@@ -43,7 +43,6 @@ export interface ImportPreview {
   /** A /2 file: what it carries beyond the steps, as the upload would write it. */
   extras?: {
     sources: { title: string; kind: string; date: string | null }[];
-    firstPrinciplesParts: number;
     /** Left out or changed, in plain words. */
     notes: string[];
   };
@@ -88,7 +87,6 @@ export async function previewProcessFile(ctx: ImportContext, workspaceId: string
     const plan = await planFileExtras(ctx, ws, file, previewIds(file));
     extras = {
       sources: (file.sources ?? []).map((x) => ({ title: x.title, kind: x.kind, date: x.date ?? null })),
-      firstPrinciplesParts: plan.firstPrinciplesParts,
       notes: plan.notes,
     };
   }
@@ -140,7 +138,7 @@ export interface ImportFileResult {
   to_confirm: number;
   /** Things worth a look: graph warnings, steps left without a role or person, a change-log entry that couldn't be written. */
   warnings: string[];
-  /** A /2 file: what was written beside the process (sources, first principles). */
+  /** A /2 file: what was written beside the process (sources). */
   bundle?: ImportBundleResult;
 }
 
@@ -168,6 +166,12 @@ function v2StepFields(s: ProcessFile["steps"][number], ids: FileIds, assumptions
   if (s.tool) out.tool = s.tool;
   if (s.sla_hours !== undefined) out.sla_hours = s.sla_hours;
   if (s.waiting_now !== undefined) out.current_wip = s.waiting_now;
+  // Capacity base values (P4): the same meanings in the file and in the step.
+  if (s.split) out.split = s.split;
+  if (s.split_notes) out.split_notes = s.split_notes;
+  if (s.tier_multiplier) out.tier_multiplier = s.tier_multiplier;
+  if (s.to_client_manager) out.to_client_manager = true;
+  if (s.sources) out.sources = s.sources;
   const evidence: NonNullable<ImportStepJson["evidence"]> = [];
   const values: Record<EvidenceField, number | undefined> = { hands_on_hours: s.hands_on_hours, wait_hours: s.wait_hours, rework_rate: s.rework_rate, waiting_now: s.waiting_now, sla_hours: s.sla_hours };
   for (const field of Object.keys(COLUMN) as EvidenceField[]) {
@@ -207,7 +211,7 @@ export function fileToProcessJson(
     source: string;
     roleFor: (role: string) => string | undefined;
     personFor: (person: string) => string | undefined;
-    /** A /2 upload's ids (steps and sources), so evidence, proposals and first principles can point at them. */
+    /** A /2 upload's ids (steps and sources), so evidence can point at them. */
     ids?: FileIds;
   },
 ): ProcessJson {
@@ -290,7 +294,7 @@ export async function importProcessFile(ctx: ImportContext, file: ProcessFile, o
     if (!found) unknownPeople.add(person);
     return found?.id;
   };
-  // A /2 file: ids are chosen here so evidence, proposals and first principles can point at the sources, steps and process that
+  // A /2 file: ids are chosen here so evidence can point at the sources, steps and process that
   // are written together with them (`import_process_bundle`, one transaction).
   const v2 = file.format === PROCESS_FILE_FORMAT_2;
   const ids: FileIds | undefined = v2 ? previewIds(file) : undefined;
@@ -306,7 +310,7 @@ export async function importProcessFile(ctx: ImportContext, file: ProcessFile, o
       processId: ids.processId,
       importSource: opts.source,
       sources: plan.sources,
-      extras: { ...(plan.firstPrinciples ? { first_principles: plan.firstPrinciples as never } : {}) },
+      extras: {},
     };
   }
   const out = await importNewProcess(ctx, ws.id, json, [], bundle);

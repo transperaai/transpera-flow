@@ -68,8 +68,13 @@ function Heading({ children, help, align = "right" }: { children: ReactNode; hel
   );
 }
 
-export function ClientGroupsSettings({ data }: { data: WorkspaceSettingsData }) {
-  const { services, clientGroups, canEdit, canManage, workspace } = data;
+/**
+ * The counted-clients table. `onlyServiceIds` limits it to those services (Set up shows the tiers' groups beside each tier, and the
+ * others here); the benchmark is its own block (`ClientHealthBenchmark`), shown once.
+ */
+export function ClientGroupsSettings({ data, onlyServiceIds, benchmark = true }: { data: WorkspaceSettingsData; onlyServiceIds?: ReadonlySet<string>; benchmark?: boolean }) {
+  const { clientGroups, canEdit, workspace } = data;
+  const services = onlyServiceIds ? data.services.filter((s) => onlyServiceIds.has(s.id)) : data.services;
   const currency = workspace.settings.currency;
   const byService = new Map<string, ClientGroupRow>(clientGroups.map((g) => [g.service_id, g]));
   const total = clientGroups.reduce((a, g) => a + g.client_count, 0);
@@ -141,41 +146,80 @@ export function ClientGroupsSettings({ data }: { data: WorkspaceSettingsData }) 
           : `${total} ${total === 1 ? "client" : "clients"} in all. Once any service has clients counted, only counted clients are simulated. A service with no numbers yet starts from its own price, base churn and expected tenure.`}
       </p>
 
-      <fieldset className="flex flex-col gap-2">
-        <legend className="mb-1 flex items-center text-xs font-medium text-fg-2">
-          Client health benchmark
-          <Help {...HELP.benchmark} />
-        </legend>
-        <div className="grid max-w-md gap-4 sm:grid-cols-2">
-          <NumberField
-            label="From"
-            help={{ description: "The low end of the client health that is normal for a business like yours.", example: "70 for a small SEO and PPC agency." }}
-            value={workspace.settings.client_health_benchmark_low ?? null}
-            save={(base, next) => saveClientHealthBenchmark(workspace.id, "low", base, next)}
-            optional
-            min={0}
-            max={100}
-            step={1}
-            placeholder="70"
-            disabled={!canManage}
-          />
-          <NumberField
-            label="To"
-            help={{ description: "The high end of the client health that is normal for a business like yours.", example: "80 for a small SEO and PPC agency." }}
-            value={workspace.settings.client_health_benchmark_high ?? null}
-            save={(base, next) => saveClientHealthBenchmark(workspace.id, "high", base, next)}
-            optional
-            min={0}
-            max={100}
-            step={1}
-            placeholder="80"
-            disabled={!canManage}
-          />
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {canManage ? "The People page shows your client health against this range. Leave both blank for no benchmark." : "Only Agency admins can change this."}
-        </p>
-      </fieldset>
+      {benchmark && <ClientHealthBenchmark data={data} />}
     </SettingsSection>
+  );
+}
+
+/** The range of client health that is normal for the business (the People page shows the simulated score against it). */
+export function ClientHealthBenchmark({ data }: { data: WorkspaceSettingsData }) {
+  const { canManage, workspace } = data;
+  return (
+    <fieldset className="flex flex-col gap-2">
+      <legend className="mb-1 flex items-center text-xs font-medium text-fg-2">
+        Client health benchmark
+        <Help {...HELP.benchmark} />
+      </legend>
+      <div className="grid max-w-md gap-4 sm:grid-cols-2">
+        <NumberField
+          label="From"
+          help={{ description: "The low end of the client health that is normal for a business like yours.", example: "70 for a small SEO and PPC agency." }}
+          value={workspace.settings.client_health_benchmark_low ?? null}
+          save={(base, next) => saveClientHealthBenchmark(workspace.id, "low", base, next)}
+          optional
+          min={0}
+          max={100}
+          step={1}
+          placeholder="70"
+          disabled={!canManage}
+        />
+        <NumberField
+          label="To"
+          help={{ description: "The high end of the client health that is normal for a business like yours.", example: "80 for a small SEO and PPC agency." }}
+          value={workspace.settings.client_health_benchmark_high ?? null}
+          save={(base, next) => saveClientHealthBenchmark(workspace.id, "high", base, next)}
+          optional
+          min={0}
+          max={100}
+          step={1}
+          placeholder="80"
+          disabled={!canManage}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {canManage ? "The People page shows your client health against this range. Leave both blank for no benchmark." : "Only Agency admins can change this."}
+      </p>
+  </fieldset>
+  );
+}
+
+/** One service's counted-clients numbers in a grid (Set up shows it under "More" for a tier). */
+export function GroupFields({ service, data }: { service: ServiceRow; data: WorkspaceSettingsData }) {
+  const group = data.clientGroups.find((g) => g.service_id === service.id);
+  const defaults = newGroupDefaults(service);
+  const currency = data.workspace.settings.currency;
+  const field = (f: ClientGroupField, scale: number, label: string, extra: { unit?: string; min: number; max: number; step: number }) => (
+    <NumberField
+      label={label}
+      help={HELP[GROUP_FIELD[f]]}
+      value={group ? Number(group[f]) : null}
+      save={(base, next) => saveClientGroupField(data.workspace.id, service.id, f, base, next)}
+      scale={scale}
+      placeholder={group ? undefined : String(Math.round(defaults[f] * scale * 100) / 100)}
+      disabled={!data.canEdit}
+      {...extra}
+    />
+  );
+  return (
+    <fieldset className="sm:col-span-2 lg:col-span-3">
+      <legend className="mb-1 text-xs font-medium text-fg-2">Counted clients: the numbers the simulation uses for clients nobody is named for</legend>
+      <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-5">
+        {field("client_count", 1, "Counted clients nobody's portfolio holds yet", { min: 0, max: MAX_GROUP_COUNT, step: 1 })}
+        {field("fee", 1, "Average fee a month", { unit: currency, min: 0, max: 1e8, step: 50 })}
+        {field("churn_monthly", 100, "Normal churn a month", { unit: "%", min: 0, max: 100, step: 0.1 })}
+        {field("stay_months", 1, "Typical stay", { unit: "months", min: 0, max: 1200, step: 1 })}
+        {field("starting_health", 1, "Starting health", { min: 0, max: 100, step: 1 })}
+      </div>
+    </fieldset>
   );
 }

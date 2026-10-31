@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Building2,
   ChevronsUpDown,
   CircleAlert,
-  FileText,
   KeyRound,
   Layers,
   LayoutGrid,
@@ -13,13 +13,12 @@ import {
   LogOut,
   Network,
   Settings2,
-  Share2,
   ShieldCheck,
   TrendingUp,
   Users,
+  UsersRound,
   type LucideIcon,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
@@ -36,9 +35,8 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { demoNav, workspaceNav, type CountTone, type NavCounts, type NavIcon, type NavItem } from "@/lib/shell/nav";
+import { workspaceNav, type CountTone, type NavCounts, type NavIcon, type NavItem } from "@/lib/shell/nav";
 import { cn } from "@/lib/utils";
-import { useMapPanelRequest } from "./map-panel-request";
 import { TransperaMark } from "./transpera-mark";
 import { WorkspaceSwitcher, type SwitcherWorkspace } from "./workspace-switcher";
 
@@ -48,12 +46,12 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   issues: CircleAlert,
   solutions: Lightbulb,
   library: Layers,
-  sources: FileText,
   people: Users,
   sandbox: TrendingUp,
   settings: Settings2,
   access: ShieldCheck,
-  share: Share2,
+  clients: Building2,
+  team: UsersRound,
 };
 
 const BADGE: Record<CountTone, string> = {
@@ -61,31 +59,22 @@ const BADGE: Record<CountTone, string> = {
   warn: "border border-warn bg-warn-soft text-fg",
 };
 
-export type ShellProps =
-  | {
-      mode: "live";
-      slug: string;
-      workspaceName: string;
-      /** The workspace's logo (a public URL), or null: the monogram stays (client branding, issue #34). */
-      logoUrl: string | null;
-      workspaces: SwitcherWorkspace[];
-      canManage: boolean;
-      /** Agency admins and the Owner: they see Share links. */
-      canEdit?: boolean;
-      counts: NavCounts;
-      viewer: { name: string; email: string | null } | null;
-    }
-  | { mode: "demo"; counts: NavCounts };
+export type ShellProps = {
+  mode: "live";
+  slug: string;
+  workspaceName: string;
+  /** The workspace's logo (a public URL), or null: the monogram stays (client branding, issue #34). */
+  logoUrl: string | null;
+  workspaces: SwitcherWorkspace[];
+  canManage: boolean;
+  counts: NavCounts;
+  viewer: { name: string; email: string | null } | null;
+};
 
 export function AppSidebar(props: ShellProps) {
   const pathname = usePathname();
-  const { requestPanel } = useMapPanelRequest();
   const { isMobile, setOpenMobile } = useSidebar();
-  const groups =
-    props.mode === "live"
-      ? workspaceNav({ slug: props.slug, pathname, canManage: props.canManage, canEdit: props.canEdit ?? false, counts: props.counts })
-      : demoNav({ pathname, counts: props.counts });
-  const larkspur = props.mode === "demo" && (pathname === "/demo/larkspur" || pathname.startsWith("/demo/larkspur/"));
+  const groups = workspaceNav({ slug: props.slug, pathname, canManage: props.canManage, counts: props.counts });
 
   const item = (i: NavItem) => {
     const Icon = ICONS[i.icon];
@@ -101,12 +90,7 @@ export function AppSidebar(props: ShellProps) {
           <Link
             href={i.href}
             aria-current={i.active ? "page" : undefined}
-            onClick={(e) => {
-              // On the read-only Larkspur map, Issues opens the map's own panel instead of loading the page again.
-              if (i.panel && larkspur) {
-                e.preventDefault();
-                requestPanel(i.panel);
-              }
+            onClick={() => {
               if (isMobile) setOpenMobile(false);
             }}
           >
@@ -131,18 +115,7 @@ export function AppSidebar(props: ShellProps) {
           <TransperaMark />
           <span className="truncate font-display text-base font-bold tracking-tight group-data-[collapsible=icon]:hidden">Transpera Flow</span>
         </div>
-        {props.mode === "live" ? (
-          <WorkspaceSwitcher current={props.workspaceName} subtitle="Workspace" workspaces={props.workspaces} logo={props.logoUrl} />
-        ) : (
-          <WorkspaceSwitcher
-            current={larkspur ? "Larkspur Creative" : "Northbeam Digital"}
-            subtitle="Demo · sample data"
-            workspaces={[
-              { name: "Northbeam Digital", href: "/demo" },
-              { name: "Larkspur Creative", href: "/demo/larkspur" },
-            ]}
-          />
-        )}
+        <WorkspaceSwitcher current={props.workspaceName} subtitle="Workspace" workspaces={props.workspaces} logo={props.logoUrl} />
       </SidebarHeader>
       <SidebarContent>
         {groups.map((g) => (
@@ -155,13 +128,7 @@ export function AppSidebar(props: ShellProps) {
         ))}
       </SidebarContent>
       <SidebarFooter>
-        {props.mode === "live" ? (
-          <NavUser viewer={props.viewer} />
-        ) : (
-          <Badge variant="outline" className="w-full justify-start rounded-md px-2 py-1 text-2xs font-medium text-muted-foreground group-data-[collapsible=icon]:hidden">
-            Demo · sample data{larkspur ? ", read-only" : ""}
-          </Badge>
-        )}
+        <NavUser viewer={props.viewer} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>

@@ -70,7 +70,7 @@ describe("the start page for an editor", () => {
 
   it("keeps the checklist links as plain navigation, not edit entries", () => {
     const html = editor();
-    for (const href of ["/w/acme/settings#roles-heading", "/w/acme/settings#people-heading", "/w/acme/settings#clients-heading", "/w/acme/processes"]) {
+    for (const href of ["/w/acme/setup/people#roles-heading", "/w/acme/setup/people#people-heading", "/w/acme/setup/clients#clients-heading", "/w/acme/processes"]) {
       expect(html).toContain(`href="${href}"`);
     }
   });

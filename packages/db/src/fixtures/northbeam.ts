@@ -97,6 +97,7 @@ const role = (key: RoleKey, name: string, headcount: number, cost: number, ongoi
   headcount,
   ongoing_hours_per_client_week: ongoing,
   active: true,
+  leadership: false,
 });
 
 const step = (
@@ -130,6 +131,10 @@ const step = (
   rework_to_step_id: null,
   tool,
   purpose: null,
+  split: null,
+  split_notes: null,
+  tier_multiplier: null,
+  to_client_manager: false,
   notes: null,
   sla_hours: null,
   expected_wait_hours: null,
@@ -463,6 +468,10 @@ function servicingProcesses(firstEdge: number): { parts: ProcessPart[]; links: S
         rework_to_step_id: null,
         tool: s.tool,
         purpose: null,
+        split: null,
+        split_notes: null,
+        tier_multiplier: null,
+        to_client_manager: false,
         notes: null,
         sla_hours: null,
         expected_wait_hours: null,

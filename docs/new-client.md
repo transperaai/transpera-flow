@@ -50,7 +50,7 @@ Settings → Environment Variables. "Sensitive" variables cannot be read back af
 |---|---|---|---|---|
 | `DATABASE_URL` | Neon owner connection (migrations, Better Auth, sign-in access) | Production, Preview | Set by the Neon integration | Neon integration (section 2) |
 | `APP_DATABASE_URL` | `authenticator` connection the app's queries use | Production, Preview | Yes | Claude via API |
-| `BETTER_AUTH_SECRET` | Signs sessions; 32+ random characters. Without it (or `DATABASE_URL`) the app runs in demo mode | Production, Preview | Yes | Claude via API, generated, never printed |
+| `BETTER_AUTH_SECRET` | Signs sessions; 32+ random characters. Without it (or `DATABASE_URL`) the app does not start (there is no demo mode now) | Production, Preview | Yes | Claude via API, generated, never printed |
 | `OAUTH_PROXY_SECRET` | Signs the preview-to-alias sign-in hand-off | Production, Preview | Yes | Claude via API, generated, never printed |
 | `PREVIEW_ALIAS_URL` | The stable preview alias, if you made one (for example `https://acme-flow-next.vercel.app`). Only this deployment's own alias is trusted | Production, Preview | No | Claude via API |
 | `BETTER_AUTH_URL` | This deployment's own URL. Production: the production URL. Preview: the stable preview alias | Production, Preview (different values) | No | Claude via API (Austin may in the dashboard) |
@@ -93,7 +93,7 @@ Other preview URLs sign in through the alias (Better Auth's OAuth proxy), so the
 
 ## 9. First sign-in and smoke test
 
-1. Open the production URL, sign in with the `ACCESS_ADMIN_EMAILS` address (the Owner). Expect the app, not an access-denied page or `/demo`.
+1. Open the production URL, sign in with the `ACCESS_ADMIN_EMAILS` address (the Owner). Expect the app, not an access-denied page.
 2. Settings → Access: add the client's domain and emails.
 3. Create or upload a process, run a simulation, reload: it persists (database and app login work).
 4. Sign in with an address not on the list: it is refused.
@@ -112,3 +112,25 @@ Export anything the client wants first. Then, with Austin's explicit yes:
 1. Vercel → project → Settings → General → **Delete Project** (removes its variables and domains). Remove the domain's DNS records.
 2. Neon: Vercel → Storage → the database → delete it (or console.neon.tech → project → Settings → Delete). This destroys all the client's data and cannot be undone.
 3. Google Cloud → the OAuth client → remove that client's origins and redirect URIs. If they had their own OAuth client or Entra app, delete it (the client's admin removes the Entra registration).
+
+## 12. Capacity starter (optional, once, on an empty workspace)
+
+What the client sees is the capacity app: **Overview**, **Set up** (Tiers & clients, People & roles), **Processes**, **Capacity** and the free-play **Sandbox**. Settings holds the workspace, simulation limits, churn drivers, client health, demand and market. A new client's Set up pages start empty. This gives them something to edit instead of a blank page: the two departments, tiers T1 to T3 with the prototype's example numbers (every one marked **estimate**, so Set up shows it until the client keys their own), and the nine roles with their department, kind, line, rule of thumb and the shared teams' units (words, links, ticket hours, tasks, set-ups and incidents). **No people and no clients**: the client keys those in (decision D19).
+
+Claude runs it from a session that has the client's `DATABASE_URL` (over Neon's WebSocket route from a cloud container, as for migrations):
+
+```bash
+pnpm --filter @transpera-flow/db capacity:starter --workspace <slug>          # add --driver neon-ws from a cloud container
+```
+
+It runs in one transaction and is safe to run twice: it changes nothing, and says why, when the workspace already has tiers, roles, people, clients, services or counted clients. **Never run it on a workspace in use** (it refuses, but don't try). Why these defaults and where they come from: `packages/db/src/capacity-starter.ts`.
+
+There is also a loader for the prototype's made-up example agency, for building and testing the Capacity page. **Never run it on a client's deployment**: the data is made up. It refuses a workspace that has anything in it.
+
+```bash
+pnpm --filter @transpera-flow/db capacity:example --workspace <slug>          # add --driver neon-ws from a cloud container
+```
+
+## 13. Applying migrations to the Preview database
+
+`bash packages/db/scripts/neon-preview-migrate.sh --dry-run` lists what is pending on the Neon **Preview** database (the project that runs the QA copy), and without `--dry-run` applies it. It fetches the connection string from the Neon API into its own process and never prints or writes it, and it uses Neon's WebSocket route, so it works from a cloud container. It is for Preview only; production migrations are applied by the orchestrator as in [`production-migrations.md`](production-migrations.md).

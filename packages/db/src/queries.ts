@@ -4,7 +4,6 @@ import type { DB } from "./db-types";
 import { rpc, rpcRows } from "./rpc";
 import { columns } from "./columns";
 import { pgCode } from "./pg-error";
-import { shareToggles } from "./share-reader";
 import type { Json } from "./db-types";
 import type { CompanyModel, SnapshotProcess } from "./company";
 import type { CitingRow } from "./evidence";
@@ -16,6 +15,7 @@ import type { ScenarioPatch } from "@transpera-flow/engine";
 import { patchOf, type SandboxChange } from "./sandbox-levers";
 import type {
   BlockRow,
+  CapacityInputs,
   SolutionIssueRow,
   SolutionRow,
   ChurnDriverRow,
@@ -161,7 +161,7 @@ export interface TeamInputs {
   personSkills: PersonSkillRow[];
   personLeave: PersonLeaveRow[];
   clientAssignments: ClientAssignmentRow[];
-  /** Per-person times (C6): everyone's for those who see everyone, only the caller's own person's otherwise; none from `share_team_capacity`. */
+  /** Per-person times (C6): everyone's for those who see everyone, only the caller's own person's otherwise. */
   personCapacityFactors: PersonCapacityFactorRow[];
 }
 
@@ -170,12 +170,10 @@ export interface TeamInputs {
  * editors and agency admins; for members and viewers, "Team member N" labels (their own person keeps their name) and a null cost rate for everyone but
  * themselves: no pay, and no average of it. Never email, notes, leave notes or skill efficiency. Per-person times (C6) come the same
  * way: everyone's for those who see everyone, only the caller's own otherwise. A bundle's per-person times must come only from
- * here: reading `person_capacity_factors` directly would bypass `shareReaderDb` and put an editor's times into a share snapshot.
+ * here: reading `person_capacity_factors` directly would show an editor's times to everyone.
  */
 export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs> {
-  // A share link reads through `shareReaderDb`, which swaps in `share_team_capacity` (labels or names, no pay, no times).
-  const toggles = shareToggles.get(db);
-  const data = toggles ? await rpc(db, "share_team_capacity", { ws: workspaceId, show_people: toggles.people }) : await rpc(db, "team_capacity", { ws: workspaceId });
+  const data = await rpc(db, "team_capacity", { ws: workspaceId });
   // The function's documented shape (migration 20261207500000): sees_everyone, own_person_id and one array per table, in
   // the columns of PersonRow, PersonRoleRow, PersonSkillRow, PersonLeaveRow and ClientAssignmentRow.
   const t = data as unknown as {
@@ -195,7 +193,7 @@ export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs>
     personSkills: t.person_skills,
     personLeave: t.person_leave,
     clientAssignments: t.client_assignments,
-    // numeric comes back as a number from jsonb; `share_team_capacity` has no such key, so a link's team has none.
+    // numeric comes back as a number from jsonb.
     personCapacityFactors: (t.person_capacity_factors ?? []).map((r) => ({ ...r, factor: Number(r.factor), items: r.items == null ? null : Number(r.items) })),
   };
 }
@@ -230,6 +228,80 @@ export async function loadClientGroups(db: Db, workspaceId: string): Promise<Cli
   const r = await db.selectFrom("client_groups").select(columns(CLIENT_GROUP_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("id").execute();
   // provenance is jsonb; ProvenanceMap is its app-side shape.
   return r as unknown as ClientGroupRow[];
+}
+
+/**
+ * The capacity Set up data the engine reads (P2b), or undefined when the workspace has no tier service (a service with a department
+ * and a tier): then nothing capacity-related reaches the model. Reads the tables as the caller; `people` is the one table a viewer who
+ * can't see people gets no rows from, so their team time and ramp are left out (like pay).
+ */
+export async function loadCapacityInputs(db: Db, workspaceId: string): Promise<CapacityInputs | undefined> {
+  const tiered = await db
+    .selectFrom("services")
+    .select("id")
+    .where("workspace_id", "=", workspaceId)
+    .where("department_id", "is not", null)
+    .where("tier_id", "is not", null)
+    .limit(1)
+    .executeTakeFirst();
+  if (!tiered) return undefined;
+  const n = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+  const [tiers, services, clients, roles, people, personTiers, portfolio] = await Promise.all([
+    db.selectFrom("tiers").select(["id", "key", "sort"]).where("workspace_id", "=", workspaceId).orderBy("sort").orderBy("key").execute(),
+    db
+      .selectFrom("services")
+      .select(["id", "department_id", "tier_id", "words", "links", "tech_hours", "meetings", "builds", "creative_sets", "channels", "adhoc_chance", "adhoc_requests"])
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    db
+      .selectFrom("clients")
+      .select(["id", "hand_holding_hours", "adhoc_chance", "adhoc_requests", "adhoc_hours", "step_factor", "words", "links", "tech_hours", "meetings", "builds", "creative_sets", "channels"])
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    db.selectFrom("roles").select(["id", "kind", "unit"]).where("workspace_id", "=", workspaceId).orderBy("id").execute(),
+    db.selectFrom("people").select(["id", "reserved_share", "ramp"]).where("workspace_id", "=", workspaceId).orderBy("id").execute(),
+    db.selectFrom("person_tiers").select(["person_id", "tier_id"]).where("workspace_id", "=", workspaceId).execute(),
+    db.selectFrom("person_portfolio").select(["person_id", "service_id", "client_count"]).where("workspace_id", "=", workspaceId).execute(),
+  ]);
+  const deliverables = (r: Record<"words" | "links" | "tech_hours" | "meetings" | "builds" | "creative_sets" | "channels", unknown>) => ({
+    words: n(r.words),
+    links: n(r.links),
+    tech_hours: n(r.tech_hours),
+    meetings: n(r.meetings),
+    builds: n(r.builds),
+    creative_sets: n(r.creative_sets),
+    channels: n(r.channels),
+  });
+  return {
+    tiers: tiers.map((t) => ({ id: t.id, key: t.key, sort: Number(t.sort) })),
+    services: services.map((s) => ({
+      id: s.id,
+      department_id: s.department_id,
+      tier_id: s.tier_id,
+      ...deliverables(s),
+      adhoc_chance: n(s.adhoc_chance),
+      adhoc_requests: n(s.adhoc_requests),
+    })),
+    clients: clients.map((c) => ({
+      id: c.id,
+      hand_holding_hours: n(c.hand_holding_hours),
+      adhoc_chance: n(c.adhoc_chance),
+      adhoc_requests: n(c.adhoc_requests),
+      adhoc_hours: n(c.adhoc_hours),
+      step_factor: n(c.step_factor),
+      ...deliverables(c),
+    })),
+    roles: roles.map((r) => ({ id: r.id, kind: r.kind === "shared" ? ("shared" as const) : ("client_facing" as const), unit: r.unit })),
+    people: people.map((p) => ({
+      id: p.id,
+      reserved_share: Number(p.reserved_share),
+      ramp: Array.isArray(p.ramp) && p.ramp.every((x) => typeof x === "number") ? (p.ramp as number[]) : null,
+    })),
+    personTiers,
+    portfolio: portfolio.map((r) => ({ person_id: r.person_id, service_id: r.service_id, client_count: Number(r.client_count) })),
+  };
 }
 
 /** The `ChurnDriverRow` columns. */
@@ -274,7 +346,7 @@ export async function loadProcessBundle(
   const ws = workspace.id;
   // People, roles held, skills, leave and assignments: the stored rows for editors, labels and no pay for members.
   const teamLoad = loadTeam(db, ws);
-  const [revision, roles, steps, edges, team, services, leadSources, seasonality, demand, roster, clientGroups, churnDrivers, servicing, market, settingsProvenance] =
+  const [revision, roles, steps, edges, team, services, leadSources, seasonality, demand, roster, clientGroups, churnDrivers, servicing, market, settingsProvenance, capacity] =
     await Promise.all([
       db.selectFrom("process_revisions").select(["id", "workspace_id", "process_id", "number", "status"]).where("id", "=", revisionId).executeTakeFirstOrThrow(),
       db.selectFrom("roles").selectAll().where("workspace_id", "=", ws).execute(),
@@ -293,6 +365,7 @@ export async function loadProcessBundle(
       process.is_company ? { servicingLinks: [], otherProcesses: [] } : loadServicingContext(db, ws, process, revisionId),
       loadMarket(db, ws),
       db.selectFrom("workspaces").select("provenance").where("id", "=", ws).executeTakeFirst(),
+      loadCapacityInputs(db, ws),
     ]);
   const wsProvenance = settingsProvenance?.provenance;
 
@@ -331,6 +404,8 @@ export async function loadProcessBundle(
     churnDrivers,
     ...servicing,
     ...market,
+    // Only a workspace with a tier service has any (P2b); the key is left out otherwise so the bundle is as it was.
+    ...(capacity ? { capacity } : {}),
   };
 }
 
@@ -451,7 +526,7 @@ export async function loadSetupCounts(db: Db, workspaceId: string): Promise<Setu
 /**
  * Every process of the workspace at its live revision, for the Overview's company map (issue #100): the pipelines, the
  * servicing processes and the child processes, in creation order. Processes never published aren't on the map. As the
- * caller of `db` (RLS decides what is visible); a share link's snapshot (B3) builds it with the same function.
+ * caller of `db` (RLS decides what is visible).
  */
 export async function loadLiveParts(db: Db, workspaceId: string): Promise<ProcessPart[]> {
   const live = (await listProcesses(db, workspaceId)).filter((p) => p.live_revision_id);
@@ -616,7 +691,7 @@ export async function loadSandboxScenarios(db: Db, workspaceId: string): Promise
 }
 
 /**
- * A workspace's saved whole-run scenarios, oldest first: the ones the process page, the issues register, share snapshots and MCP
+ * A workspace's saved whole-run scenarios, oldest first: the ones the process page, the issues register and MCP
  * understand. These are the Sandbox scenarios with no parent whose every change is a patch with no `from`; a scenario with a hire,
  * a change from a month or a parent runs only in the Sandbox. `patch` is the changes as patches.
  */
@@ -738,9 +813,6 @@ export async function loadIssues(db: Db, workspaceId: string): Promise<IssueRow[
  * "no", so the caller gets the less revealing view.
  */
 export async function readerSeesPeople(db: Db, workspaceId: string): Promise<boolean> {
-  // A share link answers with its People toggle (see `shareReaderDb`).
-  const toggles = shareToggles.get(db);
-  if (toggles) return toggles.people;
   try {
     return (await rpc(db, "can_see_people", { ws: workspaceId })) === true;
   } catch {
@@ -924,7 +996,7 @@ export interface WorkspaceLogo {
   sha256: string;
 }
 
-/** The logo `public.workspace_logo` returns for a workspace (callable signed out, for share links), or null when it has none. */
+/** The logo `public.workspace_logo` returns for a workspace (callable signed out), or null when it has none. */
 export async function loadWorkspaceLogo(db: Db, workspaceId: string): Promise<WorkspaceLogo | null> {
   const { rows } = await sql<WorkspaceLogo>`select mime, bytes, sha256 from public.workspace_logo(${workspaceId}::uuid)`.execute(db);
   return rows[0] ?? null;

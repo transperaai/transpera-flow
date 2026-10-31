@@ -191,7 +191,7 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
     });
   };
 
-  const groupsHref = props.base ? `${props.base}/settings#client-groups-heading` : null;
+  const groupsHref = props.base ? `${props.base}/setup/clients#clients-heading` : null;
   const noGroupsAtAll = services.length > 0 && services.every((s) => !s.group);
 
   return (
@@ -307,7 +307,7 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
                 Count clients in{" "}
                 {groupsHref ? (
                   <a className="text-accent underline-offset-4 hover:underline" href={groupsHref}>
-                    Settings → Client groups
+                    Set up → Tiers & clients
                   </a>
                 ) : (
                   "Settings → Client groups"

@@ -9,7 +9,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Download } from "lucide-react";
 import { useMemo, useState } from "react";
 import { retiredSteps, ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
-import { RATING_LABELS, detectBrokenScenarios, ratingOfStored, resolveMoney, type FirstPrinciples, type IssueCost, type Rating } from "@transpera-flow/engine";
+import { RATING_LABELS, detectBrokenScenarios, ratingOfStored, resolveMoney, type IssueCost, type Rating } from "@transpera-flow/engine";
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help } from "@/components/help";
 import { LIST_HELP } from "@/lib/issues/help";
@@ -25,7 +25,6 @@ import { useIssues } from "@/lib/issues/use-issues";
 import { downloadBlob, exportFileName } from "@/lib/export/map-image";
 import { issuesCsv } from "@/lib/issues/csv";
 import { useDetectedIssues } from "@/lib/issues/use-detected";
-import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import { visibleFindings } from "@/lib/rules/edit";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { useAbsenceTest } from "@/lib/sim/absence";
@@ -47,14 +46,12 @@ export function IssuesPage({
   processes,
   sources = [],
   mode,
-  firstPrinciples,
   base,
   liveRevisions,
   solutions,
+  changeCounts,
 }: {
   bundle: ProcessBundle;
-  /** The live version's first principles, whose success measures rule 11 (goals met) rates. */
-  firstPrinciples?: FirstPrinciples | null;
   issues: IssueRow[];
   scenarios: ScenarioRow[];
   processes: Named[];
@@ -66,6 +63,8 @@ export function IssuesPage({
   liveRevisions?: Record<string, string>;
   /** The workspace's solutions and which issues they solve, for the "Solutions" column (the demo keeps its own in this tab). */
   solutions?: SolutionsData;
+  /** How many Sandbox changes name each issue, by issue id, for the "Changes" column (absent in the demo). */
+  changeCounts?: Record<string, number>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -80,7 +79,7 @@ export function IssuesPage({
     router.push(`${pathname}${listQuery(next)}`, { scroll: false });
   };
 
-  const costs = useIssueCosts(bundle, scenarios, mode, firstPrinciples);
+  const costs = useIssueCosts(bundle, scenarios);
   const costOf = (i: IssueRow): IssueCost | null => (i.detected_key ? (costs?.get(i.detected_key) ?? null) : null);
 
   const options = useMemo(
@@ -189,6 +188,7 @@ export function IssuesPage({
                     <Help {...LIST_HELP.solutions} />
                   </span>
                 </th>
+                {changeCounts && <th className="px-3 py-2.5">Changes</th>}
               </tr>
             </thead>
             <tbody>
@@ -230,6 +230,17 @@ export function IssuesPage({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
+                    {changeCounts && (
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap" data-changes>
+                        {changeCounts[i.id] ? (
+                          <Link href={href} className="font-medium text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
+                            {changeCounts[i.id]} change{changeCounts[i.id] === 1 ? "" : "s"} →
+                          </Link>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -307,8 +318,6 @@ function RatingChips({ ratings, value, onChange }: { ratings: ReturnType<typeof 
 function useIssueCosts(
   bundle: ProcessBundle,
   scenarios: ScenarioRow[],
-  mode: ScreenMode,
-  firstPrinciples: FirstPrinciples | null | undefined,
 ): Map<string, IssueCost> | null {
   const model = useMemo(() => {
     try {
@@ -324,8 +333,7 @@ function useIssueCosts(
   const gaps = useMemo(() => perceptionGapDetections(bundle.steps), [bundle.steps]);
   const rules = ANALYSIS_DEFAULTS;
   const absence = useAbsenceTest(model && result && sim.status === "done" ? model : null, result?.seed ?? 1, resolveMoney(rules).absenceWeeks);
-  const successMeasures = useSuccessMeasures(bundle.process.id, mode === "demo", firstPrinciples);
-  const found = useDetectedIssues(model, result, rules, bundle.process.id, bundle.workspace.settings.currency, absence, successMeasures);
+  const found = useDetectedIssues(model, result, rules, bundle.process.id, bundle.workspace.settings.currency, absence);
   return useMemo(() => {
     // A model that can't be simulated has no costs to wait for.
     if (model && !found) return null;

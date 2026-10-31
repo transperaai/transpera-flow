@@ -164,12 +164,11 @@ describe("Tidewater: Monthly client report", () => {
     expect(noVolume.map((g) => g.kind)).toEqual(["hands_on", "volume"]);
   });
 
-  it("carries no company facts or proposals, and puts in first principles only what was said", () => {
+  it("carries no company facts, proposals or first principles", () => {
     const f = checked(pack).file;
     expect(f).not.toHaveProperty("company");
     expect(f).not.toHaveProperty("proposals");
-    expect(f.first_principles!.measures![0]).toMatchObject({ kpi: "cycleHours", comparator: "atMost", target: 40 });
-    expect(f.first_principles!.job).toBeUndefined();
+    expect(f).not.toHaveProperty("first_principles");
   });
 });
 
@@ -243,13 +242,10 @@ describe("Copperleaf: Enquiry to signed client", () => {
     expect(gaps.map((g) => g.text)).toEqual(["Pitch deck has no role", "Send contract has no hands-on time"]);
   });
 
-  it("carries no company facts or proposals, and first principles hold only what a speaker stated", () => {
+  it("carries no company facts, proposals or first principles", () => {
     const f = checked(pack).file;
     expect(f).not.toHaveProperty("company");
     expect(f).not.toHaveProperty("proposals");
-    // First principles hold only the two rules a speaker stated.
-    expect(f.first_principles!.requirements).toHaveLength(2);
-    expect(f.first_principles!.job).toBeUndefined();
-    expect(f.first_principles!.measures).toEqual([]);
+    expect(f).not.toHaveProperty("first_principles");
   });
 });

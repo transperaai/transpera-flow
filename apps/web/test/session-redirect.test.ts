@@ -43,7 +43,7 @@ afterEach(() => {
 describe("getDb", () => {
   it("runs as the signed-in user", async () => {
     getSession.mockResolvedValue(SESSION);
-    currentAccess.mockResolvedValue({ email: "a@b.co", agencyAdmin: false, guest: false });
+    currentAccess.mockResolvedValue({ email: "a@b.co", agencyAdmin: false });
     expect(await getDb()).toMatchObject({ claims: { sub: "u1", role: "authenticated" } });
   });
 

@@ -21,7 +21,6 @@ describe("pages that pass canEdit into a read only mode", () => {
     ["the Block library", PAGE("blocks")],
     ["Sources", PAGE("sources")],
     ["the Sandbox", PAGE("sandbox")],
-    ["Settings → Levers", PAGE("settings/levers")],
     ["Settings → Purposes", PAGE("settings/purposes")],
     ["Settings → Historical data", PAGE("settings/calibration")],
   ])("%s", (_, file) => {
@@ -34,12 +33,6 @@ describe("pages that pass canEdit into a read only mode", () => {
     const page = read("components/workspace-process-page.tsx");
     expect(page).toContain('mode={canEdit && !earlier && !archivedAt ? "live" : "readonly"}');
     expect(page).toContain("editHref={canEdit && !archivedAt ?");
-    expect(page).toContain("create={canEdit ? createProcess.bind(null, live.workspace.id, slug) : undefined}");
-  });
-
-  it("the first-principles page: read only, no New process", () => {
-    const page = read("components/workspace-first-principles-page.tsx");
-    expect(page).toContain("const editing: FlowEditing = !canEdit");
     expect(page).toContain("create={canEdit ? createProcess.bind(null, live.workspace.id, slug) : undefined}");
   });
 
@@ -101,7 +94,6 @@ describe("the Editor and the Settings", () => {
     const page = read(PAGE("settings"));
     expect(page).toContain("canManage={data.canManage}");
     expect(page).toContain('mode={data.canEdit ? "live" : "readonly"}');
-    expect(page).toContain("canEdit={data.canEdit}");
     const data = read("lib/data.ts");
     expect(data).toContain('rpc(db, "can_edit_workspace", { ws }),');
     expect(data).toContain('rpc(db, "can_manage_workspace", { ws }),');
@@ -110,6 +102,25 @@ describe("the Editor and the Settings", () => {
     for (const file of ["roles", "services", "demand", "market", "people"]) {
       expect(read(`app/w/[slug]/settings/${file}-settings.tsx`), file).toMatch(/canEdit/);
     }
+  });
+
+  it("Set up (Tiers & clients, People & roles): everyone reads, the loader says who may change, and the tables show text, not inputs, without it", () => {
+    for (const route of ["setup/clients", "setup/people"]) {
+      const page = read(PAGE(route));
+      expect(page, route).toContain("loadCapacitySetup(");
+      expect(page, route).toContain("notFound()");
+    }
+    const loader = read("../../../packages/db/src/capacity-setup.ts");
+    expect(loader).toContain('rpc(db, "can_edit_workspace", { ws: workspaceId })');
+    expect(loader).toContain('rpc(db, "can_see_people", { ws: workspaceId })');
+    // Every table cell takes `canEdit` from the loaded setup: a Viewer gets text.
+    expect(read("components/setup/cells.tsx")).toMatch(/canEdit \?/);
+    for (const file of ["tiers-clients", "people-roles"]) expect(read(`components/setup/${file}.tsx`), file).toContain("setup.canEdit");
+    // Pay: the salary column only exists for whoever can see pay.
+    expect(read("components/setup/people-roles.tsx")).toContain("const showSalary = !setup.payHidden;");
+    expect(read("components/setup/people-roles.tsx")).toMatch(/\{showSalary && \(\s*<HeadHelp/);
+    // The actions need a signed-in user and run through row-level security.
+    expect(read(PAGE("setup").replace("/page.tsx", "/actions.ts"))).toContain("if (!(await signedIn())) return");
   });
 
   it("the People page changes nothing: it has no action to call", () => {

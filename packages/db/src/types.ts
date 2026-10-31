@@ -5,7 +5,7 @@
 
 import type { IssueType, ScenarioPatch, StoredSeverity } from "@transpera-flow/engine";
 import type { Selectable } from "kysely";
-import type { DB, Json } from "./db-types";
+import type { DB } from "./db-types";
 import type { Viewer } from "./queries";
 import type { SandboxChange } from "./sandbox-levers";
 
@@ -75,6 +75,17 @@ export interface WorkspaceSettings {
   purposes?: { key: string; name: string; description: string }[] | null;
   /** Per-person times (capacity factors, C6): off unless true. Owners and editors switch it; see `person_capacity_factors`. */
   capacity_factor_enabled?: boolean;
+  /**
+   * Capacity Set up (P1): the share of full capacity a new starter has in each month from their start date, e.g. [0.4, 0.6, 0.8]
+   * (then full). Absent or null: that default. A person's own `ramp` replaces it. Stored only; the capacity figures (P2) use it.
+   * Checked by `workspaces_ramp_default`.
+   */
+  ramp_default?: number[] | null;
+  /**
+   * Capacity Set up (P1, D10, D37): whether DLER counts leadership's salary. Absent or null: true. "To confirm with the client."
+   * Stored only. Checked by `workspaces_dler_includes_leadership`.
+   */
+  dler_includes_leadership?: boolean | null;
 }
 
 /** One per-person time as `team_capacity` returns it (`step_id` null is the person's time on every step; `source` is entered or measured). */
@@ -107,6 +118,8 @@ export interface RoleRow {
   ongoing_hours_per_client_week: number;
   /** Inactive roles are hidden from pickers; what already names one keeps it, and it still simulates. */
   active: boolean;
+  /** Leadership: left out of clients and revenue per employee (D22). */
+  leadership: boolean;
 }
 
 export interface PersonRow {
@@ -179,6 +192,12 @@ export interface ProcessRevisionRow {
   status: "draft" | "published" | "superseded";
 }
 
+/** The three parts of a step's hands-on time (`EngineStep.split`). Type aliases, so they stay assignable to the jsonb columns. */
+export type StepSplit = { automatable: number; augmentable: number; manual: number };
+export type StepSplitNotes = { automatable?: string; augmentable?: string; manual?: string };
+/** Tier key → × on the step's time. */
+export type TierMultiplier = { [tier: string]: number };
+
 export interface StepRow {
   id: string;
   revision_id: string;
@@ -201,6 +220,14 @@ export interface StepRow {
   tool: string | null;
   /** What the step achieves: a key of the workspace's `settings.purposes`; null is Automatic (`resolvePurpose`). Sandbox phase 4. */
   purpose: string | null;
+  /** Shares of the step's hands-on time that can be automated, augmented or only done by hand; sum to 1. Null: all manual (capacity P4). */
+  split: StepSplit | null;
+  /** One line of words for each part of the split. */
+  split_notes: StepSplitNotes | null;
+  /** × on the step's time per tier key; a tier not listed is 1. Null: 1 for every tier. */
+  tier_multiplier: TierMultiplier | null;
+  /** The step goes to the client's manager (D32), falling back to its role. */
+  to_client_manager: boolean;
   notes: string | null;
   /** Target hours for one visit to the step (queue + hands-on + wait); visits over it are SLA breaches. */
   sla_hours: number | null;
@@ -315,12 +342,18 @@ export type FallbackLoad = { [roleId: string]: number };
 /** Where a parameter's value came from (docs/PRD.md §3 Parameter provenance). */
 export type ProvenanceSource = "estimated" | "entered" | "measured";
 
+/** The source labels a step's base values carry (requirements section 7), in `steps.provenance.{work|split|tier_multiplier}.source`. */
+export type StepSourceLabel = "interview" | "calculator" | "measured" | "estimate";
+export const STEP_SOURCE_LABELS: readonly StepSourceLabel[] = ["interview", "calculator", "measured", "estimate"];
+/** The step values that carry a source label. `work` is the time per occurrence (`work_hours`). */
+export type StepSourcedValue = "work" | "split" | "tier_multiplier";
+
 /**
  * One value's provenance (the §5 `provenance jsonb` shape). A type alias, not
  * an interface, so it stays assignable to the jsonb column.
  */
 export type Provenance = {
-  source: ProvenanceSource;
+  source: ProvenanceSource | StepSourceLabel;
   /** When it was set (ISO timestamp). */
   at?: string;
   /** User who set it. */
@@ -441,31 +474,6 @@ export interface ClientGroupRow {
   starting_health: number;
   /** Provenance of the five numbers. */
   provenance: ProvenanceMap;
-}
-
-/**
- * A process revision's first principles (issue #119, A54): the job and root cause as text, the lists the rule checks
- * read as jsonb arrays. `FirstPrinciples` (engine) is the app-side shape of the whole, read with
- * `firstPrinciplesFromRow`.
- */
-export interface FirstPrinciplesRow {
-  id: string;
-  workspace_id: string;
-  process_id: string;
-  revision_id: string;
-  job_who: string;
-  job_progress: string;
-  job_situation: string;
-  job_done: string;
-  statements: Json;
-  requirements: Json;
-  deletes: Json;
-  improvements: Json;
-  why_problem: string;
-  why_chain: Json;
-  root_cause: string;
-  measures: Json;
-  updated_at: string;
 }
 
 export type SourceKind = "transcript" | "notes" | "sop" | "spreadsheet" | "data" | "screenshot" | "other";
@@ -626,7 +634,14 @@ export interface MarketScheduleRow {
  * week or month, or ad-hoc requests at random, `poisson_per_month` a month on
  * average. A type alias, so it stays assignable to the jsonb column.
  */
-export type RecurrenceJson = { every: "week" | "month"; times: number } | { poisson_per_month: number };
+export type RecurrenceJson =
+  | { every: "week" | "month"; times: number }
+  | { poisson_per_month: number }
+  /** Follows what the client's tier gets: `perMonth × value ÷ (per ?? 1)` tasks a month (`Recurrence` in the engine). */
+  | { perMonth: number; driver: RecurrenceDriver; per?: number };
+
+/** What a driver recurrence follows: a tier deliverable, or "adhoc" (the chance of a request × how many). */
+export type RecurrenceDriver = "words" | "links" | "techHours" | "meetings" | "builds" | "creativeSets" | "channels" | "adhoc";
 
 /**
  * A servicing process a service's clients run, and how often (docs/PRD.md
@@ -727,11 +742,58 @@ export interface ProcessBundle {
   servicingLinks?: ServiceServicingRow[];
   otherProcesses?: ProcessPart[];
   /**
-   * Steps each process's first principles list to delete (`added_back` left out), by process id, for the revisions this bundle
-   * shows (`loadDeleteCandidates`). Optional and not loaded by `loadProcessBundle`: only callers that show purposes add it.
-   * Without it a step's purpose skips the "Could be removed" rule.
+   * The capacity Set up data the engine reads (P1's columns, mapped by P2b: `docs/plans/capacity/p2b-mapping-brief.md`). Present only
+   * for a workspace that has at least one tier service (a service with a department and a tier); absent, the model is exactly the
+   * one built before capacity existed.
    */
-  deleteCandidates?: Record<string, string[]>;
+  capacity?: CapacityInputs;
+}
+
+/** A deliverable column on a service or a client (the tier's, or a named client's own value). `null`: not entered. */
+export interface CapacityDeliverableColumns {
+  words: number | null;
+  links: number | null;
+  tech_hours: number | null;
+  meetings: number | null;
+  builds: number | null;
+  creative_sets: number | null;
+  channels: number | null;
+}
+
+/** A service's capacity columns (`services.department_id` …). */
+export interface CapacityServiceRow extends CapacityDeliverableColumns {
+  id: string;
+  department_id: string | null;
+  tier_id: string | null;
+  adhoc_chance: number | null;
+  adhoc_requests: number | null;
+}
+
+/** A named client's own values (`clients.<same names>`): each replaces its tier's; null uses the tier's. */
+export interface CapacityClientRow extends CapacityDeliverableColumns {
+  id: string;
+  hand_holding_hours: number | null;
+  adhoc_chance: number | null;
+  adhoc_requests: number | null;
+  adhoc_hours: number | null;
+  step_factor: number | null;
+}
+
+/** What the capacity mapping reads of the Set up data. Plain numbers, so a bundle can be saved and compared. */
+export interface CapacityInputs {
+  /** Tiers, in their order (`tiers.sort`): the engine's tier is the key. */
+  tiers: { id: string; key: string; sort: number }[];
+  services: CapacityServiceRow[];
+  clients: CapacityClientRow[];
+  /** Roles' kind (a client-facing role's holder is a client's manager) and unit of work. */
+  roles: { id: string; kind: "client_facing" | "shared"; unit: string | null }[];
+  /**
+   * People's team time and ramp. Read straight from `people`, so a viewer who can't see people gets none (as pay is hidden):
+   * everyone then has all their hours and no ramp.
+   */
+  people: { id: string; reserved_share: number; ramp: number[] | null }[];
+  personTiers: { person_id: string; tier_id: string }[];
+  portfolio: { person_id: string; service_id: string; client_count: number }[];
 }
 
 /**
@@ -994,7 +1056,6 @@ export type _SchemaDriftChecks = [
   Assert<Matches<ClientServiceRow, "client_services">>,
   Assert<Matches<ClientAssignmentRow, "client_assignments">>,
   Assert<Matches<ClientGroupRow, "client_groups">>,
-  Assert<Matches<FirstPrinciplesRow, "first_principles">>,
   // recurrence and provenance are jsonb; RecurrenceJson and ProvenanceMap are their app-side shapes.
   Assert<Matches<Omit<ServiceServicingRow, "recurrence">, "service_servicing">>,
   Assert<Matches<LeadSourceRow, "lead_sources">>,

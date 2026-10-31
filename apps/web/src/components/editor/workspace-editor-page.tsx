@@ -1,10 +1,11 @@
+import { changeStepIds, loadCapacityChanges } from "@transpera-flow/db";
+import { getDb } from "@/lib/auth/session";
 import { notFound, redirect } from "next/navigation";
 import { EditorPhoneGate } from "@/components/editor/editor-phone-gate";
 import { EditorView } from "@/components/editor/editor-view";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentViewer } from "@/lib/access-data";
-import { loadDismissedEditorTours, loadProcessForEditing, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources, withDeleteCandidates } from "@/lib/data";
-import { firstPrinciplesDraftChanged } from "@/lib/first-principles/data";
+import { loadDismissedEditorTours, loadProcessForEditing, loadTierSetup, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources } from "@/lib/data";
 import { loadLiveParts } from "@/lib/overview/data";
 import { loadLibrary } from "@/lib/editor/library-data";
 import { exitHref, parseEditorMode, parseHorizon, parseIssueParam } from "@/lib/editor/modes";
@@ -36,21 +37,21 @@ export async function WorkspaceEditorPage({
     const have = new Set([b.process.id, ...(b.otherProcesses ?? []).map((p) => p.process.id)]);
     return { ...b, otherProcesses: [...(b.otherProcesses ?? []), ...parts.filter((p) => !have.has(p.process.id))] };
   };
-  // Each version with the steps its first principles list to delete, for the purpose a step has when none is chosen (sandbox phase 4).
-  const live = await withDeleteCandidates(withParts(process.live));
-  const draft = process.draft ? await withDeleteCandidates(withParts(process.draft)) : process.draft;
+  const live = withParts(process.live);
+  const draft = process.draft ? withParts(process.draft) : process.draft;
   // The company map is read at the Overview, not at a process page of its own.
   const base = company ? `/w/${slug}` : `/w/${slug}/p/${processId}`;
   const canEdit = await canEditWorkspace(live.workspace.id);
   // An archived process (issue #182) is read only until it is restored: its page says so.
   if (!canEdit || live.process.archived_at) redirect(base);
-  const [scenarios, blocks, sources, viewer, fpChanged, tours] = await Promise.all([
+  const [scenarios, blocks, sources, viewer, tours, tierSetup, storedChanges] = await Promise.all([
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceBlocks(live.workspace.id),
     loadWorkspaceSources(live.workspace.id),
     currentViewer(),
-    company ? Promise.resolve(false) : firstPrinciplesDraftChanged(live.process.id, live.revision.id, draft?.revision.id ?? null),
     loadDismissedEditorTours(),
+    loadTierSetup(live.workspace.id),
+    getDb().then((db) => loadCapacityChanges(db, live.workspace.id)).catch(() => []),
   ]);
   const tourDismissed = tours.includes(company ? "company" : "process");
   // Solution mode built for an issue (`?issue=`, A49): the issue's steps are outlined and its target is what the verdict checks.
@@ -67,7 +68,6 @@ export async function WorkspaceEditorPage({
       live={live}
       draft={draft}
       mode="live"
-      extraChanges={fpChanged ? 1 : 0}
       editorMode={editorMode}
       issue={issueRow && issueAboutProcess(issueRow, live.process.id) ? solutionIssueOf(issueRow, live.process.id, live.steps) : null}
       scenarios={scenarios}
@@ -81,6 +81,8 @@ export async function WorkspaceEditorPage({
       exitHref={exit}
       horizonMonths={parseHorizon(searchParams.horizon)}
       library={editorMode === "draft" ? library : undefined}
+      tierSetup={tierSetup}
+      changesOnSteps={{ sandboxHref: `/w/${slug}/sandbox`, changes: storedChanges.map((c) => ({ id: c.id, name: c.name, kind: c.kind, steps: changeStepIds(c) })) }}
     />
     </SourceLinkingScope>
     </EditorPhoneGate>

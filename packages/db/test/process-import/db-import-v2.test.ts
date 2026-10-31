@@ -8,7 +8,7 @@ import { startTestDb, userClaims, type ImportTestDb } from "./helpers";
 
 // Upload a transpera-process/2 file (issue #167, B14), end to end as the web app does it: checked file → shared import code →
 // Kysely under RLS as the signed-in user → `import_process_bundle`. Every section lands (draft with step evidence, sources and
-// their links, first principles) and nothing company-level is touched. Runs on a
+// their links) and nothing company-level is touched. Runs on a
 // throwaway database (test/helpers.ts).
 
 
@@ -46,7 +46,6 @@ const count = async (sql: string, params: unknown[] = []) => Number((await q(sql
 const counts = async () => ({
   processes: await count("select count(*) n from processes where workspace_id = $1", [workspaceId]),
   sources: await count("select count(*) n from sources where workspace_id = $1", [workspaceId]),
-  fp: await count("select count(*) n from first_principles where workspace_id = $1", [workspaceId]),
 });
 
 describe("uploading a transpera-process/2 file ", () => {
@@ -67,7 +66,7 @@ describe("uploading a transpera-process/2 file ", () => {
     await env?.close();
   });
 
-  it("every section lands: draft with step evidence, sources and links, first principles; no company data is touched", async () => {
+  it("every section lands: draft with step evidence, sources and links; no company data is touched", async () => {
     const people = await count("select count(*) n from people where workspace_id = $1", [workspaceId]);
     const roles = await count("select count(*) n from roles where workspace_id = $1", [workspaceId]);
     const services = await count("select count(*) n from services where workspace_id = $1", [workspaceId]);
@@ -75,7 +74,7 @@ describe("uploading a transpera-process/2 file ", () => {
     const issues = await count("select count(*) n from issues where workspace_id = $1", [workspaceId]);
     const file = v2();
     const r = await importProcessFile(editorCtx, file, { workspaceId, source: "v2.json" });
-    expect(r.bundle).toEqual({ sources: 3, first_principles: true });
+    expect(r.bundle).toEqual({ sources: 3 });
     const proc = (await q("select * from processes where workspace_id = $1 and name = $2", [workspaceId, file.name]))[0];
     expect(proc).toMatchObject({ live_revision_id: null, draft_revision_id: r.revision_id, source: "import" });
 
@@ -104,22 +103,42 @@ describe("uploading a transpera-process/2 file ", () => {
     expect(links.filter((l) => l.kind === "step").every((l) => l.skind === "transcript")).toBe(true);
     expect(links.filter((l) => l.kind === "step").map((l) => l.step_id)).toContain(steps["Write proposal"].id);
 
-    // First principles are written to the draft.
-    const fp = (await q("select * from first_principles where process_id = $1", [proc.id]))[0];
-    expect(fp).toMatchObject({ revision_id: r.revision_id, job_who: "A founder who needs marketing help", job_done: "A signed engagement letter they trust" });
-    const req = fp.requirements[0];
-    expect(req).toMatchObject({ text: "Every enquiry gets a reply the same day", owner_text: "", verdict: "keep", step_id: steps["Review enquiry"].id });
-    expect(req.owner_person_id).not.toBeNull();
-    expect(req.why).toContain("“Every enquiry gets a reply the same day.” (Sales process SOP, version 3, page 1)");
-    expect(fp.measures[0]).toMatchObject({ kpi: "winRate", comparator: "atLeast", target: 0.3 });
-    expect(JSON.stringify(fp.statements)).toContain("The job, as said");
-
     // Uploading never adds or changes people, roles, services, lead sources or issues.
     expect(await count("select count(*) n from people where workspace_id = $1", [workspaceId])).toBe(people);
     expect(await count("select count(*) n from roles where workspace_id = $1", [workspaceId])).toBe(roles);
     expect(await count("select count(*) n from services where workspace_id = $1", [workspaceId])).toBe(services);
     expect(await count("select count(*) n from lead_sources where workspace_id = $1", [workspaceId])).toBe(leads);
     expect(await count("select count(*) n from issues where workspace_id = $1", [workspaceId])).toBe(issues);
+  });
+
+  it("a step's work split, split notes, tier multipliers, manager routing and source labels land in the draft; a file without them leaves the columns empty", async () => {
+    const file = v2((f) => {
+      const proposal = f.steps.find((s: { id: string }) => s.id === "proposal");
+      proposal.tier_multiplier = { T1: 1.3, T3: 0.8 };
+      proposal.to_client_manager = true;
+      proposal.sources = { ...proposal.sources, tier_multiplier: "calculator" };
+    });
+    const r = await importProcessFile(editorCtx, file, { workspaceId, source: "v2-base.json" });
+    const steps = Object.fromEntries((await q("select * from steps where revision_id = $1", [r.revision_id])).map((s) => [s.name, s]));
+    const proposal = steps["Write proposal"];
+    expect(proposal.split).toEqual({ automatable: 0.2, augmentable: 0.5, manual: 0.3 });
+    expect(proposal.split_notes).toEqual({
+      automatable: "Pull the scope and prices from the template",
+      augmentable: "Draft the approach",
+      manual: "Check it fits what the client asked for",
+    });
+    expect(proposal.tier_multiplier).toEqual({ T1: 1.3, T3: 0.8 });
+    expect(proposal.to_client_manager).toBe(true);
+    // The source labels sit beside the evidence marks in the step's provenance, stamped by the upload's user.
+    expect(proposal.provenance.work).toMatchObject({ source: "interview", by: editorId });
+    expect(proposal.provenance.split).toMatchObject({ source: "estimate", by: editorId });
+    expect(proposal.provenance.tier_multiplier).toMatchObject({ source: "calculator" });
+    expect(proposal.provenance.work_hours.evidence).toHaveLength(1);
+    // Every other step has none.
+    for (const [name, step] of Object.entries(steps) as [string, Record<string, unknown>][]) {
+      if (name === "Write proposal") continue;
+      expect([name, step.split, step.split_notes, step.tier_multiplier, step.to_client_manager]).toEqual([name, null, null, null, false]);
+    }
   });
 
   it("the preview says what each section would make, and writes nothing", async () => {
@@ -131,11 +150,10 @@ describe("uploading a transpera-process/2 file ", () => {
     expect(checked.conflicts).toHaveLength(1);
     const p = await previewProcessFile(editorCtx, workspaceId, file);
     expect(p.extras!.sources).toHaveLength(3);
-    expect(p.extras!.firstPrinciplesParts).toBeGreaterThan(0);
     expect(await counts()).toEqual(before);
   });
 
-  it("is all or nothing: a name already taken leaves no source or first principles behind", async () => {
+  it("is all or nothing: a name already taken leaves no source behind", async () => {
     const first = v2();
     await importProcessFile(editorCtx, first, { workspaceId, source: "first.json" });
     const before = await counts();
@@ -164,13 +182,13 @@ describe("uploading a transpera-process/2 file ", () => {
     expect(checked.file).not.toHaveProperty("company");
     expect(checked.file).not.toHaveProperty("proposals");
     const r = await importProcessFile(editorCtx, checked.file!, { workspaceId, source: "old.json" });
-    expect(r.bundle).toEqual({ sources: 3, first_principles: true });
+    expect(r.bundle).toEqual({ sources: 3 });
     expect(await count("select count(*) n from people where workspace_id = $1", [workspaceId])).toBe(people);
     expect(await count("select count(*) n from roles where workspace_id = $1", [workspaceId])).toBe(roles);
     expect(await count("select count(*) n from issues where workspace_id = $1", [workspaceId])).toBe(issues);
   });
 
-  it("a /1 file still uploads unchanged: no sources or first principles", async () => {
+  it("a /1 file still uploads unchanged: no sources", async () => {
     const before = await counts();
     const f = JSON.parse(JSON.stringify(PROCESS_FILE_EXAMPLE_2));
     const v1 = checkProcessFile({ format: "transpera-process/1", name: `V1 ${randomUUID().slice(0, 6)}`, steps: f.steps.map((s: Record<string, unknown>) => ({ id: s.id, name: s.name, type: s.type, role: s.role, hands_on_hours: s.hands_on_hours, wait_hours: s.wait_hours })), links: f.links.map((l: Record<string, unknown>) => ({ from: l.from, to: l.to, probability: l.probability, label: l.label })) });

@@ -13,6 +13,10 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
   "calibrations": [
     "results"
   ],
+  "capacity_changes": [
+    "effects",
+    "provenance"
+  ],
   "capacity_factor_proposals": [
     "proposal"
   ],
@@ -32,14 +36,6 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
   "demand_settings": [
     "provenance"
   ],
-  "first_principles": [
-    "deletes",
-    "improvements",
-    "measures",
-    "requirements",
-    "statements",
-    "why_chain"
-  ],
   "issue_events": [
     "detail"
   ],
@@ -51,9 +47,13 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
     "provenance"
   ],
   "people": [
-    "provenance"
+    "provenance",
+    "ramp"
   ],
   "person_capacity_factors": [
+    "provenance"
+  ],
+  "person_portfolio": [
     "provenance"
   ],
   "person_skills": [
@@ -86,9 +86,6 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
     "fallback_ongoing_load",
     "provenance"
   ],
-  "share_links": [
-    "snapshot"
-  ],
   "solutions": [
     "changed_step_ids",
     "lever_changes",
@@ -96,8 +93,14 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
   ],
   "steps": [
     "provenance",
+    "split",
+    "split_notes",
+    "tier_multiplier",
     "wait_params",
     "work_params"
+  ],
+  "tiers": [
+    "provenance"
   ],
   "workspace_headlines": [
     "numbers"

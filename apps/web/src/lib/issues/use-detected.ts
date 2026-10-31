@@ -6,10 +6,8 @@
 // role would bring), so the issues show first without it and again, costed, once a
 // worker has run it.
 
-import { sortWithoutMoney } from "@transpera-flow/db";
-import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { useEffect, useMemo, useState } from "react";
-import type { AbsenceTest, AnalysisSettings, DetectedIssue, EngineModel, SimulationResult, SuccessMeasureSource } from "@transpera-flow/engine";
+import type { AbsenceTest, AnalysisSettings, DetectedIssue, EngineModel, SimulationResult } from "@transpera-flow/engine";
 import { rerate } from "@/lib/rules/edit";
 
 export interface IssueCostsRequest {
@@ -40,10 +38,8 @@ export function useDetectedIssues(
   processId: string,
   currency: string,
   absence?: AbsenceTest | null,
-  /** The process's success measures from its first principles, for rule 11 (goals met). */
-  successMeasures?: SuccessMeasureSource,
 ): DetectedIssue[] | null {
-  const first = useMemo(() => (model && result ? rerate(model, result, rules, processId, absence, { currency, successMeasures }) : null), [model, result, rules, processId, currency, absence, successMeasures]);
+  const first = useMemo(() => (model && result ? rerate(model, result, rules, processId, absence, { currency }) : null), [model, result, rules, processId, currency, absence]);
   const roleIds = useMemo(() => (first ? costedRoleIds(first) : []), [first]);
   const wanted = roleIds.join("\n");
   const [prices, setPrices] = useState<{ model: EngineModel; result: SimulationResult; value: Record<string, number> } | null>(null);
@@ -71,14 +67,8 @@ export function useDetectedIssues(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, result, wanted]);
 
-  // A share link without Financials reads the issues in an order that never depends on money (B3).
-  const hideMoney = useShareFinancialsHidden();
   return useMemo(() => {
     if (!model || !result || !first) return first;
-    const found =
-      prices && prices.model === model && prices.result === result
-        ? rerate(model, result, rules, processId, absence, { currency, shadowPrices: prices.value, successMeasures })
-        : first;
-    return hideMoney ? sortWithoutMoney(found) : found;
-  }, [model, result, first, prices, rules, processId, currency, absence, successMeasures, hideMoney]);
+    return prices && prices.model === model && prices.result === result ? rerate(model, result, rules, processId, absence, { currency, shadowPrices: prices.value }) : first;
+  }, [model, result, first, prices, rules, processId, currency, absence]);
 }

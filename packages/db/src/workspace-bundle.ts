@@ -4,7 +4,7 @@
 //
 // What it holds: the workspace and its settings; the company model (roles, people, services, client groups, named clients
 // flagged hidden, demand, market, churn drivers, levers, analysis rules); every process with ALL its versions (published,
-// superseded and draft: steps, edges and first principles of each, the company map included); scenarios, solutions and
+// superseded and draft: steps and edges of each, the company map included); scenarios, solutions and
 // blocks; issues with their links, owners, sources and history; sources and their links.
 // Rows keep their database ids and column names so references stay intact and nothing is lost. The step `kind` and
 // `outcome` values and the edge `label` and `condition_tag` are the ones a `transpera-process/2` file uses.
@@ -46,6 +46,13 @@ export const BUNDLE_TABLES = {
   services: T("services"),
   service_servicing: T("service_servicing"),
   client_groups: T("client_groups"),
+  // Capacity Set up (P1): departments, tiers, who serves which tier, and each person's counted portfolio.
+  departments: T("departments"),
+  tiers: T("tiers"),
+  person_tiers: T("person_tiers", "person_id", "tier_id"),
+  person_portfolio: T("person_portfolio", "person_id", "service_id"),
+  // Capacity changes (P7): automations and augmentations that act on parts of steps.
+  capacity_changes: T("capacity_changes"),
   clients: T("clients"),
   client_services: T("client_services", "client_id", "service_id"),
   client_assignments: T("client_assignments", "client_id", "role_id"),
@@ -55,13 +62,11 @@ export const BUNDLE_TABLES = {
   market_conditions: T("market_conditions"),
   market_schedule: T("market_schedule"),
   churn_drivers: T("churn_drivers"),
-  lever_settings: T("lever_settings", "workspace_id"),
   analysis_rules: T("analysis_rules", "workspace_id"),
   processes: T("processes"),
   process_revisions: T("process_revisions"),
   steps: T("steps"),
   edges: T("edges"),
-  first_principles: T("first_principles"),
   sandbox_scenarios: T("sandbox_scenarios"),
   solutions: T("solutions"),
   solution_issues: T("solution_issues", "solution_id", "issue_id"),
@@ -83,7 +88,7 @@ export const BUNDLE_TABLES = {
  */
 export const ACCOUNT_KEY = /^(by|actor|actor_id|user_id|uid|author|author_id|email|user_name|user_email)$|_by$|^(created|updated|edited|reviewed|published|accepted|resolved)_by_/i;
 
-/** Keys that end in `_by` but are not accounts: the steps that took over a retired step's work, and the person who agreed a first-principles item. */
+/** Keys that end in `_by` but are not accounts: the steps that took over a retired step's work, and the person who agreed a deleted step (older backups). */
 const NOT_ACCOUNTS = new Set(["replaced_by", "agreed_by"]);
 const isAccountKey = (k: string): boolean => ACCOUNT_KEY.test(k) && !NOT_ACCOUNTS.has(k);
 
@@ -246,7 +251,7 @@ export async function exportWorkspaceBundle(
   if (!options.canEdit) {
     raw.process_revisions = raw.process_revisions.filter((r) => r.status !== "draft");
     const kept = new Set(raw.process_revisions.map((r) => r.id));
-    for (const t of ["steps", "edges", "first_principles"] as const) raw[t] = raw[t].filter((r) => kept.has(r.revision_id));
+    for (const t of ["steps", "edges"] as const) raw[t] = raw[t].filter((r) => kept.has(r.revision_id));
     raw.processes = raw.processes.map((p) => ({ ...p, draft_revision_id: null }));
   }
 
@@ -257,7 +262,6 @@ export async function exportWorkspaceBundle(
 
   const stepsBy = group(data.steps, "revision_id");
   const edgesBy = group(data.edges, "revision_id");
-  const fpBy = group(data.first_principles, "revision_id");
   const revisionsBy = group(data.process_revisions, "process_id");
   const processes = data.processes.map((p) => ({
     ...p,
@@ -267,7 +271,6 @@ export async function exportWorkspaceBundle(
       draft: rev.id === p.draft_revision_id,
       steps: stepsBy.get(String(rev.id)) ?? [],
       edges: edgesBy.get(String(rev.id)) ?? [],
-      first_principles: (fpBy.get(String(rev.id)) ?? [])[0] ?? null,
     })),
   }));
 
@@ -285,7 +288,8 @@ export async function exportWorkspaceBundle(
 
   const companyKeys = [
     "roles", "people", "person_roles", "person_skills", "person_leave", "person_capacity_factors", "services", "service_servicing", "client_groups", "client_services",
-    "client_assignments", "lead_sources", "seasonality", "demand_settings", "market_conditions", "market_schedule", "churn_drivers", "lever_settings", "analysis_rules",
+    "client_assignments", "lead_sources", "seasonality", "demand_settings", "market_conditions", "market_schedule", "churn_drivers", "analysis_rules",
+    "departments", "tiers", "person_tiers", "person_portfolio", "capacity_changes",
   ] as const;
   const company_model: Record<string, Row[]> = Object.fromEntries(companyKeys.map((k) => [k, data[k]]));
   // Named clients are hidden in the product (D27) and never deleted: the bundle keeps them, flagged, as a backup.

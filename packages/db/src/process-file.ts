@@ -8,7 +8,6 @@
 // goes ahead (something is odd, or was filled in for you). Every message names the step or link it is about.
 
 import {
-  checkFirstPrinciples,
   checkSources,
   PROCESS_FILE_FORMAT_2,
   readAssumed,
@@ -17,9 +16,9 @@ import {
   STEP_FIELDS_2,
   type EvidenceField,
   type FileCitation,
-  type FileFirstPrinciples,
   type FileRange,
   type FileSource,
+  type FileSourceLabel,
   type Env,
 } from "@transpera-flow/db/process-file-2";
 import { isObject, MAX_ID, MAX_SUGGESTIONS, norm, plural, q, round, suggest } from "@transpera-flow/db/process-file-util";
@@ -69,6 +68,16 @@ export interface ProcessFileStep {
   evidence?: Partial<Record<EvidenceField, FileCitation[]>>;
   /** Why a value is an assumption, by field. */
   assumed?: Partial<Record<EvidenceField, string>>;
+  /** Capacity base values (P4): the shares of the step's time that can be automated, augmented or only done by hand (add up to 1). */
+  split?: { automatable: number; augmentable: number; manual: number };
+  /** One line of words for each part of the split. */
+  split_notes?: { automatable?: string; augmentable?: string; manual?: string };
+  /** × on the step's time by tier key. */
+  tier_multiplier?: Record<string, number>;
+  /** The step goes to the client's manager. */
+  to_client_manager?: boolean;
+  /** Where each base value came from: interview, calculator, measured or estimate. */
+  sources?: { work?: FileSourceLabel; split?: FileSourceLabel; tier_multiplier?: FileSourceLabel };
 }
 
 export interface ProcessFileLink {
@@ -100,7 +109,6 @@ export interface ProcessFile {
   groups: ProcessFileGroup[];
   // What /2 adds (a /1 file never has these).
   sources?: FileSource[];
-  first_principles?: FileFirstPrinciples;
 }
 
 export interface ProcessFileCheck {
@@ -215,7 +223,7 @@ export const PROCESS_FILE_EXAMPLE = {
 // ---------------------------------------------------------------------------
 
 const TOP_FIELDS = ["$schema", "format", "name", "kind", "description", "entity_name", "steps", "links", "groups"];
-const TOP_FIELDS_2 = [...TOP_FIELDS, "sources", "first_principles"];
+const TOP_FIELDS_2 = [...TOP_FIELDS, "sources"];
 const STEP_FIELDS = ["id", "name", "type", "role", "person", "hands_on_hours", "wait_hours", "rework_rate", "notes", "x", "y"];
 const STEP_FIELDS_V2 = [...STEP_FIELDS, ...STEP_FIELDS_2];
 const LINK_FIELDS = ["from", "to", "probability", "label"];
@@ -523,7 +531,6 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
   }
 
   // What /2 adds: where rework goes, then the sections that refer to the steps.
-  let firstPrinciples: FileFirstPrinciples | undefined;
   if (v2) {
     for (const s of steps) {
       if (s.rework_to === undefined) continue;
@@ -535,8 +542,6 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
         warnings.push(`Step ${q(s.name)} sends rework back to ${q(byId.get(s.rework_to)!.name)} but has no rework_rate, so nothing is sent back yet.`);
       }
     }
-    const view = { ids, has: (id: string) => byId.has(id), name: stepName };
-    firstPrinciples = checkFirstPrinciples(input.first_principles, view, env);
   }
 
   if (errors.length) return fail();
@@ -659,7 +664,7 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
       steps: normalised,
       links,
       groups,
-      ...(v2 ? { sources: env.sources, ...(firstPrinciples ? { first_principles: firstPrinciples } : {}) } : {}),
+      ...(v2 ? { sources: env.sources, } : {}),
     },
     errors,
     warnings,

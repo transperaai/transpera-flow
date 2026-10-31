@@ -38,14 +38,17 @@ import type { TargetVerdict } from "@/lib/solutions/verdict";
 import { verdictInWorker } from "@/lib/solutions/verdict-client";
 import { Button } from "@/components/ui/button";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
-import { SaveProblems, useEngineModel, type EditMode } from "@/components/process-view";
+import { SaveProblems } from "@/components/save-problems";
+import { useEngineModel, type EditMode } from "@/lib/sim/use-engine-model";
 import { EditorBar, type BlockForm, type SolutionForm } from "./editor-bar";
 import { IssueArea } from "./issue-area";
 import { Inspector } from "./inspector";
 import { Palette } from "./palette";
 import { useEditorTour } from "./editor-tour";
-import { findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
+import { blockersOf, capacityGaps, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
+import type { TierSetup } from "@/lib/tier-setup";
+import type { ChangesOnSteps } from "@/components/step-base-values";
 import { SimulateFooter, type SimulatedPair } from "./simulate-footer";
 import { useBlockTools } from "./use-blocks";
 import { useEditCommands } from "./use-edit-commands";
@@ -69,12 +72,17 @@ export function EditorView({
   settingsHref,
   exitHref,
   horizonMonths = null,
-  extraChanges = 0,
   issue = null,
   tourDismissed = false,
   historyHref,
   library,
+  tierSetup,
+  changesOnSteps,
 }: {
+  /** The workspace's tiers and their deliverables, for the step base values (capacity P4). */
+  tierSetup?: TierSetup;
+  /** The workspace's stored changes, for the list on a step (capacity P7). */
+  changesOnSteps?: ChangesOnSteps;
   live: ProcessBundle;
   draft: ProcessBundle | null;
   /** How edits are saved: to the database as the signed-in user, or in memory on the demo. Viewers can't open the Editor. */
@@ -99,8 +107,6 @@ export function EditorView({
   exitHref: string;
   /** The horizon picked on the map, in months; null runs the model at its own length. */
   horizonMonths?: number | null;
-  /** Changes the draft has that aren't steps or edges (its first principles differ from live's), which Publish counts too. */
-  extraChanges?: number;
   /** Solution mode: the issue the solution is built for, whose steps are outlined and whose target the verdict is checked against. */
   issue?: SolutionIssue | null;
   /** The process library (B12): the workspace's processes, where each sits (live links), and the templates. */
@@ -140,7 +146,10 @@ export function EditorView({
   const liveModel = useEngineModel(live, weeks);
   const unresolved = useMemo(() => unresolvedSteps(working), [working]);
   // What the draft still lacks for meaningful numbers (issue #167): the same check as the upload preview, on the draft as edited.
-  const gaps = useMemo(() => (company || scratch ? [] : findGaps(gapInputFromBundle(working))), [company, scratch, working]);
+  const gaps = useMemo(
+    () => (company || scratch ? [] : [...findGaps(gapInputFromBundle(working)), ...capacityGaps(working, workingModel.model)]),
+    [company, scratch, working, workingModel],
+  );
 
   // Selection can outlive what it points at (after a delete or an undo).
   const selected = useMemo(() => {
@@ -336,7 +345,7 @@ export function EditorView({
         subject={live.process.name}
         session={session}
         drafts={drafts}
-        changes={publishableChanges(diff, hasDraft, extraChanges)}
+        changes={publishableChanges(diff)}
         saving={state.saving}
         blocked={blocked}
         unresolved={unresolved}
@@ -410,9 +419,11 @@ export function EditorView({
             sources={sources}
             stamp={stamp}
             sourcesHref={sourcesHref}
-            mode={editorMode}
             blocks={blockTools}
             company={company}
+            tierSetup={tierSetup}
+            changesOnSteps={changesOnSteps}
+            settingsHref={settingsHref}
             draft={
               marksChanges
                 ? (step) => ({
@@ -437,7 +448,7 @@ export function EditorView({
         liveNumber={live.revision.number}
         solution={solutionMode}
         verdict={verdict}
-        incomplete={gaps.length}
+        incomplete={blockersOf(gaps).length}
       />
       )}
     </div>

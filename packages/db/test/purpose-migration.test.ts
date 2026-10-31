@@ -6,7 +6,6 @@ import {
   DEFAULT_PURPOSES,
   NORTHBEAM_PROCESS_ID,
   NORTHBEAM_WORKSPACE_ID,
-  SHARE_NON_TEXT_KEYS,
   exportWorkspaceBundle,
   northbeamStepIds,
   planWorkspaceImport,
@@ -59,7 +58,7 @@ async function as<T>(claims: Record<string, unknown>, fn: (c: pg.Client) => Prom
 }
 const q = async (sql: string, params: unknown[] = []) => (await db.client.query(sql, params)).rows as Row[];
 const rpc = (c: pg.Client, fn: string, ...args: unknown[]) => c.query(`select public.${fn}(${args.map((_, i) => `$${i + 1}`).join(", ")}) as r`, args).then((r) => r.rows[0].r);
-const allSteps = () => q("select to_jsonb(s) - 'purpose' as j, to_jsonb(s) -> 'purpose' as purpose, updated_at from public.steps s order by revision_id, id");
+const allSteps = () => q("select to_jsonb(s) - 'purpose' - 'split' - 'split_notes' - 'tier_multiplier' - 'to_client_manager' as j, to_jsonb(s) -> 'purpose' as purpose, updated_at from public.steps s order by revision_id, id");
 
 async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; message: string }> {
   try {
@@ -216,15 +215,7 @@ describe("settings.purposes on a workspace", () => {
   });
 });
 
-describe("share snapshots and restores", () => {
-  it("'purpose' is on the SQL non-text list, which still equals SHARE_NON_TEXT_KEYS", async () => {
-    const [{ src }] = (await q("select pg_get_functiondef('private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)'::regprocedure) as src")) as unknown as [{ src: string }];
-    const list = /non_text_keys constant text\[\] := array\[([^\]]*)\]/.exec(src)![1]!;
-    const sql = [...list.matchAll(/'([^']+)'/g)].map((m) => m[1]!).sort();
-    expect(sql).toContain("purpose");
-    expect(sql).toEqual([...SHARE_NON_TEXT_KEYS].sort());
-  });
-
+describe("restores", () => {
   async function exportOf(workspaceId: string): Promise<WorkspaceBundle> {
     const bundle = await db.as(admin.claims, async (c) => {
       const read: TableReader = async (table, wsId) => {

@@ -123,7 +123,7 @@ describe("handleMcpRequest", () => {
     expect(built).toBe(false);
   });
 
-  it("builds the claims from the re-checked owner, not the flag the last sign-in left (a demoted admin, a guest)", async () => {
+  it("builds the claims from the re-checked owner, not the flag the last sign-in left (a demoted admin)", async () => {
     const formerAdmin = await createUser(admin, "former-admin@example.com", { agency_admin: true });
     const token = await issueToken(admin, formerAdmin);
     const seen: unknown[] = [];
@@ -131,7 +131,7 @@ describe("handleMcpRequest", () => {
       ...env.options,
       checkUser: async (user: Parameters<typeof env.options.checkUser>[0]) => {
         expect(user.agencyAdmin).toBe(true);
-        return { ...user, agencyAdmin: false, guest: true };
+        return { ...user, agencyAdmin: false };
       },
       claimsFor: (...a: Parameters<typeof env.options.claimsFor>) => {
         const claims = env.options.claimsFor(...a);
@@ -140,7 +140,7 @@ describe("handleMcpRequest", () => {
       },
     };
     expect((await post(options, { authorization: `Bearer ${token}` })).status).toBe(200);
-    expect(seen).toEqual([expect.objectContaining({ sub: formerAdmin, app_metadata: { agency_admin: false, guest: true } })]);
+    expect(seen).toEqual([expect.objectContaining({ sub: formerAdmin, app_metadata: { agency_admin: false } })]);
   });
 
   it("only accepts POST (stateless server)", async () => {

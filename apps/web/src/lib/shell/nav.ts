@@ -2,9 +2,9 @@
 // active item is unit-tested; the sidebar component only renders what this returns. Order and grouping follow the
 // prototype's `sidebar()` (apps/web/prototype/app-flow.html).
 
-export type NavIcon = "overview" | "processes" | "issues" | "solutions" | "library" | "sources" | "people" | "sandbox" | "settings" | "access" | "share";
+export type NavIcon = "clients" | "team" | "overview" | "processes" | "issues" | "solutions" | "library" | "people" | "sandbox" | "settings" | "access";
 
-/** How a count badge looks: plain, or a warning (sources that link to nothing; wired in A53). */
+/** How a count badge looks: plain, or a warning. */
 export type CountTone = "plain" | "warn";
 
 export interface NavItem {
@@ -19,8 +19,6 @@ export interface NavItem {
   countNoun?: string;
   /** A page that is not built yet: it opens a "Coming in A3x" placeholder. */
   soon?: string;
-  /** On a map route, this item opens that tab of the map's side panel instead of navigating (the read-only Larkspur demo). */
-  panel?: "issues";
   icon: NavIcon;
 }
 
@@ -38,34 +36,27 @@ export interface NavCounts {
   openIssues?: number;
   /** Solutions arrive with A49; until then there is nothing to count. */
   solutions?: number;
-  /** Sources linked to nothing; wired in A53. */
-  unlinkedSources?: number;
 }
 
 const matches = (rest: string, path: string) => rest === path || rest.startsWith(`${path}/`);
 
 /**
- * The shared shape: `base` is where the workspace's pages live (`/w/<slug>` or `/demo`), `rest` the path under it.
+ * The shared shape: `base` is where the workspace's pages live (`/w/<slug>`), `rest` the path under it.
  * The workspace root is the Overview, the landing page (issue #100); a process's map (`/p/<id>`) belongs to Processes.
  */
-function groups(base: string, rest: string, counts: NavCounts, extra: { settings: boolean; access: boolean; levers?: boolean; share?: boolean }): NavGroup[] {
+function groups(base: string, rest: string, counts: NavCounts, extra: { settings: boolean; access: boolean; levers?: boolean; share?: boolean; setup?: boolean }): NavGroup[] {
   const onMap = rest.startsWith("/p/");
   const item = (i: Omit<NavItem, "href" | "active"> & { path: string; active?: boolean }): NavItem => {
     const { path, active, ...fields } = i;
     return { ...fields, href: `${base}${path}`, active: active ?? matches(rest, path) };
   };
   const company: NavItem[] = [
-    item({ key: "sources", label: "Sources", path: "/sources", icon: "sources", count: counts.unlinkedSources, tone: "warn", countNoun: "not linked to anything" }),
-    item({ key: "people", label: "People", path: "/people", icon: "people" }),
+    item({ key: "capacity", label: "Capacity", path: "/capacity", icon: "people" }),
     // Who gets too busy, and when (issue #35).
     item({ key: "sandbox", label: "Sandbox", path: "/sandbox", icon: "sandbox" }),
   ];
-  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || rest === "/settings/levers" || rest === "/settings/calibration" || rest === "/settings/changes" }));
-  // The demo has no Settings page, so its Levers are reached from the sidebar directly.
-  if (extra.levers) company.push(item({ key: "levers", label: "Levers", path: "/settings/levers", icon: "settings" }));
+  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || rest === "/settings/calibration" || rest === "/settings/changes" }));
   if (extra.access) company.push(item({ key: "access", label: "Access", path: "/settings/access", icon: "access" }));
-  // The read-only links to pages of this workspace (B3): for Agency admins, who make them.
-  if (extra.share) company.push(item({ key: "share", label: "Share links", path: "/share", icon: "share" }));
   return [
     {
       key: "main",
@@ -84,40 +75,27 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
         item({ key: "library", label: "Block library", path: "/blocks", icon: "library" }),
       ],
     },
+    // Where the capacity figures' inputs are keyed in (capacity build P1): shown to everyone, editable by the Owner and Agency admins.
+    ...(extra.setup
+      ? [
+          {
+            key: "setup",
+            label: "Set up",
+            items: [
+              item({ key: "setup-clients", label: "Tiers & clients", path: "/setup/clients", icon: "clients" as const }),
+              item({ key: "setup-people", label: "People & roles", path: "/setup/people", icon: "team" as const }),
+            ],
+          },
+        ]
+      : []),
     { key: "company", label: "Company", items: company },
   ];
 }
 
-export function workspaceNav({ slug, pathname, canManage, canEdit = false, counts }: { slug: string; pathname: string; canManage: boolean; /** Agency admins and the Owner: they see Share links. */ canEdit?: boolean; counts: NavCounts }): NavGroup[] {
+export function workspaceNav({ slug, pathname, canManage, counts }: { slug: string; pathname: string; canManage: boolean; counts: NavCounts }): NavGroup[] {
   const base = `/w/${slug}`;
   const rest = pathname.startsWith(base) ? pathname.slice(base.length) : "\u0000";
-  return groups(base, rest, counts, { settings: true, access: canManage, share: canEdit });
-}
-
-/** Northbeam on the demo: no database, so no Settings or Access (but its Levers, edited in memory). */
-function demoGroups(pathname: string, counts: NavCounts): NavGroup[] {
-  const rest = pathname === "/demo" ? "" : pathname.startsWith("/demo/") ? pathname.slice("/demo".length) : "\u0000";
-  return groups("/demo", rest, counts, { settings: false, access: false, levers: true });
-}
-
-/** Larkspur is a read-only map: just the map, and its issues in the map's side panel. */
-function larkspurGroups(): NavGroup[] {
-  const base = "/demo/larkspur";
-  return [
-    {
-      key: "main",
-      label: null,
-      items: [
-        { key: "processes", label: "Processes", href: base, active: true, icon: "processes" },
-        { key: "issues", label: "Issues", href: `${base}?panel=issues`, active: false, panel: "issues", icon: "issues" },
-      ],
-    },
-  ];
-}
-
-export function demoNav({ pathname, counts }: { pathname: string; counts: NavCounts }): NavGroup[] {
-  if (pathname === "/demo/larkspur" || pathname.startsWith("/demo/larkspur/")) return larkspurGroups();
-  return demoGroups(pathname, counts);
+  return groups(base, rest, counts, { settings: true, access: canManage, setup: true });
 }
 
 export const flatItems = (groups: NavGroup[]): NavItem[] => groups.flatMap((g) => g.items);

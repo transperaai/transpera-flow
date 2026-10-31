@@ -5,20 +5,19 @@ import { Overview } from "@/components/overview/overview";
 import { StartOverview } from "@/components/overview/start-overview";
 import { setupChecklist } from "@/lib/overview/setup";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
-import { loadLiveProcess, loadSolutionBase, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSetup, loadWorkspaceSolutions, loadWorkspaceSources, withDeleteCandidates } from "@/lib/data";
+import { loadLiveProcess, loadSolutionBase, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSetup, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 import { solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
 import { canEditWorkspace } from "@/lib/access-data";
-import { loadLiveFirstPrinciples } from "@/lib/first-principles/data";
 import { companyMapView } from "@/lib/overview/company-version";
 import { loadCompanyVersion, loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
-import { ShareButton } from "@/components/share/share-dialog";
 import { workspaceIsEmpty } from "@/lib/restore/empty";
 import { getDb } from "@/lib/auth/session";
+import { loadCapacitySetup } from "@transpera-flow/db";
 
 /** The Overview of a workspace (issue #100): the landing page, at `/w/[slug]` and `/w/[slug]/overview`. */
 export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: string; /** `?version=N`: show an earlier version of the company map, read only. */ mapVersion?: number | null }) {
   const liveBare = await loadLiveProcess(slug);
-  const live = liveBare ? await withDeleteCandidates(liveBare) : null;
+  const live = liveBare;
   if (!live) {
     // Nothing is published (a new client): the start page. Members and viewers get a plain sentence; counts only go to editors.
     const head = await loadWorkspaceHead(slug);
@@ -45,14 +44,15 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     );
   }
   const ws = live.workspace.id;
-  const [parts, company, issues, sources, canEdit, firstPrinciples, solutions] = await Promise.all([
+  const [parts, company, issues, sources, canEdit, solutions, capacitySetup] = await Promise.all([
     loadLiveParts(ws),
     loadLiveCompany(ws),
     loadWorkspaceIssues(ws),
     loadWorkspaceSources(ws),
     canEditWorkspace(ws),
-    loadLiveFirstPrinciples(live.process.id, live.revision.id),
     loadWorkspaceSolutions(ws),
+    // Set up's data for the department cards (P6), loaded as the viewer: pay a role can't see never arrives.
+    getDb().then((db) => loadCapacitySetup(db, ws)),
   ]);
   const base = `/w/${slug}`;
   // An earlier version of the company map (only its layout and handoff lines differ); a number that isn't one shows live.
@@ -73,7 +73,6 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       viewingMapVersion={view.viewingVersion}
       issues={issues}
       mode={canEdit ? "live" : "readonly"}
-      firstPrinciples={firstPrinciples}
       solutions={solutions}
       solutionBases={solutionBases}
       hrefs={Object.fromEntries(parts.map((p) => [p.process.id, `${base}/p/${p.process.id}`]))}
@@ -83,7 +82,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       bundleHref={canEdit ? `${base}/export/bundle` : undefined}
       issuesHref={`${base}/issues`}
       forecastHref={`${base}/sandbox`}
-      share={canEdit ? <ShareButton slug={slug} kind="overview" targetId={null} what="The Overview" /> : undefined}
+      capacity={capacitySetup ? { setup: capacitySetup, base } : null}
     />
     </SourceLinkingScope>
   );

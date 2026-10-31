@@ -1,12 +1,16 @@
 "use client";
 
-// The Overview (issue #173, B15; before it #100, A35): the landing page of a workspace, in tiers. Top to bottom:
+// The Overview (issue #173, B15; before it #100, A35; the department cards are capacity build P6): the landing page of a workspace, in
+// tiers. Top to bottom:
 //
-// 1. The company map, with Play and the horizon (1, 3, 6, 12 or 24 months). The cards and charts follow the horizon.
-// 2. The health strip: Process health, Open issues, Flow efficiency, Improvement delivered.
+// 1. Capacity by department: a card each for Organic and Performance, then the whole business (department-cards.tsx). It reads the
+//    Capacity page's "Today" run, from the same cache.
+// 2. The company map, with Play and the horizon (1, 3, 6, 12 or 24 months). The charts follow the horizon.
 // 3. By process: "Across the company", then one row per process, each with the run's facts (D40) and its open issues.
 // 4. Trends: open issues, time split by process, team load by role, issues opened versus resolved, before and after per
 //    solution.
+//
+// (The issues-based health strip that used to sit between the map and By process went with P6.)
 //
 // Two simulations of the company model feed it, in workers, each once:
 // - one at the workspace's own length, with today's team, which the facts are rated from (so they don't move with the
@@ -19,11 +23,7 @@
 // worker, only once the two runs above are first in and only when something needs them; they don't depend on the horizon
 // and are kept for the session, so changing the horizon doesn't run them again. The trend charts load on their own.
 
-import { sortWithoutMoney } from "@transpera-flow/db";
-import { useShareFinancialsHidden } from "@/components/share/share-context";
 import type { ScreenMode } from "@/lib/mode";
-import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
-import type { FirstPrinciples } from "@transpera-flow/engine";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -31,7 +31,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
 import { ExportMenu } from "@/components/export/export-menu";
 import { ratingOfRank } from "@/lib/map/rating";
-import { ModelError, toEngineModel, workspacePurposes, type IssueRow, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
+import { ModelError, toEngineModel, workspacePurposes, type CapacitySetup, type IssueRow, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
 import { ratingOfStored, resolveMoney, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
@@ -48,8 +48,8 @@ import { litIds } from "@/lib/map/highlight";
 import { companyMap } from "@/lib/overview/company-map";
 import { sortFindings } from "@/lib/overview/findings";
 import { COMPANY_GROUP, groupByProcess, type ProcessGroup } from "@/lib/overview/by-process";
-import { openIssues, openedVersusResolved, processHealth, timeSplitByProcess, timeSplitOf, workingShare } from "@/lib/overview/health";
-import { improvementDelivered, impactPairs, solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
+import { openIssues, openedVersusResolved, timeSplitByProcess } from "@/lib/overview/health";
+import { impactPairs, solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
 import { useImpacts } from "@/lib/overview/use-impacts";
 import { forecastInsights, forecastModel, today } from "@/lib/forecast/forecast";
 import { timelineData } from "@/lib/forecast/timeline";
@@ -65,7 +65,8 @@ import { headlineNumbers } from "@/lib/overview/headline";
 import { FactsList } from "@/components/facts-list";
 import { useIssues } from "@/lib/issues/use-issues";
 import { ProcessGroups } from "./process-groups";
-import { FlowEfficiencyCard, ImprovementCard, OpenIssuesCard, ProcessHealthCard } from "./health-cards";
+import { capacityBaseModel } from "@/lib/capacity/model";
+import { DepartmentCards } from "./department-cards";
 import { RatingPill } from "./rating-pill";
 import { EDIT_ONLY } from "@/lib/phone";
 
@@ -91,8 +92,6 @@ export interface OverviewProps {
   /** Tracked issues: the confirmed ones colour and badge the map. */
   issues: IssueRow[];
   mode: ScreenMode;
-  /** The pipeline's live first principles, whose success measures rule 11 (goals met) rates. */
-  firstPrinciples?: FirstPrinciples | null;
   /** The workspace's solutions and their verdicts (the demo reads the ones built in this tab instead). */
   solutions?: SolutionsData;
   /** For solutions compared whose process has been published since: the version they were copied from. */
@@ -112,8 +111,8 @@ export interface OverviewProps {
   issuesHref: string;
   /** The Forecast page, linked from the team load chart. */
   forecastHref?: string;
-  /** The Share button (Agency admins, B3), made by the page that knows what is shared. */
-  share?: ReactNode;
+  /** Set up's data for the department cards (P6), with `/w/<slug>`. Absent (the demo): no cards. */
+  capacity?: { setup: CapacitySetup; base: string } | null;
 }
 
 const NO_BASES: SolutionBases = {};
@@ -189,7 +188,6 @@ export function Overview({
   company,
   issues,
   mode,
-  firstPrinciples,
   solutions,
   solutionBases = NO_BASES,
   startDate,
@@ -201,7 +199,7 @@ export function Overview({
   viewingMapVersion = null,
   issuesHref,
   forecastHref,
-  share,
+  capacity = null,
 }: OverviewProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -209,6 +207,9 @@ export function Overview({
   const { model: base, error } = useCompanyModel(live);
   const hoursPerWeek = live.workspace.settings.hours_per_week;
   const purposeCategories = useMemo(() => workspacePurposes(live.workspace.settings), [live.workspace.settings]);
+  // The department cards' model: the Capacity page's own (a year long), so its "Today" run is shared through the cache.
+  const capacityModel = useMemo(() => (capacity ? capacityBaseModel(live) : { model: null, error: null }), [capacity, live]);
+  const purposeNames = useMemo(() => Object.fromEntries(purposeCategories.map((c) => [c.key, c.name])), [purposeCategories]);
 
   // The horizon: the workspace's own length until one is picked (or ?horizon= says), as on the process pages.
   const horizonParam = Number(searchParams.get("horizon"));
@@ -254,15 +255,12 @@ export function Overview({
   // The facts (D40), from the run at the workspace's own length, rated with the documented defaults: evidence, never findings.
   const rules = ANALYSIS_DEFAULTS;
   const absence = useAbsenceTest(base && baseResult ? base : null, baseResult?.seed ?? 1, resolveMoney(rules).absenceWeeks);
-  const successMeasures = useSuccessMeasures(live.process.id, mode === "demo", firstPrinciples);
-  // A share link without Financials reads the findings in an order that never depends on money (B3).
-  const hideMoney = useShareFinancialsHidden();
   const gaps = useMemo(() => visibleFindings(rules, perceptionGapDetections(parts.flatMap((p) => p.steps))), [rules, parts]);
   // Who gets too busy, and when, over the horizon (B6): "Across the company".
   const forecastFindings = useMemo(() => (horizonModel && horizonResult ? forecastInsights(horizonModel, horizonResult, rules, start) : []), [horizonModel, horizonResult, rules, start]);
   const facts = useMemo(
-    () => (base && baseResult ? (hideMoney ? sortWithoutMoney : sortFindings)([...visibleFindings(rules, [...rerate(base, baseResult, rules, live.process.id, absence, { successMeasures }), ...gaps]), ...forecastFindings]) : null),
-    [base, baseResult, rules, live.process.id, absence, gaps, successMeasures, forecastFindings, hideMoney],
+    () => (base && baseResult ? sortFindings([...visibleFindings(rules, [...rerate(base, baseResult, rules, live.process.id, absence), ...gaps]), ...forecastFindings]) : null),
+    [base, baseResult, rules, live.process.id, absence, gaps, forecastFindings],
   );
   // Issues logged here badge the map straight away. Each part is at its live revision.
   const liveRevisions = useMemo(() => Object.fromEntries(parts.map((p) => [p.process.id, p.revision.id])), [parts]);
@@ -289,13 +287,10 @@ export function Overview({
   const openProcess = (stepId: string) => {
     const process = map.processOfStep.get(stepId);
     const href = process ? hrefs[process] : undefined;
-    if (href) router.push(href);
+    if (href) router.push(`${href}?step=${encodeURIComponent(stepId)}`);
   };
 
-  // The health strip.
   const [now] = useState(() => new Date());
-  // Each process as the map and the Processes table rate it: by its confirmed open issues (D24).
-  const health = useMemo(() => (groups ? processHealth(groups.filter((g) => g.id !== COMPANY_GROUP).map((g) => g.rating)) : null), [groups]);
   // The agency list's headline numbers (B1 3/3): once the run at the workspace's own horizon and the ratings are in, an editor's
   // browser records them (the server skips it when the stored ones are for the same engine and revisions and under an hour old).
   // Once per set of numbers, so a re-render or a change of horizon and back doesn't ask again.
@@ -314,25 +309,17 @@ export function Overview({
   }, [mode, error, groups, horizonModel, horizonResult, weeks, parts, live.workspace.id, live.workspace.settings.horizon_weeks]);
   // Months in the browser's time zone (workspaces have none of their own yet), for this card and the chart alike.
   const open = useMemo(() => openIssues(state.issues, now), [state.issues, now]);
-  const flowShare = useMemo(() => {
-    if (!horizonModel || !horizonResult) return undefined;
-    const split = timeSplitOf(horizonModel, horizonResult);
-    return split ? workingShare(split) : null;
-  }, [horizonModel, horizonResult]);
 
   // Before and after per solution, once the main runs are in, and only when the card or the chart needs them.
   const [trendsRef, trendsNear] = useNear<HTMLElement>();
   const chosen = useMemo(() => solutionsToCompare(solutionsData, state.issues), [solutionsData, state.issues]);
   const pairs = useMemo(() => (base ? impactPairs(live, chosen, solutionBases, base.horizonWeeks) : []), [base, live, chosen, solutionBases]);
   const anyImplemented = chosen.some((c) => c.implemented);
-  // Implemented solutions whose before and after can't be worked out (the version they were copied from isn't loaded, or a side can't be simulated).
-  const unmeasured = chosen.filter((c) => c.implemented).length - pairs.filter((p) => p.implemented).length;
   // Once wanted, the runs stay wanted: a horizon change empties the horizon run for a moment, which mustn't stop them.
   const wanted = !!baseResult && !!horizonResult && (anyImplemented || trendsNear);
   const [impactsWanted, setImpactsWanted] = useState(false);
   if (wanted && !impactsWanted) setImpactsWanted(true);
   const impacts = useImpacts(pairs, impactsWanted);
-  const delivered = useMemo(() => (impacts.status === "done" ? improvementDelivered(impacts.impacts, hoursPerWeek) : null), [impacts, hoursPerWeek]);
 
   // The trends.
   const timeSplit = useMemo(() => (horizonModel && horizonResult ? timeSplitByProcess(horizonModel, horizonResult, parts) : null), [horizonModel, horizonResult, parts]);
@@ -386,7 +373,6 @@ export function Overview({
         <PageHeader
           eyebrow="Overview"
           title={workspaceName}
-          actions={share}
           description={
             <span className="inline-flex items-center gap-2">
               <i aria-hidden className={`size-2 rounded-full ${simulating ? "animate-pulse bg-warn" : "bg-good"}`} />
@@ -404,6 +390,8 @@ export function Overview({
             .
           </Card>
         ) : null}
+
+        {capacity && <DepartmentCards setup={capacity.setup} model={capacityModel.model} modelError={capacityModel.error} purposeNames={purposeNames} base={capacity.base} />}
 
         <Section
           id="map"
@@ -488,13 +476,6 @@ export function Overview({
           </Card>
         </Section>
 
-        <section aria-label="Health" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" data-tier="health">
-          <ProcessHealthCard health={health} />
-          <OpenIssuesCard issues={open} />
-          <FlowEfficiencyCard share={flowShare} span={span} error={!!error} />
-          <ImprovementCard delivered={delivered} status={!anyImplemented ? "done" : impacts.status} unmeasured={unmeasured} />
-        </section>
-
         <Section
           id="by-process"
           title="By process"
@@ -517,18 +498,15 @@ export function Overview({
             <ChartCard id="time-split" title="Time split by process" note={`Of the time work spends in each process over the next ${span}, the share someone is working on it.`}>
               {timeSplit ? <TimeSplitChart rows={timeSplit} months={months} /> : error ? <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p> : chartLoading()}
             </ChartCard>
-            {/* Not on a share link: share links show no time split (sandbox phase 4). */}
-            {mode !== "share" && (
-              <ChartCard id="time-achieves" title="What the time achieves" wide note={`The team's working time over the next ${span}, by what the steps achieve, as a share of the hours available. Hands-on against waiting is above.`}>
-                {horizonResult?.monthly ? (
-                  <TimeAchieves monthly={horizonResult.monthly} hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek} start={start} categories={purposeCategories} sandboxHref={forecastHref} span={span} />
-                ) : error ? (
-                  <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p>
-                ) : (
-                  chartLoading()
-                )}
-              </ChartCard>
-            )}
+            <ChartCard id="time-achieves" title="What the time achieves" wide note={`The team's working time over the next ${span}, by what the steps achieve, as a share of the hours available. Hands-on against waiting is above.`}>
+              {horizonResult?.monthly ? (
+                <TimeAchieves monthly={horizonResult.monthly} hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek} start={start} categories={purposeCategories} sandboxHref={forecastHref} span={span} />
+              ) : error ? (
+                <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p>
+              ) : (
+                chartLoading()
+              )}
+            </ChartCard>
             <ChartCard
               id="team-load"
               title="Team load by role"

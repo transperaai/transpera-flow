@@ -31,8 +31,7 @@ function createAuth(env: AuthEnv) {
     databaseHooks: {
       user: {
         create: {
-          // A first sign-in is refused unless the address is on the access list (or a live restricted share link lists it: a
-          // guest). Nothing is written.
+          // A first sign-in is refused unless the address is on the access list . Nothing is written.
           before: async (user) => {
             const role = await signInRole(pool, user.email, user.emailVerified === true, env.adminEmails);
             if (!role) throw denied();

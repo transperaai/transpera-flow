@@ -12,7 +12,6 @@ const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8"
 const OWN_ROW = [
   "components/people-page.tsx",
   "components/utilisation-bars.tsx",
-  "components/compare-view.tsx",
   "lib/forecast/timeline.ts",
   "lib/scenarios/levers.ts",
 ];
@@ -24,9 +23,6 @@ const NAMES = [
   "components/process-issues.tsx",
   "components/process-page.tsx",
   "components/process-canvas.tsx",
-  "lib/process-page/about.ts",
-  "components/first-principles/first-principles-card.tsx",
-  "components/first-principles/first-principles-flow.tsx",
   "lib/churn-drivers.ts",
   "lib/scenarios/scenarios.ts",
   "lib/scenarios/broken.ts",
@@ -59,7 +55,7 @@ describe("per-person screens use the viewer helpers", () => {
     const data = read("lib/data.ts");
     expect(data).toContain("loadTeam(db, ws)");
     expect(data).toContain("roleUsage(roleSteps, team.personRoles, team.clientAssignments,");
-    expect(read("app/w/[slug]/settings/people-settings.tsx")).toContain("Your record. Agency admins see the whole team.");
+    expect(read("components/setup/people-roles.tsx")).toContain("Your record. Agency admins see the whole team.");
     expect(read("app/w/[slug]/settings/clients-settings.tsx")).toContain("A_TEAM_MEMBER");
   });
 });
@@ -110,9 +106,8 @@ describe("per-person times are never ranked or compared", () => {
     const before = source.slice(0, uses[0]!.index);
     expect(before.slice(before.lastIndexOf("{personTimes.state")).startsWith('{personTimes.state === "on"')).toBe(true);
     expect(source).toMatch(/personTimes\.state === "on" && ready\.personRows\s*\?\s*proposePersonTimes\(/);
-    // The wizard offers people to match only when given them, and the demo passes none.
+    // The wizard offers people to match only when given them.
     expect(source).toContain('people={personTimes.state === "on" ? personTimes.people : null}');
-    expect(read("app/demo/settings/calibration/page.tsx")).toContain('personTimes={{ state: "hidden" }}');
   });
 
   it("the People page reads per-person times only through personFactors, inside PersonDetailBlock", () => {

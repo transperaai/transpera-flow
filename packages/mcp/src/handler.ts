@@ -14,8 +14,6 @@ export interface TokenUser {
   id: string;
   email: string;
   agencyAdmin: boolean;
-  /** Signed in only for a restricted share link (B3): claims mark them so nothing joins them to a workspace. */
-  guest?: boolean;
 }
 
 export interface McpHandlerOptions {

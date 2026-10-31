@@ -1,25 +1,19 @@
 "use client";
 
-import { useActionState, useState } from "react";
 import { A_TEAM_MEMBER, type ClientAssignmentRow, type ClientRow, type ClientServiceRow } from "@transpera-flow/db";
 import { ChecklistField, DateField, NumberField, SelectField, TextField, ToggleField, type FieldHelp } from "@/components/fields";
-import { HelpLabel } from "@/components/help";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
-import { clientsRuleSentence, MAX_MRR, type ClientField, type ClientSources } from "@/lib/clients";
-import { formatWholeCurrency } from "@/lib/format";
-import { SettingsSection } from "./section";
-import type { AddClientResult, saveClientAssignment, saveClientField, saveClientServices } from "./client-actions";
+import { MAX_MRR, type ClientField } from "@/lib/clients";
+import type { saveClientAssignment, saveClientField, saveClientServices } from "./client-actions";
 
-// Settings, Clients (issue #182, B19; PRD D42): clients one by one, with their MRR, start date, services and who looks after
-// them in each role. A client who leaves is made inactive: hidden here and left out of simulations, never deleted. The
-// writes come in as `ops` (the server actions, or a stand-in in the browser tests), so this file never imports server code.
+// A named client's fields (issue #182, B19; PRD D42): name, status, MRR, start date, services and who looks after them in each role,
+// shown under "More" on a row of Set up, Tiers & clients (the list, the add form and the inactive filter live there). A client who
+// leaves is made inactive: hidden and left out of simulations, never deleted. The writes come in as `ops` (the server actions, or a
+// stand-in in the browser tests), so this file never imports server code.
 
 type Scalar = string | number | boolean | null;
 
 export interface ClientOps {
-  add: (workspaceId: string, prev: AddClientResult, form: FormData) => Promise<AddClientResult>;
   saveField: typeof saveClientField;
   saveServices: typeof saveClientServices;
   saveAssignment: typeof saveClientAssignment;
@@ -37,8 +31,6 @@ export interface ClientsSettingsProps {
   personRoles: { person_id: string; role_id: string }[];
   /** Agency admins. */
   canEdit: boolean;
-  /** Which processes simulate client groups and which these clients (PRD D42). */
-  sources: ClientSources;
   ops: ClientOps;
 }
 
@@ -57,106 +49,17 @@ const HELP: Record<"name" | "status" | "mrr" | "start" | "services" | "role", Fi
   },
 };
 
-export function ClientsSettings(props: ClientsSettingsProps) {
-  const { clients, canEdit, sources } = props;
-  const [showInactive, setShowInactive] = useState(false);
-  const active = clients.filter((c) => c.active);
-  const inactive = clients.filter((c) => !c.active);
-  return (
-    <SettingsSection
-      id="clients"
-      title="Clients"
-      description={
-        <>
-          {active.length} active{inactive.length ? `, ${inactive.length} inactive` : ""}. {clientsRuleSentence(sources)}
-        </>
-      }
-    >
-      {canEdit ? <AddClient {...props} /> : <p className="text-fg-2">You can view clients here; Agency admins can change them.</p>}
-      {active.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2" data-empty="clients">
-          No active clients yet.
-        </p>
-      ) : (
-        <ul className="flex flex-col divide-y divide-line border-y border-line" data-clients="active">
-          {active.map((c) => (
-            <li key={c.id}>
-              <ClientRowView client={c} {...props} />
-            </li>
-          ))}
-        </ul>
-      )}
-      {inactive.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <Button type="button" variant="link" size="sm" className="self-start px-0" aria-expanded={showInactive} onClick={() => setShowInactive((s) => !s)}>
-            {showInactive ? "Hide inactive clients" : `Show ${inactive.length} inactive ${inactive.length === 1 ? "client" : "clients"}`}
-          </Button>
-          {showInactive && (
-            <ul className="flex flex-col divide-y divide-line border-y border-line" data-clients="inactive">
-              {inactive.map((c) => (
-                <li key={c.id}>
-                  <ClientRowView client={c} {...props} />
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </SettingsSection>
-  );
-}
-
-function AddClient({ workspaceId, currency, ops }: ClientsSettingsProps) {
-  const [state, action, pending] = useActionState<AddClientResult, FormData>((prev, form) => ops.add(workspaceId, prev, form), {});
-  return (
-    <form action={action} className="flex flex-wrap items-end gap-2" data-add-client>
-      <label className="flex flex-col gap-1">
-        <HelpLabel label="Name" {...HELP.name} />
-        <Input name="name" required maxLength={200} />
-      </label>
-      <label className="flex flex-col gap-1">
-        <HelpLabel label={`MRR (${currency})`} {...HELP.mrr} />
-        <Input name="mrr" type="number" min={0} max={MAX_MRR} step="any" inputMode="decimal" className="w-32" />
-      </label>
-      <label className="flex flex-col gap-1">
-        <HelpLabel label="Start date" {...HELP.start} />
-        <Input name="start_date" type="date" />
-      </label>
-      <Button type="submit" disabled={pending}>
-        {pending ? "Adding…" : "Add client"}
-      </Button>
-      {state.error && (
-        <p role="alert" className="w-full text-crit">
-          {state.error}
-        </p>
-      )}
-    </form>
-  );
-}
-
-function ClientRowView({ client: c, ...props }: ClientsSettingsProps & { client: ClientRow }) {
+/** Everything else about a named client (the part of a row that opens): Set up shows it under "More". */
+export function ClientMore({ client: c, ...props }: ClientsSettingsProps & { client: ClientRow }) {
   const { workspaceId, currency, canEdit, ops } = props;
   const disabled = !canEdit;
   const serviceIds = props.clientServices.filter((s) => s.client_id === c.id).map((s) => s.service_id);
-  const serviceNames = props.services.filter((s) => serviceIds.includes(s.id)).map((s) => s.name);
   const field =
     <T extends Scalar>(f: ClientField): Saver<T> =>
     (base, next) =>
       ops.saveField(c.id, f, base, next) as Promise<SaveOutcome<T>>;
   const roles = props.roles.filter((r) => r.active || props.clientAssignments.some((a) => a.client_id === c.id && a.role_id === r.id));
   return (
-    <details className="group py-2" data-client={c.name}>
-      <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-1 py-1 hover:bg-panel-2">
-        <span aria-hidden className="text-fg-3 transition-transform group-open:rotate-90">
-          ›
-        </span>
-        <span className={`font-semibold ${c.active ? "" : "text-fg-3"}`}>{c.name}</span>
-        <span className="text-fg-2">{serviceNames.join(", ") || "No services"}</span>
-        <span className="text-fg-3 tabular-nums">
-          {formatWholeCurrency(Number(c.mrr), currency)} a month{c.start_date ? ` · since ${c.start_date}` : ""}
-        </span>
-        {!c.active && <span className="rounded-lg bg-panel-2 px-1.5 text-xs text-fg-2">Inactive</span>}
-      </summary>
       <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2 lg:grid-cols-3">
         <TextField label="Name" value={c.name} save={field("name")} disabled={disabled} help={HELP.name} />
         <ToggleField label="Status" value={c.active} save={field("active")} onLabel="Active" offLabel="Inactive: hidden and left out of simulations" disabled={disabled} help={HELP.status} />
@@ -198,6 +101,5 @@ function ClientRowView({ client: c, ...props }: ClientsSettingsProps & { client:
           </fieldset>
         )}
       </div>
-    </details>
   );
 }

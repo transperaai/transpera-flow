@@ -26,6 +26,20 @@ The `process-file` skill turns a mix of materials (interview transcripts, rough 
 2. It lists what it found (processes, people, numbers, conflicts between sources), then asks about every gap and ambiguity in one numbered message, grouped by process, each with a suggested answer and its quote. Answer by number ("1 yes, 2 0.3, 3 skip"). Say "skip" or "use your best guess" for an item and it records an assumption marked as yours; otherwise it builds only after your answers.
 3. It writes one `.json` file per process, then a short summary: what was built, assumptions, conflicts between sources, **Missing for simulation**, what it left out, and what is still open, with the questions and your answers.
 
+## Base values for capacity
+
+A step can carry the values the capacity app works from, all optional (a file without them uploads exactly as before):
+
+| Field | Meaning |
+|---|---|
+| `split` | `{automatable, augmentable, manual}`: shares of the step's hands-on time that add up to 1. The skill reads each step as gather (automatable), judge (augmentable) and check (manual). |
+| `split_notes` | One line for each part, in the speaker's words. |
+| `tier_multiplier` | × on the step's time for each tier, e.g. `{"T1": 1.3, "T3": 0.8}`; a tier not listed is 1. |
+| `to_client_manager` | `true` when the client's own manager does the step. Keep the `role` as the fallback. |
+| `sources` | Where `work`, `split` and `tier_multiplier` came from: `interview`, `calculator`, `measured` or `estimate`. Stored in the step's provenance. |
+
+A split that doesn't add up to 100%, a tier multiplier below 0, or a source that isn't one of the four stops the upload with a message naming the step. The servicing link's "per 1,000 words" recurrence is not part of the file: it belongs to the link between a service and a servicing process, which is set in the app.
+
 ## Upload
 
 1. In the app, open **Processes**, then **Upload process**, and choose a file (or drop it). Do this once per file.

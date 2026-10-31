@@ -115,8 +115,8 @@ async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; mes
 /** Counts of every table a restore writes to, for a workspace, so "nothing was written" can be compared. */
 const TABLES = [
   "roles", "people", "person_roles", "person_leave", "person_skills", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
-  "lever_settings", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links", "processes",
-  "process_revisions", "steps", "edges", "first_principles", "sandbox_scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
+  "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links", "processes",
+  "process_revisions", "steps", "edges", "sandbox_scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
   "solutions", "audit_log",
 ];
 async function snapshot(ws: string): Promise<Record<string, number>> {
@@ -748,7 +748,7 @@ describe("limits", () => {
   const L = WORKSPACE_IMPORT_LIMITS;
   const rows = (n: number): Row[] => Array.from({ length: n }, () => ({}));
   it.each([
-    ["processes", (p: ImportPlan) => { p.processes = rows(L.processes + 1).map(() => ({ id: "", parent_process_id: null, name: "", kind: "", entity_name: "", description: "", archived: false, layout: {}, steps: [], edges: [], first_principles: null })); }],
+    ["processes", (p: ImportPlan) => { p.processes = rows(L.processes + 1).map(() => ({ id: "", parent_process_id: null, name: "", kind: "", entity_name: "", description: "", archived: false, layout: {}, steps: [], edges: [] })); }],
     ["steps", (p: ImportPlan) => { p.processes[0]!.steps = rows(L.steps + 1); }],
     ["edges", (p: ImportPlan) => { p.processes[0]!.edges = rows(L.edges + 1); }],
     ["sources", (p: ImportPlan) => { p.sources = rows(L.sources + 1); }],

@@ -4,6 +4,29 @@ Process-map simulator: turns a company's workflows into a runnable
 discrete-event Monte Carlo model. Product spec and decisions: [`docs/PRD.md`](docs/PRD.md).
 Work is tracked as GitHub issues (milestone parents #1–#3). Picking this up? Start with [`docs/HANDOVER.md`](docs/HANDOVER.md).
 
+## The app
+
+Transpera Flow answers one question for an agency: are we at capacity, and how many more clients per employee could automation or
+augmentation allow? Each client has their own deployment. The screens, in the order the menu shows them:
+
+| Screen | Path | What it is |
+|---|---|---|
+| **Overview** | `/w/<slug>` | The company map, the headline numbers and the department cards, with what is still missing to get a number. |
+| **Set up** | `/w/<slug>/setup/clients`, `/setup/people` | Where the capacity figures' inputs are keyed in. *Tiers & clients*: tiers, what a client of each tier gets, counted and named clients, other services and the client health benchmark. *People & roles*: roles (department, kind, line, leadership flag), shared teams, people (hours, salary, tiers served, portfolios). Every field is edited in one place, and each shows where its value came from (interview, calculator, measured, estimate). |
+| **Processes** | `/w/<slug>/processes`, `/p/<id>` | The process maps and the Editor. A step's base values (work split, tier multiplier, who it goes to) are set in the Editor and read on the process page; `/p/<id>?step=<step id>` opens a process with that step selected. |
+| **Capacity** | `/w/<slug>/capacity` | Today's busy share by person and role, DLER, clients and revenue per employee, the bottleneck, and when to hire (the next 12 months). |
+| **Sandbox** | `/w/<slug>/sandbox` | Free play: change anything (a hire, a price, a tier, automation of a step), see the capacity and money result, and keep the changes you like. |
+| **Settings** | `/w/<slug>/settings` | The workspace, simulation limits, churn drivers, client health rules, demand and market. Services, clients, roles and people moved to Set up. |
+
+A new client's Set up pages start empty. Two loaders fill a workspace for a first look; both refuse a workspace that has anything in it:
+
+```sh
+pnpm --filter @transpera-flow/db capacity:starter --workspace <slug>   # the client's start: departments, tiers, roles, example numbers marked "estimate". For a real deployment.
+pnpm --filter @transpera-flow/db capacity:example --workspace <slug>   # the prototype's made-up agency, to build and test with. Never on a client's deployment.
+```
+
+Add `--driver neon-ws` from a cloud container, where Neon's port 5432 is closed.
+
 ## Layout
 
 | Path | What |
@@ -23,9 +46,8 @@ pnpm install
 pnpm dev            # http://localhost:3000
 ```
 
-Without `DATABASE_URL` and `BETTER_AUTH_SECRET` the app runs in **demo mode** (`/demo`), showing the
-Northbeam sample from the seed fixtures. To use a database, copy
-`apps/web/.env.example` to `apps/web/.env.local` and fill it in.
+The app needs a database and sign-in: copy `apps/web/.env.example` to `apps/web/.env.local` and fill it in. (The public `/demo`
+pages are gone; the Northbeam and Larkspur fixtures stay for the engine's golden tests and the database tests.)
 
 ## Stack and database
 
@@ -46,6 +68,7 @@ request sees (`packages/db/src/client.ts`, ADR [0019](docs/adr/0019-neon-and-bet
 
 ```sh
 pnpm --filter @transpera-flow/db migrate [--dry-run]   # apply new migrations to DATABASE_URL (--dry-run lists them)
+bash packages/db/scripts/neon-preview-migrate.sh [--dry-run]   # the same for the Neon PREVIEW database (never production); the connection comes from the Neon API and is never printed
 bash packages/db/scripts/db-sql.sh -c "select 1"    # psql "$DATABASE_URL" -v ON_ERROR_STOP=1 "$@"
 bash packages/db/scripts/db-sql.sh -v app_password="$APP_PASSWORD" -f packages/db/scripts/create-app-login.sql
 pnpm --filter @transpera-flow/db gen:types          # db-types.ts, json-columns.ts, function-types.ts (needs local Postgres)
@@ -68,9 +91,9 @@ pnpm test           # database tests need Postgres, see below
 pnpm --filter @transpera-flow/web build && pnpm --filter @transpera-flow/web e2e
 ```
 
-`e2e` (needs a finished build, served without a database or auth secret, so the app is in demo mode) opens every demo page at
-400, 768 and 1024 px and in dark mode: no sideways scroll, nothing past the edge, phones read only, no light surface in
-dark mode. It runs in CI's `check` job after the build.
+`e2e` (needs a finished build, served without a database or auth secret) opens the pages that need no sign-in (today the privacy
+page; the `/demo` pages are gone) at 400, 768 and 1024 px and in dark mode: no sideways scroll, nothing past the edge, phones read
+only, no light surface in dark mode. It runs in CI's `check` job after the build.
 
 `pnpm test` runs the PRD §6.7 timing tests (tagged `perf`) last, on their own, so
 the other suites don't share the CPU with them. A package's own `pnpm test` leaves
@@ -105,7 +128,7 @@ claude mcp add --transport http transpera-flow https://<host>/api/mcp \
 
 The server is **read-only**: Claude and ChatGPT query and report, and nothing they call writes company data, sources, issues,
 drafts or processes (docs/plans/cut-list.md item 5). Tools: `list_workspaces`, `set_active_workspace` (the only state it
-changes: the token's own active-workspace setting), `get_workspace_summary`, `get_process`, `get_facts`, `get_first_principles`,
+changes: the token's own active-workspace setting), `get_workspace_summary`, `get_process`, `get_facts`,
 `list_issues`, `list_scenarios`, `list_solutions`, `list_sources`, `list_templates`, `run_scenario` (with `scenario`: a saved Sandbox scenario run month by month), `compare_scenarios`, `check_robustness`
 (time-capped; a capped check is flagged `partial`) and `get_bottlenecks` (with the shadow price: extra completions per quarter
 from one more FTE in the top bottleneck role; see `packages/engine/src/shadow-price.ts`). `run_scenario` and

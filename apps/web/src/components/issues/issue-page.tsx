@@ -10,7 +10,8 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { IssueEventRow, IssueRow, ProcessBundle, SourceRow } from "@transpera-flow/db";
+import { changesForIssue, type CapacityChangeRow, type CapacitySetup, type IssueEventRow, type IssueRow, type ProcessBundle, type SourceRow } from "@transpera-flow/db";
+import { IssueChanges } from "@/components/issues/issue-changes";
 import type { StepBadge } from "@/lib/issues/register";
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help, HelpLabel } from "@/components/help";
@@ -68,8 +69,8 @@ export interface IssuePageProps {
   solutions?: SolutionsData;
   /** Member names by user id (the person linked to each membership), so the history says who by name. */
   memberNames?: Readonly<Record<string, string>>;
-  /** The Share button (Agency admins, B3), made by the page that knows what is shared. */
-  share?: ReactNode;
+  /** Set up and the workspace's Sandbox changes, for "Changes anchored to this issue" (absent in the demo). `bundle` is the company model's process; the page's own is used when it is left out. */
+  capacity?: { setup: CapacitySetup; changes: CapacityChangeRow[]; bundle?: ProcessBundle };
 }
 
 export function IssuePage(props: IssuePageProps) {
@@ -160,7 +161,6 @@ export function IssuePage(props: IssuePageProps) {
         </div>
         {canEdit && (
           <div className={`flex flex-wrap items-center gap-2 ${EDIT_ONLY}`} data-edit-entry>
-            {props.share}
             <span className="flex items-center">
               <Button type="button" variant="outline" onClick={() => setEdit(true)}>
                 Edit
@@ -262,6 +262,10 @@ export function IssuePage(props: IssuePageProps) {
               </Card>
             )}
           </section>
+
+          {props.capacity && (
+            <IssueChanges changes={changesForIssue(props.capacity.changes, issue.id)} setup={props.capacity.setup} bundle={props.capacity.bundle ?? bundle} base={base} help={<Help {...ISSUE_PAGE_HELP.changes} />} />
+          )}
 
           <section className="flex flex-col gap-2" data-section="history">
             <div>

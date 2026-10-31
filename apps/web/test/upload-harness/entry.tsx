@@ -91,7 +91,6 @@ function makeUpload(company: HarnessCompany): UploadProcess {
             ? {
                 extras: {
                   sources: (check.file.sources ?? []).map((x) => ({ title: x.title, kind: x.kind, date: x.date ?? null })),
-                  firstPrinciplesParts: check.file.first_principles ? 3 : 0,
                   notes: [],
                   conflicts: check.conflicts ?? [],
                 },

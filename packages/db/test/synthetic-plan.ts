@@ -77,8 +77,7 @@ export function syntheticPlan(L: Limits, options: SyntheticOptions = {}) {
     for (const skip of [2, 3, 4]) {
       for (let i = 0; edges.length < edgesPer && i + skip < stepsPer; i++) edges.push({ id: mk(), from_step_id: stepIds[i], to_step_id: stepIds[i + skip], probability: 0 });
     }
-    const first_principles = { job_who: `Who ${p}`, job_progress: "Progress", job_situation: "Situation", job_done: "Done", statements: [], requirements: [], deletes: [], improvements: [], measures: [], why_problem: "", why_chain: [], root_cause: "" };
-    return { id: pid, parent_process_id: null, name: `Process ${p}`, kind: kindOf(p), entity_name: "item", description: null, archived: p % 20 === 0 && p > 1, layout: {}, steps, edges, first_principles };
+    return { id: pid, parent_process_id: null, name: `Process ${p}`, kind: kindOf(p), entity_name: "item", description: null, archived: p % 20 === 0 && p > 1, layout: {}, steps, edges };
   });
 
   const issues = Array.from({ length: L.issues }, (_, i) => ({
@@ -163,7 +162,7 @@ export function syntheticPlan(L: Limits, options: SyntheticOptions = {}) {
     format: "transpera-workspace-import/1",
     settings: { hours_per_week: 38, currency: "GBP" },
     roles, people, person_roles, person_leave, lead_sources, seasonality, demand_settings: { growth_monthly: 0.01, created_at: when }, churn_drivers,
-    market_conditions, market_schedule, lever_settings: { hidden: [], created_at: when }, analysis_rules: { settings: {}, created_at: when }, clients, sources, processes, sandbox_scenarios, blocks, issues, services,
+    market_conditions, market_schedule, analysis_rules: { settings: {}, created_at: when }, clients, sources, processes, sandbox_scenarios, blocks, issues, services,
     service_servicing, client_groups, client_services, client_assignments, person_skills, person_capacity_factors, source_links,
   };
 }

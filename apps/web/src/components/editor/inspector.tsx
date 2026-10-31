@@ -1,7 +1,7 @@
 "use client";
 
 // The Editor's right column (issue #104): the inspector for the selected step (today's Step tab), what a selected
-// group adds (first step, ungroup, save as a block), the loose ends the editor can see, and a first-principles reminder.
+// group adds (first step, ungroup, save as a block), and the loose ends the editor can see.
 
 import { useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { isGroup, UPKEEP_PURPOSE, workspacePurposes, type EvidenceStamp, type ProcessBundle, type SourceRow, type StepRow } from "@transpera-flow/db";
@@ -14,8 +14,9 @@ import { StepInspector, type DraftInfo } from "@/components/step-inspector";
 import { deleteSelection, hasPurpose, setStepPurposes, stepWarnings } from "@/lib/editor/commands";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { membersOf, setGroupEntry, ungroup } from "@/lib/editor/groups";
-import type { EditorMode } from "@/lib/editor/modes";
 import type { BlockTools } from "./use-blocks";
+import type { TierSetup } from "@/lib/tier-setup";
+import type { ChangesOnSteps } from "@/components/step-base-values";
 
 export function Inspector({
   bundle,
@@ -27,11 +28,16 @@ export function Inspector({
   sources,
   stamp,
   sourcesHref,
-  mode,
   draft,
   blocks,
   company = false,
+  tierSetup,
+  changesOnSteps,
+  settingsHref,
 }: {
+  tierSetup?: TierSetup;
+  changesOnSteps?: ChangesOnSteps;
+  settingsHref?: string;
   bundle: ProcessBundle;
   editor: ProcessEditor;
   selected: Selection;
@@ -41,12 +47,11 @@ export function Inspector({
   sources: readonly SourceRow[];
   stamp: () => EvidenceStamp;
   sourcesHref?: string;
-  mode: EditorMode;
   /** How the draft changes a step against live, as the inspector shows it; null when there is no draft. */
   draft: ((step: StepRow) => DraftInfo) | null;
   /** The block library as the Editor uses it: a selected group can be saved as a block. */
   blocks: BlockTools;
-  /** The company map (B11): no loose ends to chase, no first principles, no blocks. */
+  /** The company map (B11): no loose ends to chase, no blocks. */
   company?: boolean;
 }) {
   const step = selected.steps.length === 1 && !selected.edges.length ? bundle.steps.find((s) => s.id === selected.steps[0]) : undefined;
@@ -72,6 +77,9 @@ export function Inspector({
             stamp={stamp}
             sourcesHref={sourcesHref}
             draft={draft ? draft(step) : null}
+            tierSetup={tierSetup}
+            changesOnSteps={changesOnSteps}
+            settingsHref={settingsHref}
           />
           <LinkedSources
             className="flex flex-col gap-1.5 border-t border-line pt-3"
@@ -120,21 +128,6 @@ export function Inspector({
           </ul>
         </section>
       )}
-
-      {mode !== "block" && !company && (
-        <section aria-label="First principles" className="flex flex-col gap-1.5">
-          <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
-            First principles
-            <Help
-              label="First principles"
-              description="Before you add a step, ask whether it needs to exist. Delete what you can, then simplify, then speed it up, and only then automate it."
-              example="Before automating an approval email, check whether anyone ever says no to it. If not, delete the step."
-            />
-          </h2>
-          <p className="text-xs">Delete first. Simplify next. Speed up after that. Automate last.</p>
-          <p className="text-xs text-muted-foreground">The process&apos;s own first principles will show here.</p>
-        </section>
-      )}
     </>
   );
 }
@@ -158,7 +151,7 @@ function ManyPurposes({ bundle, editor, ids }: { bundle: ProcessBundle; editor: 
           What they achieve
           <Help
             label="What they achieve"
-            description="Sets what the hands-on time of every selected step achieves, in one change you can undo. Automatic uses the first principles and the process."
+            description="Sets what the hands-on time of every selected step achieves, in one change you can undo. Automatic uses the process."
             example="Select the five chasing steps and choose Coordination."
           />
         </span>

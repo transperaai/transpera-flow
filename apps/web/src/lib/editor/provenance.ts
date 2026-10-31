@@ -12,7 +12,7 @@ export type ProvenanceSource = "estimated" | "entered" | "measured";
 
 /** One value's provenance (the §5 shape). A type alias so it stays a plain JSON object. */
 export type Provenance = {
-  source: ProvenanceSource;
+  source: ProvenanceSource | "interview" | "calculator" | "estimate";
   /** When it was set (ISO timestamp). */
   at?: string;
   /** User who set it. */

@@ -7,4 +7,3 @@ export { fileToProcessJson, importProcessFile, previewProcessFile, type ImportFi
 export { PROCESS_TEMPLATES, type ProcessTemplate } from "./templates";
 export { LINK_FETCHES_PER_MINUTE, takeLinkFetch, type LinkFetchTurn } from "./link-limit";
 export { checkLink, fetchPublicPage, isPublicAddress, LinkError, NOT_PUBLIC_ADVICE, PUBLIC_POLICY, type FetchPolicy, type Resolver } from "./fetch-link";
-export { mergeFirstPrinciples, type FpInput, type FpMergeResult, type FpMode } from "./first-principles";

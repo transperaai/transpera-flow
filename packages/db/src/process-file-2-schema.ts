@@ -5,13 +5,14 @@
 import { PROCESS_FILE_BLOCK_TYPE, PROCESS_FILE_SCHEMA } from "@transpera-flow/db/process-file";
 import {
   EVIDENCE_FIELDS,
-  FP_COMPARATORS,
-  FP_KINDS,
-  FP_VERDICTS,
   MAX_FILE_SOURCES,
+  MAX_SPLIT_NOTE,
+  MAX_TIER_MULTIPLIER,
   PROCESS_FILE_FORMAT_2,
   SOURCE_KINDS,
-  SUCCESS_KPI_KEYS,
+  SOURCE_LABELS,
+  SOURCED_VALUES,
+  SPLIT_PARTS,
 } from "@transpera-flow/db/process-file-2";
 
 const citation = { $ref: "#/$defs/citation" } as const;
@@ -23,9 +24,6 @@ const assumed = {
   description: 'Why the value is an assumption: nobody said it, so say where the guess comes from ("Typical for a proposal; Sam confirmed the order of magnitude").',
 } as const;
 const evidence = { ...citations, description: "Quotes that back this, word for word, each from one of the file's sources." } as const;
-/** The two ways to say where something came from. Leave both out when the file just states it. */
-const backing = { evidence, assumed } as const;
-
 const rangeHours = (what: string) =>
   ({ type: "object", required: ["min", "max"], properties: { min: { type: "number", minimum: 0 }, max: { type: "number", minimum: 0 } }, description: `The lowest and highest ${what} in hours. The typical value is the number beside it.` }) as const;
 
@@ -91,6 +89,29 @@ export const PROCESS_FILE_SCHEMA_2 = {
           tool: { type: "string", maxLength: 200, description: "The tool used, e.g. HubSpot." },
           sla_hours: { type: "number", minimum: 0, maximum: 10000, description: "Target hours for one visit to the step." },
           waiting_now: { type: "integer", minimum: 0, description: "Items sitting at the step right now." },
+          split: {
+            type: "object",
+            required: [...SPLIT_PARTS],
+            description:
+              "How the step's hands-on time divides: automatable (gathering and collating: pulling numbers, drafting from data), augmentable (judging: a tool can help but a person decides) and manual (checking, deciding, the client call). Shares from 0 to 1 that add up to 1. Only when the sources say how the work divides.",
+            properties: Object.fromEntries(SPLIT_PARTS.map((p) => [p, { type: "number", minimum: 0, maximum: 1 }])),
+          },
+          split_notes: {
+            type: "object",
+            description: "One line of words on what each part of the split is, e.g. \"Pull spend and budgets, spot under-pacing\".",
+            properties: Object.fromEntries(SPLIT_PARTS.map((p) => [p, { type: "string", maxLength: MAX_SPLIT_NOTE }])),
+          },
+          tier_multiplier: {
+            type: "object",
+            description: "× on the step's time for a client of each tier, by tier name, e.g. {\"T1\": 1.3, \"T2\": 1, \"T3\": 0.8}. A tier not listed is 1. Only when the sources say a tier takes longer or shorter.",
+            additionalProperties: { type: "number", minimum: 0, maximum: MAX_TIER_MULTIPLIER },
+          },
+          to_client_manager: { type: "boolean", description: "True when the step is done by the client's own manager, whatever their role. Keep the role as the fallback." },
+          sources: {
+            type: "object",
+            description: `Where a value came from, by value (${SOURCED_VALUES.join(", ")}): ${SOURCE_LABELS.join(", ")}.`,
+            properties: Object.fromEntries(SOURCED_VALUES.map((v) => [v, { enum: [...SOURCE_LABELS] }])),
+          },
           evidence: {
             type: "object",
             description: `Quotes by value: ${EVIDENCE_FIELDS.join(", ")}. Every number that came from a source should have its quote.`,
@@ -109,55 +130,6 @@ export const PROCESS_FILE_SCHEMA_2 = {
       items: { type: "object", required: ["from", "to"], properties: { ...linkProperties, evidence, assumed } },
     },
     groups: PROCESS_FILE_SCHEMA.properties.groups,
-    first_principles: {
-      type: "object",
-      description: "Fill only what the materials say, with the quote. Leave the rest out.",
-      properties: {
-        job: {
-          type: "object",
-          properties: { who: { type: "string" }, progress: { type: "string" }, situation: { type: "string" }, done: { type: "string" }, ...backing },
-          description: "The job the process does for the person it serves: who, the progress they want, the situation, and what done looks like.",
-        },
-        truths: {
-          type: "array",
-          items: { type: "object", required: ["text"], properties: { text: { type: "string" }, kind: { enum: [...FP_KINDS] }, test: { type: "string", description: "For an assumption: how to test it." }, ...backing } },
-        },
-        requirements: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["text"],
-            properties: {
-              text: { type: "string" },
-              owner: { type: "string", description: "A named person who set it, not a team." },
-              why: { type: "string" },
-              verdict: { enum: [...FP_VERDICTS] },
-              step: { type: "string", description: "The id of the step it creates." },
-              ...backing,
-            },
-          },
-        },
-        measures: {
-          type: "array",
-          items: {
-            type: "object",
-            required: ["text"],
-            properties: {
-              text: { type: "string" },
-              kpi: { enum: [...SUCCESS_KPI_KEYS] },
-              comparator: { enum: [...FP_COMPARATORS] },
-              target: { type: "number", description: "In the unit people read: a win rate of 30% is 30." },
-              horizon: { type: "string" },
-              ...backing,
-            },
-          },
-        },
-        why: {
-          type: "object",
-          properties: { problem: { type: "string" }, chain: { type: "array", items: { type: "string" }, description: "Each answer to 'why?', in order." }, root: { type: "string" }, ...backing },
-        },
-      },
-    },
   },
 } as const;
 
@@ -212,6 +184,9 @@ export const PROCESS_FILE_EXAMPLE_2 = {
       hands_on_hours: 3,
       wait_hours: 24,
       waiting_now: 2,
+      split: { automatable: 0.2, augmentable: 0.5, manual: 0.3 },
+      split_notes: { automatable: "Pull the scope and prices from the template", augmentable: "Draft the approach", manual: "Check it fits what the client asked for" },
+      sources: { work: "interview", split: "estimate" },
       evidence: {
         hands_on_hours: [{ source: "interview-maya", speaker: "Maya Chen", time: "00:06:40", quote: "Three hours to write, but they sit for a day before I review them.", value: 3 }],
         wait_hours: [{ source: "interview-maya", speaker: "Maya Chen", time: "00:06:40", quote: "they sit for a day before I review them", value: 24 }],
@@ -237,24 +212,6 @@ export const PROCESS_FILE_EXAMPLE_2 = {
     { from: "decides", to: "signed", probability: 0.6, label: "Signs", assumed: "No data on win rate yet; 60% is the figure the SOP plans around." },
     { from: "decides", to: "declined", probability: 0.4, label: "Declines" },
   ],
-  first_principles: {
-    job: {
-      who: "A founder who needs marketing help",
-      done: "A signed engagement letter they trust",
-      evidence: [{ source: "sales-sop", time: "page 1", quote: "Every enquiry gets a reply the same day." }],
-    },
-    requirements: [
-      {
-        text: "Every enquiry gets a reply the same day",
-        owner: "Maya Chen",
-        why: "It is how the firm wins on trust.",
-        verdict: "keep",
-        step: "review",
-        evidence: [{ source: "sales-sop", time: "page 1", quote: "Every enquiry gets a reply the same day." }],
-      },
-    ],
-    measures: [{ text: "Win rate of at least 30%", kpi: "winRate", comparator: "atLeast", target: 30, horizon: "6 months", assumed: "Austin's goal for the year; no history to check it against." }],
-  },
 } as const;
 
 /** What "Copy prompt for Claude" copies: a short ask, the rules for evidence, then the schema and an example. */
@@ -276,8 +233,8 @@ export function claudePrompt2(): string {
     '- List every material in "sources" (an id, a title, a kind, a date, who spoke). Leave out "body" for long ones.',
     '- Every number comes from a source or is an assumption. A number from a source carries "evidence": the quote word for word (never reworded), its source id, who said it and where (a time or a page), and "value" when they stated a number. A number nobody stated carries "assumed": one sentence on why. If neither is true, leave the number out. Never invent one.',
     "- Quote a day length exactly as it was said: if someone says a working day, keep that in the quote and convert it in the number (7.5 hours a day unless the sources say otherwise). If two sources give different numbers, give both as separate quotes with their own value: Transpera flags the disagreement for me to settle.",
+    '- Capacity base values are optional. Add "split" (shares of a step\'s hands-on time that are automatable, augmentable and manual: gathering, judging, checking) only when the sources say how the work divides, "tier_multiplier" only when they say a tier takes longer, and "sources" (interview, calculator, measured or estimate) for each such value.',
     "- Useful minimum for a meaningful simulation: a role and hands-on time on every work step, a wait on every wait step, odds on every branch of a decision, and how many leads (or recurring tasks) arrive. Ask me for what's missing rather than guessing; the upload warns about anything still missing.",
-    '- "first_principles" only holds what the materials say, quoted. Leave the rest empty.',
     "- Use role names exactly as I use them. Don't add fields that aren't in the schema.",
     "- Don't put loops in the links unless a decision step decides when they stop. For work sent back to be redone, use rework_rate (and rework_to for where it goes).",
     "",

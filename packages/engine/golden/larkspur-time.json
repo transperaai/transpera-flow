@@ -1,7 +1,7 @@
 {
   "model": "larkspur-time",
   "description": "Larkspur Creative run month by month with a purpose on every step (engine 1.14.0): where working time goes, as first-pass hands-on hours by purpose, rework, client hours, idle and hours available, for the team and each role. Every other number is larkspur's.",
-  "engineVersion": "1.14.0",
+  "engineVersion": "1.17.0",
   "seed": 1,
   "reps": 30,
   "outputs": {

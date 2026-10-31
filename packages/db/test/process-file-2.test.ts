@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020.js";
-import { FP_COMPARATORS, FP_KINDS, FP_VERDICTS, SUCCESS_KPIS } from "@transpera-flow/engine";
 import { describe, expect, it } from "vitest";
 import { checkProcessFile, checkProcessFileText, PROCESS_FILE_EXAMPLE } from "../src/process-file";
 import * as v2 from "../src/process-file-2";
@@ -50,7 +49,6 @@ describe("the published schema and example", () => {
     const f = checkProcessFile(example()).file!;
     expect(f.format).toBe("transpera-process/2");
     expect(f.sources).toHaveLength(3);
-    expect(f.first_principles).toMatchObject({ job: { who: expect.any(String) }, requirements: [{ owner: "Maya Chen", step: "review" }], measures: [{ kpi: "winRate" }] });
     const proposal = f.steps.find((s) => s.id === "proposal")!;
     expect(proposal.evidence?.hands_on_hours?.[0]).toMatchObject({ source: "interview-maya", speaker: "Maya Chen", time: "00:06:40", value: 3 });
     expect(f.links.find((l) => l.to === "call")?.evidence?.[0]?.value).toBe(0.67);
@@ -81,13 +79,6 @@ describe("the published schema and example", () => {
     expect(prompt).toMatch(/Never invent/);
     expect(prompt).toMatch(/at most five/);
     expect(prompt).not.toMatch(/"company"|"proposals"/);
-  });
-
-  it("the lists written out here match the engine's", () => {
-    expect([...v2.FP_KINDS]).toEqual([...FP_KINDS]);
-    expect([...v2.FP_VERDICTS]).toEqual([...FP_VERDICTS]);
-    expect([...v2.FP_COMPARATORS]).toEqual([...FP_COMPARATORS]);
-    expect([...v2.SUCCESS_KPI_KEYS]).toEqual(Object.keys(SUCCESS_KPIS));
   });
 });
 
@@ -363,57 +354,20 @@ describe("company facts and proposals (no longer read)", () => {
   });
 });
 
-describe("first principles", () => {
-  const fp = () => ({
-    job: { who: "A founder", done: "Signed", evidence: [cite()] },
-    truths: [{ text: "Leads go cold after a week", kind: "truth", evidence: [cite()] }, { text: "Clients prefer calls", kind: "assumption", test: "Ask five clients", assumed: "A hunch." }],
-    requirements: [{ text: "Reply the same day", owner: "Sam", why: "Trust", verdict: "keep", step: "b", evidence: [cite()] }],
-    measures: [{ text: "Win rate", kpi: "winRate", comparator: "atLeast", target: 30, horizon: "6 months", assumed: "A goal." }],
-    why: { problem: "Slow", chain: ["Busy", "No time"], root: "No process", evidence: [cite()] },
-  });
-
-  it("keeps every part", () => {
+describe("first principles (no longer read)", () => {
+  it("a file that still has them is read: the section is ignored with a warning, as any unknown field is, and the rest stands", () => {
     const f = base();
-    f.first_principles = fp();
-    const out = checkProcessFile(f);
-    expect(out.errors).toEqual([]);
-    expect(out.warnings).toEqual([]);
-    expect(out.file!.first_principles).toMatchObject({
-      job: { who: "A founder", done: "Signed" },
-      truths: [{ kind: "truth" }, { kind: "assumption", test: "Ask five clients", assumed: "A hunch." }],
-      requirements: [{ owner: "Sam", step: "b", verdict: "keep" }],
-      measures: [{ kpi: "winRate", target: 30 }],
-      why: { chain: ["Busy", "No time"], root: "No process" },
-    });
+    f.first_principles = { job: { who: "A founder" }, truths: [{ text: "Leads go cold" }] };
+    const checked = checkProcessFile(f);
+    expect(checked.errors).toEqual([]);
+    expect(checked.warnings).toEqual(["The file has a field 'first_principles' that Transpera doesn't use. It was ignored."]);
+    expect(checked.file).not.toHaveProperty("first_principles");
+    expect(checked.file!.steps).toHaveLength(3);
   });
 
-  it("names each way it can be wrong", () => {
-    const cases: [(f: ReturnType<typeof fp>) => void, RegExp][] = [
-      [(f) => ((f.requirements[0] as { step: unknown }).step = "zzz"), /names 'zzz' as its step, which isn't a step\./],
-      [(f) => ((f.requirements[0] as { verdict: unknown }).verdict = "maybe"), /verdict should be keep, change, drop or challenge/],
-      [(f) => ((f.truths[0] as { kind: unknown }).kind = "myth"), /kind should be truth or assumption/],
-      [(f) => ((f.measures[0] as { kpi: unknown }).kpi = "happiness"), /kpi should be one of won, winsPerWeek/],
-      [(f) => ((f.measures[0] as { comparator: unknown }).comparator = "equals"), /comparator should be atLeast or atMost/],
-      [(f) => delete (f.truths[0] as { text?: string }).text, /first_principles\.truths item 1 has no text/],
-      [(f) => ((f as unknown as { job: unknown }).job = "x"), /first_principles\.job should be an object/],
-      [(f) => ((f as unknown as { truths: unknown }).truths = {}), /first_principles\.truths should be a list/],
-    ];
-    for (const [change, message] of cases) {
-      const f = base();
-      const p = fp();
-      change(p);
-      f.first_principles = p;
-      expect(errorsOf(f).join("\n"), String(message)).toMatch(message);
-    }
-  });
-
-  it("warns for items with neither evidence nor an assumed reason, so nothing is filled in without a say-so", () => {
-    const f = base();
-    f.first_principles = { truths: [{ text: "Leads go cold" }], job: { who: "A founder" } };
-    expect(warningsOf(f)).toEqual([
-      "first_principles.job has neither evidence nor an assumed reason, so whoever reviews it won't see where it came from.",
-      "first_principles.truths item 1 'Leads go cold' has neither evidence nor an assumed reason, so whoever reviews it won't see where it came from.",
-    ]);
+  it("the schema and the worked example do not have the section", () => {
+    expect(Object.keys(PROCESS_FILE_SCHEMA_2.properties)).not.toContain("first_principles");
+    expect(example()).not.toHaveProperty("first_principles");
   });
 });
 
@@ -426,6 +380,6 @@ describe("text and structure", () => {
 
   it("sectionCounts counts what each section will make", () => {
     const file = checkProcessFile(example()).file!;
-    expect(v2.sectionCounts(file)).toEqual({ sources: 3, firstPrinciples: 3 });
+    expect(v2.sectionCounts(file)).toEqual({ sources: 3 });
   });
 });

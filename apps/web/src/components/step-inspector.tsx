@@ -20,6 +20,8 @@ import {
   type StepRow,
 } from "@transpera-flow/db";
 import { EvidencePanel } from "@/components/evidence";
+import { StepBaseValues, type ChangesOnSteps } from "@/components/step-base-values";
+import type { TierSetup } from "@/lib/tier-setup";
 import { NumberField, SelectField, TextField, type SelectOption } from "@/components/fields";
 import { ProvenanceBadge } from "@/components/provenance-badge";
 import {
@@ -64,15 +66,13 @@ function PurposeField({ bundle, step, save }: { bundle: ProcessBundle; step: Ste
       ? resolved?.source === "deleted_category"
         ? "Its category was deleted: Automatic is used. Pick another."
         : null
-      : resolved?.source === "first_principles"
-        ? "Listed to delete in First principles"
-        : resolved?.source === "process_kind"
-          ? bundle.process.kind === "servicing"
-            ? "Client work process"
-            : resolved.key === "client_job"
-              ? "After the sale in a sales pipeline"
-              : "Sales pipeline process, up to and including the sale decision"
-          : null;
+      : resolved?.source === "process_kind"
+        ? bundle.process.kind === "servicing"
+          ? "Client work process"
+          : resolved.key === "client_job"
+            ? "After the sale in a sales pipeline"
+            : "Sales pipeline process, up to and including the sale decision"
+        : null;
   return (
     <SelectField
       label="What it achieves"
@@ -104,10 +104,20 @@ export function StepInspector({
   sources = [],
   stamp,
   sourcesHref,
+  tierSetup,
+  changesOnSteps,
+  settingsHref,
+  readOnly = false,
 }: {
   bundle: ProcessBundle;
   step: StepRow;
   editor: ProcessEditor;
+  /** The workspace's tiers and what each tier's service gets, for the base values (capacity P4). */
+  tierSetup?: TierSetup;
+  changesOnSteps?: ChangesOnSteps;
+  settingsHref?: string;
+  /** Show the base values as they are without letting anyone change them. */
+  readOnly?: boolean;
   /** Put focus in the first field (asked for from the step's menu). */
   autoFocus?: boolean;
   onFocused?: () => void;
@@ -259,6 +269,16 @@ export function StepInspector({
           </div>
           <Duration phase="work" title="Hands-on time" step={step} via={via} field={field} />
           <Duration phase="wait" title="Wait" step={step} via={via} field={field} />
+          <StepBaseValues
+            bundle={bundle}
+            step={step}
+            editor={editor}
+            stamp={stamp ?? (() => ({ at: new Date().toISOString() }))}
+            tierSetup={tierSetup}
+            changesOnSteps={changesOnSteps}
+            readOnly={readOnly}
+            settingsHref={settingsHref}
+          />
           <div className={sectionClass}>
             <div className="grid grid-cols-2 gap-2">
               <NumberField

@@ -62,7 +62,6 @@ const SHARED: [string, string][] = [
   ["shell/skeletons", "IssuePageSkeleton"],
   ["shell/skeletons", "SolutionPageSkeleton"],
   ["shell/skeletons", "HistorySkeleton"],
-  ["shell/skeletons", "FirstPrinciplesSkeleton"],
   ["shell/empty-state", "EmptyState"],
   ["map/map-placeholder", "MapSkeleton"],
   ["map/map-placeholder", "FirstRunStatus"],

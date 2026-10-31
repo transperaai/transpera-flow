@@ -7,6 +7,23 @@ new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
+**31 Oct 2026: the capacity app as it now is** (work packages P0 to P9, `docs/plans/capacity/`). The screens are Overview, Set up
+(Tiers & clients, People & roles), Processes, Capacity and the free-play Sandbox; Settings keeps the workspace, simulation limits,
+churn drivers, client health, demand and market. See the README's "The app" for what each shows. How to stand it up for a client:
+`docs/new-client.md` (section 12 has the starter and example loaders, section 13 the Preview migration script). P9 (follow-ups):
+servicing links can follow the tier ("From the tier": a deliverable, x n, per m); roles have a leadership flag (Set up, People & roles,
+under More) that leaves them out of clients and revenue per employee; hiring advice stretches its 2-month base by the market's time to
+hire; each Set up field is edited in one place (the old full Clients, People and Roles lists in Settings are gone); `/p/<id>?step=<id>`
+opens a step, and viewers read its base values; the `lever_settings` table, the guest sign-in plumbing and the Overview health cards
+are gone. Still to sweep: the `mode: "demo"` paths of the shared screens (listed in the P9 report).
+
+**31 Oct 2026 (P0, `docs/plans/capacity/p0-cuts-brief.md`): cut, for the client app.** First principles (pages, card, MCP `get_first_principles`,
+engine and db modules, `first_principles` table), every share link (`/s/<token>`, the Share links page, the buttons, `share_links`
+and its functions), the older process-level lever system (`scenario-panel`, `lever-panel`, `compare-view`, `robustness-check`,
+`process-view`, `bottleneck-panel`, Settings, Levers) and the `/demo` pages are gone. Sources is off the menu but opens by its
+address. Goal seek and "What matters most" are off the Sandbox screen (`SANDBOX_ANALYSIS_SHOWN` in `lib/sandbox/analysis-shown.ts`).
+Migration `20270118000000_capacity_cuts.sql` drops the tables and functions. The notes below that mention these features are history.
+
 **31 Oct 2026: the direction changed again. Read `docs/plans/client-refocus-handover.md` first.** The app is being
 refocused, not rebuilt, on the client's real question: are they at capacity, and how many more clients per employee
 would automation or augmentation allow? The next chat writes the requirements from the client's interview transcripts.
@@ -344,7 +361,6 @@ deterministic. Production has only one account (the agency admin), so smoke test
 - An editor changes a client health rule; the owner's change log names them (B1 3/3).
 - Upload a logo (B5); restore a large workspace on a preview (B21: the 40 s function timeout is verified only on plain
   PostgREST), with per-person times on, and check they come back (#228).
-- Create a share link and a play link and open them signed out (B3, B4).
 - Switch per-person times on (Settings → Simulation), set one, check the change log names the step (C6, #230).
 - Import a step log with a Person column and apply the proposed per-person times (#227).
 - Open the app on a phone: pages read, nothing edits; check dark mode.
@@ -370,7 +386,7 @@ deterministic. Production has only one account (the agency admin), so smoke test
 ## Open items for Austin's QA
 
 - The lost-revenue definition, and the starter scenarios (see the decision above).
-- Larkspur (the second sample workspace) is not seeded in production; it's only at `/demo/larkspur`.
+- Larkspur (the second sample workspace) is not seeded in production; it is a fixture for the engine's golden tests (the `/demo/larkspur` page is gone).
 - The /privacy wording added with #29 (narration sends model numbers to Anthropic).
 - A live narration check on production (the API key is set).
 - The two-browser Realtime test: presence plus live changes.
@@ -424,7 +440,7 @@ simulation, waits for Austin's end-of-build review.
 
 - **Next.js 16:** `proxy.ts` replaces middleware, and request APIs are async. Read `apps/web/AGENTS.md` and the
   bundled docs before writing Next code.
-- **Demo mode:** without Supabase env vars, the app redirects to `/demo`, which runs Northbeam from the fixtures.
+- **No demo mode:** the `/demo` pages are gone (P0); without the database and auth settings the home and sign-in pages answer 404.
 - **Engine determinism:** never use `Math.log`/`Math.exp` in the engine; use `det-math.ts`. Any change that moves
   golden-model numbers needs an `ENGINE_VERSION` bump and `golden:approve` (see `docs/engine-versioning.md`).
 - **Fixtures are the source of truth for sample data:** after changing them or a migration, run

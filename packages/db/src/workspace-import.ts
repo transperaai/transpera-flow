@@ -71,12 +71,22 @@ const cols = <T extends keyof DB>(_table: T, ...c: (keyof Selectable<DB[T]> & st
  * The columns the restore accepts for each plan section (everything else is dropped). `workspace_id`, `created_by`,
  * `updated_at` and every `*_by` are never sent. `created_at` is carried where loaders order by it, and not on steps or edges
  * (the database tells an import's own edges from later edits by `created_at < now()`). Extras the plan adds beyond table
- * columns: `processes` also has archived, layout, steps, edges and first_principles; `issues` also has links, owner_ids and
+ * columns: `processes` also has archived, layout, steps, edges; `issues` also has links, owner_ids and
  * source_ids; `market_schedule` may carry `condition_preset` in place of `condition_id`.
  */
 export const IMPORT_COLUMNS = {
-  roles: cols("roles", "id", "name", "color", "default_cost_rate", "headcount", "ongoing_hours_per_client_week", "active", "provenance", "created_at"),
-  people: cols("people", "id", "name", "active", "capacity_hours_week", "cost_rate", "end_date", "fte", "notes", "start_date", "provenance", "created_at"),
+  departments: cols("departments", "id", "name", "sort", "created_at"),
+  tiers: cols("tiers", "id", "key", "name", "sort", "both_count", "provenance", "created_at"),
+  roles: cols(
+    "roles", "id", "name", "color", "default_cost_rate", "headcount", "ongoing_hours_per_client_week", "active", "provenance", "created_at",
+    "department_id", "kind", "line", "rule_of_thumb", "unit", "leadership",
+  ),
+  people: cols(
+    "people", "id", "name", "active", "capacity_hours_week", "cost_rate", "end_date", "fte", "notes", "start_date", "provenance", "created_at",
+    "reserved_share", "salary_monthly", "label", "ramp",
+  ),
+  person_tiers: cols("person_tiers", "person_id", "tier_id", "created_at"),
+  person_portfolio: cols("person_portfolio", "person_id", "service_id", "client_count", "provenance", "created_at"),
   person_roles: cols("person_roles", "person_id", "role_id", "created_at"),
   person_leave: cols("person_leave", "id", "person_id", "start_date", "end_date", "note", "created_at"),
   lead_sources: cols("lead_sources", "id", "name", "conversion_to_qualified", "volume_week", "provenance", "created_at"),
@@ -85,23 +95,22 @@ export const IMPORT_COLUMNS = {
   churn_drivers: cols("churn_drivers", "id", "name", "description", "driver", "enabled", "example", "month", "value", "weight", "chance", "effect", "effect_months", "provenance", "created_at"),
   market_conditions: cols("market_conditions", "id", "name", "churn", "conv", "cycle", "hire", "leads", "pay", "price", "created_at"),
   market_schedule: cols("market_schedule", "id", "condition_id", "from_month", "to_month", "created_at"),
-  lever_settings: cols("lever_settings", "hidden", "created_at"),
   analysis_rules: cols("analysis_rules", "settings", "created_at"),
-  clients: cols("clients", "id", "name", "active", "health", "mrr", "notes", "start_date", "provenance", "created_at"),
+  clients: cols(
+    "clients", "id", "name", "active", "health", "mrr", "notes", "start_date", "provenance", "created_at",
+    "channels", "hand_holding_hours", "adhoc_chance", "adhoc_requests", "adhoc_hours", "meetings", "words", "links", "tech_hours", "builds", "creative_sets", "step_factor",
+  ),
   sources: cols("sources", "id", "kind", "title", "body", "recorded_at", "speakers", "created_at"),
   processes: cols("processes", "id", "parent_process_id", "name", "kind", "entity_name", "description"),
   steps: cols(
     "steps", "id", "assumption", "child_process_id", "conflict", "cost_override", "current_wip", "dropoff_benchmark", "expected_wait_hours", "entry_step_id",
     "kind", "lost_per_day_waiting", "name", "notes", "outcome", "parent_step_id", "person_id", "provenance", "purpose", "replaced_by", "rework_rate", "rework_to_step_id",
-    "role_id", "sla_hours", "target_cycle_hours", "tool", "wait_dist", "wait_hours", "wait_params", "work_dist", "work_hours", "work_params", "x", "y",
+    "role_id", "sla_hours", "split", "split_notes", "target_cycle_hours", "tier_multiplier", "to_client_manager", "tool", "wait_dist", "wait_hours", "wait_params", "work_dist", "work_hours", "work_params", "x", "y",
   ),
   edges: cols("edges", "id", "condition_tag", "from_step_id", "label", "probability", "to_step_id"),
-  first_principles: cols(
-    "first_principles", "deletes", "improvements", "job_done", "job_progress", "job_situation", "job_who", "measures", "requirements", "root_cause", "statements",
-    "why_chain", "why_problem",
-  ),
   sandbox_scenarios: cols("sandbox_scenarios", "id", "parent_id", "name", "description", "changes", "horizon_months", "start_date", "created_at"),
   blocks: cols("blocks", "id", "name", "description", "type", "steps", "created_at"),
+  capacity_changes: cols("capacity_changes", "id", "name", "kind", "effects", "adoption", "ramp_months", "tiers", "cost_monthly", "issue_id", "source", "provenance", "created_at"),
   issues: cols(
     "issues", "id", "client_id", "created_at", "detected_key", "evidence", "evidence_metrics", "evidence_sources", "owner_person_id", "person_id", "process_id",
     "resolution", "resolution_note", "resolved_how", "role_id", "scenario_id", "severity", "source", "status", "step_id", "target_goal", "target_measure",
@@ -110,6 +119,7 @@ export const IMPORT_COLUMNS = {
   services: cols(
     "services", "id", "name", "active", "churn_health_sensitivity", "churn_monthly_base", "entry_process_id", "fallback_ongoing_load", "margin", "mix_share",
     "path_tags", "price", "price_high", "price_low", "pricing_model", "tenure_months", "provenance", "created_at",
+    "department_id", "tier_id", "words", "links", "tech_hours", "meetings", "builds", "creative_sets", "channels", "adhoc_chance", "adhoc_requests", "price_rise_churn",
   ),
   service_servicing: cols("service_servicing", "id", "process_id", "service_id", "recurrence", "sla_hours", "provenance", "created_at"),
   client_groups: cols("client_groups", "id", "service_id", "client_count", "churn_monthly", "fee", "starting_health", "stay_months", "provenance", "created_at"),
@@ -141,6 +151,8 @@ const SETTING_KEYS: Record<keyof WorkspaceSettings, true> = {
   capacity_factor_enabled: true,
   overhead_monthly: true,
   purposes: true,
+  ramp_default: true,
+  dler_includes_leadership: true,
 };
 export const WORKSPACE_SETTING_KEYS = Object.keys(SETTING_KEYS) as readonly (keyof WorkspaceSettings)[];
 
@@ -183,13 +195,14 @@ export interface PlanProcess {
   layout: unknown;
   steps: Row[];
   edges: Row[];
-  first_principles: Row | null;
 }
 
 /** The restore function's `p_plan`: placeholders only (`00000000-0000-4000-8000-` and a rank). */
 export interface ImportPlan {
   format: typeof PLAN_FORMAT;
   settings: Record<string, unknown> | null;
+  departments: Row[];
+  tiers: Row[];
   roles: Row[];
   people: Row[];
   person_roles: Row[];
@@ -201,7 +214,6 @@ export interface ImportPlan {
   market_conditions: Row[];
   /** Rows carry `condition_id` (a custom condition) or `condition_preset` (the key of a preset the new workspace already has). */
   market_schedule: Row[];
-  lever_settings: Row | null;
   analysis_rules: Row | null;
   clients: Row[];
   sources: Row[];
@@ -209,6 +221,7 @@ export interface ImportPlan {
   sandbox_scenarios: Row[];
   blocks: Row[];
   issues: Row[];
+  capacity_changes: Row[];
   services: Row[];
   service_servicing: Row[];
   client_groups: Row[];
@@ -216,6 +229,8 @@ export interface ImportPlan {
   client_assignments: Row[];
   person_skills: Row[];
   person_capacity_factors: Row[];
+  person_tiers: Row[];
+  person_portfolio: Row[];
   source_links: Row[];
 }
 
@@ -245,7 +260,7 @@ const SECTION_ARRAYS = ["processes", "solutions", "solution_issues", "blocks", "
 /** Sections a backup made before Suggestions were removed (28 Oct 2026) may still hold: read, counted, never restored. */
 const LEGACY_SECTIONS = ["suggestions", "suggestion_proposals"] as const;
 /** Tables whose rows have an `id` column (company-model tables without one are keyed otherwise). */
-const NO_ID_TABLES = new Set(["person_roles", "person_skills", "person_capacity_factors", "client_services", "client_assignments", "demand_settings", "lever_settings", "analysis_rules", "solution_issues"]);
+const NO_ID_TABLES = new Set(["person_roles", "person_skills", "person_capacity_factors", "person_tiers", "person_portfolio", "client_services", "client_assignments", "demand_settings", "analysis_rules", "solution_issues"]);
 
 const things = (key: string) => key.replace(/^company_model\./, "").replace(/_/g, " ");
 
@@ -328,7 +343,6 @@ function shapeProblem(v: Row): string | null {
       if (!Array.isArray(ver.steps) || !Array.isArray(ver.edges)) return "a version has no list of steps or edges";
       const s = checkTable("the steps of a version", ver.steps, true) ?? checkTable("the edges of a version", ver.edges, true);
       if (s) return s;
-      if (ver.first_principles != null && !isObj(ver.first_principles)) return "a version's first principles aren't an object";
     }
   }
   // Loops in the nesting: one walk with colours (0 new, 1 on the current path, 2 done), so a deep chain costs one pass.
@@ -349,7 +363,10 @@ function shapeProblem(v: Row): string | null {
   return null;
 }
 
-/** Every row that names a workspace, in the whole bundle. */
+/**
+ * Every row that names a workspace, in the whole bundle. (A bundle made before first principles were cut may carry a `first_principles`
+ * row on a version: it is never read, so it is neither checked nor restored, and an older bundle is not refused for having one.)
+ */
 function* allRows(b: WorkspaceBundle): Generator<Row> {
   for (const rows of Object.values(b.company_model)) yield* rowsOf(rows);
   for (const p of b.processes) {
@@ -358,7 +375,6 @@ function* allRows(b: WorkspaceBundle): Generator<Row> {
       yield v;
       yield* rowsOf(v.steps);
       yield* rowsOf(v.edges);
-      if (isObj(v.first_principles)) yield v.first_principles;
     }
   }
   for (const k of ["solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) yield* b[k];
@@ -524,7 +540,12 @@ const R = (col: string, to: string, mode: Mode): Ref => ({ col, to, mode });
 export const IMPORT_REFS: Record<string, Ref[]> = {
   person_roles: [R("person_id", "people", "require"), R("role_id", "roles", "require")],
   person_leave: [R("person_id", "people", "require")],
-  services: [R("entry_process_id", "processes", "null")],
+  roles: [R("department_id", "departments", "null")],
+  // A service whose department or tier isn't restored becomes a plain service (the pair is cleared together, below).
+  services: [R("entry_process_id", "processes", "null"), R("department_id", "departments", "null"), R("tier_id", "tiers", "null")],
+  capacity_changes: [R("issue_id", "issues", "null")],
+  person_tiers: [R("person_id", "people", "require"), R("tier_id", "tiers", "require")],
+  person_portfolio: [R("person_id", "people", "require"), R("service_id", "services", "require")],
   service_servicing: [R("service_id", "services", "require"), R("process_id", "processes", "require")],
   client_groups: [R("service_id", "services", "require")],
   client_services: [R("client_id", "clients", "require"), R("service_id", "services", "require")],
@@ -546,7 +567,7 @@ const LABELS: Record<string, string> = {
   churn_drivers: "churn drivers", market_conditions: "market conditions", market_schedule: "market schedule rows", clients: "clients", sources: "sources",
   sandbox_scenarios: "scenarios", blocks: "blocks", issues: "issues", services: "services", service_servicing: "servicing rules", client_groups: "client groups",
   client_services: "client services", client_assignments: "client assignments", person_skills: "skills", person_capacity_factors: "per-person times", source_links: "source links",
-  steps: "steps", edges: "edges", processes: "processes",
+  steps: "steps", edges: "edges", processes: "processes", departments: "departments", tiers: "tiers", person_tiers: "tiers served", person_portfolio: "portfolio counts", capacity_changes: "capacity changes",
 };
 
 /** The rows with each reference checked against what is restored: a row whose required reference is missing is dropped; an optional one is cleared. */
@@ -575,6 +596,9 @@ function resolveRefs(section: string, rows: Row[], sets: Record<string, Set<stri
   }
   return out;
 }
+
+/** A service is a tier of a department only with both set (the database checks the pair): if one reference was cleared, clear the other. */
+const pairOrNone = (r: Row): Row => (r.department_id == null || r.tier_id == null ? { ...r, department_id: null, tier_id: null } : r);
 
 const byCreated = (a: Row, b: Row) => text(a.created_at).localeCompare(text(b.created_at)) || text(a.id).localeCompare(text(b.id));
 
@@ -645,6 +669,8 @@ export function planWorkspaceImport(
     roles: new Set(company("roles").map((r) => lc(r.id))),
     people: new Set(company("people").map((r) => lc(r.id))),
     services: new Set(company("services").map((r) => lc(r.id))),
+    departments: new Set(company("departments").map((r) => lc(r.id))),
+    tiers: new Set(company("tiers").map((r) => lc(r.id))),
     clients: new Set(company("clients").map((r) => lc(r.id))),
     sources: new Set(bundle.sources.map((r) => lc(r.id))),
     sandbox_scenarios: new Set([...rowsOf(bundle.sandbox_scenarios), ...rowsOf(bundle.scenarios)].map((r) => lc(r.id))),
@@ -682,7 +708,6 @@ export function planWorkspaceImport(
       layout: version.layout ?? {},
       steps,
       edges: edges.map((e) => pick(e, IMPORT_COLUMNS.edges)),
-      first_principles: isObj(version.first_principles) ? pick(version.first_principles, IMPORT_COLUMNS.first_principles) : null,
     };
   });
   const processes = parentsFirst(processRows, "parent_process_id") as unknown as PlanProcess[];
@@ -692,7 +717,7 @@ export function planWorkspaceImport(
   // The company model.
   const flat = (section: keyof typeof IMPORT_COLUMNS, rows: Row[], refs: Ref[] = []): Row[] =>
     resolveRefs(section, rows, sets, refs, note).map((r) => pick(r, IMPORT_COLUMNS[section]));
-  const one = (section: "demand_settings" | "lever_settings" | "analysis_rules"): Row | null => {
+  const one = (section: "demand_settings" | "analysis_rules"): Row | null => {
     const r = company(section)[0];
     return r ? pick(r, IMPORT_COLUMNS[section]) : null;
   };
@@ -756,7 +781,9 @@ export function planWorkspaceImport(
   const plan: ImportPlan = {
     format: PLAN_FORMAT,
     settings: null,
-    roles: flat("roles", company("roles")),
+    departments: flat("departments", company("departments")).sort(byCreated),
+    tiers: flat("tiers", company("tiers")).sort(byCreated),
+    roles: flat("roles", company("roles"), IMPORT_REFS.roles),
     people: flat("people", company("people")),
     person_roles: flat("person_roles", company("person_roles"), IMPORT_REFS.person_roles),
     person_leave: flat("person_leave", company("person_leave"), IMPORT_REFS.person_leave),
@@ -766,7 +793,6 @@ export function planWorkspaceImport(
     churn_drivers: flat("churn_drivers", company("churn_drivers")).sort(byCreated),
     market_conditions: customConditions.map((c) => pick(c, IMPORT_COLUMNS.market_conditions)).sort(byCreated),
     market_schedule: schedule,
-    lever_settings: one("lever_settings"),
     analysis_rules: one("analysis_rules"),
     clients: flat("clients", company("clients")),
     sources,
@@ -774,13 +800,16 @@ export function planWorkspaceImport(
     sandbox_scenarios: sandbox.rows.map((r) => pick(r, IMPORT_COLUMNS.sandbox_scenarios)),
     blocks: flat("blocks", bundle.blocks).sort(byCreated),
     issues: issueRows,
-    services: flat("services", company("services"), IMPORT_REFS.services),
+    capacity_changes: flat("capacity_changes", company("capacity_changes"), IMPORT_REFS.capacity_changes).sort(byCreated),
+    services: flat("services", company("services"), IMPORT_REFS.services).map(pairOrNone),
     service_servicing: flat("service_servicing", company("service_servicing"), IMPORT_REFS.service_servicing),
     client_groups: flat("client_groups", company("client_groups"), IMPORT_REFS.client_groups).sort(byCreated),
     client_services: flat("client_services", company("client_services"), IMPORT_REFS.client_services),
     client_assignments: flat("client_assignments", company("client_assignments"), IMPORT_REFS.client_assignments),
     person_skills: personSkills,
     person_capacity_factors: capacityFactors,
+    person_tiers: flat("person_tiers", company("person_tiers"), IMPORT_REFS.person_tiers),
+    person_portfolio: flat("person_portfolio", company("person_portfolio"), IMPORT_REFS.person_portfolio),
     source_links: sourceLinks,
   };
 
@@ -824,6 +853,10 @@ export function planWorkspaceImport(
     ...(["roles", "people", "services", "clients", "client_groups", "lead_sources", "churn_drivers", "market_conditions", "blocks", "issues", "sources"] as const).map((k) => line(k, plan[k].length)),
     line("scenarios", plan.sandbox_scenarios.length),
     line("person_capacity_factors", plan.person_capacity_factors.length),
+    line("departments", plan.departments.length),
+    line("tiers", plan.tiers.length),
+    line("capacity_changes", plan.capacity_changes.length),
+    line("person_portfolio", plan.person_portfolio.length),
   ].filter((l) => l.count > 0);
   const leftOut = [
     line("older_versions", olderVersions, "older versions of processes"),

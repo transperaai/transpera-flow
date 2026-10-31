@@ -13,6 +13,7 @@ const isScalar = (v: unknown): v is Scalar => v === null || ["string", "number",
 export const ROLE_FIELDS = {
   name: (v) => typeof v === "string" && v.trim().length >= 1 && v.trim().length <= 200,
   active: (v) => typeof v === "boolean",
+  leadership: (v) => typeof v === "boolean",
 } as const satisfies Record<string, Check>;
 
 export type RoleField = keyof typeof ROLE_FIELDS;

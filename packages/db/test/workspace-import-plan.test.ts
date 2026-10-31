@@ -63,7 +63,6 @@ function makeBundle(): { bundle: WorkspaceBundle; ids: Ids } {
       market_conditions: [{ id: ids.presetCond, workspace_id: w, name: "Boom", preset: "boom", churn: 1 }, { id: ids.cond, workspace_id: w, name: "Mine", preset: null, churn: 1, created_at: "2026-01-01" }],
       market_schedule: [{ id: id(), workspace_id: w, condition_id: ids.presetCond, from_month: 1, to_month: 2 }, { id: id(), workspace_id: w, condition_id: ids.cond, from_month: 3, to_month: 4 }],
       churn_drivers: [],
-      lever_settings: [{ workspace_id: w, hidden: [], created_at: "2026-01-01" }],
       analysis_rules: [],
     },
     processes,
@@ -543,7 +542,8 @@ describe("planWorkspaceImport", () => {
     const beta = plan.processes.find((p) => p.name === "Beta")!;
     expect(beta.archived).toBe(true);
     expect(beta.steps.map((s) => s.name)).toEqual(["b1"]);
-    expect(beta.first_principles).toEqual({ job_done: "x" });
+    // A version that still carries first principles (an older backup) is accepted, and the row is not read.
+    expect(beta).not.toHaveProperty("first_principles");
     expect(summary.leftOut.find((l) => l.key === "unpublished_drafts")!.count).toBe(1);
     expect(summary.leftOut.find((l) => l.key === "older_versions")!.count).toBe(1);
     expect(placeholderOf.has(ids.pCompany!)).toBe(true);
@@ -842,9 +842,9 @@ describe("per-person times in a backup (#228): restored", () => {
     expect(plan.person_capacity_factors).toEqual([]);
     const { person_capacity_factors: _gone, ...rest } = plan;
     expect(Object.keys(rest)).toEqual([
-      "format", "settings", "roles", "people", "person_roles", "person_leave", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
-      "lever_settings", "analysis_rules", "clients", "sources", "processes", "sandbox_scenarios", "blocks", "issues", "services", "service_servicing", "client_groups", "client_services",
-      "client_assignments", "person_skills", "source_links",
+      "format", "settings", "departments", "tiers", "roles", "people", "person_roles", "person_leave", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
+      "analysis_rules", "clients", "sources", "processes", "sandbox_scenarios", "blocks", "issues", "capacity_changes", "services", "service_servicing", "client_groups", "client_services",
+      "client_assignments", "person_skills", "person_tiers", "person_portfolio", "source_links",
     ]);
     // The new key sits right after person_skills.
     const keys = Object.keys(plan);

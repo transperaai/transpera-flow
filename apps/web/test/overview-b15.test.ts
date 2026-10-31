@@ -4,7 +4,6 @@ import { describe, expect, it } from "vitest";
 import { northbeamBundle, northbeamIssues, partOf, toEngineModel, type IssueRow, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
 import { RATING_LABELS, ratingOfStored, ratingRank, simulate, type DetectedIssue, type EngineModel, type Rating, type SimulationResult } from "@transpera-flow/engine";
 import { ProcessGroups, countsLine } from "@/components/overview/process-groups";
-import { FlowEfficiencyCard, ImprovementCard, OpenIssuesCard, ProcessHealthCard } from "@/components/overview/health-cards";
 import { BeforeAfterChart, IssuesDonut, OpenedResolvedChart, TimeSplitChart } from "@/components/overview/trend-charts";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { ratingOfRank } from "@/lib/map/rating";
@@ -17,8 +16,8 @@ import { rerate } from "@/lib/rules/edit";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import { demoBundle } from "@/lib/sources/demo";
 
-// The Overview's B15 redesign (issue #173): the aggregations behind the health strip, the findings by process and the
-// trends, and each card and chart rendered with data and empty. The browser behaviour (play, horizon, expand) is in
+// The Overview's B15 redesign (issue #173): the aggregations behind the health numbers, the findings by process and the
+// trends, and each chart rendered with data and empty (the health strip's cards are gone: P6 replaced the strip). The browser behaviour (play, horizon, expand) is in
 // overview-browser.test.ts.
 
 const live = demoBundle();
@@ -364,46 +363,6 @@ describe("playing the company map", () => {
 });
 
 const html = (el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(el);
-
-describe("the health cards", () => {
-  it("Process health: how many need attention, and the counts by rating", () => {
-    const out = html(createElement(ProcessHealthCard, { health: processHealth(["risk", "bad", null]) }));
-    expect(out).toContain("2 of 3");
-    expect(out).toContain("need attention");
-    expect(out).toContain("Operational risk");
-    expect(out).toContain("Not rated");
-    expect(html(createElement(ProcessHealthCard, { health: processHealth([]) }))).toContain("No process is published yet.");
-    expect(html(createElement(ProcessHealthCard, { health: null }))).toContain('aria-busy="true"');
-  });
-  it("Open issues: the total by rating, and how many were resolved this month", () => {
-    const out = html(createElement(OpenIssuesCard, { issues: { total: 3, byRating: countByRating(["bad", "bad", "risk"]), resolvedThisMonth: 1 } }));
-    expect(out).toContain(">3<");
-    expect(out).toContain("1 issue resolved this month");
-    const none = html(createElement(OpenIssuesCard, { issues: { total: 0, byRating: countByRating([]), resolvedThisMonth: 0 } }));
-    expect(none).toContain("Nothing open.");
-  });
-  it("Flow efficiency: working against waiting over the horizon, and its empty states", () => {
-    const out = html(createElement(FlowEfficiencyCard, { share: 0.18, span: "3 months" }));
-    expect(out).toContain("18% working, 82% waiting over the next 3 months");
-    expect(html(createElement(FlowEfficiencyCard, { share: null, span: "3 months" }))).toContain("nothing to split");
-    expect(html(createElement(FlowEfficiencyCard, { share: undefined, span: "3 months", error: true }))).toContain("simulated");
-  });
-  it("Improvement delivered: hours saved and days cut, or how it fills in", () => {
-    const out = html(createElement(ImprovementCard, { delivered: { count: 2, superseded: 1, hoursSaved: 25, daysCut: { days: 2, processName: "Lead to live" } }, status: "done" }));
-    expect(out).toContain("25 h");
-    expect(out).toContain("a month saved");
-    expect(out).toContain("2 days cut from Lead to live&#x27;s time to complete");
-    expect(out).toContain("By 2 implemented solutions");
-    expect(out).toContain("1 earlier solution built from the same version isn&#x27;t counted again.");
-    const empty = html(createElement(ImprovementCard, { delivered: null, status: "done" }));
-    expect(empty).toContain("Nothing implemented yet.");
-    expect(empty).toContain("When an issue is resolved by a solution");
-    // Implemented, but none could be measured: say so, not "Nothing implemented yet".
-    const unmeasured = html(createElement(ImprovementCard, { delivered: null, status: "done", unmeasured: 2 }));
-    expect(unmeasured).not.toContain("Nothing implemented yet.");
-    expect(unmeasured).toContain("Couldn&#x27;t measure 2 implemented solutions");
-  });
-});
 
 describe("the trend charts", () => {
   it("the issues donut: an arc per rating with a legend, bars by process, and a table", () => {

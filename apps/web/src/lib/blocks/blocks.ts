@@ -11,13 +11,23 @@ import { deleteSteps, newId } from "@/lib/editor/commands";
 import { edgeRow, groupRow } from "@/lib/editor/groups";
 import { applyEdit, type Edit, type Op, type RowChange } from "@/lib/editor/ops";
 
+/** The key in a group's `provenance` that names the library block it was made from (capacity P8). */
+export const BLOCK_MARK = "block";
+
+/** The library block a group was made from, or null. */
+export function blockOfStep(step: { provenance?: unknown }): string | null {
+  const p = step.provenance;
+  const v = p && typeof p === "object" ? (p as Record<string, unknown>)[BLOCK_MARK] : null;
+  return typeof v === "string" ? v : null;
+}
+
 /** How much of a block's name the group keeps. */
 const NAME_MAX = 200;
 
 /** The columns of a step a block keeps; anything else in a stored document is ignored. */
 const STEP_KEYS = [
   "id", "name", "kind", "outcome", "role_id", "person_id", "work_hours", "work_dist", "work_params", "wait_hours", "wait_dist", "wait_params",
-  "rework_rate", "rework_to_step_id", "tool", "purpose", "notes", "sla_hours", "expected_wait_hours", "lost_per_day_waiting", "dropoff_benchmark",
+  "rework_rate", "rework_to_step_id", "tool", "purpose", "split", "split_notes", "tier_multiplier", "to_client_manager", "notes", "sla_hours", "expected_wait_hours", "lost_per_day_waiting", "dropoff_benchmark",
   "target_cycle_hours", "current_wip", "x", "y", "parent_step_id", "entry_step_id", "child_process_id", "assumption", "conflict", "provenance",
 ] as const;
 const EDGE_KEYS = ["id", "from_step_id", "to_step_id", "probability", "condition_tag", "label"] as const;
@@ -149,6 +159,7 @@ function materialize(
   parent: string | null,
   x: number,
   y: number,
+  blockId: string | null = null,
 ): { group: StepRow; steps: StepRow[]; edges: EdgeRow[] } {
   const { revision } = bundle;
   const owner = { revision_id: revision.id, workspace_id: revision.workspace_id, process_id: revision.process_id };
@@ -157,7 +168,13 @@ function materialize(
   const people = new Set(bundle.people.map((p) => p.id));
   const base = groupRow(bundle, x, y, parent);
   const entry = block.entry_step_id ?? entryOf(block.steps, block.edges);
-  const group: StepRow = { ...base, name: name.trim().slice(0, NAME_MAX) || "Block", entry_step_id: entry ? (ids.get(entry) ?? null) : null };
+  const group: StepRow = {
+    ...base,
+    name: name.trim().slice(0, NAME_MAX) || "Block",
+    entry_step_id: entry ? (ids.get(entry) ?? null) : null,
+    // The insertion record (P8): which library block this group came from. A solution's map carries it, so the library can count the solutions using a block.
+    ...(blockId ? { provenance: { ...(base.provenance ?? {}), [BLOCK_MARK]: blockId } as unknown as StepRow["provenance"] } : {}),
+  };
   const steps = parentsFirst(block.steps).map(
     (s): StepRow => ({
       ...pickKeys<BlockStep>(s, STEP_KEYS),
@@ -174,6 +191,11 @@ function materialize(
       child_process_id: null,
       // A purpose from another workspace's list that this one lacks reads as Automatic; an older block has none.
       purpose: typeof s.purpose === "string" && STEP_PURPOSE_KEY.test(s.purpose) ? s.purpose : null,
+      // Base values (capacity P4) travel with the block; an older block has none.
+      split: s.split ? { ...s.split } : null,
+      split_notes: s.split_notes ? { ...s.split_notes } : null,
+      tier_multiplier: s.tier_multiplier ? { ...s.tier_multiplier } : null,
+      to_client_manager: s.to_client_manager === true,
       // A role or person deleted since the block was saved would fail the foreign key.
       role_id: s.role_id && roles.has(s.role_id) ? s.role_id : null,
       person_id: s.person_id && people.has(s.person_id) ? s.person_id : null,
@@ -208,7 +230,7 @@ const stepOf = (bundle: ProcessBundle, id: string | null) => (id ? bundle.steps.
  * step. A step with branches, or an end step, gets the block placed beside it, unconnected. With nothing selected it goes
  * at the end of the top level. The new steps are new rows, so they show as added.
  */
-export function insertBlock(bundle: ProcessBundle, selectedId: string | null, block: BlockBundle, name: string): { edit: Edit; id: string; note?: string } | null {
+export function insertBlock(bundle: ProcessBundle, selectedId: string | null, block: BlockBundle, name: string, blockId: string | null = null): { edit: Edit; id: string; note?: string } | null {
   if (blockProblem(block)) return null;
   const sel = stepOf(bundle, selectedId);
   const parent = sel ? (sel.parent_step_id ?? null) : null;
@@ -218,7 +240,7 @@ export function insertBlock(bundle: ProcessBundle, selectedId: string | null, bl
   const x0 = sel ? Number(sel.x) + (branches ? 0 : 240) : siblings.reduce((m, s) => Math.max(m, Number(s.x) + 240), 0);
   const y0 = sel ? Number(sel.y) + (branches ? 120 : 0) : siblings.length ? Number(siblings[siblings.length - 1]!.y) : 0;
   // Build it once to measure the box it needs, then put the group where that box fits.
-  const probe = materialize(bundle, block, name, parent, 0, 0);
+  const probe = materialize(bundle, block, name, parent, 0, 0, blockId);
   const at = freeSpotFor(bundle, parent, x0, y0, openGroupSize([probe.group, ...probe.steps], probe.group.id, "all"));
   const made = { ...probe, group: { ...probe.group, x: at.x, y: at.y } };
 
@@ -252,11 +274,11 @@ export function replaceProblem(bundle: ProcessBundle, selectedId: string | null)
  * leads out of the block, and a group whose first step it was now starts at the block. The selection, and the steps inside it if it is a group, are removed (undo brings
  * them back). The block's steps are new rows, so they show as added.
  */
-export function replaceWithBlock(bundle: ProcessBundle, selectedId: string, block: BlockBundle, name: string): { edit: Edit; id: string; note?: string } | null {
+export function replaceWithBlock(bundle: ProcessBundle, selectedId: string, block: BlockBundle, name: string, blockId: string | null = null): { edit: Edit; id: string; note?: string } | null {
   if (blockProblem(block) || replaceProblem(bundle, selectedId)) return null;
   const sel = stepOf(bundle, selectedId)!;
   const parent = sel.parent_step_id ?? null;
-  const made = materialize(bundle, block, name, parent, Number(sel.x), Number(sel.y));
+  const made = materialize(bundle, block, name, parent, Number(sel.x), Number(sel.y), blockId);
 
   // The selection and everything inside it: a group's connections usually start or end at a step inside it.
   const byId = new Map(bundle.steps.map((s) => [s.id, s]));

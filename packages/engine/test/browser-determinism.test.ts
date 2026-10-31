@@ -2,7 +2,7 @@ import { build } from "esbuild";
 import { chromium, type Browser } from "playwright-core";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { larkspurModel, northbeamModel, northbeamWithClients, northbeamWithMoney, northbeamWithServices, northbeamWithServicing, simulate, type SimulateOptions } from "../src";
+import { capacityModel, larkspurModel, northbeamModel, northbeamWithClients, northbeamWithMoney, northbeamWithServices, northbeamWithServicing, simulate, type SimulateOptions } from "../src";
 import { largeModel } from "./fixtures/large-model";
 
 // The same model and seed must give byte-identical results in Node and in a
@@ -93,6 +93,12 @@ describe("determinism across hosts", () => {
     const model = northbeamWithMoney();
     expect(await runInWorker(model, 30, 1, { monthly: true })).toBe(JSON.stringify(simulate(model, 30, 1, { monthly: true })));
   }, 60_000);
+
+  it("The client capacity app's example agency (the capacity golden model), month by month with where each person's time goes: Node and a browser worker agree byte for byte", async () => {
+    const model = capacityModel();
+    const options = { monthly: true, personTime: true };
+    expect(await runInWorker(model, 30, 1, options)).toBe(JSON.stringify(simulate(model, 30, 1, options)));
+  }, 120_000);
 
   it("large synthetic model: Node and a browser worker agree byte for byte", async () => {
     const model = largeModel();

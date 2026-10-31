@@ -74,6 +74,12 @@ interface StepFieldsJson {
   notes?: string | null;
   sla_hours?: number | null;
   current_wip?: number | null;
+  /** Base values for capacity (P4); see StepFields. */
+  split?: StepFields["split"];
+  split_notes?: StepFields["split_notes"];
+  tier_multiplier?: StepFields["tier_multiplier"];
+  to_client_manager?: boolean;
+  sources?: StepFields["sources"];
   x?: number;
   y?: number;
   evidence?: CitationJson[];
@@ -193,7 +199,7 @@ const hasCitations = (steps: readonly { evidence?: unknown[] }[]) => steps.some(
 function toFields(args: StepFieldsJson & { name?: string }, l: Lookups, where: string): StepFields {
   const f: StepFields = {};
   if (args.name !== undefined) f.name = args.name;
-  for (const key of ["kind", "outcome", "work_hours", "work_dist", "wait_hours", "wait_dist", "rework_rate", "tool", "notes", "sla_hours", "current_wip", "x", "y"] as const) {
+  for (const key of ["kind", "outcome", "work_hours", "work_dist", "wait_hours", "wait_dist", "rework_rate", "tool", "notes", "sla_hours", "current_wip", "split", "split_notes", "tier_multiplier", "to_client_manager", "sources", "x", "y"] as const) {
     if (args[key] !== undefined) (f as Record<string, unknown>)[key] = args[key];
   }
   const params = (p: ParamsJson | undefined) => p && (Object.fromEntries(Object.entries(p).filter(([, v]) => v !== undefined)) as StepFields["work_params"]);
@@ -322,7 +328,7 @@ export interface ImportOutcome {
   draft: { revision_id: string; number: number; opened_now: boolean };
   checklist: ReturnType<typeof checklist>;
   warnings: string[];
-  /** A /2 upload: what was written beside the process (sources, first principles). */
+  /** A /2 upload: what was written beside the process (sources). */
   bundle?: ImportBundleResult;
   text: string;
 }
@@ -366,7 +372,7 @@ interface ImportScope {
 /**
  * What a `transpera-process/2` upload carries beyond the process itself (issue #167). Everything is written by one call to
  * `import_process_bundle`, so it is all there afterwards or none of it is. Ids are chosen by the caller so rows that point at
- * each other (a step's evidence cites a source, first principles point at the process) can be built before anything is written.
+ * each other (a step's evidence cites a source) can be built before anything is written.
  */
 export interface ImportBundle {
   /** The new process's id. */
@@ -375,14 +381,13 @@ export interface ImportBundle {
   importSource: string;
   /** Sources to add. Each `id` is a placeholder the evidence cites; the database replaces it with the id it makes. Each is linked to the process. */
   sources: { id: string; kind: string; title: string; speakers: string[]; recorded_at: string | null; body: string | null }[];
-  /** The rest of the extras, as `import_process_bundle` takes them: `first_principles` (its columns). */
-  extras: { first_principles?: Json };
+  /** The rest of the extras, as `import_process_bundle` takes them (none today). */
+  extras: Record<string, never>;
 }
 
 /** What `import_process_bundle` wrote beyond the process. */
 export interface ImportBundleResult {
   sources: number;
-  first_principles: boolean;
 }
 
 /**
@@ -518,7 +523,7 @@ export async function importNewProcess(ctx: ImportContext, workspaceId: string, 
   if (bundle) {
     const out = data as unknown as { processes: typeof made } & ImportBundleResult;
     made = out.processes;
-    scope.bundleResult = { sources: out.sources, first_principles: out.first_principles };
+    scope.bundleResult = { sources: out.sources };
   }
   prepared.settle(new Map(made.map((r) => [r.process_id, r])));
   return prepared.write();

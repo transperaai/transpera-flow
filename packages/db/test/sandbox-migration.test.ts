@@ -334,7 +334,7 @@ describe("what is left", () => {
 
 const LISTS = ["roles", "people", "person_roles", "person_leave", "lead_sources", "seasonality", "churn_drivers", "market_conditions", "market_schedule", "clients", "sources", "processes", "sandbox_scenarios", "blocks", "issues", "services", "service_servicing", "client_groups", "client_services", "client_assignments", "person_skills", "person_capacity_factors", "source_links"];
 async function restoreInto(w: string, scenarios: unknown[]) {
-  const plan = { format: "transpera-workspace-import/1", settings: null, demand_settings: null, lever_settings: null, analysis_rules: null, ...Object.fromEntries(LISTS.map((k) => [k, []])), sandbox_scenarios: scenarios };
+  const plan = { format: "transpera-workspace-import/1", settings: null, demand_settings: null, analysis_rules: null, ...Object.fromEntries(LISTS.map((k) => [k, []])), sandbox_scenarios: scenarios };
   await db.client.query("begin");
   try {
     await db.client.query("set local role authenticated");

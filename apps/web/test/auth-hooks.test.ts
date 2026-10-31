@@ -84,17 +84,8 @@ describe("Better Auth hooks", () => {
     expect((await db.client.query("select count(*) from memberships where user_id = $1", [user.id])).rows[0].count).toBe(before);
   });
 
-  it("lets an outsider on a live restricted share link in as a guest, with no memberships", async () => {
-    const [ws] = (await db.client.query("select id from workspaces limit 1")).rows.map((r) => r.id as string);
-    await db.client.query(
-      `insert into share_links (workspace_id, token_hash, kind, show_people, allowed_emails, expires_at, snapshot, engine_version)
-       values ($1, repeat('a', 64), 'overview', true, '{guest@outside.org}', now() + interval '1 day', $2::jsonb, '1')`,
-      [ws, JSON.stringify({ v: 1, kind: "overview", toggles: { people: true, financials: false } })],
-    );
-    const user = await newUser("guest@outside.org");
-    const session = await adapter().createSession(user.id);
-    expect(session.userId).toBe(user.id);
-    expect((await db.client.query("select 1 from memberships where user_id = $1", [user.id])).rowCount).toBe(0);
+  it("lets no outsider in as a guest any more: an address on no access list is refused", async () => {
+    await expect(newUser("guest@outside.org")).rejects.toMatchObject({ body: { code: "not_on_access_list" } });
   });
 
   it("trusts the preview alias and this deployment's own URL, and no look-alike Vercel project", () => {

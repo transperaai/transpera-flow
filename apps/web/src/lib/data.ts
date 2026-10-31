@@ -5,6 +5,7 @@ import {
   DEMAND_SETTINGS_COLUMNS,
   LEAD_SOURCE_COLUMNS,
   listProcesses,
+  loadCapacitySetup,
   loadBlocks,
   loadCompanyProcessId,
   loadSetupCounts,
@@ -13,7 +14,6 @@ import {
   loadSolutions,
   loadChurnDrivers,
   loadClientGroups,
-  loadDeleteCandidates,
   loadTeam,
   loadClients,
   loadMarket,
@@ -75,6 +75,7 @@ import type { HeadlineNumbers } from "./overview/headline";
 import { roleUsage, type RoleUsage } from "./roles";
 import { rpc, rpcRows } from "@transpera-flow/db/client";
 import { getDb } from "./auth/session";
+import { tierSetupFrom, type TierSetup } from "./tier-setup";
 import { columnList } from "./columns";
 
 /** Workspaces the signed-in user can see (RLS decides). */
@@ -168,16 +169,12 @@ export async function loadSourceLinking(workspaceId: string): Promise<{ links: S
   return { links, targets };
 }
 
-/**
- * The bundle with the steps its processes' first principles list to delete (`deleteCandidates`, sandbox phase 4), for the revisions it
- * shows: what a step's Automatic purpose ("Could be removed") needs. One read; callers that show or run purposes use it.
- */
-export async function withDeleteCandidates<B extends ProcessBundle>(bundle: B): Promise<B> {
-  const parts = [{ processId: bundle.process.id, revisionId: bundle.revision.id }, ...(bundle.otherProcesses ?? []).map((p) => ({ processId: p.process.id, revisionId: p.revision.id }))];
-  return { ...bundle, deleteCandidates: await loadDeleteCandidates(await getDb(), parts) };
+/** The categories stored on the workspace as they are (null while it has none and uses the defaults), the base a save checks against. */
+/** The workspace's tier keys (in sort order) and what each tier's service gets (capacity P4), from P1's Set up data. */
+export async function loadTierSetup(workspaceId: string): Promise<TierSetup> {
+  return tierSetupFrom(await loadCapacitySetup(await getDb(), workspaceId).catch(() => null));
 }
 
-/** The categories stored on the workspace as they are (null while it has none and uses the defaults), the base a save checks against. */
 export async function loadStoredPurposes(workspaceId: string): Promise<PurposeCategory[] | null> {
   const row = await (await getDb()).selectFrom("workspaces").select(["settings"]).where("id", "=", workspaceId).executeTakeFirst();
   return (row?.settings as WorkspaceSettings | undefined)?.purposes ?? null;
@@ -415,7 +412,7 @@ export interface WorkspaceSettingsData {
   canEdit: boolean;
   /** agency_admin or owner: may change workspace settings. */
   canManage: boolean;
-  roles: Pick<RoleRow, "id" | "name" | "color" | "active">[];
+  roles: Pick<RoleRow, "id" | "name" | "color" | "active" | "leadership">[];
   /** How many steps (any revision), people, clients and services name each role, by role id. */
   roleUsage: Record<string, RoleUsage>;
   /** Steps someone does (working steps with a role) in the workspace's live processes, for skills. */
@@ -490,7 +487,7 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
   const [canEdit, canManage, roles, steps, people, personRoles, personSkills, personLeave, services, tags, roleSteps, team, factorRows] = await Promise.all([
     rpc(db, "can_edit_workspace", { ws }),
     rpc(db, "can_manage_workspace", { ws }),
-    db.selectFrom("roles").select(["id", "name", "color", "active"]).where("workspace_id", "=", ws).orderBy("name").execute(),
+    db.selectFrom("roles").select(["id", "name", "color", "active", "leadership"]).where("workspace_id", "=", ws).orderBy("name").execute(),
     revisions.length
       ? db
           .selectFrom("steps")

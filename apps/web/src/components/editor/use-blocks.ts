@@ -81,7 +81,7 @@ export function useBlockTools({
     let id: string | null = null;
     let said: string | undefined;
     const ran = editor.run((b) => {
-      const made = insertBlock(b, only, readBlock(block.steps), block.name);
+      const made = insertBlock(b, only, readBlock(block.steps), block.name, block.id);
       id = made?.id ?? null;
       said = made?.note;
       return made?.edit ?? null;
@@ -97,7 +97,7 @@ export function useBlockTools({
     let id: string | null = null;
     let said: string | undefined;
     const ran = editor.run((b) => {
-      const made = replaceWithBlock(b, only, readBlock(block.steps), block.name);
+      const made = replaceWithBlock(b, only, readBlock(block.steps), block.name, block.id);
       id = made?.id ?? null;
       said = made?.note;
       return made?.edit ?? null;

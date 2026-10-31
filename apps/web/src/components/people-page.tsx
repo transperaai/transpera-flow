@@ -11,7 +11,7 @@ import { ABSENCE_MAX_PEOPLE, RATING_LABELS, clientHealthSummary, resolveMoney, t
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
-import { useEngineModel } from "@/components/process-view";
+import { useEngineModel } from "@/lib/sim/use-engine-model";
 import { EmptyState } from "@/components/shell/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -71,12 +71,12 @@ function BigNumber({ value, unit }: { value: string; unit?: string }) {
 
 export function PeoplePage({
   bundle,
-  settingsHref,
+  setupHref,
   forecast,
 }: {
   bundle: ProcessBundle;
   /** Where the benchmark is set; null on the demo, which has no Settings. */
-  settingsHref: string | null;
+  setupHref: string | null;
   /**
    * Who gets too busy, and when (issue #35): the Forecast page it links to, the analysis rules (omitted: the demo's,
    * edited in this tab), and on the demo its sample plan and fixed start date.
@@ -159,11 +159,11 @@ export function PeoplePage({
       {picker}
       <div className="grid gap-4 md:grid-cols-3" aria-busy={sim.status === "running"}>
         <ClientHealthCard health={health} />
-        <BenchmarkCard score={health.score} benchmark={benchmark} settingsHref={settingsHref} />
+        <BenchmarkCard score={health.score} benchmark={benchmark} setupHref={setupHref} />
         <TeamCard team={team} />
       </div>
       {health.groups.length > 0 && <ClientGroupsTable health={health} />}
-      <HowBusy busy={sim.status === "running"} rows={rows} viewer={viewer} notInRun={notInRun} detailOf={detailOf} bundle={bundle} settingsHref={settingsHref} />
+      <HowBusy busy={sim.status === "running"} rows={rows} viewer={viewer} notInRun={notInRun} detailOf={detailOf} bundle={bundle} setupHref={setupHref} />
       <IfSomeoneIsAway away={away} viewer={viewer} runWeeks={baseModel?.horizonWeeks ?? 0} weeksAway={absenceWeeks} />
       {forecast && <ForecastPanel bundle={forecast.bundle ?? bundle} forecastHref={forecast.href} startDate={forecast.startDate} />}
     </>
@@ -184,7 +184,7 @@ function ClientHealthCard({ health }: { health: ClientHealthSummary }) {
           Client health · company
         </Eyebrow>
         {health.score === null ? (
-          <p className="text-sm text-muted-foreground">No clients are counted yet. Count them per service in Settings, under Services and client groups.</p>
+          <p className="text-sm text-muted-foreground">No clients are counted yet. Count them per tier in Set up, under Tiers & clients.</p>
         ) : (
           <>
             <BigNumber value={String(Math.round(health.score))} unit="/ 100" />
@@ -208,7 +208,7 @@ function ClientHealthCard({ health }: { health: ClientHealthSummary }) {
   );
 }
 
-function BenchmarkCard({ score, benchmark, settingsHref }: { score: number | null; benchmark: Benchmark | null; settingsHref: string | null }) {
+function BenchmarkCard({ score, benchmark, setupHref }: { score: number | null; benchmark: Benchmark | null; setupHref: string | null }) {
   return (
     <Card>
       <CardContent className="flex flex-col gap-2">
@@ -232,10 +232,10 @@ function BenchmarkCard({ score, benchmark, settingsHref }: { score: number | nul
         ) : (
           <p className="text-sm text-muted-foreground">
             No benchmark entered.{" "}
-            {settingsHref ? (
+            {setupHref ? (
               <>
                 Add one in{" "}
-                <Link href={`${settingsHref}#client-groups-heading`} className="underline underline-offset-2">
+                <Link href={`${setupHref}/clients#clients-heading`} className="underline underline-offset-2">
                   Settings
                 </Link>{" "}
                 to see how your client health compares.
@@ -333,7 +333,7 @@ function HowBusy({
   notInRun,
   detailOf,
   bundle,
-  settingsHref,
+  setupHref,
 }: {
   /** A newer run is going: the numbers shown are the previous run's. */
   busy: boolean;
@@ -342,7 +342,7 @@ function HowBusy({
   notInRun: boolean;
   detailOf: (id: string) => PersonDetail | null;
   bundle: ProcessBundle;
-  settingsHref: string | null;
+  setupHref: string | null;
 }) {
   const onlyOwn = !viewer.seesEveryone;
   // One person's detail is open at a time.
@@ -365,7 +365,7 @@ function HowBusy({
       )}
       {onlyOwn && rows.length === 0 && notInRun && (
         <p className="px-4 pb-4 text-sm text-muted-foreground" data-not-in-run>
-          You aren&apos;t in this simulation: your record is inactive or starts later. Agency admins can change that in Settings → People.
+          You aren&apos;t in this simulation: your record is inactive or starts later. Agency admins can change that in Set up → People & roles.
         </p>
       )}
       {onlyOwn && rows.length === 0 && !notInRun && (
@@ -377,17 +377,17 @@ function HowBusy({
         <div className="px-4 pb-4">
           <EmptyState
             action={
-              settingsHref ? (
-                <Link href={`${settingsHref}#people-heading`} className="font-medium text-accent hover:underline">
-                  Open Settings, People →
+              setupHref ? (
+                <Link href={`${setupHref}/people#people-heading`} className="font-medium text-accent hover:underline">
+                  Open Set up, People & roles →
                 </Link>
               ) : undefined
             }
           >
             {/* Only someone who sees everyone gets here, so saying whether people exist reveals nothing. */}
             {bundle.people.length > 0
-              ? "Nobody is in this simulation: every person is inactive or starts later. Change that in Settings, People."
-              : "No people yet. Add them in Settings, People."}
+              ? "Nobody is in this simulation: every person is inactive or starts later. Change that in Set up, People & roles."
+              : "No people yet. Add them in Set up, People & roles."}
           </EmptyState>
         </div>
       )}
@@ -459,7 +459,7 @@ function HowBusy({
                     {open && (
                       <TableRow data-person-detail id={`person-detail-${p.id}`} className="bg-panel-2/40 hover:bg-panel-2/40">
                         <TableCell colSpan={9} className="whitespace-normal">
-                          <PersonDetailBlock person={p} detail={detail} bundle={bundle} editHref={viewer.seesEveryone && settingsHref ? `${settingsHref}#people-heading` : null} />
+                          <PersonDetailBlock person={p} detail={detail} bundle={bundle} editHref={viewer.seesEveryone && setupHref ? `${setupHref}#people-heading` : null} />
                         </TableCell>
                       </TableRow>
                     )}

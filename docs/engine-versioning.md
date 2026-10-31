@@ -1,7 +1,7 @@
 # Engine versioning and golden models
 
 The engine's numbers are the product, so none may move unnoticed (docs/PRD.md §6.9 layer 3, decision D16;
-issue #22; ADR 0009). Ten golden models are run at a fixed seed on every push, their key outputs are compared
+issue #22; ADR 0009). Eleven golden models are run at a fixed seed on every push, their key outputs are compared
 exactly with approved baselines, and every change that moves one needs a new baseline and a new `ENGINE_VERSION`,
 which every run records.
 
@@ -17,9 +17,10 @@ which every run records.
 | `northbeam-chances` | `northbeamWithChances()` | `northbeam-drivers` with `late` measured as events (effect 0.6, 3 months), `handoff` entered (chance 0.05, effect 1, 2 months), the custom driver at chance 0.1 effect 0.5, a PPC fee range 3,000 to 6,000 and a `fee` channel of PPC +8% from month 4 with the price driver on, run month by month (engine 1.12.0). |
 | `northbeam-channels` | `northbeamWithChannels()` | `northbeam-money` with monthly channels from month 3: leads x1.2, conversion x0.9, hands-on time x0.7 on the heaviest step, a wait of 0 to 8 h, rework 0 to 0.1, role cost x1.1, overheads x1.25, one person's capacity x0.9 and base churn x1.3 (engine 1.12.0). |
 | `larkspur-time` | `larkspurWithPurposes()` | Larkspur with a purpose on every step (a mapping by step id: `LARKSPUR_PURPOSES`), run month by month for six months of its week-26 horizon: where working time goes (engine 1.14.0), first-pass hands-on hours by purpose, rework, client hours, idle and hours available, for the team and each role. Every other number is `larkspur`'s. |
+| `capacity` | `capacityModel()` | The client capacity app's example agency (engine 1.17.0; re-baselined from 1.16.0 for least-busy placement counting the full step time, and from 1.15.0 for step splits, tier multipliers and changes, below): six tier services in two departments with driver-based servicing steps, 26 people with team time, portfolios and tiers, 13 named clients (with overrides and hand-holding) beside 145 counted ones, won clients placed on the least busy person who serves the tier. Run month by month with where each person's time goes. |
 | `larkspur` | `larkspurModel()` | Larkspur Creative, the "second, messier sample agency" (§6.9): overloaded designers, a copywriter past her week on overtime, an 18-client named roster whose health drives churn, and the corners Northbeam leaves alone (below). |
 
-Each runs with the app's defaults, 30 replications at seed 1 (`northbeam-money`, `northbeam-chances`, `northbeam-channels` and `larkspur-time` also ask for the monthly series). The outputs kept (`keyOutputs` in
+Each runs with the app's defaults, 30 replications at seed 1 (`northbeam-money`, `northbeam-chances`, `northbeam-channels`, `larkspur-time` and `capacity` also ask for the monthly series; `capacity` also asks for `personTime`). The outputs kept (`keyOutputs` in
 `packages/engine/test/golden.ts`) are throughput (won, lost, done, wins a week), cycle time (mean, P50, P90), new
 MRR, billed, LTV added and lost revenue, labour, overtime hours and cost, clients at risk and churned, servicing
 touchpoints, the bottleneck role, step and person, utilisation per role (total with its 10–90% range, and its
@@ -157,6 +158,43 @@ factor (the chance it had at the last tick, with health as it ended). Not change
 today's price and tenure, and the pooled billing estimate still uses the won-month churn factor. Pressures are
 measured on the clients that are still active, so a driver that makes clients leave also thins the sample it is
 measured on; the share is of expected churn each week, which keeps that small.
+
+## Capacity inputs (engine 1.15.0, capacity P2)
+
+Added 31 Oct 2026 (`docs/plans/capacity/p2-engine-inputs-brief.md`, ADR 0022). **No existing simulated number moved.** Every field below is optional and unset it changes nothing; the approved diff of the ten existing golden models is `engineVersion` and nothing else. `capacity` is new. Approved with `golden:approve --bump "capacity inputs (P2): new golden; no existing number moved"`. The step work split, tier multipliers and changes (`EngineStep.split`, `tierMultiplier`, `EngineModel.changes`) were P3's, read since 1.16.0 (next section).
+
+- **Driver recurrences** (`{ perMonth, driver, per }`): each client's tasks a month are `tasksPerMonth` of its effective deliverables (its `overrides`, else its tier's). A non-ad-hoc driver runs the `{ every: "month", times }` path with the per-client rate, on its `servicing:<client>:<service>:<process>` stream (only driver links use it, so no existing stream moves). `"adhoc"`: each client-month draws Bernoulli(`chance`), then Poisson(`requests`) tasks placed uniformly in the month, from the new stream `adhoc:<client>:<service>:<process>`. Poisson counts use exponential gaps (`log` from det-math only). A month on the clock is 4.33 weeks, as `{ every: "month" }` and `tasksPerWeek` read it (ADR 0022 note 3); `clientTasksPerWeek` resolves a driver for the loads and `servicingTasksPerWeek`.
+- **`clientMix: "groups-add"`** adds the counted clients to `clients` in `withClientGroups`; keys stay unique (a taken number is skipped). `"groups-replace"` and omitted are the old code. Copies of an expanded model (`carryExpanded`) are not expanded twice.
+- **Portfolios and managers.** `withClientGroups` deals a service's counted clients to people with a `portfolio[service]` in people order (assigned in each of their roles the service's steps use, and `manager` set); the rest stay unassigned. A `toClientManager` step queues for the client's manager whatever their role (the step joins their list for those clients only, never the shared queue), else the client's assignee in the role, else the pool; leave and end dates fall back to the pool. The manager's hours are theirs in `PersonResult`, and their own (first) role's in the role results; they count in `PersonResult.clients` and the client's team.
+- **Per-client overrides.** `adhocHours` scales the drawn times of the client's ad-hoc process so the steps' mean total is `adhocHours`; `stepFactor` multiplies the client's drawn times (number, or per step); both after the draw. `handHoldingHours[role]` is ongoing load (`hours / 4.33` a week) on the client's assignee in the role, its manager for a role a `toClientManager` step uses, on top of the servicing tasks (`clientHandHolding`, also in `rosterLoads`).
+- **Team time and ramp** (`availability.ts`). Capacity in a month is capacity x `availableShare`. It is the existing capacity channel (channels.ts): the shares are injected as that channel for the people who have them, multiplied into the model's own capacity channel, on the model's channel months, the run's calendar months, or 52/12-week months. The hours for work, the utilisation denominator and the roles' hours follow. Paid hours (`labourCost`) don't fall. `availabilityFloor` is untouched.
+- **`placeNewClients: "least-busy"`** picks, per needed role, the person with the lowest busy share who serves the service's `tier` (`EnginePerson.tiers`; omitted serves all). Busy share here is planned: the servicing hours a week their current clients are expected to bring plus their ongoing load, over their hours now (realised hours lag the assignment, so a run of wins would all land on one person). A role nobody serving the tier holds stays shared. The won client's manager is the person placed in the role of its `toClientManager` steps.
+- **`SimulateOptions.personTime`** returns `SimulationResult.personTime`: mean hands-on hours a month per person per step and mean clients per person per service. Read off the run; not asked for, nothing is allocated.
+- **`capacityProblems(model)`** is `checkCapacityInputs`. `simulate` doesn't call it or throw on problems.
+
+**Timing** (`capacity`, 30 replications, month by month with `personTime`, one container with a load average of about 8 on 4 cores): about 4.4 to 6 s. 158 clients at about 25 tasks each a month through 28 steps for 52 weeks is about 20 times the seeded Northbeam's work (250 ms for 13 weeks), so the 1.5 s target of the 40-step model doesn't apply; the golden test runs it with the absence test and the issue ratings in about 6 s.
+
+## Step splits, tier multipliers and changes (engine 1.16.0, capacity P3)
+
+Added 31 Oct 2026 (`docs/plans/capacity/p3-engine-changes-brief.md`, ADR 0022 "Engine 1.16.0"). **Only the `capacity` golden moved**: the approved diff of the ten other golden models is `engineVersion` and nothing else (checked by running the golden test unapproved first, when `capacity` alone failed). `capacity` moved because `capacityModel()` has splits, tier multipliers and the prototype's 13 changes, which the run now reads. Approved with `golden:approve --bump "step splits, tier multipliers and changes (P3)"`. A model with none of `EngineStep.split`, `EngineStep.tierMultiplier` and `EngineModel.changes` takes exactly the old path (one null test per draw).
+
+- **What is read.** A step's drawn hands-on time is multiplied, after the draw (no stream moves), by `stepTimeFactor(step, tier, changes, month, clientStepFactor)`: the tier multiplier, the split with the changes in force that month, and the client's own `stepFactor` (applied once, inside the factor). A client's `adhocHours` replaces the step's base time before the split (the residual of a change is not scaled by it). The tier is the tier of the task's service; pipeline work and work with no client uses no tier and no client factor (its split and changes still act, a change limited by `tiers` does not).
+- **Months.** A change is read by the month the hands-on time starts in: the model's channel months when it has channels (team time and ramp make them), else the calendar months of a monthly run, else 52/12-week months from the start. The warm-up is month 1 (as for team time).
+- **Cache.** The factor and the parts are cached per step, tier and month (and per work scale for the rare client with its own ad-hoc hours): `capacity-time.ts`.
+- **Repairs.** `simulate` doesn't throw on what `checkCapacityInputs` names. A split that is not three shares of 0 to 1 adding to 1 (within `SPLIT_TOLERANCE`) is no split: the step is all manual. A change's adoption is held to 0 to 1; a start month below 1 acts from month 1, one that is not a number never starts; a bad ramp is no ramp; `remove` is held to 0 to 1; a bad residual is 0; a speed-up below 1 or not a number is 1. A negative tier multiplier counts as 0 and one that is not a number as 1. An effect on an unknown step acts on nothing.
+- **`PersonTime`** (asked for with `personTime: true`) gains, when a step has a split: `partHours` (hands-on hours a month per person and step by automatable / augmentable / manual, `actual` after the changes and `before` for the same draws without any change), `freed` (`total`, `byChange`, `byPerson`: the hours the changes freed a month; the hours freed are `before − actual`), and with `monthly: true` `monthly` (everyone together, hours in each month: parts after and before, and the hours freed per change). Not asked for, nothing is allocated.
+- **Ordering rule for the hours freed.** Changes act in the order of the model's `changes` list (and a change's effects in their order); a change is credited with the time its effects take off a part given the changes before it have already acted. The savings add up to the base time less the time taken, so when two changes act on one part the earlier one is credited first. The pure version is `stepPartsDetail`.
+- **Not in scope.** Changes act on hands-on time only. Rework, waits and routing stay as they are; "also changes rework or waiting" is later.
+
+**Timing** (`capacity`, 30 replications, month by month with `personTime`, same container, load average about 8): 4.6 to 4.9 s before, 4.85 to 5.06 s after (within the noise; the changes also shorten the work the run does).
+
+## Least-busy placement uses the full step time (engine 1.17.0, capacity P2b)
+
+Added 31 Oct 2026 (`docs/plans/capacity/p2b-mapping-brief.md`). **Only the `capacity` golden moved**: the approved diff of the ten other golden models is `engineVersion` and nothing else (checked by running the golden test unapproved first, when `capacity` alone failed). Approved with `golden:approve --bump "least-busy placement counts tier multipliers and changes"`.
+
+- **What changed.** `plannedHours` (the busy share used to place a won client with `placeNewClients: "least-busy"`) took a step's plain `work` times the client's factor. For a step with a split or a tier multiplier it now takes `work` times `capacityEntry(...).f` (the tier multiplier of the service's tier and the changes in force in the month the client is placed) times the client's factor, the same number the run scales a drawn time by. A step with neither takes exactly the old expression.
+- **Months.** The month is the one the client is added in, fixed when it is placed (the planned hours are taken off again by the same amount when it leaves).
+- **Scope.** Only models with `placeNewClients: "least-busy"` and a step with `split` or `tierMultiplier` are affected.
 
 ## Time by purpose (engine 1.14.0, sandbox phase 4)
 
@@ -379,6 +417,18 @@ and the seven together under 7 s. Measured on a quiet 4-core container, engine 1
 
 Each run is about 0.7 s, inside the 1 s limit but not by a wide margin: with another process using the CPU one segment reached
 1.2 s and the test failed, so re-run it alone before concluding. Spliced numbers cost about 4 ms.
+
+## Won clients and a named client leaving (P7, no version bump)
+
+Two optional fields for the free-play Sandbox (`docs/plans/capacity/p7-sandbox-brief.md` section 3). Unset or empty, the code paths are not taken, no random stream is
+touched and every golden is byte-identical, so `ENGINE_VERSION` did not move (`packages/engine/test/won-clients.test.ts`, and the goldens run unapproved).
+
+- `EngineModel.wonClients: { service, month, count }[]` (1-based month). Each client is its own `inject` event, spread evenly through the month (nothing drawn).
+  It skips the sales steps: it enters the first step after the sale (`afterSaleSteps`, the onboarding hand-off) if the pipeline has one, else becomes a won client
+  at once. It is then an ordinary won client (`addWonClient`, `placeNewClients`), counts in `won` and `clientsWon`, and stays out of the cycle times (it has no time to win).
+  Entries for an unknown service, a month past the end or a count under 1 are ignored; a count is capped at 500 an entry.
+- `EngineClient.leavesMonth` (1-based). At the first weekly churn tick on or after that month's start the named client is removed as a churned client (lost, with its
+  fee). Its churn draw is still made, so no other client's draws move. Counted clients have no such field.
 
 ## Where the version goes
 

@@ -303,12 +303,6 @@ function Preview({ upload, loaded, onBack, onCancel }: { upload: UploadProcess; 
           {p.extras && (
             <p className="text-sm" data-upload-extra-counts>
               <b>{p.extras.sources.length}</b> {p.extras.sources.length === 1 ? "source" : "sources"}
-              {p.extras.firstPrinciplesParts > 0 && (
-                <>
-                  {" "}
-                  · first principles: <b>{p.extras.firstPrinciplesParts}</b> {p.extras.firstPrinciplesParts === 1 ? "part" : "parts"}
-                </>
-              )}
             </p>
           )}
         </>

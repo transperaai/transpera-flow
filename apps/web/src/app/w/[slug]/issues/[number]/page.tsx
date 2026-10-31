@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { buildSolutionHref, solutionEditorHref } from "@/lib/solutions/links";
-import { isUnpublished } from "@transpera-flow/db";
+import { isUnpublished, loadCapacityChanges, loadCapacitySetup } from "@transpera-flow/db";
+import { getDb } from "@/lib/auth/session";
 import { IssuePage } from "@/components/issues/issue-page";
-import { ShareButton } from "@/components/share/share-dialog";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { Page } from "@/components/shell/page";
 import { canEditWorkspace, currentUserId } from "@/lib/access-data";
@@ -38,6 +38,11 @@ export default async function WorkspaceIssuePage(props: PageProps<"/w/[slug]/iss
     loadMemberNames(ws),
   ]);
   const base = `/w/${slug}`;
+  // The Sandbox changes that name this issue (P8): the figures are worked out in the browser, only when there are some. The company model's process is
+  // sent only when this issue's own map is another one.
+  const db = await getDb();
+  const [setup, changes] = await Promise.all([loadCapacitySetup(db, ws), loadCapacityChanges(db, ws)]);
+  const capacity = setup ? { setup, changes: changes.filter((c) => c.issue_id === issue.id), bundle: own && own !== probe ? probe.live : undefined } : undefined;
   return (
     <Page title={issue.number ? `Issue #${issue.number}` : "Issue"} eyebrow="Improve" width="max-w-6xl" hideHeader>
       <SourceLinkingScope workspaceId={ws} sources={sources} canEdit={canEdit} issueSources={{ issueId: issue.id, sourceIds: issue.source_ids }}>
@@ -55,7 +60,7 @@ export default async function WorkspaceIssuePage(props: PageProps<"/w/[slug]/iss
         liveRevisions={liveRevisions}
         solutions={solutions}
         memberNames={memberNames}
-        share={canEdit && issue.number != null ? <ShareButton slug={slug} kind="issue" targetId={issue.id} what={`Issue #${issue.number}`} /> : undefined}
+        capacity={capacity}
       />
       </SourceLinkingScope>
     </Page>

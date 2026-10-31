@@ -67,6 +67,12 @@ The transcripts and per-transcript extracts are not in the repo. People are name
 | D30 | **Capacity widgets lead with the answer in a sentence**, then a picture, with "How this works" folded away: room for more clients per department (gauge and who can take the next client), what if someone leaves (before/after per person), time to serve one client (per-tier cards), the next 12 months (what to do, then a small chart per team). | 31 Oct, Austin |
 | D31 | **The Sandbox opens on the company's processes** (the map, with play controls) and lets you **swap process blocks in and out** per step, from a chosen month. An automation or augmentation is a block that acts on a step's automatable and augmentable parts, so it follows the baseline; blocks that change the flow come from the block library. Levers, verdict and charts sit below. "What would help most" and the everyone-by-month grid are dropped; saved scenarios get their own design in the build. | 31 Oct, Austin |
 | D32 | **A person's month is built from process steps**: steps assigned to "the client's manager" for each client they look after (at the tier's frequencies), their share of their team's steps, and steps pinned to them; plus their reserved team time. The Capacity page links each item back to its step. The next-12-months widget is just the "What to do" list. | 31 Oct, Austin |
+| D33 | **Goal seek and "What matters most" (tornado) are hidden**, not cut: off the Sandbox screen, code kept. Goal seek's search still serves "room for more clients". | 31 Oct, Austin |
+| D34 | **Saved scenarios and compare are designed when the Sandbox (P7) is built**, not before. | 31 Oct, Austin |
+| D35 | **Shared teams start with the D27 list and no rates.** Set up flags a missing rate until Joe keys it in. | 31 Oct, Austin |
+| D36 | **Price rises carry a churn rate.** Each tier has an editable "extra churn for each 10% rise, for 3 months", prefilled with an estimate and flagged as one. The Sandbox's Barely / Normally / Strongly are presets for it, and results show the clients lost to the rise on their own line. | 31 Oct, Austin (our recommendation) |
+| D37 | **Unconfirmed client figures are made-up placeholders, flagged as estimates and editable later.** This covers D10 (directors and managers in DLER salaries: a workspace setting, on by default, marked "to confirm") and which department reads 2.75 and which 3.2 (not hard-coded: DLER is computed from the data). | 31 Oct, Austin |
+| D38 | **No saved scenarios.** The Sandbox is free play: levers reset when you leave. In their place, the Sandbox lets you **pick a map version per process**: today's map or one of its solutions (a copied, edited map), from a chosen month. Results show today's path and the changed path side by side, with the "What happens" verdict. Replaces D34. | 31 Oct, Austin |
 
 ## What the transcripts tell us, in five lines
 
@@ -353,9 +359,11 @@ judgement kept:
 
 **3. The future time is worked out, never typed.** Worked example, using illustrative shares:
 - Pacing at 55 min = 38.5 automatable + 11 augmentable + 5.5 manual.
-- With the change, the automatable part becomes 38.5 × 10% plus a 3-min residual, about 7 min. With 80% adoption the
-  step is about 23 min.
-- That saves about 32 min a client a month, about **7.5 h a month for a 14-client manager**.
+- With the change at full adoption, the automatable part becomes 38.5 × 10% plus a 3-min residual, about 7 min, and
+  the step is about 23 min: about 32 min saved a client a month, about **7.4 h a month for a 14-client manager**.
+- At 80% adoption the automatable part is 38.5 × (1 − 0.9 × 0.8) + 3 × 0.8, about 13 min, so the step is about 30 min:
+  about 25 min saved, about 5.9 h a month for 14 clients. (Corrected 31 Oct: the first draft gave the full-adoption
+  figures as the 80% ones.)
 - **If the baseline is later corrected to 70 min, the saving moves with it.**
 
 **4. Display.** On the map, each step shows a stacked bar (automatable / augmentable / manual) with now against

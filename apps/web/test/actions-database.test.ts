@@ -324,24 +324,6 @@ describe("blocks and runs", () => {
   });
 });
 
-describe("sharing", () => {
-  it("makes a link, refreshes its copy, and turns it off", async () => {
-    const { createShareLink, refreshShareLink, revokeShareLink } = await import("@/app/w/[slug]/share-actions");
-    const made = await createShareLink(SLUG, { kind: "overview", targetId: null, people: false, financials: false, emails: "", expiresOn: null, label: "For the board" });
-    expect(made).toMatchObject({ status: "ok", url: expect.stringMatching(/^https:\/\/flow\.example\/s\//) });
-    const link = await one("select id, kind, label, mode, token_hash, revoked_at, engine_version from share_links where workspace_id = $1", [WS]);
-    expect(link).toMatchObject({ kind: "overview", label: "For the board", mode: "view", revoked_at: null });
-    expect(link.token_hash).toMatch(/^[0-9a-f]{64}$/);
-    const before = (await one("select snapshot from share_links where id = $1", [link.id])).snapshot;
-    expect(before).toBeTypeOf("object");
-    expect(await refreshShareLink(SLUG, link.id)).toEqual({ status: "ok" });
-    expect(await revokeShareLink(SLUG, link.id)).toEqual({ status: "ok" });
-    expect((await one("select revoked_at from share_links where id = $1", [link.id])).revoked_at).not.toBeNull();
-    expect(await revokeShareLink(SLUG, link.id)).toEqual({ status: "error", message: "That link is already off, or you can't change it." });
-    expect(await refreshShareLink(SLUG, link.id)).toEqual({ status: "error", message: "This link was turned off." });
-  });
-});
-
 describe("sources", () => {
   it("adds a source with its links in one go, links it again, and unlinks it", async () => {
     const { createSource, linkSource, unlinkSource } = await import("@/app/w/[slug]/source-actions");
@@ -495,9 +477,15 @@ describe("settings", () => {
 
   it("adds a client, assigns people to it, and links servicing", async () => {
     const c = await import("@/app/w/[slug]/settings/client-actions");
+    const setup = await import("@/app/w/[slug]/setup/actions");
     const sv = await import("@/app/w/[slug]/settings/servicing-actions");
-    expect(await c.addClient(WS, {}, form({ name: "Test Client Ltd", mrr: "1200", start_date: "2026-09-01" }))).toEqual({});
-    const client = await one("select id from clients where workspace_id = $1 and name = 'Test Client Ltd'", [WS]);
+    expect(await setup.addNamedClient(WS, northbeamServiceIds.seo, "Test Client Ltd", { mrr: "1200", start_date: "2026-09-01" })).toEqual({ id: expect.any(String) });
+    expect(await setup.addNamedClient(WS, northbeamServiceIds.seo, "   ")).toEqual({ error: "Enter the client's name." });
+    expect(await setup.addNamedClient(WS, northbeamServiceIds.seo, "Bad MRR", { mrr: "-5" })).toEqual({ error: "Enter MRR as a number, 0 or more." });
+    const client = await one("select id, mrr, start_date::text as start_date from clients where workspace_id = $1 and name = 'Test Client Ltd'", [WS]);
+    expect(Number(client.mrr)).toBe(1200);
+    expect(client.start_date).toBe("2026-09-01");
+    expect((await q("select 1 from client_services where client_id = $1 and service_id = $2", [client.id, northbeamServiceIds.seo])).rowCount).toBe(1);
     const person = northbeamPersonIds["Maya Collins"]!;
     expect(await c.saveClientAssignment(client.id, WS, northbeamRoleIds.strat, null, person)).toEqual({ status: "saved", value: person });
     expect(await c.saveClientAssignment(client.id, WS, northbeamRoleIds.strat, null, person)).toEqual({ status: "saved", value: person });
@@ -513,7 +501,7 @@ describe("settings", () => {
   });
 });
 
-describe("history, first principles and calibration", () => {
+describe("history and calibration", () => {
   it("duplicates a published version as a new process, and restores one into the draft", async () => {
     const { duplicateVersion, restoreVersion } = await import("@/app/w/[slug]/p/[processId]/history/actions");
     const dup = await duplicateVersion(P, REV, "Northbeam copy");
@@ -522,12 +510,6 @@ describe("history, first principles and calibration", () => {
     expect(await duplicateVersion(P, "99999999-9999-4999-8999-999999999999", "x")).toMatchObject({ status: "error" });
     const r = await restoreVersion(P, REV, true);
     expect(["restored", "error"]).toContain(r.status);
-  });
-
-  it("saves first principles into a draft", async () => {
-    const { saveFirstPrinciplesAction } = await import("@/app/w/[slug]/p/[processId]/first-principles/actions");
-    const out = await saveFirstPrinciplesAction(WS, P, { purpose: "Win good clients" }, null, null);
-    expect(out, JSON.stringify(out)).toMatchObject({ status: "saved" });
   });
 
   it("records an import dataset and a client calibration refusal", async () => {

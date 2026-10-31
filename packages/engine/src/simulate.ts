@@ -12,6 +12,8 @@
 //
 // Time runs from -warmup to H; everything reported is measured over [0, H].
 
+import { withAvailability, availabilityBase } from "./availability";
+import { capacityEntry, capacityStep, cleanChanges, type CapacityEntry, type CapacityStep } from "./capacity-time";
 import { activeChannels, capacityFactors, channelMonth, keyFactors, planChannels, withMaxRework, type FeeRise } from "./channels";
 import {
   AWAY_PRESSURE,
@@ -32,11 +34,13 @@ import {
   type ChurnReplication,
   type DriverEvents,
 } from "./churn-drivers";
-import { carriersFor, clientChurnMonthly, clientRoleLoads, rolePools, withClientGroups } from "./clients";
+import { carriersFor, clientChurnMonthly, clientHandHolding, clientRoleLoads, managerRoles, rolePools, withClientGroups, type Carrier } from "./clients";
+import { effectiveDeliverables } from "./capacity-inputs";
 import {
   AT_RISK_HEALTH,
   clampHealth,
   clientChurnSensitivity,
+  clientTasksPerWeek,
   healthRules,
   poissonMeanGap,
   recurrenceInterval,
@@ -51,6 +55,9 @@ import { eligible } from "./eligibility";
 import { flattenModel } from "./flatten";
 import { detectLoops, type Loop } from "./loops";
 import type {
+  ClientOverrides,
+  PartHours,
+  PersonTime,
   ClientReplication,
   ClientResult,
   Distribution,
@@ -129,6 +136,8 @@ interface SimEntity extends TraceEntity {
    * t >= 0: its hands-on work after the sale bills at it. 0 otherwise (kept on every entity so the shape is monomorphic).
    */
   rate: number;
+  /** Set on a client the model's `wonClients` brought in: it is not a lead, so its (near zero) time to win stays out of the cycle times. */
+  injected?: true;
   /**
    * Per rework loop (by index in the run's loop list), where the item is: `LP_*` bits; then, from `nLoops` on, for each
    * loop's steps how many times (up to 2) the item has visited it in its stay in the loop. Null until it first reaches a step in a loop.
@@ -173,8 +182,10 @@ interface Task {
   /** Not done by then: missed. */
   deadline: number;
   state: "open" | "done" | "missed";
-  /** An ad-hoc request (a Poisson link) rather than scheduled work: it feeds the response-time driver. */
+  /** An ad-hoc request (a Poisson link, or a driver of "adhoc") rather than scheduled work: it feeds the response-time driver. */
   adhoc: boolean;
+  /** × on the drawn hands-on times of its steps (a client's own ad-hoc hours); 1 for nearly every task. */
+  scale: number;
 }
 
 /** One recurring servicing process of one client. */
@@ -187,9 +198,22 @@ interface LinkState {
   interval: number | null;
   gap: number;
   rng: Rng;
+  /** Whether its tasks are ad-hoc requests. */
+  adhoc: boolean;
+  /** × on the drawn hands-on times of its tasks (1 unless the client has its own ad-hoc hours). */
+  scale: number;
+  /**
+   * An ad-hoc driver (docs/adr/0022-capacity-inputs.md): this link's event is the start of a client-month, which draws
+   * whether the client asks (`chance`) and then how many requests (Poisson, mean `requests`), each placed uniformly in the month
+   * as an event of `one`. Null for every other link.
+   */
+  month: { chance: number; requests: number } | null;
+  one: LinkState | null;
+  /** A placed request of an ad-hoc driver: makes its one task and schedules nothing after it. */
+  once: boolean;
 }
 
-type EventType = "arrive" | "week" | "measure" | "back" | "away" | "end" | "leave" | "task" | "staff" | "capacity";
+type EventType = "arrive" | "inject" | "week" | "measure" | "back" | "away" | "end" | "leave" | "task" | "staff" | "capacity";
 
 /**
  * A timed event. One shape for every type (unused fields null), so the event
@@ -336,6 +360,8 @@ interface StepState {
   chRework: number[] | null;
   /** `wait` draws unit-mean waits that the channel scales (the step has no wait of its own). */
   waitUnit: boolean;
+  /** The capacity view of the step (split, tier multiplier; capacity-time.ts); null for a step that has neither, which is nearly all of them. */
+  cap: CapacityStep | null;
 }
 
 /** The edges an entity picks from at a step, and their total probability. */
@@ -557,6 +583,14 @@ function durationSampler(rng: Rng, mean: number, dist: Distribution): () => numb
   return () => sampleDuration(rng, mean, dist);
 }
 
+/** A Poisson count with the given mean, as the exponential gaps of a rate-`mean` process that fall inside one unit of time (det-math's `log` only). */
+function poissonCount(rng: Rng, mean: number): number {
+  if (!(mean > 0)) return 0;
+  let n = 0;
+  for (let acc = expo(rng, 1 / mean); acc < 1; acc += expo(rng, 1 / mean)) n++;
+  return n;
+}
+
 /** Sample a duration with the given mean. */
 export function sampleDuration(rng: Rng, mean: number, dist: Distribution): number {
   switch (dist.kind) {
@@ -653,6 +687,15 @@ interface PersonState {
   teamMark: number;
   /** Their busy share so far in the measured window, as of the last weekly churn tick (the team-overload driver). */
   util: number;
+  /**
+   * Steps they take only for the clients they manage (`toClientManager`), though their role isn't the step's: they never take from
+   * the step's shared queue, and the hours count to `ownAcc`, their own role's. Null for nearly everyone.
+   */
+  mgrOnly: Set<StepState> | null;
+  /** Their own (first) role's hour counters; null when none is in the model. */
+  ownAcc: RoleAcc | null;
+  /** With `placeNewClients: "least-busy"`: the servicing hours a week their clients are expected to bring (see `plannedHours`). */
+  planned: number;
 }
 
 /** The people who look after some clients, shared by every client with the same services and assignees: their busy share and leave are read once a tick. */
@@ -670,6 +713,8 @@ interface RosterClient {
   key: string;
   /** Whether it is on the roster (reported per client) rather than won during the run. */
   roster: boolean;
+  /** The hour of the run it is removed at the first weekly tick on or after (`EngineClient.leavesMonth`); Infinity: none. */
+  leaveAt: number;
   /** Base monthly churn and health sensitivity (docs/PRD.md §6.3.5). */
   churnBase: number;
   sensitivity: number;
@@ -680,6 +725,10 @@ interface RosterClient {
   assigned: PersonState[];
   /** Its assigned person per role id, for servicing tasks. */
   assignees: Map<string, PersonState>;
+  /** Its manager: the person `toClientManager` steps queue for; null when it has none the model knows. */
+  manager: PersonState | null;
+  /** With "least-busy" placement: who its expected servicing hours a week fall on, as [person, hours]; null otherwise. */
+  planned: [PersonState, number][] | null;
   active: boolean;
   health: number;
   touch: Touchpoints;
@@ -727,7 +776,9 @@ interface RosterClient {
   /** What it shares with clients of the same services and assignees (see `shapeFor`). */
   shape: ClientShape;
   /** Its services and assignees, to work its shape out again when the team changes (a planned start or end date). */
-  spec: { services: string[]; assignments: Record<string, string> };
+  spec: { services: string[]; assignments: Record<string, string>; manager?: string; handHoldingHours?: Record<string, number> };
+  /** Its own time factor on the steps of its servicing tasks (`overrides.stepFactor`): a number for every step or one per step id; null for none. */
+  stepFactor: number | Record<string, number> | null;
   /**
    * Churn drivers run as chances (B4): by driver slot, when the hit lasts to (hours; 0 = not hit), how many times a 10% rise's effect it
    * is (a price hit), and its own random stream (created at its first draw). All null unless the run has a driver that can be in
@@ -753,6 +804,7 @@ interface ClientShape {
   carriers: [PersonState, string, number][];
   assigned: PersonState[];
   assignees: Map<string, PersonState>;
+  manager: PersonState | null;
   svcKey: string;
   serviced: boolean;
   team: Team;
@@ -806,9 +858,12 @@ export function runOnce(
    * starts, e.g. the 1st of each calendar month (see `monthBounds`).
    */
   sampleMonthly: boolean | readonly number[] = false,
+  /** Keep where each person's time goes by step, and their clients by service (`PersonTime`). Read off the run; changes nothing in it. */
+  samplePersonTime = false,
 ): ReplicationResult {
   // Groups and child processes are only a view: runs see leaf steps (a no-op for flat models).
-  model = withClientGroups(flattenModel(model));
+  // (Team time and ramp become a capacity channel on the run's months: availability.ts.)
+  model = withAvailability(withClientGroups(flattenModel(model)), typeof sampleMonthly === "object" ? sampleMonthly : undefined);
   const streams = new Streams(seed);
   let labels = streamLabels.get(model);
   if (!labels) streamLabels.set(model, (labels = new StreamLabels()));
@@ -825,6 +880,9 @@ export function runOnce(
   let peopleModel = resolvePeople(model);
   // Capacity channel: each person's factor per month. The people are copied (their capacity changes during the run), month 0's factor applies from the start.
   const capPlan = ch?.capacity ? capacityFactors(ch, Object.keys(peopleModel), plan!.n) : null;
+  // Team time and ramp lower the hours for client work, not the hours paid for: paid hours come from the model's own capacity channel alone.
+  const avail = model.channels ? availabilityBase(model.channels) : null;
+  const paidPlan = avail ? (avail.base?.capacity ? capacityFactors(avail.base, Object.keys(peopleModel), plan!.n) : null) : capPlan;
   const baseCapacity = new Map<string, number>();
   if (capPlan) {
     peopleModel = { ...peopleModel };
@@ -852,6 +910,11 @@ export function runOnce(
     staffing ? Object.fromEntries(Object.entries(peopleModel).filter(([, p]) => presentAt(p, t))) : peopleModel;
   const services = resolveServices(model);
   const hasServices = services[0]!.id !== null;
+  // Step splits, tier multipliers and changes (capacity-time.ts): a servicing task scales by its service's tier. Slot 0 is no tier.
+  const capChanges = cleanChanges(model.changes);
+  const tierSlots = new Map<string, number>();
+  const svcTierKey = services.map((sv) => sv.s.tier);
+  const svcTierSlot = svcTierKey.map((k) => (k === undefined ? 0 : (tierSlots.get(k) ?? (tierSlots.set(k, tierSlots.size + 1), tierSlots.size))));
   // Market conditions (market.ts); null when the model has none or they are all Stable, which leaves every path below as it was.
   const market = activeMarket(model);
   // The month the factors come from is looked up per event, so the checks and the month length are done once here.
@@ -954,6 +1017,7 @@ export function runOnce(
       chWait: plan?.wait.get(s.id) ?? null,
       chRework: plan?.rework.get(s.id) ?? null,
       waitUnit: !(s.wait || waitDist.kind === "triangular") && Boolean(plan?.wait.get(s.id)?.some((v) => v > 0)),
+      cap: capacityStep(s),
     });
   }
   // End steps: the two sinks, then any further ones (which may override them).
@@ -1050,8 +1114,24 @@ export function runOnce(
     overCapW: 0,
     teamMark: 0,
     util: 0,
+    mgrOnly: null,
+    planned: 0,
+    ownAcc: person.roles.map((rid) => (Object.hasOwn(roleAcc, rid) ? roleAcc[rid]! : null)).find((a) => a !== null) ?? null,
   }));
   for (const st of stepList) st.people = people.filter((p) => p.steps.includes(st));
+  // A client's manager takes its `toClientManager` steps whatever their role (D32): the step joins their list for those clients' tasks only.
+  if (servicing) {
+    const managerIds = new Set(Object.values(model.clients ?? {}).flatMap((c) => (c.manager !== undefined ? [c.manager] : [])));
+    for (const p of people) {
+      if (!managerIds.has(p.id)) continue;
+      for (const st of stepList) {
+        if (st.s.toClientManager && st.assigned && !st.s.person && st.s.role && !p.steps.includes(st)) {
+          p.steps.push(st);
+          (p.mgrOnly ??= new Set()).add(st);
+        }
+      }
+    }
+  }
 
   // Capacity per role: each person's capacity split evenly across their roles.
   const roleCapacity: Record<string, number> = {};
@@ -1129,6 +1209,8 @@ export function runOnce(
   // steps by index. Nothing in the run reads them.
   const bounds = sampleMonthly ? monthBounds(H, monthHours, sampleMonthly === true ? undefined : sampleMonthly) : null;
   const nM = bounds ? bounds.length - 1 : 0;
+  /** The hour the 1-based month `m` starts at: the run's months when it is asked for them, else 52/12 weeks each; Infinity past the end. */
+  const monthStartHour = (m: number): number => (bounds ? (m - 1 < bounds.length - 1 ? bounds[m - 1]! : Infinity) : (m - 1) * monthHours);
   const nR = roleIds.length;
   const nP = people.length;
   const pooledFee = roster ? 0 : pooledMonthlyFee(model);
@@ -1195,6 +1277,11 @@ export function runOnce(
     }
     return lo;
   };
+  /**
+   * The run's month `t` falls in, for changes (0-based; the warm-up and month 1 are month 0): the model's channel months when it
+   * has channels (team time and ramp use them), else the calendar months of a monthly run, else 52/12 weeks from the start.
+   */
+  const capMonth = (t: number): number => (plan ? chM(t) : bounds ? monthOf(t) : t > 0 ? Math.floor(t / monthHours) : 0);
   /** Where month m ends, cut at `hi`. */
   const monthEnd = (m: number, hi: number) => (m === nM - 1 ? hi : Math.min(hi, bounds![m + 1]!));
   /** Add `amount`, spread evenly over [a, b], to row `row`'s months, keeping only the part inside [0, H]. */
@@ -1689,9 +1776,16 @@ export function runOnce(
     const ids = new Set(proc.steps);
     processRoles.set(pid, [...new Set(model.steps.filter((s) => ids.has(s.id) && s.role).map((s) => s.role!))].sort());
   }
+  /** A client's own ad-hoc hours per request, as a × on the drawn times of its ad-hoc process's steps: their mean total becomes `hours`. 1 without. */
+  const adhocScale = (processId: string, hours: number | undefined): number => {
+    if (hours === undefined) return 1;
+    const ids = new Set(processes[processId]?.steps ?? []);
+    const total = model.steps.reduce((sum, s) => (ids.has(s.id) ? sum + s.work : sum), 0);
+    return total > 0 ? hours / total : 1;
+  };
   /** The team that looks after a client (see `Team`). */
   const teamFor = (
-    client: { services: string[]; assignments: Record<string, string> },
+    client: { services: string[]; assignments: Record<string, string>; manager?: string },
     rc: { assigned: PersonState[]; carriers: [PersonState, string, number][] },
   ): Team => {
     // Who looks after it (for the churn drivers): its carriers and assignees, and the people of the roles that work its servicing
@@ -1701,6 +1795,7 @@ export function runOnce(
     if (rc.assigned.length > 0) {
       // (Assignees in the order they were given: another order only means another cache entry.)
       for (const rid in client.assignments) teamKey += `|${rid}=${client.assignments[rid]}`;
+      if (client.manager !== undefined) teamKey += `|m=${client.manager}`;
     }
     let shared = teamOf.get(teamKey);
     if (!shared) {
@@ -1732,29 +1827,40 @@ export function runOnce(
     }
     return shared;
   };
+  /** Roles whose steps go to a client's manager: hand-holding hours in these are the manager's. */
+  const facingRoles = managerRoles(model);
   /** Client shapes by their services and assignees (see `ClientShape`). */
   const shapes = new Map<string, ClientShape>();
-  const shapeFor = (client: { services: string[]; assignments: Record<string, string> }): ClientShape => {
+  const shapeFor = (client: { services: string[]; assignments: Record<string, string>; manager?: string; handHoldingHours?: Record<string, number> }): ClientShape => {
     let key = client.services.length === 1 ? client.services[0]! : client.services.join("\u0000");
     for (const rid in client.assignments) key += `\u0001${rid}\u0002${client.assignments[rid]}`;
+    if (client.manager !== undefined) key += `\u0003${client.manager}`;
+    const hand = client.handHoldingHours ? clientHandHolding(model, client) : null;
+    if (hand) for (const rid in hand) key += `\u0004${rid}\u0005${hand[rid]}`;
     let shape = shapes.get(key);
     if (shape) return shape;
     const carriers: [PersonState, string, number][] = [];
     const uncovered: number[] = [];
     const loads = clientRoleLoads(model, client);
-    for (const rid in loads) {
-      const found = carriersFor(pools, poolPeople, rid, client.assignments[rid]);
+    const place = (rid: string, weekly: number, assignee: string | undefined) => {
+      const found = carriersFor(pools, poolPeople, rid, assignee);
       for (const c of found) {
-        carriers.push([personById.get(c.person)!, rid, loads[rid]! * c.share]);
+        carriers.push([personById.get(c.person)!, rid, weekly * c.share]);
       }
       // Nobody of the role on the team: the work is still there, undone.
-      if (!found.length && loads[rid]! > 0) uncovered.push(roleIndex.get(rid)!, loads[rid]!);
-    }
+      if (!found.length && weekly > 0) uncovered.push(roleIndex.get(rid)!, weekly);
+    };
+    for (const rid in loads) place(rid, loads[rid]!, client.assignments[rid]);
+    // Unplanned hand-holding is on top of the servicing tasks, done by the client's assignee in the role (its manager for a client-facing role).
+    if (hand) for (const rid in hand) place(rid, hand[rid]!, facingRoles.has(rid) && client.manager !== undefined ? client.manager : client.assignments[rid]);
     const assigned: PersonState[] = [];
     for (const pid of new Set(Object.values(client.assignments))) {
       const p = personById.get(pid);
       if (p) assigned.push(p);
     }
+    // The manager looks after the client too (their busy share and client count; the churn drivers' team).
+    const manager = client.manager !== undefined ? (personById.get(client.manager) ?? null) : null;
+    if (manager && !assigned.includes(manager)) assigned.push(manager);
     const assignees = new Map<string, PersonState>();
     if (servicing) {
       for (const [rid, pid] of Object.entries(client.assignments)) {
@@ -1778,6 +1884,7 @@ export function runOnce(
       carriers,
       assigned,
       assignees,
+      manager,
       svcKey: client.services[0] ?? "",
       serviced: client.services.some((sid) => (linksBySvc[serviceIndex.get(sid) ?? -1]?.length ?? 0) > 0),
       team: NO_TEAM,
@@ -1789,9 +1896,96 @@ export function runOnce(
     shapes.set(key, shape);
     return shape;
   };
+  // Where each person's time goes (`PersonTime`), only when asked for: hands-on hours by person and step, and client-weeks by person and service.
+  const nStepsAll = stepList.length;
+  const nSvc = services.length;
+  const ptHours = samplePersonTime ? new Float64Array(people.length * nStepsAll) : null;
+  const ptCount = samplePersonTime ? new Float64Array(people.length * nSvc) : null;
+  const ptSum = samplePersonTime ? new Float64Array(people.length * nSvc) : null;
+  const ptLast = samplePersonTime ? new Float64Array(people.length).fill(-W) : null;
+  // ...and by part of the step's split, before and after the changes, and the hours each change freed (only with a split somewhere).
+  const changeIds = [...new Set(capChanges.map((c) => c.id))];
+  const changeIndex = new Map(changeIds.map((id, i) => [id, i] as const));
+  const nChg = changeIds.length;
+  const ptParts =
+    ptHours && stepList.some((st) => st.cap?.view.split)
+      ? {
+          actual: new Float64Array(people.length * nStepsAll * 3),
+          before: new Float64Array(people.length * nStepsAll * 3),
+          freed: new Float64Array(people.length * nChg),
+          mActual: mon ? new Float64Array(nM * 3) : null,
+          mBefore: mon ? new Float64Array(nM * 3) : null,
+          mFreed: mon ? new Float64Array(nChg * nM) : null,
+        }
+      : null;
+  /** Add a person's client counts since they last changed to the window's client-weeks. */
+  const ptAdvance = (p: PersonState, t: number) => {
+    const a = Math.max(ptLast![p.idx]!, 0);
+    const b = Math.min(t, H);
+    ptLast![p.idx] = t;
+    if (!(b > a)) return;
+    for (let s = 0; s < nSvc; s++) ptSum![p.idx * nSvc + s]! += (ptCount![p.idx * nSvc + s]! * (b - a)) / hpw;
+  };
+  /** A client of these services starts (+1) or stops (-1) counting for a person. */
+  const ptTrack = (p: PersonState, services_: readonly string[], t: number, by: number) => {
+    ptAdvance(p, t);
+    for (const sid of services_) {
+      const s = serviceIndex.get(sid);
+      if (s !== undefined) ptCount![p.idx * nSvc + s]! += by;
+    }
+  };
+  /** "least-busy" placement (`placeNewClients`); anything else is today's round-robin. */
+  const leastBusy = model.placeNewClients === "least-busy";
+  const stepById = new Map(model.steps.map((s) => [s.id, s] as const));
+  /**
+   * The servicing hours a week a client is expected to bring and who they fall on: its tasks a week (its own deliverables) times
+   * each step's mean time (with its ad-hoc hours and step factor), to the step's person, the client's manager for a `toClientManager`
+   * step, or its assignee in the step's role. Work for a shared pool falls on no one in particular and is left out.
+   * A step with a split or a tier multiplier counts its full time (`capacityEntry`: the service's tier multiplier and the changes in
+   * force in the month `t` falls in, as the run applies them to a drawn time), so the placement sees what the work will take.
+   */
+  const plannedHours = (
+    client: { services: string[]; overrides?: ClientOverrides },
+    rc: { manager: PersonState | null; assignees: Map<string, PersonState>; stepFactor: number | Record<string, number> | null },
+    t: number,
+  ): [PersonState, number][] => {
+    const out = new Map<PersonState, number>();
+    for (const sid of client.services) {
+      const svc = serviceIndex.get(sid);
+      if (svc === undefined) continue;
+      for (const link of linksBySvc[svc]!) {
+        const r = link.recurrence;
+        const weekly = clientTasksPerWeek(model, client, sid, r);
+        if (!(weekly > 0)) continue;
+        const scale = "driver" in r && r.driver === "adhoc" ? adhocScale(link.process, effectiveDeliverables(model, client, sid).adhocHours) : 1;
+        for (const stepId of processes[link.process]!.steps) {
+          const step = stepById.get(stepId);
+          if (!step) continue;
+          const who = step.person ? personById.get(step.person) : step.role ? ((step.toClientManager ? rc.manager : null) ?? rc.assignees.get(step.role)) : undefined;
+          if (!who) continue;
+          const own = rc.stepFactor === null ? 1 : typeof rc.stepFactor === "number" ? rc.stepFactor : (rc.stepFactor[stepId] ?? 1);
+          const cs = stepStates.get(stepId)?.cap;
+          if (cs) {
+            const f = capacityEntry(cs, capChanges, svcTierKey[svc], svcTierSlot[svc]!, capMonth(t), scale).f;
+            out.set(who, (out.get(who) ?? 0) + weekly * step.work * scale * (f * own));
+          } else out.set(who, (out.get(who) ?? 0) + weekly * step.work * scale * own);
+        }
+      }
+    }
+    return [...out];
+  };
   const addClient = (
     key: string,
-    client: { services: string[]; assignments: Record<string, string>; health?: number; mrr?: number },
+    client: {
+      services: string[];
+      assignments: Record<string, string>;
+      health?: number;
+      mrr?: number;
+      overrides?: ClientOverrides;
+      manager?: string;
+      handHoldingHours?: Record<string, number>;
+      leavesMonth?: number;
+    },
     t: number,
     isRoster: boolean,
     weeklyBill: number,
@@ -1800,12 +1994,16 @@ export function runOnce(
     const rc: RosterClient = {
       key,
       roster: isRoster,
+      leaveAt: isRoster && client.leavesMonth !== undefined && Number.isFinite(client.leavesMonth) && client.leavesMonth >= 1 ? monthStartHour(Math.floor(client.leavesMonth)) : Infinity,
       churnBase: shape.churnBase,
       sensitivity: shape.sensitivity,
       rng: streams.get(isRoster ? labels.join("churn", "client", key) : labels.join("churn", key)),
       carriers: shape.carriers,
       assigned: shape.assigned,
       assignees: shape.assignees,
+      manager: shape.manager,
+      planned: null,
+      stepFactor: client.overrides?.stepFactor ?? null,
       active: true,
       health: client.health !== undefined && Number.isFinite(client.health) ? clampHealth(client.health) : rules.initial,
       touch: { onTime: 0, late: 0, missed: 0 },
@@ -1848,14 +2046,41 @@ export function runOnce(
         const svc = serviceIndex.get(sid);
         if (svc === undefined) continue;
         for (const link of linksBySvc[svc]!) {
-          const interval = recurrenceInterval(link.recurrence, hpw);
+          const r = link.recurrence;
+          const entry = targetFor(processes[link.process]!.entry);
+          if ("driver" in r) {
+            // A driver recurrence (docs/adr/0022-capacity-inputs.md): the client's own rate, from its overrides or its tier's deliverables.
+            const eff = effectiveDeliverables(model, client, sid);
+            if (r.driver === "adhoc") {
+              // Each client-month: Bernoulli(chance) that it asks, then Poisson(requests) tasks placed uniformly in the month. Streams of their own.
+              if (!(eff.adhoc.chance > 0 && eff.adhoc.requests > 0)) continue;
+              const scale = adhocScale(link.process, eff.adhocHours);
+              const rng = streams.get(labels.join("adhoc", key, sid, link.process));
+              const base: LinkState = { link, entry, svc, interval: null, gap: 0, rng, adhoc: true, scale, month: null, one: null, once: true };
+              const l: LinkState = { ...base, once: false, month: { chance: eff.adhoc.chance, requests: eff.adhoc.requests }, one: base };
+              scheduleTask(rc, l, t);
+              continue;
+            }
+            const perWeek = clientTasksPerWeek(model, client, sid, r);
+            if (!(perWeek > 0)) continue;
+            const interval = hpw / perWeek;
+            const l: LinkState = { link, entry, svc, interval, gap: interval, rng: streams.get(labels.join("servicing", key, sid, link.process)), adhoc: false, scale: 1, month: null, one: null, once: false };
+            scheduleTask(rc, l, t + l.rng() * interval);
+            continue;
+          }
+          const interval = recurrenceInterval(r, hpw);
           const l: LinkState = {
             link,
-            entry: targetFor(processes[link.process]!.entry),
+            entry,
             svc,
             interval,
-            gap: interval ?? poissonMeanGap(link.recurrence, hpw),
+            gap: interval ?? poissonMeanGap(r, hpw),
             rng: streams.get(labels.join("servicing", key, sid, link.process)),
+            adhoc: interval === null,
+            scale: 1,
+            month: null,
+            one: null,
+            once: false,
           };
           // The first task falls at a random point in the first interval, so clients' tasks don't all land at once.
           scheduleTask(rc, l, t + (interval !== null ? l.rng() * interval : expo(l.rng, l.gap)));
@@ -1868,11 +2093,16 @@ export function runOnce(
     for (const p of rc.assigned) {
       advance(p, t);
       p.clients++;
+      if (ptCount) ptTrack(p, client.services, t, 1);
     }
     for (let i = 0; i < touched.length; i++) addRosterLoad(touched[i]!, parts[i]!, t);
     if (mon && shape.uncovered.length) {
       advanceUncovered(t);
       for (let i = 0; i < shape.uncovered.length; i += 2) uncoveredRate[shape.uncovered[i]!]! += shape.uncovered[i + 1]!;
+    }
+    if (leastBusy) {
+      rc.planned = plannedHours(client, rc, t);
+      for (const [p, h] of rc.planned) p.planned += h;
     }
     rosterClients.push(rc);
     active = rosterClients.length;
@@ -1907,11 +2137,13 @@ export function runOnce(
   };
   const removeClient = (rc: RosterClient, t: number) => {
     rc.active = false;
+    if (rc.planned) for (const [p, h] of rc.planned) p.planned -= h;
     bill(rc, t);
     billHourly(rc, t);
     for (const p of rc.assigned) {
       advance(p, t);
       p.clients--;
+      if (ptCount) ptTrack(p, rc.spec.services, t, -1);
     }
     for (const p of rc.shape.touched) {
       p.contrib.delete(rc);
@@ -2005,6 +2237,28 @@ export function runOnce(
     svc.drawn = true;
     return triangular(rng, Math.min(r.low, price), price, Math.max(r.high, price));
   };
+  /**
+   * The person of `pool` (a role's members) with the lowest busy share who serves `tier`: expected servicing hours a week of their
+   * clients plus their ongoing load, over their hours a week now. Ties go to the first in people order. Not someone on leave now unless
+   * everyone is. Null when no one serves the tier.
+   */
+  const leastBusyOf = (pool: Carrier[], tier: string | undefined, t: number): string | null => {
+    let best: string | null = null;
+    let bestShare = Infinity;
+    let bestAway = true;
+    for (const c of pool) {
+      const p = personById.get(c.person)!;
+      if (tier !== undefined && p.person.tiers && !p.person.tiers.includes(tier)) continue;
+      const away = onLeave(p, t);
+      const share = p.person.capacity > 0 ? (p.planned + p.load) / p.person.capacity : Infinity;
+      if ((bestAway && !away) || (away === bestAway && share < bestShare)) {
+        best = c.person;
+        bestShare = share;
+        bestAway = away;
+      }
+    }
+    return best;
+  };
   /** A retainer won during the run: a synthetic client, assigned per role by round-robin among the role's members. */
   const addWonClient = (svc: ServiceState, t: number, price: number) => {
     const services = svc.id !== null ? [svc.id] : [];
@@ -2017,6 +2271,12 @@ export function runOnce(
     for (const rid of roles) {
       const pool = pools[rid] ?? [];
       if (!pool.length) continue;
+      if (leastBusy) {
+        // The least busy person of the role who serves the service's tier (`EnginePerson.tiers`); nobody serves it: the role stays shared.
+        const pick = leastBusyOf(pool, svc.s.tier, t);
+        if (pick) assignments[rid] = pick;
+        continue;
+      }
       const i = nextAssignee[rid] ?? 0;
       assignments[rid] = pool[i % pool.length]!.person;
       nextAssignee[rid] = i + 1;
@@ -2025,7 +2285,17 @@ export function runOnce(
     const nf = newFeeAt(svc, t);
     if (nf !== 1) fee *= nf;
     const weeklyBill = svc.s.pricingModel === "retainer" ? fee / WEEKS_PER_MONTH : 0;
-    const rc = addClient(`won:${++wonClients}`, { services, assignments }, t, false, weeklyBill);
+    // With least-busy placement the client's manager is the person placed in the role of its `toClientManager` steps.
+    let manager: string | undefined;
+    if (leastBusy) {
+      for (const link of linksBySvc[serviceIndex.get(svc.id)!] ?? []) {
+        for (const stepId of processes[link.process]!.steps) {
+          const step = stepById.get(stepId);
+          if (manager === undefined && step?.toClientManager && step.role && assignments[step.role] !== undefined) manager = assignments[step.role];
+        }
+      }
+    }
+    const rc = addClient(`won:${++wonClients}`, manager !== undefined ? { services, assignments, manager } : { services, assignments }, t, false, weeklyBill);
     // A client won on an hourly service bills the hours worked for it (ongoing here, servicing and onboarding in `startService`).
     if (svc.s.pricingModel === "hourly") {
       rc.hourlyRate = fee;
@@ -2325,7 +2595,9 @@ export function runOnce(
         weekly = driveClient(rc, t, multiplier, handoffRate, tenureExtra);
         runClient = rc;
       }
-      if (rc.rng() < weekly) {
+      // The draw is made either way, so a client that is told to leave moves no other client's draws.
+      const drawn = rc.rng();
+      if (drawn < weekly || t >= rc.leaveAt) {
         removeClient(rc, t);
         rc.churned = true;
         churned++;
@@ -2404,9 +2676,18 @@ export function runOnce(
   /** A client's servicing task is due: it enters its process, and the next one is scheduled. Churned clients generate none. */
   function createTask(c: RosterClient, l: LinkState, t: number) {
     if (!c.active) return;
-    scheduleTask(c, l, t + (l.interval ?? expo(l.rng, l.gap)));
+    if (l.month) {
+      // An ad-hoc driver's client-month starts: the next month is scheduled, then whether this one has requests, and where they fall.
+      scheduleTask(c, l, t + monthHours);
+      if (l.rng() < l.month.chance) {
+        const n = poissonCount(l.rng, l.month.requests);
+        for (let i = 0; i < n; i++) scheduleTask(c, l.one!, t + l.rng() * monthHours);
+      }
+      return;
+    }
+    if (!l.once) scheduleTask(c, l, t + (l.interval ?? expo(l.rng, l.gap)));
     const sla = l.link.sla;
-    const task: Task = { client: c, due: t + sla, deadline: t + 2 * sla, state: "open", adhoc: l.interval === null };
+    const task: Task = { client: c, due: t + sla, deadline: t + 2 * sla, state: "open", adhoc: l.adhoc, scale: l.scale };
     const e: SimEntity = { id: eid++, t0: t, trace: NO_TRACE, seg: null, svc: l.svc, task, rate: 0, lp: null };
     if (keepTrace) {
       e.trace = [];
@@ -2527,7 +2808,7 @@ export function runOnce(
       if (nf !== 1) units *= nf;
       if (price !== sv.s.price && sv.s.price > 0) units *= price / sv.s.price;
       sv.wonUnits += units;
-      cycle.push(t - e.t0);
+      if (!e.injected) cycle.push(t - e.t0);
       // An hourly win bills the hands-on work done for it from now on (`startService`).
       if (sv.s.pricingModel === "hourly") {
         e.rate = price * (market ? mkt(t).price : 1);
@@ -2644,7 +2925,11 @@ export function runOnce(
     setQ(st.stat, t, 1);
     // A servicing task whose client has an assigned person for the step's
     // role, who can do the step, queues for them only (docs/PRD.md §6.3.3).
-    const assignee = st.assigned && e.task && !st.s.person && st.s.role ? e.task.client.assignees.get(st.s.role) : undefined;
+    // A step with `toClientManager` goes to the client's manager, whatever their role; a client with none falls back to its assignee in the role, then the pool.
+    const assignee =
+      st.assigned && e.task && !st.s.person && st.s.role
+        ? ((st.s.toClientManager ? e.task.client.manager : null) ?? e.task.client.assignees.get(st.s.role))
+        : undefined;
     if (assignee && assignee.steps.includes(st)) {
       const assigned = st.assigned!;
       let k = assigned.people.indexOf(assignee);
@@ -2683,7 +2968,8 @@ export function runOnce(
     const steps = p.steps;
     for (let i = 0; i < steps.length; i++) {
       const st = steps[i]!;
-      const c = st.queue.peek();
+      // (A client's manager from another role takes only the clients' tasks assigned to them, never the step's shared queue.)
+      const c = p.mgrOnly !== null && p.mgrOnly.has(st) ? undefined : st.queue.peek();
       if (c && (!best || c.seg!.tQ < bestTQ)) {
         best = c;
         bestTQ = c.seg!.tQ;
@@ -2735,6 +3021,27 @@ export function runOnce(
         const f = st.chWork[chM(t)]!;
         if (f !== 1) handsOn *= f;
       }
+      // A servicing task of a client with its own ad-hoc hours scales the drawn time (after the draw, so no stream moves). That
+      // replaces the step's base time, so it comes before the split (docs/adr/0022-capacity-inputs.md note 7).
+      const scale = e.task ? e.task.scale : 1;
+      if (scale !== 1) handsOn *= scale;
+      // The client's own time factor on the step (`stepFactor`): a number for every step, or one per step id.
+      let own = 1;
+      if (e.task) {
+        const sf = e.task.client.stepFactor;
+        if (sf !== null) {
+          const f = typeof sf === "number" ? sf : sf[st.s.id];
+          if (f !== undefined && Number.isFinite(f) && f > 0) own = f;
+        }
+      }
+      // A step with a split or a tier multiplier: `stepTimeFactor` (the tier's multiplier, the changes in force that month, and the client's factor). Pipeline work has no tier.
+      let cap: CapacityEntry | null = null;
+      const drawn1 = handsOn;
+      if (st.cap) {
+        cap = capacityEntry(st.cap, capChanges, e.task ? svcTierKey[e.svc] : undefined, e.task ? svcTierSlot[e.svc]! : 0, capMonth(t), scale);
+        const f = cap.f * own;
+        if (f !== 1) handsOn *= f;
+      } else if (own !== 1) handsOn *= own;
       dur = handsOn / frac;
       st.stat.handsOnSum += handsOn;
       st.stat.handsOnN++;
@@ -2749,9 +3056,53 @@ export function runOnce(
       const svc = e.task !== undefined;
       if (svc) p.svcHours += handsOn;
       else p.busyHours += handsOn;
+      if (ptHours) {
+        // Only the part inside the measured window counts (a job straddling t = 0 or the horizon), as for hourly work.
+        const share = t >= 0 && t + dur <= H ? 1 : dur > 0 ? Math.max(0, Math.min(t + dur, H) - Math.max(t, 0)) / dur : t >= 0 && t < H ? 1 : 0;
+        if (share > 0) {
+          ptHours[p.idx * nStepsAll + st.mi]! += handsOn * share;
+          if (ptParts) {
+            // Parts: the draw (before the capacity factor, with the client's factor) per hour of the step's mean time, times the mean parts.
+            const row = (p.idx * nStepsAll + st.mi) * 3;
+            const mo = mon && t >= 0 && t < H ? monthOf(t) : -1;
+            if (cap) {
+              const unit = cap.work > 0 ? (drawn1 * own * share) / cap.work : 0;
+              const { actual: a, before: b } = cap;
+              ptParts.actual[row]! += unit * a.automatable;
+              ptParts.actual[row + 1]! += unit * a.augmentable;
+              ptParts.actual[row + 2]! += unit * a.manual;
+              ptParts.before[row]! += unit * b.automatable;
+              ptParts.before[row + 1]! += unit * b.augmentable;
+              ptParts.before[row + 2]! += unit * b.manual;
+              if (ptParts.mActual && mo >= 0) {
+                ptParts.mActual[mo * 3]! += unit * a.automatable;
+                ptParts.mActual[mo * 3 + 1]! += unit * a.augmentable;
+                ptParts.mActual[mo * 3 + 2]! += unit * a.manual;
+                ptParts.mBefore![mo * 3]! += unit * b.automatable;
+                ptParts.mBefore![mo * 3 + 1]! += unit * b.augmentable;
+                ptParts.mBefore![mo * 3 + 2]! += unit * b.manual;
+              }
+              for (const f of cap.freed) {
+                const ci = changeIndex.get(f.change)!;
+                ptParts.freed[p.idx * nChg + ci]! += unit * f.hours;
+                if (ptParts.mFreed && mo >= 0) ptParts.mFreed[ci * nM + mo]! += unit * f.hours;
+              }
+            } else {
+              // No split (or no capacity view): all manual, and nothing to free.
+              ptParts.actual[row + 2]! += handsOn * share;
+              ptParts.before[row + 2]! += handsOn * share;
+              if (ptParts.mActual && mo >= 0) {
+                ptParts.mActual[mo * 3 + 2]! += handsOn * share;
+                ptParts.mBefore![mo * 3 + 2]! += handsOn * share;
+              }
+            }
+          }
+        }
+      }
       const over = overloaded(p);
       if (over) p.overPipeline += handsOn;
-      const acc = st.acc;
+      // A manager from another role does the step as their own role's work.
+      const acc = p.mgrOnly !== null && p.mgrOnly.has(st) ? p.ownAcc : st.acc;
       if (acc) {
         if (svc) acc.svc += handsOn;
         else acc.busy += handsOn;
@@ -3095,6 +3446,41 @@ export function runOnce(
     if (nextArrival < arrivalTimes.length) schedule(arrivalTimes[nextArrival++]!, "arrive");
   };
   scheduleArrival();
+  // Clients the model says are won (`wonClients`): each is its own event, in time order, spread evenly through its month. Nothing is drawn here.
+  const injections: number[] = [];
+  const injectionTimes: number[] = [];
+  for (const w of model.wonClients ?? []) {
+    const svc = serviceIndex.get(w.service);
+    const month = Math.floor(Number(w.month));
+    const count = Math.min(500, Math.max(0, Math.round(Number(w.count))));
+    if (svc === undefined || !(month >= 1) || !(count >= 1)) continue;
+    const from = monthStartHour(month);
+    const to = Math.min(H, monthStartHour(month + 1));
+    if (!(from < H)) continue;
+    for (let i = 0; i < count; i++) {
+      const at = from + ((i + 0.5) / count) * (to - from);
+      if (at >= H) continue;
+      injectionTimes.push(at);
+      injections.push(svc);
+    }
+  }
+  let nextInject = 0;
+  if (injections.length) {
+    // In time order (the stable sort keeps the model's order for equal times).
+    const order = injections.map((_, i) => i).sort((a, b) => injectionTimes[a]! - injectionTimes[b]! || a - b);
+    const sorted = order.map((i) => injections[i]!);
+    for (const i of order) schedule(injectionTimes[i]!, "inject");
+    injections.splice(0, injections.length, ...sorted);
+  }
+  // Where an injected client goes: the first step after the sale (onboarding), or straight to a won client when the pipeline has none.
+  let injectHead: Target | null = null;
+  if (injections.length) {
+    const after = afterSaleSteps(model);
+    const pointed = new Set<string>();
+    for (const sid of after) for (const n of stepById.get(sid)?.next ?? []) if (after.has(n.to)) pointed.add(n.to);
+    const head = model.steps.find((st) => after.has(st.id) && !pointed.has(st.id));
+    if (head) injectHead = targetFor(head.id);
+  }
   // Weekly churn ticks.
   for (let w = 1; w <= model.horizonWeeks; w++) schedule(w * model.hoursPerWeek, "week");
   // Planned starts and end dates: the clients' work is shared out again (before anyone back picks up work at the same time).
@@ -3131,6 +3517,12 @@ export function runOnce(
         if (mon && ev.t < H) mon.opps[monthOf(ev.t)]!++;
       }
       enterTarget(e, entryTargets[sv]!, ev.t);
+    } else if (ev.type === "inject") {
+      const sv = injections[nextInject++]!;
+      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv, rate: 0, lp: null, injected: true };
+      if (keepTrace) entities.push(e);
+      if (injectHead) enterTarget(e, injectHead, ev.t);
+      else reachEnd(e, "won", ev.t);
     } else if (ev.type === "end") {
       endService(ev.e!, ev.st!, ev.p, ev.t);
     } else if (ev.type === "leave") {
@@ -3220,13 +3612,19 @@ export function runOnce(
     const f = capPlan?.byPerson.get(p.id);
     return f ? baseCapacity.get(p.id)! * f[m]! : p.person.capacity;
   };
+  /** A person's paid hours a week in channel month `m`: their capacity times the model's own capacity channel, not team time or ramp. */
+  const paidAt = (p: PersonState, m: number): number => {
+    const f = paidPlan?.byPerson.get(p.id);
+    return f ? baseCapacity.get(p.id)! * f[m]! : (baseCapacity.get(p.id) ?? p.person.capacity);
+  };
   /** Whether a capacity or role-cost channel makes this person's paid hours or cost change during the run. */
   const paidVaries = (p: PersonState): boolean => Boolean(capPlan?.byPerson.has(p.id) || (plan && plan.roleCost.size));
   /** Contracted hours and what they cost over [a, b] of the window (inside the person's time on the team), month by month as the channels change them. */
-  const paidOver = (p: PersonState, a: number, b: number): { hours: number; cost: number } => {
+  const paidOver = (p: PersonState, a: number, b: number): { hours: number; cost: number; payHours: number } => {
     let hours = 0;
     let cost = 0;
-    if (!(b > a)) return { hours, cost };
+    let payHours = 0;
+    if (!(b > a)) return { hours, cost, payHours };
     const starts = plan!.starts;
     for (let m = chM(a); m < plan!.n; m++) {
       const lo = m === 0 ? a : Math.max(a, starts[m - 1]!);
@@ -3234,11 +3632,14 @@ export function runOnce(
       if (hi > lo) {
         const h = (capacityAt(p, m) * (hi - lo)) / hpw;
         hours += h;
-        cost += h * rateOf(p, m);
+        // (Without team time or ramp the hours worked and the hours paid are the same number.)
+        const pay = avail ? (paidAt(p, m) * (hi - lo)) / hpw : h;
+        payHours += pay;
+        cost += pay * rateOf(p, m);
       }
       if (hi >= b) break;
     }
-    return { hours, cost };
+    return { hours, cost, payHours };
   };
   /**
    * The month-by-month sums as this replication's result: hours available less leave (and before a planned start or
@@ -3289,7 +3690,7 @@ export function runOnce(
           const present = Math.max(0, Math.min(b, own2) - Math.max(a, own1));
           const rate = plan && plan.roleCost.size ? rateOf(p, m) : rate0;
           overtimeCostM[m]! += ot[m]! * rate;
-          return (capM(m) * present * rate) / hpw;
+          return ((avail ? paidAt(p, m) : capM(m)) * present * rate) / hpw;
         });
         labourByPerson[p.id] = mine;
         for (let m = 0; m < nM; m++) labour[m]! += mine[m]!;
@@ -3470,7 +3871,7 @@ export function runOnce(
     if (ot > 0) {
       overtimeHours += ot;
       // Overtime is costed at the person's rate (with a role-cost channel, the mean of the run's rates over their paid hours).
-      overtimeCost += ot * (paid && paid.hours > 0 ? paid.cost / paid.hours : rateOf(p));
+      overtimeCost += ot * (paid && paid.payHours > 0 ? paid.cost / paid.payHours : rateOf(p));
     }
     // Paid hours: contracted capacity while on the team. Leave is paid (it only reduces the hours available).
     if (!model.payHidden) labourCost += paid ? paid.cost : cap * rateOf(p);
@@ -3601,6 +4002,59 @@ export function runOnce(
     if (sv.id !== null && sv.s.pricingModel === "hourly") hourlyOut[sv.id] = { hours: hourlyHours[i]!, revenue: hourlyRev[i]! };
   });
   const monthly = mon ? monthlyOut(mon) : null;
+  let personTime: PersonTime | null = null;
+  if (ptHours) {
+    const monthsInRun = H / monthHours;
+    const stepHours: PersonTime["stepHours"] = {};
+    const clientCounts: PersonTime["clients"] = {};
+    for (const p of people) {
+      ptAdvance(p, H);
+      for (const st of stepList) {
+        const h = ptHours[p.idx * nStepsAll + st.mi]!;
+        if (h > 0) (stepHours[p.id] ??= {})[st.s.id] = h / monthsInRun;
+      }
+      for (let s = 0; s < nSvc; s++) {
+        const id = services[s]!.id;
+        const weeks = ptSum![p.idx * nSvc + s]!;
+        if (id !== null && weeks > 0) (clientCounts[p.id] ??= {})[id] = weeks / model.horizonWeeks;
+      }
+    }
+    personTime = { stepHours, clients: clientCounts };
+    if (ptParts) {
+      const part = (arr: Float64Array, row: number, div: number): PartHours => ({ automatable: arr[row]! / div, augmentable: arr[row + 1]! / div, manual: arr[row + 2]! / div });
+      const actual: NonNullable<PersonTime["partHours"]>["actual"] = {};
+      const before: NonNullable<PersonTime["partHours"]>["before"] = {};
+      const byPerson: Record<string, Record<string, number>> = {};
+      const byChange: Record<string, number> = Object.fromEntries(changeIds.map((id) => [id, 0]));
+      let total = 0;
+      for (const p of people) {
+        for (const st of stepList) {
+          const row = (p.idx * nStepsAll + st.mi) * 3;
+          const any = ptParts.actual[row]! || ptParts.actual[row + 1]! || ptParts.actual[row + 2]! || ptParts.before[row]! || ptParts.before[row + 1]! || ptParts.before[row + 2]!;
+          if (!any) continue;
+          (actual[p.id] ??= {})[st.s.id] = part(ptParts.actual, row, monthsInRun);
+          (before[p.id] ??= {})[st.s.id] = part(ptParts.before, row, monthsInRun);
+        }
+        for (let ci = 0; ci < nChg; ci++) {
+          const h = ptParts.freed[p.idx * nChg + ci]! / monthsInRun;
+          if (h === 0) continue;
+          (byPerson[p.id] ??= {})[changeIds[ci]!] = h;
+          byChange[changeIds[ci]!]! += h;
+          total += h;
+        }
+      }
+      personTime.partHours = { actual, before };
+      personTime.freed = { total, byChange, byPerson };
+      if (ptParts.mActual) {
+        const months = Array.from({ length: nM }, (_, m) => m);
+        personTime.monthly = {
+          actual: months.map((m) => part(ptParts.mActual!, m * 3, 1)),
+          before: months.map((m) => part(ptParts.mBefore!, m * 3, 1)),
+          freed: Object.fromEntries(changeIds.map((id, ci) => [id, months.map((m) => ptParts.mFreed![ci * nM + m]!)])),
+        };
+      }
+    }
+  }
   const toTrace = ({ seg: _seg, svc, task: _task, rate: _rate, lp: _lp, ...entity }: SimEntity): TraceEntity => {
     const id = services[svc]!.id;
     return id !== null ? { ...entity, service: id } : entity;
@@ -3631,6 +4085,7 @@ export function runOnce(
     entities: keepTrace ? entities.map(toTrace) : null,
     ...(weekly ? { weekly } : {}),
     ...(monthly ? { monthly } : {}),
+    ...(personTime ? { personTime } : {}),
     H,
     warmupHours: W,
     activeEnd: active,
@@ -3916,6 +4371,45 @@ export interface SimulateOptions {
    * sizes a different automatic warm-up, which shifts every arrival and draw (sandbox phase 3, §1). `SimulationResult.initialState` echoes it.
    */
   initialState?: InitialState;
+  /**
+   * Also report where each person's time goes by step, and their clients by service (`SimulationResult.personTime`). Read off the
+   * run, so no other number changes; not asked for, nothing is allocated.
+   */
+  personTime?: boolean;
+}
+
+/** The replications' `PersonTime` averaged (an entry a run doesn't have is 0 in it). */
+function personTimeMeans(parts: PersonTime[]): PersonTime {
+  const mean = (pick: (p: PersonTime) => Record<string, Record<string, number>>): Record<string, Record<string, number>> => {
+    const sums: Record<string, Record<string, number>> = {};
+    for (const part of parts) {
+      const rows = pick(part);
+      for (const pid of Object.keys(rows)) {
+        const row = (sums[pid] ??= {});
+        for (const id of Object.keys(rows[pid]!)) row[id] = (row[id] ?? 0) + rows[pid]![id]!;
+      }
+    }
+    for (const pid of Object.keys(sums)) for (const id of Object.keys(sums[pid]!)) sums[pid]![id]! /= parts.length;
+    return sums;
+  };
+  const out: PersonTime = { stepHours: mean((p) => p.stepHours), clients: mean((p) => p.clients) };
+  // The capacity parts (P3): the same mean over the replications, whatever the shape (an entry a run doesn't have is 0).
+  if (parts.every((p) => p.partHours)) out.partHours = meanTree(parts.map((p) => p.partHours)) as NonNullable<PersonTime["partHours"]>;
+  if (parts.every((p) => p.freed)) out.freed = meanTree(parts.map((p) => p.freed)) as NonNullable<PersonTime["freed"]>;
+  if (parts.every((p) => p.monthly)) out.monthly = meanTree(parts.map((p) => p.monthly)) as NonNullable<PersonTime["monthly"]>;
+  return out;
+}
+
+/** The mean of same-shaped trees of numbers, arrays and records; a key or index a tree doesn't have counts as 0. */
+function meanTree(trees: readonly unknown[]): unknown {
+  const shape = trees.find((t) => t !== undefined);
+  if (typeof shape === "number" || shape === undefined) return trees.reduce<number>((sum, t) => sum + ((t as number | undefined) ?? 0), 0) / trees.length;
+  if (Array.isArray(shape)) {
+    const n = Math.max(...trees.map((t) => (t as unknown[] | undefined)?.length ?? 0));
+    return Array.from({ length: n }, (_, i) => meanTree(trees.map((t) => (t as unknown[] | undefined)?.[i])));
+  }
+  const keys = new Set(trees.flatMap((t) => (t === undefined ? [] : Object.keys(t as object))));
+  return Object.fromEntries([...keys].map((k) => [k, meanTree(trees.map((t) => (t as Record<string, unknown> | undefined)?.[k]))]));
 }
 
 /**
@@ -3932,7 +4426,7 @@ export function monthBounds(H: number, monthHours: number, starts?: readonly num
 }
 
 export function simulate(model: EngineModel, reps = 30, seed = 1, options: SimulateOptions = {}): SimulationResult {
-  model = withClientGroups(flattenModel(model));
+  model = withAvailability(withClientGroups(flattenModel(model)), options.monthly ? options.monthStarts : undefined);
   const runs: ReplicationResult[] = [];
   let trace: TraceEntity[] | null = null;
   const ch = activeChannels(model);
@@ -3943,7 +4437,7 @@ export function simulate(model: EngineModel, reps = 30, seed = 1, options: Simul
   }
   const start = options.initialState ?? initialState(model);
   for (let i = 0; i < reps; i++) {
-    const r = runOnce(model, seed + i * SEED_STRIDE, i === 0, start, false, options.monthly ? (options.monthStarts ?? true) : false);
+    const r = runOnce(model, seed + i * SEED_STRIDE, i === 0, start, false, options.monthly ? (options.monthStarts ?? true) : false, Boolean(options.personTime));
     if (i === 0) trace = r.entities;
     runs.push(r);
   }
@@ -4072,6 +4566,7 @@ export function simulate(model: EngineModel, reps = 30, seed = 1, options: Simul
     ...(model.clients ? { clients: clientResults(model, runs) } : {}),
     ...(runs[0]?.churn ? { churnCauses: summariseChurn(model, resolveChurnDrivers(model), runs.map((r) => r.churn!)) } : {}),
     ...(options.monthly && runs[0]?.monthly ? { monthly: monthlyResult(model, runs.map((r) => r.monthly!)) } : {}),
+    ...(options.personTime && runs[0]?.personTime ? { personTime: personTimeMeans(runs.map((r) => r.personTime!)) } : {}),
     ...(options.monthly && runs[0]?.monthly
       ? {
           monthlySamples: {

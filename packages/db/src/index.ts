@@ -27,21 +27,14 @@ export {
   type ModelOptions,
 } from "./model";
 export { loadAnalysisRules, saveAnalysisRules, type AnalysisRules, type SaveAnalysisRulesOutcome } from "./analysis-rules";
-export { loadLeverSettings, saveLeverSettings, type LeverSettings, type SaveLeverSettingsOutcome } from "./lever-settings";
-export {
-  FIRST_PRINCIPLES_COLUMNS,
-  firstPrinciplesDiffer,
-  firstPrinciplesFromRow,
-  firstPrinciplesToColumns,
-  loadDeleteCandidates,
-  loadFirstPrinciples,
-  loadFirstPrinciplesFor,
-  resolveFirstPrinciples,
-  saveFirstPrinciples,
-  type FirstPrinciplesOwner,
-  type ResolvedFirstPrinciples,
-  type SaveFirstPrinciplesOutcome,
-} from "./first-principles";
+export * from "./capacity-setup";
+export * from "./capacity-figures";
+export * from "./capacity-changes";
+export * from "./issue-changes";
+export * from "./sandbox-play";
+export * from "./sandbox-play-series";
+export * from "./sandbox-verdict";
+export { applyCapacityStarter, STARTER_NUMBERS, STARTER_ROLES, STARTER_TIERS, type Queryable as StarterQueryable, type StarterResult } from "./capacity-starter";
 export { isRetiredStep, partitionSteps, retiredSteps } from "./retired";
 export {
   absolutePositions,
@@ -155,6 +148,7 @@ export {
   LEAD_SOURCE_COLUMNS,
   listProcesses,
   loadChurnDrivers,
+  loadCapacityInputs,
   loadClientGroups,
   loadClients,
   loadTeam,
@@ -276,16 +270,20 @@ export {
   type Backing,
   type EvidenceField,
   type FileCitation,
-  type FileFirstPrinciples,
   type FileRange,
   type FileSource,
 } from "./process-file-2";
 export { claudePrompt2, PROCESS_FILE_EXAMPLE_2, PROCESS_FILE_SCHEMA_2 } from "./process-file-2-schema";
 export {
+  blockersOf,
+  capacityBlockers,
+  capacityGaps,
+  capacityNotes,
   findGaps,
   gapInputFromBundle,
   gapInputFromFile,
   gapLines,
+  notesOf,
   SERVER_DEFAULT_NOTE_PREFIX,
   type GapInput,
   type GapKind,
@@ -301,5 +299,5 @@ export {
   hideAiIssueKey,
 } from "./person-labels";
 export { OVERTIME_COST_CLAUSE, payFreeIssueFields } from "./issue-pay";
-export * from "./share";
 export { MONEY_SOURCE, moneyRegex, shareMoneyRegex } from "./money";
+export { capacitySetupFromModel } from "./fixtures/capacity-setup-from-model";

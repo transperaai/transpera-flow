@@ -7,7 +7,7 @@ const { onceForRequest } = await import("@/lib/auth/session");
 // getSessionUser's per-request memo: React's `cache` doesn't memoize in a Server Action or a Route Handler, where nearly every
 // call site asks getSessionUser() and then getDb() (which asks again), each time a session read and an access check.
 describe("onceForRequest", () => {
-  const user = { id: "u", email: "a@b.c", agencyAdmin: false, guest: false, name: null };
+  const user = { id: "u", email: "a@b.c", agencyAdmin: false, name: null };
 
   it("loads once for one request's headers, and again for another request", async () => {
     const load = vi.fn(async () => user);

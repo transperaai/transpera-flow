@@ -1,12 +1,12 @@
-// What `transpera-process/2` adds to the /1 file (issue #167, B14): evidence for every number, a list of sources, and first
-// principles. (It used to carry facts about the company and proposed issues and ideas as well; Suggestions are gone,
-// docs/plans/cut-list.md item 2, and a file that still has them gets a warning that they are not read.) The steps, links and groups are checked in process-file.ts
+// What `transpera-process/2` adds to the /1 file (issue #167, B14): evidence for every number and a list of sources.
+// (It used to carry facts about the company, proposed issues and ideas, and first principles as well; they are gone,
+// and a file that still has them gets a warning that they are not read.) The steps, links and groups are checked in process-file.ts
 // (shared with /1); this module checks the new parts and holds their types, schema pieces and the prompt's extra rules.
 // Pure: no I/O and no framework.
 //
-// A file never changes anything live: first principles go to the new draft; sources are added and linked to the process.
+// A file never changes anything live: sources are added and linked to the process.
 
-// The engine's lists (ratings, issue types, first-principles values, success measures) are written out here, not imported: this
+// The engine's lists (ratings, issue types) are written out here, not imported: this
 // module and the schema generator (scripts/gen-import-schema.ts) run under plain Node, which can't load the engine's source. A
 // test (process-file-2.test.ts) fails if any list drifts from the engine's.
 
@@ -14,12 +14,6 @@ import { isObject, norm, q, suggest } from "@transpera-flow/db/process-file-util
 
 export const PROCESS_FILE_FORMAT_2 = "transpera-process/2";
 
-export const FP_KINDS = ["truth", "assumption"] as const;
-export const FP_VERDICTS = ["keep", "change", "drop", "challenge"] as const;
-export const FP_COMPARATORS = ["atLeast", "atMost"] as const;
-export const SUCCESS_KPI_KEYS = ["won", "winsPerWeek", "winRate", "newMrr", "billed", "cycleHours", "labour", "wipEnd"] as const;
-const FP_MAX_ITEMS = 50;
-const FP_MAX_CHAIN = 10;
 
 export const SOURCE_KINDS = ["transcript", "notes", "sop", "spreadsheet", "data", "screenshot", "other"] as const;
 export type FileSourceKind = (typeof SOURCE_KINDS)[number];
@@ -29,7 +23,6 @@ const MAX_QUOTE = 2000;
 const MAX_CITATIONS = 10;
 const MAX_REASON = 2000;
 const MAX_BODY = 500_000;
-const MAX_TEXT = 2000;
 
 /** The step fields that can carry evidence, as the file names them. */
 export const EVIDENCE_FIELDS = ["hands_on_hours", "wait_hours", "rework_rate", "waiting_now", "sla_hours"] as const;
@@ -76,14 +69,6 @@ export interface FileSource {
 export interface FileRange {
   min: number;
   max: number;
-}
-
-export interface FileFirstPrinciples {
-  job?: Backing & { who?: string; progress?: string; situation?: string; done?: string };
-  truths: (Backing & { text: string; kind?: (typeof FP_KINDS)[number]; test?: string })[];
-  requirements: (Backing & { text: string; owner?: string; why?: string; verdict?: (typeof FP_VERDICTS)[number]; step?: string })[];
-  measures: (Backing & { text: string; kpi?: (typeof SUCCESS_KPI_KEYS)[number]; comparator?: (typeof FP_COMPARATORS)[number]; target?: number; horizon?: string })[];
-  why?: Backing & { problem?: string; chain?: string[]; root?: string };
 }
 
 /** What the v2 checker needs from the file's steps. */
@@ -262,7 +247,7 @@ export function readAssumed(raw: unknown, where: string, env: Env): string | und
   return raw.trim();
 }
 
-/** `evidence` and `assumed` of an item (company, proposal, first principles). */
+/** `evidence` and `assumed` of an item (a source's own items). */
 export function readBacking(raw: Record<string, unknown>, where: string, env: Env, opts: { warnIfBare?: boolean } = {}): Backing {
   const evidence = readCitations(raw.evidence, where, env);
   const assumed = readAssumed(raw.assumed, where, env);
@@ -286,7 +271,27 @@ export function citationConflict(label: string, field: EvidenceField, cites: rea
 // ---------------------------------------------------------------------------
 
 /** The step fields /2 reads on top of /1's. */
-export const STEP_FIELDS_2 = ["hands_on_range", "wait_range", "rework_to", "tool", "sla_hours", "waiting_now", "evidence", "assumed"];
+export const STEP_FIELDS_2 = [
+  "hands_on_range", "wait_range", "rework_to", "tool", "sla_hours", "waiting_now", "evidence", "assumed",
+  "split", "split_notes", "tier_multiplier", "to_client_manager", "sources",
+];
+
+/** The parts of a step's hands-on time (capacity P4): the work of gathering, of judging, of checking. */
+export const SPLIT_PARTS = ["automatable", "augmentable", "manual"] as const;
+export type SplitPart = (typeof SPLIT_PARTS)[number];
+/** What each part is in the interviews' words (the process-file skill's gather / judge / check). */
+export const SPLIT_PART_WORDS: Record<SplitPart, string> = { automatable: "automatable (gather)", augmentable: "augmentable (judge)", manual: "manual (check)" };
+/** The shares of a split must add up to 1 within this (the database checks the same). */
+export const SPLIT_SUM_TOLERANCE = 0.001;
+/** Where a base value came from (requirements section 7); the engine's `SourceLabel`. A test keeps the lists equal. */
+export const SOURCE_LABELS = ["interview", "calculator", "measured", "estimate"] as const;
+export type FileSourceLabel = (typeof SOURCE_LABELS)[number];
+/** The step values that carry a source label. */
+export const SOURCED_VALUES = ["work", "split", "tier_multiplier"] as const;
+export type SourcedValue = (typeof SOURCED_VALUES)[number];
+export const MAX_SPLIT_NOTE = 300;
+export const MAX_TIER_MULTIPLIER = 100;
+export const MAX_TIERS = 50;
 
 export interface StepExtras {
   hands_on_range?: FileRange;
@@ -297,6 +302,16 @@ export interface StepExtras {
   waiting_now?: number;
   evidence?: Partial<Record<EvidenceField, FileCitation[]>>;
   assumed?: Partial<Record<EvidenceField, string>>;
+  /** Shares of the step's hands-on time that can be automated, augmented or only done by hand; they add up to 1. */
+  split?: Record<SplitPart, number>;
+  /** One line of words for each part of the split. */
+  split_notes?: Partial<Record<SplitPart, string>>;
+  /** × on the step's time by tier key (a tier not listed is 1). */
+  tier_multiplier?: Record<string, number>;
+  /** The step goes to the client's manager, falling back to its role. */
+  to_client_manager?: boolean;
+  /** Where each base value came from. */
+  sources?: Partial<Record<SourcedValue, FileSourceLabel>>;
 }
 
 /** The numbers /1 already read for the step (hours, wait, rework), which the new fields are checked against. */
@@ -324,6 +339,86 @@ function readRange(v: unknown, label: string, what: string, max: number, given: 
   return { min: v.min, max: v.max };
 }
 
+/** The step's work split, tier multipliers, manager routing and source labels (capacity P4), with problems in plain words. */
+function readBaseValues(raw: Record<string, unknown>, label: string, env: Env, out: StepExtras): void {
+  if (raw.split !== undefined && raw.split !== null) {
+    const sp = raw.split;
+    if (!isObject(sp)) env.errors.push(`${label}: "split" should be {"automatable": 0.5, "augmentable": 0.3, "manual": 0.2}: the share of the step's time that can be automated, augmented, or only done by hand.`);
+    else {
+      unknownFields(sp, SPLIT_PARTS, `${label}, split`, env);
+      const missing = SPLIT_PARTS.filter((p) => sp[p] === undefined || sp[p] === null);
+      const bad = SPLIT_PARTS.filter((p) => !missing.includes(p) && (typeof sp[p] !== "number" || !Number.isFinite(sp[p]) || (sp[p] as number) < 0 || (sp[p] as number) > 1));
+      if (missing.length) env.errors.push(`${label}: the split needs a share for ${SPLIT_PARTS.map((p) => `"${p}"`).join(", ")}; ${missing.map((p) => `"${p}"`).join(" and ")} ${missing.length === 1 ? "is" : "are"} missing. Use 0 for a part that doesn't exist.`);
+      for (const p of bad) env.errors.push(`${label}: the split's ${p} share is ${typeof sp[p] === "number" ? sp[p] : "not a number"}, but a share runs from 0 to 1 (0.5 is half).`);
+      if (!missing.length && !bad.length) {
+        const parts = SPLIT_PARTS.map((p) => sp[p] as number);
+        const total = parts.reduce((a, b) => a + b, 0);
+        if (Math.abs(total - 1) > SPLIT_SUM_TOLERANCE) env.errors.push(`${label}: the split's shares add up to ${Math.round(total * 1000) / 10}%, but they must add up to 100%.`);
+        else out.split = { automatable: parts[0]!, augmentable: parts[1]!, manual: parts[2]! };
+      }
+    }
+  }
+  if (raw.split_notes !== undefined && raw.split_notes !== null) {
+    if (!isObject(raw.split_notes)) env.errors.push(`${label}: "split_notes" should be a line of words for each part, like {"automatable": "Pull spend and budgets"}.`);
+    else {
+      unknownFields(raw.split_notes, SPLIT_PARTS, `${label}, split_notes`, env);
+      const notes: Partial<Record<SplitPart, string>> = {};
+      for (const part of SPLIT_PARTS) {
+        const v = raw.split_notes[part];
+        if (v === undefined || v === null) continue;
+        if (typeof v !== "string") env.errors.push(`${label}: the split note for ${part} should be text.`);
+        else if (/[\r\n]/.test(v.trim())) env.errors.push(`${label}: the split note for ${part} should be one line.`);
+        else if (v.trim().length > MAX_SPLIT_NOTE) env.errors.push(`${label}: the split note for ${part} is ${v.trim().length} characters long; the most is ${MAX_SPLIT_NOTE}.`);
+        else if (v.trim()) notes[part] = v.trim();
+      }
+      if (Object.keys(notes).length) out.split_notes = notes;
+      if (Object.keys(notes).length && raw.split === undefined) env.warnings.push(`${label} has split_notes but no split, so the notes won't be used until the shares are given.`);
+    }
+  }
+  if (raw.tier_multiplier !== undefined && raw.tier_multiplier !== null) {
+    const tm = raw.tier_multiplier;
+    if (!isObject(tm)) env.errors.push(`${label}: "tier_multiplier" should give a number for each tier, like {"T1": 1.3, "T2": 1, "T3": 0.8}.`);
+    else {
+      const entries = Object.entries(tm);
+      if (entries.length > MAX_TIERS) env.errors.push(`${label}: tier_multiplier lists ${entries.length} tiers; the most is ${MAX_TIERS}.`);
+      const mult: Record<string, number> = {};
+      for (const [tier, v] of entries.slice(0, MAX_TIERS)) {
+        if (!tier.trim() || tier.trim().length > 40) env.errors.push(`${label}: a tier in tier_multiplier needs a name of 1 to 40 characters.`);
+        else if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > MAX_TIER_MULTIPLIER) env.errors.push(`${label}: the multiplier for tier ${q(tier)} should be a number from 0 to ${MAX_TIER_MULTIPLIER} (1 means the base time, 1.3 means 30% longer).`);
+        else mult[tier.trim()] = v;
+      }
+      if (Object.keys(mult).length) out.tier_multiplier = mult;
+    }
+  }
+  if (raw.to_client_manager !== undefined && raw.to_client_manager !== null) {
+    if (typeof raw.to_client_manager !== "boolean") env.errors.push(`${label}: to_client_manager should be true or false.`);
+    else if (raw.to_client_manager) {
+      out.to_client_manager = true;
+      if (typeof raw.role !== "string" || !raw.role.trim()) env.warnings.push(`${label} goes to the client's manager but has no role, so it has no one to fall back to when a client has no manager. Give it a role.`);
+    }
+  }
+  if (raw.sources !== undefined && raw.sources !== null) {
+    if (!isObject(raw.sources)) env.errors.push(`${label}: "sources" should say where each value came from, like {"work": "interview", "split": "estimate"}.`);
+    else {
+      const sources: Partial<Record<SourcedValue, FileSourceLabel>> = {};
+      for (const [key, v] of Object.entries(raw.sources)) {
+        if (!(SOURCED_VALUES as readonly string[]).includes(key)) {
+          env.warnings.push(`${label} has a source for ${q(key)}, which Transpera doesn't label (it labels ${SOURCED_VALUES.join(", ")}). It was ignored.`);
+          continue;
+        }
+        if (typeof v !== "string" || !(SOURCE_LABELS as readonly string[]).includes(v)) {
+          env.errors.push(`${label}: the source of ${key} is ${typeof v === "string" ? q(v) : "not text"}; use ${SOURCE_LABELS.join(", ")}.`);
+          continue;
+        }
+        sources[key as SourcedValue] = v as FileSourceLabel;
+      }
+      if (Object.keys(sources).length) out.sources = sources;
+      if (sources.split && raw.split === undefined) env.warnings.push(`${label} gives a source for the split but no split.`);
+      if (sources.tier_multiplier && raw.tier_multiplier === undefined) env.warnings.push(`${label} gives a source for the tier multipliers but no tier_multiplier.`);
+    }
+  }
+}
+
 /** What /2 adds to a step: ranges, where rework goes, the tool, the SLA, items waiting now, and the evidence for each value. */
 export function readStepExtras(raw: Record<string, unknown>, label: string, env: Env, given: GivenNumbers): StepExtras {
   const out: StepExtras = {};
@@ -344,6 +439,8 @@ export function readStepExtras(raw: Record<string, unknown>, label: string, env:
     if (!Number.isInteger(now)) env.errors.push(`${label}: waiting_now should be a whole number of items.`);
     else out.waiting_now = now;
   }
+
+  readBaseValues(raw, label, env, out);
 
   const stated: Record<EvidenceField, number | undefined> = {
     hands_on_hours: given.hands_on_hours,
@@ -397,139 +494,8 @@ export function readStepExtras(raw: Record<string, unknown>, label: string, env:
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// First principles
-// ---------------------------------------------------------------------------
-
-const ITEM_FIELDS = ["evidence", "assumed"];
-
-const FP_KEYS = ["job", "truths", "requirements", "measures", "why"];
-
-/** The file's `first_principles`: filled only where the materials say so. */
-export function checkFirstPrinciples(raw: unknown, steps: StepsView, env: Env): FileFirstPrinciples | undefined {
-  if (raw === undefined) return undefined;
-  if (!isObject(raw)) {
-    env.errors.push('"first_principles" should be an object with job, truths, requirements, measures and why.');
-    return undefined;
-  }
-  unknownFields(raw, FP_KEYS, "first_principles", env);
-  const fp: FileFirstPrinciples = { truths: [], requirements: [], measures: [] };
-  const items = (v: unknown, key: string): unknown[] => {
-    if (v === undefined || v === null) return [];
-    if (!Array.isArray(v)) {
-      env.errors.push(`first_principles.${key} should be a list.`);
-      return [];
-    }
-    if (v.length > FP_MAX_ITEMS) env.errors.push(`first_principles.${key} lists ${v.length}; the most is ${FP_MAX_ITEMS}.`);
-    return v.slice(0, FP_MAX_ITEMS);
-  };
-
-  if (raw.job !== undefined) {
-    if (!isObject(raw.job)) env.errors.push("first_principles.job should be an object with who, progress, situation and done.");
-    else {
-      const j = raw.job;
-      unknownFields(j, ["who", "progress", "situation", "done", ...ITEM_FIELDS], "first_principles.job", env);
-      const job: NonNullable<FileFirstPrinciples["job"]> = { ...readBacking(j, "first_principles.job", env, { warnIfBare: true }) };
-      for (const k of ["who", "progress", "situation", "done"] as const) {
-        const v = text(j[k], MAX_TEXT, "first_principles.job", k, env);
-        if (v) job[k] = v;
-      }
-      fp.job = job;
-    }
-  }
-
-  items(raw.truths, "truths").forEach((r, i) => {
-    const where = `first_principles.truths item ${i + 1}`;
-    if (!isObject(r)) return void env.errors.push(`${where} should be an object with text.`);
-    const t = text(r.text, MAX_TEXT, where, "text", env);
-    if (!t) return void env.errors.push(`${where} has no text.`);
-    unknownFields(r, ["text", "kind", "test", ...ITEM_FIELDS], where, env);
-    const item: FileFirstPrinciples["truths"][number] = { text: t, ...readBacking(r, `${where} ${q(t.slice(0, 40))}`, env, { warnIfBare: true }) };
-    if (r.kind !== undefined) {
-      if (typeof r.kind === "string" && (FP_KINDS as readonly string[]).includes(r.kind)) item.kind = r.kind as (typeof FP_KINDS)[number];
-      else env.errors.push(`${where}: kind should be truth or assumption.`);
-    }
-    const test = text(r.test, MAX_TEXT, where, "test", env);
-    if (test) item.test = test;
-    fp.truths.push(item);
-  });
-
-  const ref = (v: unknown, where: string): string | undefined => {
-    if (v === undefined || v === null) return undefined;
-    if (typeof v !== "string" || !steps.has(v.trim())) {
-      const near = typeof v === "string" ? suggest(v.trim(), steps.ids, env.budget) : null;
-      env.errors.push(`${where} names ${typeof v === "string" ? q(v) : "something"} as its step, which isn't a step.${near ? ` Did you mean ${q(near)}?` : ""}`);
-      return undefined;
-    }
-    return v.trim();
-  };
-  items(raw.requirements, "requirements").forEach((r, i) => {
-    const where = `first_principles.requirements item ${i + 1}`;
-    if (!isObject(r)) return void env.errors.push(`${where} should be an object with text.`);
-    const t = text(r.text, MAX_TEXT, where, "text", env);
-    if (!t) return void env.errors.push(`${where} has no text.`);
-    unknownFields(r, ["text", "owner", "why", "verdict", "step", ...ITEM_FIELDS], where, env);
-    const item: FileFirstPrinciples["requirements"][number] = { text: t, ...readBacking(r, `${where} ${q(t.slice(0, 40))}`, env, { warnIfBare: true }) };
-    const owner = text(r.owner, 200, where, "owner", env);
-    if (owner) item.owner = owner;
-    const why = text(r.why, MAX_TEXT, where, "why", env);
-    if (why) item.why = why;
-    if (r.verdict !== undefined) {
-      if (typeof r.verdict === "string" && (FP_VERDICTS as readonly string[]).includes(r.verdict)) item.verdict = r.verdict as (typeof FP_VERDICTS)[number];
-      else env.errors.push(`${where}: verdict should be keep, change, drop or challenge.`);
-    }
-    const step = ref(r.step, where);
-    if (step) item.step = step;
-    fp.requirements.push(item);
-  });
-
-  items(raw.measures, "measures").forEach((r, i) => {
-    const where = `first_principles.measures item ${i + 1}`;
-    if (!isObject(r)) return void env.errors.push(`${where} should be an object with text.`);
-    const t = text(r.text, MAX_TEXT, where, "text", env);
-    if (!t) return void env.errors.push(`${where} has no text.`);
-    unknownFields(r, ["text", "kpi", "comparator", "target", "horizon", ...ITEM_FIELDS], where, env);
-    const item: FileFirstPrinciples["measures"][number] = { text: t, ...readBacking(r, `${where} ${q(t.slice(0, 40))}`, env, { warnIfBare: true }) };
-    if (r.kpi !== undefined && r.kpi !== null) {
-      if (typeof r.kpi === "string" && (SUCCESS_KPI_KEYS as readonly string[]).includes(r.kpi)) item.kpi = r.kpi as (typeof SUCCESS_KPI_KEYS)[number];
-      else env.errors.push(`${where}: kpi should be one of ${SUCCESS_KPI_KEYS.join(", ")}, or left out.`);
-    }
-    if (r.comparator !== undefined) {
-      if (typeof r.comparator === "string" && (FP_COMPARATORS as readonly string[]).includes(r.comparator)) item.comparator = r.comparator as (typeof FP_COMPARATORS)[number];
-      else env.errors.push(`${where}: comparator should be atLeast or atMost.`);
-    }
-    const target = number(r.target, where, "target", -1e12, 1e12, env, "in the unit people read: a win rate of 30% is 30");
-    if (target !== undefined) item.target = target;
-    const horizon = text(r.horizon, 200, where, "horizon", env);
-    if (horizon) item.horizon = horizon;
-    fp.measures.push(item);
-  });
-
-  if (raw.why !== undefined) {
-    if (!isObject(raw.why)) env.errors.push("first_principles.why should be an object with problem, chain and root.");
-    else {
-      const w = raw.why;
-      unknownFields(w, ["problem", "chain", "root", ...ITEM_FIELDS], "first_principles.why", env);
-      const why: NonNullable<FileFirstPrinciples["why"]> = { ...readBacking(w, "first_principles.why", env, { warnIfBare: true }) };
-      const problem = text(w.problem, MAX_TEXT, "first_principles.why", "problem", env);
-      if (problem) why.problem = problem;
-      const root = text(w.root, MAX_TEXT, "first_principles.why", "root", env);
-      if (root) why.root = root;
-      const chain = strings(w.chain, "first_principles.why", "chain", FP_MAX_CHAIN, env);
-      if (chain?.length) why.chain = chain;
-      fp.why = why;
-    }
-  }
-  return fp;
-}
-
 /** How many things each v2 section will make, for the preview and for tests. */
-export function sectionCounts(file: {
-  sources?: readonly FileSource[];
-  first_principles?: FileFirstPrinciples;
-}): { sources: number; firstPrinciples: number } {
-  const f = file.first_principles;
-  const firstPrinciples = f ? (f.job ? 1 : 0) + f.truths.length + f.requirements.length + f.measures.length + (f.why ? 1 : 0) : 0;
-  return { sources: file.sources?.length ?? 0, firstPrinciples };
+export function sectionCounts(file: { sources?: readonly FileSource[] }): { sources: number } {
+  return { sources: file.sources?.length ?? 0 };
 }
 

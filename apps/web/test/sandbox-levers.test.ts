@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  LEVER_KIND_IDS,
   SANDBOX_LEVERS,
   changesFromPatch,
   larkspurBundle,
@@ -67,7 +66,7 @@ describe("the registry and the engine's patches", () => {
     expect(() => changesFromPatch([{ path: "nope", op: "set", value: 1 }])).toThrow(/No lever/);
   });
 
-  it("each of the process page's sliders maps to a lever whose Settings, Levers kind is the slider's kind", () => {
+  it("each of the older lever list's sliders maps to a lever whose kind is the slider's kind", () => {
     for (const model of models) {
       for (const lever of buildLevers(model)) {
         const hit = leverOfPath(lever.path);
@@ -77,9 +76,8 @@ describe("the registry and the engine's patches", () => {
     }
   });
 
-  it("every kind the registry names is a real kind, in the catalogue and in the database package's copy", () => {
+  it("every kind the registry names is a real kind in the catalogue", () => {
     const catalogue = LEVER_KINDS.map((k) => k.id);
-    expect([...LEVER_KIND_IDS]).toEqual(catalogue);
     for (const l of SANDBOX_LEVERS) if (l.kind !== null) expect(catalogue, l.id).toContain(l.kind);
     // The kinds the catalogue says are changed in the Sandbox are the ones of the levers with no slider.
     const sandboxKinds = LEVER_KINDS.filter((k) => k.control === "sandbox").map((k) => k.id).sort();
@@ -103,7 +101,7 @@ describe("the registry and the engine's patches", () => {
     // Hiding a kind doesn't change what a saved change does; the Sandbox only says so.
     expect(leverHidden(sandboxLever("D1")!, ["people.starters"])).toBe(true);
     expect(leverHidden(sandboxLever("E6")!, ["people.starters"])).toBe(false);
-    expect(leverHidden(sandboxLever("A6")!, LEVER_KIND_IDS)).toBe(false);
+    expect(leverHidden(sandboxLever("A6")!, LEVER_KINDS.map((k) => k.id))).toBe(false);
   });
 
   it("only offers a lever with ranges for the ops the dialog shows, and the hire range is 0.1 to 1.5 (0.1 to 2 accepted)", () => {
