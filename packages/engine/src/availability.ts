@@ -12,6 +12,7 @@
 // A model where nobody has team time or a ramp (or where every share is 1) is returned as it is, so it runs as before.
 
 import { availableShare, CAPACITY_WEEKS_PER_MONTH } from "./capacity-inputs";
+import { carryExpanded } from "./clients";
 import type { EngineChannels, EngineModel } from "./model";
 
 /** The model's own channels behind an injected capacity channel, by the channels object the run reads (for paid hours). */
@@ -62,7 +63,7 @@ export function withAvailability(model: EngineModel, monthStarts?: readonly numb
   if (any) {
     const channels: EngineChannels = { ...base, starts, capacity };
     original.set(channels, base);
-    out = { ...model, channels };
+    out = carryExpanded(model, { ...model, channels });
   }
   let byKey = memo.get(model);
   if (!byKey) memo.set(model, (byKey = new Map()));

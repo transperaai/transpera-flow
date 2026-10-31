@@ -181,6 +181,15 @@ const expanded = new WeakSet<EngineModel>();
 const memo = new WeakMap<EngineModel, EngineModel>();
 
 /**
+ * Say that `to`, a copy of the already expanded model `from` with something else changed, is expanded too. Needed beside "groups-add",
+ * where expanding twice would add the counted clients twice (under "groups-replace" a second expansion gives the same clients).
+ */
+export function carryExpanded(from: EngineModel, to: EngineModel): EngineModel {
+  if (expanded.has(from)) expanded.add(to);
+  return to;
+}
+
+/**
  * The model with its client groups expanded: `clients` holds one unnamed
  * client per counted client (named `<service> <n>`, billing the group's fee,
  * starting at its health, assigned to nobody), and each grouped service takes

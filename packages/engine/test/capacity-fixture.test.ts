@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { capacityModel, checkCapacityInputs, effectiveDeliverables, stepParts, tasksPerMonth } from "../src";
 
-// The prototype's example agency as an engine model (fixtures/capacity.ts). Not a golden: the engine doesn't read the new
-// fields yet. These tests check it is a clean input and still says what the prototype says.
+// The prototype's example agency as an engine model (fixtures/capacity.ts; the `capacity` golden). These tests check it is a
+// clean input and still says what the prototype says.
 
 describe("capacityModel", () => {
   const m = capacityModel();

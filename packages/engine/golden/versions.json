@@ -88,5 +88,11 @@
     "date": "2026-10-29",
     "note": "Time and what it achieves (sandbox phase 4): EngineStep.purpose and MonthlyResult.time (first-pass hands-on hours by purpose, rework, client hours, idle and hours available, per role, person and team); larkspur-time golden model. No existing simulated number moved.",
     "digest": "sha256:c39ad8a186cddebcf53a6b34d6b27c0371604d07a18fe1c80100f28dbdbc713c"
+  },
+  {
+    "version": "1.15.0",
+    "date": "2026-10-31",
+    "note": "capacity inputs (P2): new golden; no existing number moved",
+    "digest": "sha256:5f7a97009474b5944f15ce81c34b76df412d8219a455b2034275c63f90983078"
   }
 ]

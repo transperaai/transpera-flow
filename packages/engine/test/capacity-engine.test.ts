@@ -198,6 +198,13 @@ describe("item 2: named and counted clients together", () => {
     const r = simulate(withGroups("groups-add"), 2, 1);
     expect(Object.keys(r.clients ?? {}).sort()).toEqual(["group:svc:1", "group:svc:2", "group:svc:3", "n1", "n2"]);
   });
+
+  it("the counted clients are added once even when team time or a ramp makes the run copy the model", () => {
+    const m = withGroups("groups-add");
+    m.people = { ann: { name: "Ann", roles: ["r"], capacity: HPW, reservedShare: 0.2 }, bob: { name: "Bob", roles: ["r"], capacity: HPW, ramp: [0.5] } };
+    const r = simulate(m, 2, 1, { monthly: true });
+    expect(Object.keys(r.clients ?? {})).toHaveLength(5);
+  });
 });
 
 describe("item 3: portfolios and the client's manager", () => {

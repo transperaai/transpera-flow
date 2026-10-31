@@ -62,25 +62,25 @@ export interface EnginePerson {
   /**
    * Team time (0-1): the share of their hours kept for leading, mentoring and reviews. Their hours for client work are
    * the hours they have × (1 − share) (`availableShare`, capacity-inputs.ts). Omitted: 0, all their hours, as before this
-   * field existed. Not read by the simulation yet (P2).
+   * field existed. Read by the simulation from engine 1.15.0 (availability.ts): it lowers their hours for work, not their pay.
    */
   reservedShare?: number;
   /**
    * New-starter ramp: the share of full capacity in each month from `from` (the first entry is the month `from` falls in),
-   * e.g. `[0.4, 0.6, 0.8]`, then 1 (`rampShare`). Omitted: full from the start, as before this field existed. Not read by
-   * the simulation yet (P2).
+   * e.g. `[0.4, 0.6, 0.8]`, then 1 (`rampShare`). Omitted: full from the start, as before this field existed. Read by
+   * the simulation from engine 1.15.0, with team time (availability.ts).
    */
   ramp?: number[];
   /**
    * Tier keys (`EngineService.tier`) they can serve, used to place won clients. Omitted: every tier, as before this field
-   * existed. Not read by the simulation yet (P2).
+   * existed. Read by the simulation from engine 1.15.0, for `placeNewClients: "least-busy"`.
    */
   tiers?: string[];
   /**
    * Counted clients assigned to them, by service id: that many of the service's counted clients (`clientGroups`), in each of
    * the person's roles that the service's servicing steps use. The group's remainder (count minus the sum over people) stays
    * unassigned and shared, as today; a sum above the count is an input error (`checkCapacityInputs`). Omitted: none
-   * assigned, as before this field existed. Not read by the simulation yet (P2).
+   * assigned, as before this field existed. Read by the simulation from engine 1.15.0 (`withClientGroups` deals them out in people order).
    */
   portfolio?: Record<string, number>;
 }
@@ -240,8 +240,8 @@ export type Recurrence =
        * Tasks a month driven by what the client's tier gets: `perMonth × value ÷ (per ?? 1)`, where `value` is the client's
        * effective deliverable (its override, else its tier's; `effectiveDeliverables`). `driver: "adhoc"` reads `chance × requests`
        * (arrivals are Bernoulli(chance) a month, then that many requests). Words use `per: 1000`. Spaced evenly in the month
-       * like `{ every: "month", times }`. A driver of 0 means no tasks. Not read by the simulation yet (P2): until then it is
-       * not a runnable recurrence.
+       * like `{ every: "month", times }`. A driver of 0 means no tasks. Read by the simulation from engine 1.15.0. Ad-hoc tasks are placed
+       * uniformly in the month.
        */
       perMonth: number;
       driver: DeliverableKey | "adhoc";
@@ -419,7 +419,7 @@ export interface EngineStep {
    * The step goes to the client's manager (D32): the person who holds the client in their portfolio or assignments, whatever
    * their role (a director or a manager). Falls back to `role`'s pool if the client has none. A step for a shared team keeps
    * `role` and leaves this off; a pinned step keeps `person`. Needs a `role`. Omitted: false, as before this field existed.
-   * Not read by the simulation yet (P2).
+   * Read by the simulation from engine 1.15.0.
    */
   toClientManager?: boolean;
   /**
@@ -658,13 +658,13 @@ export interface EngineModel {
   /**
    * How counted clients (`clientGroups`) and named clients (`clients`) combine. "groups-replace" (the default) is today's rule:
    * groups replace the named roster. "groups-add": the groups are unnamed clients in addition to the named ones. Omitted:
-   * "groups-replace", as before this field existed. Not read by the simulation yet (P2).
+   * "groups-replace", as before this field existed. Read by the simulation from engine 1.15.0 (`withClientGroups`).
    */
   clientMix?: "groups-replace" | "groups-add";
   /**
    * How won clients are assigned. "round-robin" (the default) is today's rule. "least-busy": the least-busy person who serves
-   * the tier (`EnginePerson.tiers`), in each needed role. Omitted: "round-robin", as before this field existed. Not read by
-   * the simulation yet (P2).
+   * the tier (`EnginePerson.tiers`), in each needed role. Omitted: "round-robin", as before this field existed. Read by
+   * the simulation from engine 1.15.0.
    */
   placeNewClients?: "round-robin" | "least-busy";
   /**

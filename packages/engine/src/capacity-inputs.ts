@@ -1,8 +1,9 @@
 // What the capacity inputs mean (docs/adr/0022-capacity-inputs.md; docs/plans/capacity/p23-interface-brief.md).
 //
-// Pure functions, so the engine (P2, P3) and the app's derived figures share one definition of each new field. Nothing in
-// simulate.ts reads this file yet: the fields are optional, and with all of them unset every function here gives the answer
-// the engine already gives (a factor of exactly 1, full availability, the old recurrences).
+// Pure functions, so the engine (P2, P3) and the app's derived figures share one definition of each new field. Since
+// engine 1.15.0 the run reads `effectiveDeliverables`, `tasksPerMonth` and `availableShare` (P2); `stepParts` and
+// `stepTimeFactor` are P3's and are not read yet. The fields are optional, and with all of them unset every function here
+// gives the answer the engine already gives (a factor of exactly 1, full availability, the old recurrences).
 //
 // Time: a month is 52/12 weeks, as in demand.ts and market.ts. Hours are working hours, as everywhere in the engine; a step's
 // mean `work` is in hours and so are the parts `stepParts` returns. Month indexes are 0-based (0 is the first month of the
