@@ -62,25 +62,25 @@ export interface EnginePerson {
   /**
    * Team time (0-1): the share of their hours kept for leading, mentoring and reviews. Their hours for client work are
    * the hours they have × (1 − share) (`availableShare`, capacity-inputs.ts). Omitted: 0, all their hours, as before this
-   * field existed. Not read by the simulation yet (P2).
+   * field existed. Read by the simulation from engine 1.15.0 (availability.ts): it lowers their hours for work, not their pay.
    */
   reservedShare?: number;
   /**
    * New-starter ramp: the share of full capacity in each month from `from` (the first entry is the month `from` falls in),
-   * e.g. `[0.4, 0.6, 0.8]`, then 1 (`rampShare`). Omitted: full from the start, as before this field existed. Not read by
-   * the simulation yet (P2).
+   * e.g. `[0.4, 0.6, 0.8]`, then 1 (`rampShare`). Omitted: full from the start, as before this field existed. Read by
+   * the simulation from engine 1.15.0, with team time (availability.ts).
    */
   ramp?: number[];
   /**
    * Tier keys (`EngineService.tier`) they can serve, used to place won clients. Omitted: every tier, as before this field
-   * existed. Not read by the simulation yet (P2).
+   * existed. Read by the simulation from engine 1.15.0, for `placeNewClients: "least-busy"`.
    */
   tiers?: string[];
   /**
    * Counted clients assigned to them, by service id: that many of the service's counted clients (`clientGroups`), in each of
    * the person's roles that the service's servicing steps use. The group's remainder (count minus the sum over people) stays
    * unassigned and shared, as today; a sum above the count is an input error (`checkCapacityInputs`). Omitted: none
-   * assigned, as before this field existed. Not read by the simulation yet (P2).
+   * assigned, as before this field existed. Read by the simulation from engine 1.15.0 (`withClientGroups` deals them out in people order).
    */
   portfolio?: Record<string, number>;
 }
@@ -240,8 +240,8 @@ export type Recurrence =
        * Tasks a month driven by what the client's tier gets: `perMonth × value ÷ (per ?? 1)`, where `value` is the client's
        * effective deliverable (its override, else its tier's; `effectiveDeliverables`). `driver: "adhoc"` reads `chance × requests`
        * (arrivals are Bernoulli(chance) a month, then that many requests). Words use `per: 1000`. Spaced evenly in the month
-       * like `{ every: "month", times }`. A driver of 0 means no tasks. Not read by the simulation yet (P2): until then it is
-       * not a runnable recurrence.
+       * like `{ every: "month", times }`. A driver of 0 means no tasks. Read by the simulation from engine 1.15.0. Ad-hoc tasks are placed
+       * uniformly in the month.
        */
       perMonth: number;
       driver: DeliverableKey | "adhoc";
@@ -419,7 +419,7 @@ export interface EngineStep {
    * The step goes to the client's manager (D32): the person who holds the client in their portfolio or assignments, whatever
    * their role (a director or a manager). Falls back to `role`'s pool if the client has none. A step for a shared team keeps
    * `role` and leaves this off; a pinned step keeps `person`. Needs a `role`. Omitted: false, as before this field existed.
-   * Not read by the simulation yet (P2).
+   * Read by the simulation from engine 1.15.0.
    */
   toClientManager?: boolean;
   /**
@@ -658,13 +658,13 @@ export interface EngineModel {
   /**
    * How counted clients (`clientGroups`) and named clients (`clients`) combine. "groups-replace" (the default) is today's rule:
    * groups replace the named roster. "groups-add": the groups are unnamed clients in addition to the named ones. Omitted:
-   * "groups-replace", as before this field existed. Not read by the simulation yet (P2).
+   * "groups-replace", as before this field existed. Read by the simulation from engine 1.15.0 (`withClientGroups`).
    */
   clientMix?: "groups-replace" | "groups-add";
   /**
    * How won clients are assigned. "round-robin" (the default) is today's rule. "least-busy": the least-busy person who serves
-   * the tier (`EnginePerson.tiers`), in each needed role. Omitted: "round-robin", as before this field existed. Not read by
-   * the simulation yet (P2).
+   * the tier (`EnginePerson.tiers`), in each needed role. Omitted: "round-robin", as before this field existed. Read by
+   * the simulation from engine 1.15.0.
    */
   placeNewClients?: "round-robin" | "least-busy";
   /**
@@ -953,6 +953,21 @@ export interface TimeSplit {
   uncovered: Stat[] | null;
 }
 
+/**
+ * Where each person's time goes, by step (the Capacity page links each item to its step, D32). Asked for with
+ * `simulate(…, { personTime: true })`; not asked for, nothing is allocated and no other output changes. Only the non-zero
+ * entries are listed.
+ */
+export interface PersonTime {
+  /** Mean hands-on hours a month per person id per step id, over the measured window (pipeline and servicing work both). */
+  stepHours: Record<string, Record<string, number>>;
+  /**
+   * Mean clients per person id per service id over the window: the clients who have them assigned in any role, or as their
+   * manager, counted under each service the client takes.
+   */
+  clients: Record<string, Record<string, number>>;
+}
+
 /** One month of a role's or person's busy share across replications. */
 export interface MonthBusy extends Stat {
   /** Hours a week they have that month (capacity less leave, and before a start or after an end date). */
@@ -1077,6 +1092,8 @@ export interface ReplicationResult {
   weekly?: WeeklySamples;
   /** Present only when the run was asked for month-by-month numbers (see `MonthlyReplication`). */
   monthly?: MonthlyReplication;
+  /** Present only when the run was asked for where each person's time goes (see `PersonTime`). */
+  personTime?: PersonTime;
   H: number;
   /** Warm-up simulated before t = 0 and discarded. */
   warmupHours: number;
@@ -1299,6 +1316,8 @@ export interface SimulationResult {
   churnCauses?: ChurnCauses;
   /** Month by month, only when the run was asked for it (`simulate(…, { monthly: true })`). */
   monthly?: MonthlyResult;
+  /** Where each person's time goes, by step, and their clients by service: only when asked for (`simulate(…, { personTime: true })`). Means over the replications. */
+  personTime?: PersonTime;
   /**
    * With `monthly`: each replication's own months (replication × month), for paired comparisons such as the price-rise
    * trade-off (the same seed and warm-up give the same random numbers, so two runs' replications pair up).

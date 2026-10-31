@@ -2,9 +2,9 @@
 // Source: docs/prototypes/client-capacity-app.PROTOTYPE.html (`base`, `PROCS`, `LIB`). The prototype's data is made up, so
 // nothing here is confidential; the names are the prototype's.
 //
-// The engine doesn't read the new fields yet (P2, P3), so this model is not a golden. It exists so that P1 can seed from
-// it, the check can be tested on a model that sets every field, and P2 has something to promote to a golden once
-// simulate.ts reads the fields (docs/engine-versioning.md).
+// The engine reads the P2 fields (engine 1.15.0), and this model is the `capacity` golden (docs/engine-versioning.md). It is
+// also what P1 seeds from and what the check is tested on. The work split, tier multipliers and changes are P3's: the model
+// sets them, and the engine doesn't read them yet.
 //
 // What the mapping does (the ADR has the reasoning):
 // - a service is one tier of one department (six of them), with its own deliverables and ad-hoc rule;

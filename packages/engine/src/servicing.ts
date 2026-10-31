@@ -6,6 +6,7 @@
 // twice the SLA (missed) lowers it more; and monthly churn rises as health
 // falls.
 
+import { effectiveDeliverables, tasksPerMonth } from "./capacity-inputs";
 import type { EngineClient, EngineHealthRules, EngineModel, EngineService, EngineServicingLink, Recurrence } from "./model";
 
 /** The PRD's estimated defaults (§6.3.5): start at 80; +2 on time, −5 late, −12 missed. */
@@ -52,7 +53,12 @@ export function clientChurnSensitivity(model: EngineModel, client: Pick<EngineCl
 /** A service's servicing links whose process the model has, with a usable recurrence and SLA. */
 export function servicingLinks(model: Pick<EngineModel, "servicingProcesses">, service: EngineService): EngineServicingLink[] {
   const processes = model.servicingProcesses ?? {};
-  return (service.servicing ?? []).filter((l) => l.process in processes && tasksPerWeek(l.recurrence) > 0 && l.sla > 0);
+  return (service.servicing ?? []).filter((l) => l.process in processes && hasTasks(l.recurrence) && l.sla > 0);
+}
+
+/** Whether a recurrence can make tasks. A driver recurrence needs a client's deliverables to know, so it counts when its rate is usable. */
+function hasTasks(r: Recurrence): boolean {
+  return "driver" in r ? Number.isFinite(r.perMonth) && r.perMonth > 0 : tasksPerWeek(r) > 0;
 }
 
 /** True when a service's clients run at least one servicing process (so its fallback load doesn't apply). */
@@ -73,7 +79,20 @@ export function tasksPerWeek(r: Recurrence): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** Hours between tasks of a fixed recurrence; null for Poisson requests. */
+/**
+ * Tasks a week one client generates from a servicing link's recurrence, drivers included (docs/adr/0022-capacity-inputs.md):
+ * a driver recurrence reads the client's effective deliverables (its overrides, else the service's: `effectiveDeliverables`)
+ * and turns `tasksPerMonth` into a week at this file's 4.33 weeks a month, so it runs on the same clock as `{ every: "month" }`.
+ * `client` is undefined for a client with no overrides.
+ */
+export function clientTasksPerWeek(model: Pick<EngineModel, "services">, client: Pick<EngineClient, "overrides"> | undefined, serviceId: string, r: Recurrence): number {
+  if (!("driver" in r)) return tasksPerWeek(r);
+  const e = effectiveDeliverables(model, client, serviceId);
+  const n = tasksPerMonth(r, e.deliverables, e.adhoc) / WEEKS_PER_MONTH;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** Hours between tasks of a fixed recurrence; null for Poisson requests and for drivers (see `clientTasksPerWeek`). */
 export function recurrenceInterval(r: Recurrence, hoursPerWeek: number): number | null {
   if ("poissonPerMonth" in r || "driver" in r) return null;
   return hoursPerWeek / tasksPerWeek(r);

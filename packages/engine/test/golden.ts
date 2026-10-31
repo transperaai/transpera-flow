@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { MARKET_PRESETS, absenceTest, detectIssues, larkspurModel, larkspurWithPurposes, northbeamModel, northbeamWithChances, northbeamWithChannels, northbeamWithChurnDrivers, northbeamWithClientGroups, northbeamWithMoney, northbeamWithServicing, simulate, withMarketCondition, type EngineModel, type SimulateOptions, type SimulationResult, type Stat, type TimeSplit } from "../src";
+import { MARKET_PRESETS, absenceTest, capacityModel, detectIssues, larkspurModel, larkspurWithPurposes, northbeamModel, northbeamWithChances, northbeamWithChannels, northbeamWithChurnDrivers, northbeamWithClientGroups, northbeamWithMoney, northbeamWithServicing, simulate, withMarketCondition, type EngineModel, type SimulateOptions, type SimulationResult, type Stat, type TimeSplit } from "../src";
 
 export const GOLDEN_DIR = new URL("../golden/", import.meta.url);
 export const VERSION_FILE = new URL("../src/version.ts", import.meta.url);
@@ -101,6 +101,15 @@ export const GOLDEN_MODELS: GoldenModel[] = [
     reps: 30,
     options: { monthly: true },
   },
+  {
+    name: "capacity",
+    description:
+      "The client capacity app's example agency (capacityModel, from the prototype; engine 1.15.0): two departments of three tiers, 26 people with team time and portfolios, 13 named clients beside the counted ones, servicing steps driven by what each tier gets (words, links, channels, ad hoc by chance and requests), a named client's own overrides and hand-holding, and won clients placed on the least busy person who serves the tier. Run month by month, with where each person's time goes by step and their clients by service.",
+    model: capacityModel,
+    seed: 1,
+    reps: 30,
+    options: { monthly: true, personTime: true },
+  },
 ];
 
 const stat = (s: Stat) => ({ mean: s.mean, p10: s.p10, p90: s.p90 });
@@ -128,6 +137,8 @@ export function keyOutputs(model: EngineModel, r: SimulationResult) {
     ...(r.monthly ? { monthly: monthlyMeans(r.monthly) } : {}),
     // Where the time goes (engine 1.14.0), only for a model whose steps say what they achieve.
     ...(r.monthly && model.steps.some((s) => s.purpose !== undefined) ? { time: timeMeans(r.monthly.time) } : {}),
+    // Where each person's time goes by step, and their clients by service (engine 1.15.0), only for a run asked for it.
+    ...(r.personTime ? { personTime: r.personTime } : {}),
     overtime: { hours: stat(k.overtimeHours), cost: stat(k.overtimeCost!) },
     clients: k.clientsAtRisk && k.clientsChurned ? { atRisk: stat(k.clientsAtRisk), churned: stat(k.clientsChurned) } : null,
     touchpoints: k.touchpoints ? { onTime: stat(k.touchpoints.onTime), late: stat(k.touchpoints.late), missed: stat(k.touchpoints.missed) } : null,
