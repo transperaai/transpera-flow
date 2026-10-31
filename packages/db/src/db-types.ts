@@ -333,14 +333,6 @@ export interface LeadSources {
   workspace_id: string;
 }
 
-export interface LeverSettings {
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  hidden: Generated<string[]>;
-  updated_at: Generated<string>;
-  workspace_id: string;
-}
-
 export interface MarketConditions {
   churn: Generated<number>;
   conv: Generated<number>;
@@ -832,7 +824,6 @@ export interface DB {
   issue_sources: IssueSources;
   issues: Issues;
   lead_sources: LeadSources;
-  lever_settings: LeverSettings;
   market_conditions: MarketConditions;
   market_schedule: MarketSchedule;
   memberships: Memberships;

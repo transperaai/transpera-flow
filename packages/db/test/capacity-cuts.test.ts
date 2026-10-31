@@ -48,7 +48,7 @@ async function as<T>(claims: Record<string, unknown>, fn: (c: pg.Client) => Prom
   }
 }
 
-const TABLES_THAT_STAY = ["lever_settings", "analysis_rules", "processes", "process_revisions", "steps", "edges", "solutions", "sources", "issues", "sandbox_scenarios", "blocks", "people", "roles", "clients"];
+const TABLES_THAT_STAY = ["analysis_rules", "processes", "process_revisions", "steps", "edges", "solutions", "sources", "issues", "sandbox_scenarios", "blocks", "people", "roles", "clients"];
 
 beforeAll(async () => {
   db = await createTestDb({ upTo: BASE });
@@ -103,8 +103,8 @@ describe("what the migration drops", () => {
   it("keeps the unique index solutions depend on, and every table a user keeps, row for row", async () => {
     expect(await q("select conname from pg_constraint where conname = 'solutions_base_revision_id_process_id_workspace_id_fkey'")).toHaveLength(1);
     for (const t of TABLES_THAT_STAY) expect(await count(t), t).toBe(beforeCounts[t]);
-    // The lever list is no longer read, but its data is left alone.
-    expect((await q("select hidden from public.lever_settings where workspace_id = $1", [ws]))[0]!.hidden).toEqual(["people.starters"]);
+    // This migration leaves the lever list's table alone; P9 (20270125000100_drop_lever_settings.sql, applied after it here) drops it.
+    expect((await q("select to_regclass('public.lever_settings') t"))[0]!.t).toBeNull();
   });
 
   it("lets nobody sign in as a share link's guest any more, and still lets a deployment role in", async () => {

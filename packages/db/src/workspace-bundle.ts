@@ -62,7 +62,6 @@ export const BUNDLE_TABLES = {
   market_conditions: T("market_conditions"),
   market_schedule: T("market_schedule"),
   churn_drivers: T("churn_drivers"),
-  lever_settings: T("lever_settings", "workspace_id"),
   analysis_rules: T("analysis_rules", "workspace_id"),
   processes: T("processes"),
   process_revisions: T("process_revisions"),
@@ -289,7 +288,7 @@ export async function exportWorkspaceBundle(
 
   const companyKeys = [
     "roles", "people", "person_roles", "person_skills", "person_leave", "person_capacity_factors", "services", "service_servicing", "client_groups", "client_services",
-    "client_assignments", "lead_sources", "seasonality", "demand_settings", "market_conditions", "market_schedule", "churn_drivers", "lever_settings", "analysis_rules",
+    "client_assignments", "lead_sources", "seasonality", "demand_settings", "market_conditions", "market_schedule", "churn_drivers", "analysis_rules",
     "departments", "tiers", "person_tiers", "person_portfolio", "capacity_changes",
   ] as const;
   const company_model: Record<string, Row[]> = Object.fromEntries(companyKeys.map((k) => [k, data[k]]));

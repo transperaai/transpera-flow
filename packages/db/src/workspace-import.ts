@@ -95,7 +95,6 @@ export const IMPORT_COLUMNS = {
   churn_drivers: cols("churn_drivers", "id", "name", "description", "driver", "enabled", "example", "month", "value", "weight", "chance", "effect", "effect_months", "provenance", "created_at"),
   market_conditions: cols("market_conditions", "id", "name", "churn", "conv", "cycle", "hire", "leads", "pay", "price", "created_at"),
   market_schedule: cols("market_schedule", "id", "condition_id", "from_month", "to_month", "created_at"),
-  lever_settings: cols("lever_settings", "hidden", "created_at"),
   analysis_rules: cols("analysis_rules", "settings", "created_at"),
   clients: cols(
     "clients", "id", "name", "active", "health", "mrr", "notes", "start_date", "provenance", "created_at",
@@ -215,7 +214,6 @@ export interface ImportPlan {
   market_conditions: Row[];
   /** Rows carry `condition_id` (a custom condition) or `condition_preset` (the key of a preset the new workspace already has). */
   market_schedule: Row[];
-  lever_settings: Row | null;
   analysis_rules: Row | null;
   clients: Row[];
   sources: Row[];
@@ -262,7 +260,7 @@ const SECTION_ARRAYS = ["processes", "solutions", "solution_issues", "blocks", "
 /** Sections a backup made before Suggestions were removed (28 Oct 2026) may still hold: read, counted, never restored. */
 const LEGACY_SECTIONS = ["suggestions", "suggestion_proposals"] as const;
 /** Tables whose rows have an `id` column (company-model tables without one are keyed otherwise). */
-const NO_ID_TABLES = new Set(["person_roles", "person_skills", "person_capacity_factors", "person_tiers", "person_portfolio", "client_services", "client_assignments", "demand_settings", "lever_settings", "analysis_rules", "solution_issues"]);
+const NO_ID_TABLES = new Set(["person_roles", "person_skills", "person_capacity_factors", "person_tiers", "person_portfolio", "client_services", "client_assignments", "demand_settings", "analysis_rules", "solution_issues"]);
 
 const things = (key: string) => key.replace(/^company_model\./, "").replace(/_/g, " ");
 
@@ -719,7 +717,7 @@ export function planWorkspaceImport(
   // The company model.
   const flat = (section: keyof typeof IMPORT_COLUMNS, rows: Row[], refs: Ref[] = []): Row[] =>
     resolveRefs(section, rows, sets, refs, note).map((r) => pick(r, IMPORT_COLUMNS[section]));
-  const one = (section: "demand_settings" | "lever_settings" | "analysis_rules"): Row | null => {
+  const one = (section: "demand_settings" | "analysis_rules"): Row | null => {
     const r = company(section)[0];
     return r ? pick(r, IMPORT_COLUMNS[section]) : null;
   };
@@ -795,7 +793,6 @@ export function planWorkspaceImport(
     churn_drivers: flat("churn_drivers", company("churn_drivers")).sort(byCreated),
     market_conditions: customConditions.map((c) => pick(c, IMPORT_COLUMNS.market_conditions)).sort(byCreated),
     market_schedule: schedule,
-    lever_settings: one("lever_settings"),
     analysis_rules: one("analysis_rules"),
     clients: flat("clients", company("clients")),
     sources,

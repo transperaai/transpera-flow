@@ -121,7 +121,7 @@ async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; mes
 /** Counts of every table a restore writes to, for a workspace, so "nothing was written" can be compared. */
 const TABLES = [
   "roles", "people", "person_roles", "person_leave", "person_skills", "person_capacity_factors", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions",
-  "market_schedule", "lever_settings", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links",
+  "market_schedule", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links",
   "processes", "process_revisions", "steps", "edges", "sandbox_scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
   "solutions", "audit_log",
 ];
@@ -449,7 +449,7 @@ const bodyOf = (sql: string) => {
 };
 const FN = "public.import_workspace_bundle(uuid, jsonb, text)";
 /** The migration that defines the function now (it applies the settings for every restorer: 20270104000000), and its body. */
-const LATEST_FILE = "20270125000000_role_leadership.sql";
+const LATEST_FILE = "20270125000100_drop_lever_settings.sql";
 const bodyOfFunction = (sql: string, name: string) => {
   const fn = sql.slice(sql.search(new RegExp(`^create (?:or replace )?function ${name.replace(".", "\\.")}\\(`, "mi")));
   return fn.slice(fn.indexOf("$$") + 2, fn.indexOf("$$", fn.indexOf("$$") + 2));

@@ -190,7 +190,6 @@ const TABLES: TableCase[] = [
   },
   named("sources", "title"),
   // Settings tables.
-  singleton("lever_settings"),
   singleton("analysis_rules"),
   singleton("demand_settings"),
   {
