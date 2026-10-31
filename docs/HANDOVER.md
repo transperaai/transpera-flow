@@ -7,6 +7,16 @@ new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
+**31 Oct 2026: the capacity app as it now is** (work packages P0 to P9, `docs/plans/capacity/`). The screens are Overview, Set up
+(Tiers & clients, People & roles), Processes, Capacity and the free-play Sandbox; Settings keeps the workspace, simulation limits,
+churn drivers, client health, demand and market. See the README's "The app" for what each shows. How to stand it up for a client:
+`docs/new-client.md` (section 12 has the starter and example loaders, section 13 the Preview migration script). P9 (follow-ups):
+servicing links can follow the tier ("From the tier": a deliverable, x n, per m); roles have a leadership flag (Set up, People & roles,
+under More) that leaves them out of clients and revenue per employee; hiring advice stretches its 2-month base by the market's time to
+hire; each Set up field is edited in one place (the old full Clients, People and Roles lists in Settings are gone); `/p/<id>?step=<id>`
+opens a step, and viewers read its base values; the `lever_settings` table, the guest sign-in plumbing and the Overview health cards
+are gone. Still to sweep: the `mode: "demo"` paths of the shared screens (listed in the P9 report).
+
 **31 Oct 2026 (P0, `docs/plans/capacity/p0-cuts-brief.md`): cut, for the client app.** First principles (pages, card, MCP `get_first_principles`,
 engine and db modules, `first_principles` table), every share link (`/s/<token>`, the Share links page, the buttons, `share_links`
 and its functions), the older process-level lever system (`scenario-panel`, `lever-panel`, `compare-view`, `robustness-check`,

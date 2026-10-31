@@ -46,8 +46,4 @@ describe("process page help", () => {
     for (const key of ["cost", "dismiss"]) expect(text).toContain(`<Help {...INSIGHT_HELP.${key}} />`);
     expect((text.match(/<Help\b/g) ?? []).length).toBe(2);
   });
-
-  it("the Overview's health cards (B15) keep to none, as QA wave 1 left the Overview", () => {
-    expect(read("components/overview/health-cards.tsx")).not.toContain("<Help");
-  });
 });

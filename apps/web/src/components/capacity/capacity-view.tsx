@@ -13,6 +13,7 @@ import {
   departmentCeiling,
   dler,
   hiringAdvice,
+  hiringDelayAt,
   leaver,
   missingForCapacity,
   serviceLines,
@@ -375,7 +376,7 @@ function Bottleneck({ setup, model, result, base, stepProcess }: { setup: Capaci
           <span key={s.stepId}>
             {i > 0 && ", "}
             {s.stepId !== "hand" && stepProcess[s.stepId] ? (
-              <Link href={`${base}/p/${stepProcess[s.stepId]}#step-${s.stepId}`} className="text-accent hover:underline" data-step-link={s.stepId}>
+              <Link href={`${base}/p/${stepProcess[s.stepId]}?step=${s.stepId}`} className="text-accent hover:underline" data-step-link={s.stepId}>
                 {s.name}
               </Link>
             ) : (
@@ -531,7 +532,8 @@ function monthLabel(start: string, i: number): string {
 
 function NextTwelve({ setup, year, phase, startDate }: CapacityViewProps & { phase: PhaseState }) {
   const result = phase.status === "done" ? phase.run.result : null;
-  const advice = useMemo(() => (result ? hiringAdvice(setup, result) : []), [setup, result]);
+  const market = year?.model.market;
+  const advice = useMemo(() => (result ? hiringAdvice(setup, result, (m) => hiringDelayAt(market, m)) : []), [setup, result, market]);
   if (!year) return null;
   const monthName = (i: number) => (i === 0 ? "now" : startDate ? monthLabel(startDate, i) : `month ${i + 1}`);
   const over = advice.filter((a) => a.overFrom !== null);
@@ -564,7 +566,7 @@ function NextTwelve({ setup, year, phase, startDate }: CapacityViewProps & { pha
         </>
       )}
       <How
-        works="Runs the year month by month: today's clients, expected wins from lead flow, churn, planned hires and leavers, and onboarding work for each new client. A team goes over when its average busy share passes its line. Hiring advice allows 2 months to hire."
+        works="Runs the year month by month: today's clients, expected wins from lead flow, churn, planned hires and leavers, and onboarding work for each new client. A team goes over when its average busy share passes its line. Hiring advice allows 2 months to hire, stretched or shortened by the market's time to hire in the month you would hire."
         tells="when each team runs out of room, and when to start hiring so the new person arrives in time."
       />
     </Section>

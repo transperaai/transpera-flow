@@ -9,7 +9,7 @@ import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentUserId } from "@/lib/access-data";
 import { loadLastChange } from "@/lib/process-page/data";
 import { processRatings, trailOf } from "@/lib/processes/rows";
-import { loadCompanyId, loadMemberNames, loadProcessForEditing, loadProcessVersion, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
+import { loadCompanyId, loadMemberNames, loadProcessForEditing, loadProcessVersion, loadTierSetup, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /**
  * A process of the workspace on the canvas, at `/w/[slug]/p/[processId]` (any process, never-published ones
@@ -28,7 +28,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const archivedAt = live.process.archived_at ?? null;
   // `?version=N` shows an earlier version, read only; a number that isn't an earlier version shows live.
   const earlier = version ? await loadProcessVersion(live, version) : null;
-  const [canEdit, scenarios, issues, sources, liveRevisions, solutions, viewerId, memberNames] = await Promise.all([
+  const [canEdit, scenarios, issues, sources, liveRevisions, solutions, viewerId, memberNames, tierSetup] = await Promise.all([
     canEditWorkspace(live.workspace.id),
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceIssues(live.workspace.id),
@@ -38,6 +38,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     loadWorkspaceSolutions(live.workspace.id, live.process.id),
     currentUserId(),
     loadMemberNames(live.workspace.id),
+    loadTierSetup(live.workspace.id),
   ]);
   // Who last published the live version.
   const lastChange = isUnpublished(live) ? null : await loadLastChange(live.revision.id, memberNames);
@@ -63,6 +64,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       liveRevisions={liveRevisions}
       registerHref={`${base}/issues`}
       settingsHref={`${base}/settings`}
+      tierSetup={tierSetup}
       rating={ratings[live.process.id] ?? null}
       editHref={canEdit && !archivedAt ? `${base}/p/${live.process.id}/edit` : undefined}
       historyHref={`${base}/p/${live.process.id}/history`}

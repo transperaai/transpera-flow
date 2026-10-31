@@ -6,8 +6,8 @@
 // (the client's founder and head of CS: an `owner` membership in every workspace) and `viewer`.
 
 export type DeploymentRole = "owner" | "agency_admin" | "viewer";
-/** A deployment role, or `guest`: an outsider listed on a live restricted share link, with no role anywhere (B3). */
-export type SignInRole = DeploymentRole | "guest";
+/** The role an address signs in with: a deployment role. */
+export type SignInRole = DeploymentRole;
 
 /** What the login page shows when nothing on the access list matches. */
 export const ACCESS_DENIED_CODE = "not_on_access_list";
@@ -28,7 +28,7 @@ export interface IdentityInput {
   tid?: string;
 }
 
-/** The role an address signs in with (`guest` included), or null when it may not sign in. Used before the user exists. */
+/** The role an address signs in with, or null when it may not sign in. Used before the user exists. */
 export async function signInRole(
   db: Queryable,
   email: string | null | undefined,
@@ -41,8 +41,7 @@ export async function signInRole(
 }
 
 /**
- * Once per sign-in: decides the role again, and in one transaction records the provider identities, sets the Owner flag, and (not
- * for a guest) makes the user's membership in every workspace match the list: an Agency admin's or a Viewer's, raised or lowered.
+ * Once per sign-in: decides the role again, and in one transaction records the provider identities, sets the Owner flag, and makes the user's membership in every workspace match the list: an Agency admin's or a Viewer's, raised or lowered.
  * Returns null, changing nothing, when the user may no longer sign in.
  */
 export async function syncSignIn(
@@ -99,8 +98,6 @@ export interface CurrentAccess {
   email: string;
   /** The Owner. Counts only while the list still says owner, so a demotion takes effect at the next request. */
   agencyAdmin: boolean;
-  /** Signed in only for a restricted share link (B3): no role anywhere. */
-  guest: boolean;
 }
 
 /**
@@ -119,5 +116,5 @@ export async function currentAccess(db: Queryable, userId: string, adminEmails: 
   );
   const row = rows[0];
   if (!row || !row.role) return null;
-  return { email: String(row.email), agencyAdmin: row.agency_admin === true && row.role === "owner", guest: row.role === "guest" };
+  return { email: String(row.email), agencyAdmin: row.agency_admin === true && row.role === "owner" };
 }

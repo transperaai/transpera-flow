@@ -4,7 +4,7 @@
 // its rating, the insights and confirmed issues on it, and the sources behind its
 // numbers. Opens when a step is clicked (or Enter on it) and closes with Escape.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { EVIDENCE_COLUMNS, evidenceOf, type StepRow } from "@transpera-flow/db";
@@ -56,6 +56,7 @@ export function StepDetail({
   reworkTo,
   extras,
   sources,
+  baseValues,
   onClose,
 }: {
   step: StepRow;
@@ -65,6 +66,8 @@ export function StepDetail({
   reworkTo: string | null;
   extras: StepExtras;
   sources: string[];
+  /** The step's base values for capacity, read only (P9): shown under the numbers when given. */
+  baseValues?: ReactNode;
   onClose: () => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
@@ -131,6 +134,12 @@ export function StepDetail({
         />
       ) : (
         <List title="Sources" items={sources} empty="No source cited for this step's numbers." />
+      )}
+      {baseValues && (
+        <section className="mt-3" data-step-base-values>
+          <h4 className="text-[11px] font-semibold tracking-wide text-fg-3 uppercase">Base values</h4>
+          <div className="mt-1">{baseValues}</div>
+        </section>
       )}
     </aside>
   );

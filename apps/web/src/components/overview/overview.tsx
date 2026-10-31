@@ -287,7 +287,7 @@ export function Overview({
   const openProcess = (stepId: string) => {
     const process = map.processOfStep.get(stepId);
     const href = process ? hrefs[process] : undefined;
-    if (href) router.push(href);
+    if (href) router.push(`${href}?step=${encodeURIComponent(stepId)}`);
   };
 
   const [now] = useState(() => new Date());

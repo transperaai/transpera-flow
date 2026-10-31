@@ -108,7 +108,7 @@ async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; mes
 /** Counts of every table a restore writes to, for a workspace, so "nothing was written" can be compared. */
 const TABLES = [
   "roles", "people", "person_roles", "person_leave", "person_skills", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
-  "lever_settings", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links", "processes",
+  "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links", "processes",
   "process_revisions", "steps", "edges", "sandbox_scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
   "solutions", "audit_log",
 ];
@@ -202,7 +202,7 @@ const sqlOf = (name: string) => readFileSync(new URL(`../migrations/${name}`, im
 const OLD_MIGRATION = "20261207000000_import_workspace_bundle.sql";
 const NEW_MIGRATION = "20261215000000_bigger_restores.sql";
 /** The latest migration that defines `import_workspace_bundle` (#228 replaced B21's body, which NEW_MIGRATION still holds). */
-const LATEST_MIGRATION = "20270123000000_capacity_changes.sql";
+const LATEST_MIGRATION = "20270125000100_drop_lever_settings.sql";
 const OLD_MD5 = "968cbd0034a0bb1479b8ee0c9eaf7962";
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 /** The text between the first `$$` and the last `$$` of a function (what `pg_proc.prosrc` holds). */

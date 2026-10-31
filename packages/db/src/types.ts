@@ -118,6 +118,8 @@ export interface RoleRow {
   ongoing_hours_per_client_week: number;
   /** Inactive roles are hidden from pickers; what already names one keeps it, and it still simulates. */
   active: boolean;
+  /** Leadership: left out of clients and revenue per employee (D22). */
+  leadership: boolean;
 }
 
 export interface PersonRow {

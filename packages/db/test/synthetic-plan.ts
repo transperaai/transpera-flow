@@ -162,7 +162,7 @@ export function syntheticPlan(L: Limits, options: SyntheticOptions = {}) {
     format: "transpera-workspace-import/1",
     settings: { hours_per_week: 38, currency: "GBP" },
     roles, people, person_roles, person_leave, lead_sources, seasonality, demand_settings: { growth_monthly: 0.01, created_at: when }, churn_drivers,
-    market_conditions, market_schedule, lever_settings: { hidden: [], created_at: when }, analysis_rules: { settings: {}, created_at: when }, clients, sources, processes, sandbox_scenarios, blocks, issues, services,
+    market_conditions, market_schedule, analysis_rules: { settings: {}, created_at: when }, clients, sources, processes, sandbox_scenarios, blocks, issues, services,
     service_servicing, client_groups, client_services, client_assignments, person_skills, person_capacity_factors, source_links,
   };
 }

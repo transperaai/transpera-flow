@@ -5,7 +5,7 @@
 // Editor (A39), which "✎ Open in Editor" opens; History (A40) lists the earlier versions this page can show.
 
 import { isReadOnly } from "@/lib/mode";
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -35,6 +35,9 @@ import { useSimulation } from "@/lib/sim/use-simulation";
 import { ExportMenu } from "@/components/export/export-menu";
 import { ratingOfRank } from "@/lib/map/rating";
 import { ProcessCanvas } from "./process-canvas";
+import { StepBaseValues } from "./step-base-values";
+import type { ProcessEditor } from "@/lib/editor/editor";
+import type { TierSetup } from "@/lib/tier-setup";
 import { ProcessSolutions, type SolutionsData } from "./solutions/process-solutions";
 import { NO_SOLUTIONS_DATA } from "@/lib/solutions/cards";
 import { useProcessIssues } from "./process-issues";
@@ -78,7 +81,10 @@ export function ProcessPage({
   processPicker,
   notice,
   aboutInfo,
+  tierSetup,
 }: {
+  /** The tiers and what each service's tier gets, for the step base values (a driver recurrence is read from them). */
+  tierSetup?: TierSetup;
   /** What "About this process" needs from the server: where the process sits on the company map, whether a draft is open, and who last changed it. */
   aboutInfo?: { trail: string[]; hasDraft: boolean; lastChange: { at: string | null; by: string } | null };
   /** The process at the version on screen: live, or an earlier one when `viewingVersion` is set. */
@@ -170,6 +176,15 @@ export function ProcessPage({
     [bundle, model],
   );
   const [gapStep, setGapStep] = useState<string | null>(null);
+  // `?step=<id>` (the Capacity page's bottleneck, the Overview): that step is selected, lit and scrolled to. An id this version doesn't have is ignored.
+  const stepParam = searchParams.get("step");
+  const linkedStep = useMemo(() => (stepParam && bundle.steps.some((s) => s.id === stepParam) ? stepParam : null), [stepParam, bundle.steps]);
+  useEffect(() => {
+    if (linkedStep) document.getElementById("map")?.scrollIntoView({ block: "start" });
+  }, [linkedStep]);
+  // The map is read only here: the step's base values show in its detail with every control off, and nothing they would save is ever sent.
+  const readOnlyEditor = useMemo(() => ({ run: () => undefined }) as unknown as ProcessEditor, []);
+  const stampNow = useCallback(() => ({ at: new Date().toISOString() }), []);
   const showGapStep = (id: string) => {
     setGapStep(id);
     document.getElementById("map")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -312,7 +327,9 @@ export function ProcessPage({
             openIssues={issuesUi.openIssues}
             rating={issuesUi.rating}
             stepExtras={issuesUi.stepExtras}
-            highlight={issuesUi.highlight ?? (gapStep ? [gapStep] : null)}
+            highlight={issuesUi.highlight ?? (gapStep ? [gapStep] : linkedStep ? [linkedStep] : null)}
+            initialStepId={linkedStep}
+            stepBaseValues={(step) => <StepBaseValues bundle={bundle} step={step} editor={readOnlyEditor} stamp={stampNow} tierSetup={tierSetup} readOnly settingsHref={settingsHref} />}
             sourceTitles={sourceTitles}
             // Only while there is a model to run: one that can't be built never starts a run.
             computing={model !== null && sim.status === "running" && sim.run === null}

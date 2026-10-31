@@ -230,6 +230,36 @@ describe("a step's detail", () => {
   }, 60_000);
 });
 
+describe("a step linked from another page (?step=<id>)", () => {
+  it("opens that step's detail at once, with its base values read only for a viewer", async () => {
+    const audit = (await (await mount()).evaluate(() => window.mapIds.audit)) as string;
+    const page = await mount({ openStep: audit, baseValues: true });
+    await page.waitForSelector("[data-step-detail]");
+    expect(await page.locator("[data-step-detail]").getAttribute("data-step-detail")).toBe(audit);
+    const values = page.locator("[data-step-detail] [data-step-base-values]");
+    expect(await values.locator("[data-base-values]").count()).toBe(1);
+    // Read only: the split sliders and the source pickers are all off.
+    const controls = values.locator("input, select, textarea");
+    expect(await controls.count()).toBeGreaterThan(3);
+    for (const c of await controls.all()) expect(await c.isDisabled()).toBe(true);
+    await page.close();
+  }, 60_000);
+
+  it("shows no detail for a step the map doesn't have", async () => {
+    const page = await mount({ openStep: "00000000-0000-4000-8000-00000000dead", baseValues: true });
+    await page.waitForTimeout(300);
+    expect(await page.locator("[data-step-detail]").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it("opens the groups it sits inside", async () => {
+    const page = await mount({ nested: true, openStep: (await (await mount()).evaluate(() => window.mapIds.qualify)) as string });
+    await page.waitForSelector("[data-step-detail]");
+    await page.waitForFunction(() => document.querySelectorAll("[data-group='open']").length === 1);
+    await page.close();
+  }, 60_000);
+});
+
 type Box = { id: string; l: number; t: number; r: number; b: number };
 const cards = (page: Page): Promise<Box[]> =>
   page.locator(".react-flow__node").evaluateAll((els) =>

@@ -66,9 +66,10 @@ function build(who: "owner" | "viewer", extraTiers: number) {
   }
   const orgT1 = services[0]!;
   const roles: SetupRole[] = [
-    { id: id("e", 1), name: "SEO Manager", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "client_facing", line: 0.85, rule_of_thumb: 10, unit: null, provenance: { line: { source: "estimate" } } },
-    { id: id("e", 2), name: "Content team", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "shared", line: 0.85, rule_of_thumb: null, unit: "words", provenance: {} },
-    { id: id("e", 3), name: "Technical SEO", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "shared", line: 0.85, rule_of_thumb: null, unit: null, provenance: {} },
+    { id: id("e", 1), name: "SEO Manager", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "client_facing", line: 0.85, rule_of_thumb: 10, unit: null, leadership: false, provenance: { line: { source: "estimate" } } },
+    { id: id("e", 2), name: "Content team", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "shared", line: 0.85, rule_of_thumb: null, unit: "words", leadership: false, provenance: {} },
+    { id: id("e", 4), name: "Old analyst", color: null, active: false, default_cost_rate: 0, headcount: 0, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "client_facing", line: 0.85, rule_of_thumb: 10, unit: null, leadership: false, provenance: {} },
+    { id: id("e", 3), name: "Technical SEO", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "shared", line: 0.85, rule_of_thumb: null, unit: null, leadership: false, provenance: {} },
   ];
   const person = (n: number, name: string, role: string, over: Partial<SetupPerson> = {}): SetupPerson => ({
     id: id("f", n), name, email: null, active: true, fte: 1, capacity_hours_week: 38, cost_rate: null, start_date: null, end_date: null, notes: null, reserved_share: 0,
@@ -79,6 +80,10 @@ function build(who: "owner" | "viewer", extraTiers: number) {
     {
       id: id("1", 1), name: "Harbourline Group", active: true, mrr: 13000, start_date: null, health: null, notes: null, provenance: {}, service_ids: [orgT1.id], assignments: { [roles[0]!.id]: people[0]!.id },
       channels: null, hand_holding_hours: 3, adhoc_chance: 1, adhoc_requests: 8, adhoc_hours: null, meetings: 4, words: null, links: null, tech_hours: null, builds: null, creative_sets: null, step_factor: null,
+    },
+    {
+      id: id("1", 2), name: "Old Mill Bakery", active: false, mrr: 1200, start_date: null, health: null, notes: null, provenance: {}, service_ids: [], assignments: {},
+      channels: null, hand_holding_hours: null, adhoc_chance: null, adhoc_requests: null, adhoc_hours: null, meetings: null, words: null, links: null, tech_hours: null, builds: null, creative_sets: null, step_factor: null,
     },
   ];
   const setup: CapacitySetup = {
@@ -103,7 +108,7 @@ function build(who: "owner" | "viewer", extraTiers: number) {
     workspace: { id: WS, name: "Acme", slug: "acme", settings: { currency: "AUD", hours_per_week: 38, retainer: 2500 } },
     canEdit: who === "owner",
     canManage: who === "owner",
-    roles: roles.map((r) => ({ id: r.id, name: r.name, color: null, active: true })),
+    roles: roles.map((r) => ({ id: r.id, name: r.name, color: null, active: r.active, leadership: r.leadership })),
     roleUsage: {},
     steps: [],
     people: people.map((p) => ({ id: p.id, workspace_id: WS, name: p.name, email: null, fte: 1, capacity_hours_week: p.capacity_hours_week, cost_rate: null, active: true, start_date: null, end_date: null, notes: null })),

@@ -9,6 +9,7 @@ import {
   dler,
   dlerSalariesMissing,
   hiringAdvice,
+  hiringDelayAt,
   leaver,
   perEmployee,
   personMax,
@@ -304,6 +305,18 @@ describe("serviceLines and perEmployee", () => {
   });
 });
 
+describe("the leadership flag", () => {
+  test("per-employee figures follow the flag on the role, not its name", () => {
+    const setup = capacitySetupFromModel(tinyModel());
+    const flipped = { ...setup, roles: setup.roles.map((r) => ({ ...r, leadership: !r.leadership })) };
+    expect(perEmployee(setup, "org").employees).toBe(3);
+    // Every flag flipped: the director is counted again, and the other two client-facing roles and the shared one drop out.
+    expect(perEmployee(flipped, "org").employees).toBeLessThan(3);
+    const none = { ...setup, roles: setup.roles.map((r) => ({ ...r, leadership: false })) };
+    expect(perEmployee(none, "org").employees).toBe(4);
+  });
+});
+
 describe("hiringAdvice", () => {
   test("the first month a role's mean busy share passes its line, less the hiring delay", () => {
     const model = tinyModel();
@@ -325,6 +338,17 @@ describe("hiringAdvice", () => {
       ["content", null, null],
     ]);
     expect(hiringAdvice(setup, result, 0)[1]!.hireBy).toBe(3);
+
+    // The workspace's market stretches the delay: "time to hire" 200% from month 0 doubles 2 months to 4.
+    const slow = { months: Array.from({ length: 24 }, () => ({ leads: 1, conv: 1, cycle: 1, price: 1, churn: 1, hire: 2, pay: 1 })) };
+    expect(hiringDelayAt(slow, 3)).toBe(4);
+    expect(hiringDelayAt(undefined, 3)).toBe(2);
+    expect(hiringAdvice(setup, result, (m) => hiringDelayAt(slow, m)).map((a) => [a.roleId, a.hireBy])).toEqual([
+      ["dir_org", -3],
+      ["mgr_org", -1],
+      ["content", null],
+    ]);
+    expect(hiringAdvice(setup, result, (m) => hiringDelayAt(undefined, m))[1]!.hireBy).toBe(1);
   });
 });
 

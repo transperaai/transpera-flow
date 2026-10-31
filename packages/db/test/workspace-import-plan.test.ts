@@ -63,7 +63,6 @@ function makeBundle(): { bundle: WorkspaceBundle; ids: Ids } {
       market_conditions: [{ id: ids.presetCond, workspace_id: w, name: "Boom", preset: "boom", churn: 1 }, { id: ids.cond, workspace_id: w, name: "Mine", preset: null, churn: 1, created_at: "2026-01-01" }],
       market_schedule: [{ id: id(), workspace_id: w, condition_id: ids.presetCond, from_month: 1, to_month: 2 }, { id: id(), workspace_id: w, condition_id: ids.cond, from_month: 3, to_month: 4 }],
       churn_drivers: [],
-      lever_settings: [{ workspace_id: w, hidden: [], created_at: "2026-01-01" }],
       analysis_rules: [],
     },
     processes,
@@ -844,7 +843,7 @@ describe("per-person times in a backup (#228): restored", () => {
     const { person_capacity_factors: _gone, ...rest } = plan;
     expect(Object.keys(rest)).toEqual([
       "format", "settings", "departments", "tiers", "roles", "people", "person_roles", "person_leave", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
-      "lever_settings", "analysis_rules", "clients", "sources", "processes", "sandbox_scenarios", "blocks", "issues", "capacity_changes", "services", "service_servicing", "client_groups", "client_services",
+      "analysis_rules", "clients", "sources", "processes", "sandbox_scenarios", "blocks", "issues", "capacity_changes", "services", "service_servicing", "client_groups", "client_services",
       "client_assignments", "person_skills", "person_tiers", "person_portfolio", "source_links",
     ]);
     // The new key sits right after person_skills.

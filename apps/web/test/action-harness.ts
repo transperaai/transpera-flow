@@ -17,7 +17,7 @@ export interface TestUser {
   agencyAdmin: boolean;
 }
 
-const session: { db: ReturnType<TestDb["dbAs"]> | null; user: (TestUser & { name: string | null; guest: boolean }) | null } = { db: null, user: null };
+const session: { db: ReturnType<TestDb["dbAs"]> | null; user: (TestUser & { name: string | null }) | null } = { db: null, user: null };
 
 /** What the mocked `@/lib/auth/session` module exports. */
 export const sessionMock = {
@@ -78,7 +78,7 @@ export async function addMember(tdb: TestDb, workspaceId: string, role: string, 
 /** The next action runs as this user (RLS applies), or as the signed-out `anon` role. */
 export function signInAs(world: { tdb: TestDb; users?: World["users"] }, who: keyof World["users"] | TestUser): void {
   const user = typeof who === "string" ? world.users![who] : who;
-  session.user = { ...user, name: null, guest: false };
+  session.user = { ...user, name: null };
   session.db = world.tdb.dbAs(claimsFor(user));
 }
 

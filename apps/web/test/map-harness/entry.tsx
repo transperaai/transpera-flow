@@ -16,6 +16,7 @@ import type { ViewHint } from "@/lib/editor/groups";
 import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
 import type { LibraryCreate, LibraryCreateInput } from "@/lib/editor/library-create";
 import { ProcessEditor } from "@/lib/editor/editor";
+import { StepBaseValues } from "@/components/step-base-values";
 import { MemoryStore } from "@/lib/editor/store";
 import { demoBundle } from "@/lib/sources/demo";
 
@@ -41,6 +42,10 @@ export interface HarnessOptions {
   run?: boolean;
   /** Seen by a member: the Audit step is pinned to a named person, whom the map must not name. */
   member?: boolean;
+  /** A step whose detail is open when the map first shows, as `?step=<id>` opens it on the process page. */
+  openStep?: string;
+  /** The step's base values, read only, in its detail, as the process page shows them to a Viewer. */
+  baseValues?: boolean;
 }
 
 declare global {
@@ -177,6 +182,12 @@ function Harness({ options }: { options: HarnessOptions }) {
         viewRef={viewRef}
         stepExtras={() => ({ insights: ["An insight"], issues: ["An issue"] })}
         computing={options.computing}
+        initialStepId={options.openStep ?? null}
+        stepBaseValues={
+          options.baseValues
+            ? (step) => <StepBaseValues bundle={base} step={step} editor={{ run: () => undefined } as unknown as ProcessEditor} stamp={() => ({ at: "2026-10-05T00:00:00Z" })} readOnly />
+            : undefined
+        }
       />
       {options.palette && editor && options.company && (
         <aside aria-label="Inspector" style={{ width: 260, padding: 8 }}>

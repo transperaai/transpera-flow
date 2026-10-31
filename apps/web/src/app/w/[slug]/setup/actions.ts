@@ -4,7 +4,7 @@ import { refresh } from "next/cache";
 import { addTier, checkSetupValue, formatRamp, parseRamp, removeTier, setupFieldRule, type SetupTable } from "@transpera-flow/db";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
 import { saveField, saveFields, saveLinks } from "@/lib/fields/server";
-import { isId } from "@/lib/clients";
+import { isId, parseNewClient } from "@/lib/clients";
 import { pgCode } from "@/app/action-db";
 import { saveClientAssignment } from "../settings/client-actions";
 import { getDb, getSessionUser } from "@/lib/auth/session";
@@ -170,17 +170,20 @@ export interface NamedClientResult {
   id?: string;
 }
 
-/** + Add a client: a name, on one tier of one department (its service). Everything else starts blank and uses the tier's values. */
-export async function addNamedClient(workspaceId: string, serviceId: string, name: string): Promise<NamedClientResult> {
-  const clean = typeof name === "string" ? name.trim() : "";
+/**
+ * + Add a client: a name, on one tier of one department (its service), and optionally their MRR and start date (text, as typed).
+ * Everything else starts blank and uses the tier's values.
+ */
+export async function addNamedClient(workspaceId: string, serviceId: string, name: string, extras: { mrr?: string; start_date?: string } = {}): Promise<NamedClientResult> {
   if (!isId(workspaceId) || !isId(serviceId)) return { error: "Couldn't save. Try again." };
-  if (clean.length === 0 || clean.length > 200) return { error: "Enter the client's name." };
+  const parsed = parseNewClient({ name, mrr: extras.mrr ?? "", start_date: extras.start_date ?? "" });
+  if (!parsed.ok) return { error: parsed.error };
   if (!(await signedIn())) return { error: signedOut.message };
   const db = await getDb();
   try {
     const service = await db.selectFrom("services").select("id").where("id", "=", serviceId).where("workspace_id", "=", workspaceId).executeTakeFirst();
     if (!service) return { error: "Pick a tier first." };
-    const client = await db.insertInto("clients").values({ workspace_id: workspaceId, name: clean }).returning("id").executeTakeFirstOrThrow();
+    const client = await db.insertInto("clients").values({ workspace_id: workspaceId, ...parsed.value }).returning("id").executeTakeFirstOrThrow();
     await db.insertInto("client_services").values({ client_id: client.id, service_id: serviceId, workspace_id: workspaceId }).execute();
     refresh();
     return { id: client.id };

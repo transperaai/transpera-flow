@@ -98,41 +98,6 @@ export function SimulationSettings({ data }: { data: WorkspaceSettingsData }) {
   );
 }
 
-export function PeopleSettings({ data, saveFactor }: { data: WorkspaceSettingsData; saveFactor?: SaveFactor }) {
-  const active = data.people.filter((p) => p.active);
-  const inactive = data.people.filter((p) => !p.active);
-  return (
-    <SettingsSection id="people" title="People" description={
-      data.canEdit ? (
-        <>
-          {active.length} active{inactive.length ? `, ${inactive.length} inactive` : ""}. Modelled for capacity, not performance.
-        </>
-      ) : (
-        <>Your record. Agency admins see the whole team. Modelled for capacity, not performance.</>
-      )
-    }>
-      {data.canEdit ? (
-        <AddPerson data={data} />
-      ) : (
-        <p className="mb-3 text-fg-2">You can view people here; Agency admins can change them.</p>
-      )}
-      {data.people.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">
-          No people yet. Until you add some, each role&apos;s head-count is used instead.
-        </p>
-      ) : (
-        <ul className="flex flex-col divide-y divide-line border-y border-line">
-          {[...active, ...inactive].map((p) => (
-            <li key={p.id}>
-              <PersonRow person={p} data={data} saveFactor={saveFactor} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </SettingsSection>
-  );
-}
-
 export function AddPerson({ data }: { data: WorkspaceSettingsData }) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(createPerson.bind(null, data.workspace.id), {});
   return (
@@ -164,32 +129,6 @@ export function AddPerson({ data }: { data: WorkspaceSettingsData }) {
         </p>
       )}
     </form>
-  );
-}
-
-function PersonRow({ person: p, data, saveFactor }: { person: PersonDetail; data: WorkspaceSettingsData; saveFactor?: SaveFactor }) {
-  const roleIds = data.personRoles.filter((r) => r.person_id === p.id).map((r) => r.role_id);
-  const leave = data.personLeave.filter((l) => l.person_id === p.id);
-  const roleNames = data.roles.filter((r) => roleIds.includes(r.id)).map((r) => r.name);
-  const hoursPerWeek = data.workspace.settings.hours_per_week;
-  const capacity = p.capacity_hours_week ?? Number(p.fte) * hoursPerWeek;
-
-  return (
-    <details className="group py-2">
-      <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-1 py-1 hover:bg-panel-2">
-        <span aria-hidden className="text-fg-3 transition-transform group-open:rotate-90">
-          ›
-        </span>
-        <span className={`font-semibold ${p.active ? "" : "text-fg-3 line-through"}`}>{p.name}</span>
-        <span className="text-fg-2">{roleNames.join(", ") || "No role"}</span>
-        <span className="text-fg-3 tabular-nums">
-          {formatNumber(Number(p.fte), 2)} of full time · {formatNumber(Number(capacity), 1)} h/week
-        </span>
-        {leave.length > 0 && <span className="text-fg-3">{leave.length} leave</span>}
-        {!p.active && <span className="rounded-lg bg-panel-2 px-1.5 text-xs text-fg-2">Inactive</span>}
-      </summary>
-      <PersonMore person={p} data={data} saveFactor={saveFactor} />
-    </details>
   );
 }
 

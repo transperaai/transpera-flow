@@ -8,8 +8,8 @@
 import { Fragment, useState } from "react";
 import { formatRamp, missingForCapacity, sourceLabel, type CapacitySetup, type SetupPerson, type SetupRole } from "@transpera-flow/db";
 import { SettingsSection } from "@/app/w/[slug]/settings/section";
-import { AddRole, RoleMore, RolesSettings } from "@/app/w/[slug]/settings/roles-settings";
-import { AddPerson, PeopleSettings, PersonMore } from "@/app/w/[slug]/settings/people-settings";
+import { AddRole, RoleMore } from "@/app/w/[slug]/settings/roles-settings";
+import { AddPerson, PersonMore } from "@/app/w/[slug]/settings/people-settings";
 import { saveRoleField, savePersonField } from "@/app/w/[slug]/settings/actions";
 import { saveDlerIncludesLeadership, savePersonRamp, savePersonTiers, savePortfolioCount, saveRampDefault, saveSetupField } from "@/app/w/[slug]/setup/actions";
 import { TextField, ToggleField } from "@/components/fields";
@@ -33,15 +33,6 @@ export function PeopleAndRoles({ setup, data }: { setup: CapacitySetup; data: Wo
       <SharedTeams setup={setup} />
       <PeopleTable setup={setup} data={data} />
       <WorkspaceDefaults setup={setup} />
-      <SettingsSection id="more" title="More" description="Every role and person in full, as they were in Settings.">
-        <details className="rounded-lg border border-line p-2">
-          <summary className="cursor-pointer font-medium">All roles and all people, with every field</summary>
-          <div className="mt-3 flex flex-col gap-6">
-            <RolesSettings data={data} />
-            <PeopleSettings data={data} />
-          </div>
-        </details>
-      </SettingsSection>
     </div>
   );
 }
@@ -97,6 +88,7 @@ function RolesTable({ setup, data }: { setup: CapacitySetup; data: WorkspaceSett
                 <TableRow data-role={r.name}>
                   <TableCell className="min-w-40">
                     <TextCell label={`${r.name}: name`} value={r.name} save={(base, next) => saveRoleField(r.id, "name", base, next) as Promise<SaveOutcome<string | null>>} canEdit={canEdit} />
+                    {!r.active && <span className="text-xs text-fg-3">Inactive</span>}
                   </TableCell>
                   <TableCell>
                     <SelectCell
@@ -289,7 +281,7 @@ function PeopleTable({ setup, data }: { setup: CapacitySetup; data: WorkspaceSet
         </TableBody>
       </Table>
       <Note>
-        Also on each person, under More: email, start and end dates, leave, skills (steps they can do), per-person times, overtime cap. Ramp-up for new starters (90 days to about 80%) and the offshore / contractor label are here. Leadership (Founder, Head of Client Services, Growth Strategy Lead) isn&apos;t in the capacity figures.
+        Also on each person, under More: email, start and end dates, leave, skills (steps they can do), per-person times, overtime cap. Ramp-up for new starters (90 days to about 80%) and the offshore / contractor label are here. Roles marked as leadership (under More) aren&apos;t in clients or revenue per employee.
       </Note>
     </SettingsSection>
   );
