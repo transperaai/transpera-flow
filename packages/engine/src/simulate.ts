@@ -136,6 +136,8 @@ interface SimEntity extends TraceEntity {
    * t >= 0: its hands-on work after the sale bills at it. 0 otherwise (kept on every entity so the shape is monomorphic).
    */
   rate: number;
+  /** Set on a client the model's `wonClients` brought in: it is not a lead, so its (near zero) time to win stays out of the cycle times. */
+  injected?: true;
   /**
    * Per rework loop (by index in the run's loop list), where the item is: `LP_*` bits; then, from `nLoops` on, for each
    * loop's steps how many times (up to 2) the item has visited it in its stay in the loop. Null until it first reaches a step in a loop.
@@ -211,7 +213,7 @@ interface LinkState {
   once: boolean;
 }
 
-type EventType = "arrive" | "week" | "measure" | "back" | "away" | "end" | "leave" | "task" | "staff" | "capacity";
+type EventType = "arrive" | "inject" | "week" | "measure" | "back" | "away" | "end" | "leave" | "task" | "staff" | "capacity";
 
 /**
  * A timed event. One shape for every type (unused fields null), so the event
@@ -711,6 +713,8 @@ interface RosterClient {
   key: string;
   /** Whether it is on the roster (reported per client) rather than won during the run. */
   roster: boolean;
+  /** The hour of the run it is removed at the first weekly tick on or after (`EngineClient.leavesMonth`); Infinity: none. */
+  leaveAt: number;
   /** Base monthly churn and health sensitivity (docs/PRD.md §6.3.5). */
   churnBase: number;
   sensitivity: number;
@@ -1205,6 +1209,8 @@ export function runOnce(
   // steps by index. Nothing in the run reads them.
   const bounds = sampleMonthly ? monthBounds(H, monthHours, sampleMonthly === true ? undefined : sampleMonthly) : null;
   const nM = bounds ? bounds.length - 1 : 0;
+  /** The hour the 1-based month `m` starts at: the run's months when it is asked for them, else 52/12 weeks each; Infinity past the end. */
+  const monthStartHour = (m: number): number => (bounds ? (m - 1 < bounds.length - 1 ? bounds[m - 1]! : Infinity) : (m - 1) * monthHours);
   const nR = roleIds.length;
   const nP = people.length;
   const pooledFee = roster ? 0 : pooledMonthlyFee(model);
@@ -1978,6 +1984,7 @@ export function runOnce(
       overrides?: ClientOverrides;
       manager?: string;
       handHoldingHours?: Record<string, number>;
+      leavesMonth?: number;
     },
     t: number,
     isRoster: boolean,
@@ -1987,6 +1994,7 @@ export function runOnce(
     const rc: RosterClient = {
       key,
       roster: isRoster,
+      leaveAt: isRoster && client.leavesMonth !== undefined && Number.isFinite(client.leavesMonth) && client.leavesMonth >= 1 ? monthStartHour(Math.floor(client.leavesMonth)) : Infinity,
       churnBase: shape.churnBase,
       sensitivity: shape.sensitivity,
       rng: streams.get(isRoster ? labels.join("churn", "client", key) : labels.join("churn", key)),
@@ -2587,7 +2595,9 @@ export function runOnce(
         weekly = driveClient(rc, t, multiplier, handoffRate, tenureExtra);
         runClient = rc;
       }
-      if (rc.rng() < weekly) {
+      // The draw is made either way, so a client that is told to leave moves no other client's draws.
+      const drawn = rc.rng();
+      if (drawn < weekly || t >= rc.leaveAt) {
         removeClient(rc, t);
         rc.churned = true;
         churned++;
@@ -2798,7 +2808,7 @@ export function runOnce(
       if (nf !== 1) units *= nf;
       if (price !== sv.s.price && sv.s.price > 0) units *= price / sv.s.price;
       sv.wonUnits += units;
-      cycle.push(t - e.t0);
+      if (!e.injected) cycle.push(t - e.t0);
       // An hourly win bills the hands-on work done for it from now on (`startService`).
       if (sv.s.pricingModel === "hourly") {
         e.rate = price * (market ? mkt(t).price : 1);
@@ -3436,6 +3446,41 @@ export function runOnce(
     if (nextArrival < arrivalTimes.length) schedule(arrivalTimes[nextArrival++]!, "arrive");
   };
   scheduleArrival();
+  // Clients the model says are won (`wonClients`): each is its own event, in time order, spread evenly through its month. Nothing is drawn here.
+  const injections: number[] = [];
+  const injectionTimes: number[] = [];
+  for (const w of model.wonClients ?? []) {
+    const svc = serviceIndex.get(w.service);
+    const month = Math.floor(Number(w.month));
+    const count = Math.min(500, Math.max(0, Math.round(Number(w.count))));
+    if (svc === undefined || !(month >= 1) || !(count >= 1)) continue;
+    const from = monthStartHour(month);
+    const to = Math.min(H, monthStartHour(month + 1));
+    if (!(from < H)) continue;
+    for (let i = 0; i < count; i++) {
+      const at = from + ((i + 0.5) / count) * (to - from);
+      if (at >= H) continue;
+      injectionTimes.push(at);
+      injections.push(svc);
+    }
+  }
+  let nextInject = 0;
+  if (injections.length) {
+    // In time order (the stable sort keeps the model's order for equal times).
+    const order = injections.map((_, i) => i).sort((a, b) => injectionTimes[a]! - injectionTimes[b]! || a - b);
+    const sorted = order.map((i) => injections[i]!);
+    for (const i of order) schedule(injectionTimes[i]!, "inject");
+    injections.splice(0, injections.length, ...sorted);
+  }
+  // Where an injected client goes: the first step after the sale (onboarding), or straight to a won client when the pipeline has none.
+  let injectHead: Target | null = null;
+  if (injections.length) {
+    const after = afterSaleSteps(model);
+    const pointed = new Set<string>();
+    for (const sid of after) for (const n of stepById.get(sid)?.next ?? []) if (after.has(n.to)) pointed.add(n.to);
+    const head = model.steps.find((st) => after.has(st.id) && !pointed.has(st.id));
+    if (head) injectHead = targetFor(head.id);
+  }
   // Weekly churn ticks.
   for (let w = 1; w <= model.horizonWeeks; w++) schedule(w * model.hoursPerWeek, "week");
   // Planned starts and end dates: the clients' work is shared out again (before anyone back picks up work at the same time).
@@ -3472,6 +3517,12 @@ export function runOnce(
         if (mon && ev.t < H) mon.opps[monthOf(ev.t)]!++;
       }
       enterTarget(e, entryTargets[sv]!, ev.t);
+    } else if (ev.type === "inject") {
+      const sv = injections[nextInject++]!;
+      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv, rate: 0, lp: null, injected: true };
+      if (keepTrace) entities.push(e);
+      if (injectHead) enterTarget(e, injectHead, ev.t);
+      else reachEnd(e, "won", ev.t);
     } else if (ev.type === "end") {
       endService(ev.e!, ev.st!, ev.p, ev.t);
     } else if (ev.type === "leave") {

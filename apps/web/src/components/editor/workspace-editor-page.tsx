@@ -1,3 +1,5 @@
+import { changeStepIds, loadCapacityChanges } from "@transpera-flow/db";
+import { getDb } from "@/lib/auth/session";
 import { notFound, redirect } from "next/navigation";
 import { EditorPhoneGate } from "@/components/editor/editor-phone-gate";
 import { EditorView } from "@/components/editor/editor-view";
@@ -42,13 +44,14 @@ export async function WorkspaceEditorPage({
   const canEdit = await canEditWorkspace(live.workspace.id);
   // An archived process (issue #182) is read only until it is restored: its page says so.
   if (!canEdit || live.process.archived_at) redirect(base);
-  const [scenarios, blocks, sources, viewer, tours, tierSetup] = await Promise.all([
+  const [scenarios, blocks, sources, viewer, tours, tierSetup, storedChanges] = await Promise.all([
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceBlocks(live.workspace.id),
     loadWorkspaceSources(live.workspace.id),
     currentViewer(),
     loadDismissedEditorTours(),
     loadTierSetup(live.workspace.id),
+    getDb().then((db) => loadCapacityChanges(db, live.workspace.id)).catch(() => []),
   ]);
   const tourDismissed = tours.includes(company ? "company" : "process");
   // Solution mode built for an issue (`?issue=`, A49): the issue's steps are outlined and its target is what the verdict checks.
@@ -79,6 +82,7 @@ export async function WorkspaceEditorPage({
       horizonMonths={parseHorizon(searchParams.horizon)}
       library={editorMode === "draft" ? library : undefined}
       tierSetup={tierSetup}
+      changesOnSteps={{ sandboxHref: `/w/${slug}/sandbox`, changes: storedChanges.map((c) => ({ id: c.id, name: c.name, kind: c.kind, steps: changeStepIds(c) })) }}
     />
     </SourceLinkingScope>
     </EditorPhoneGate>

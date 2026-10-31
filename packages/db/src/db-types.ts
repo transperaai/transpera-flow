@@ -87,6 +87,24 @@ export interface Calibrations {
   workspace_id: string;
 }
 
+export interface CapacityChanges {
+  adoption: Generated<Numeric>;
+  cost_monthly: Numeric | null;
+  created_at: Generated<string>;
+  created_by: Generated<string | null>;
+  effects: Generated<Json>;
+  id: Generated<string>;
+  issue_id: string | null;
+  kind: string;
+  name: string;
+  provenance: Generated<Json>;
+  ramp_months: Generated<number>;
+  source: Generated<string>;
+  tiers: string[] | null;
+  updated_at: Generated<string>;
+  workspace_id: string;
+}
+
 export interface CapacityFactorProposals {
   calibration_id: string;
   created_at: Generated<string>;
@@ -796,6 +814,7 @@ export interface DB {
   audit_log: AuditLog;
   blocks: Blocks;
   calibrations: Calibrations;
+  capacity_changes: CapacityChanges;
   capacity_factor_proposals: CapacityFactorProposals;
   churn_drivers: ChurnDrivers;
   client_assignments: ClientAssignments;

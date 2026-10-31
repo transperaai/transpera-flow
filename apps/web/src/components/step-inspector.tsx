@@ -20,7 +20,7 @@ import {
   type StepRow,
 } from "@transpera-flow/db";
 import { EvidencePanel } from "@/components/evidence";
-import { StepBaseValues } from "@/components/step-base-values";
+import { StepBaseValues, type ChangesOnSteps } from "@/components/step-base-values";
 import type { TierSetup } from "@/lib/tier-setup";
 import { NumberField, SelectField, TextField, type SelectOption } from "@/components/fields";
 import { ProvenanceBadge } from "@/components/provenance-badge";
@@ -105,6 +105,7 @@ export function StepInspector({
   stamp,
   sourcesHref,
   tierSetup,
+  changesOnSteps,
   settingsHref,
   readOnly = false,
 }: {
@@ -113,6 +114,7 @@ export function StepInspector({
   editor: ProcessEditor;
   /** The workspace's tiers and what each tier's service gets, for the base values (capacity P4). */
   tierSetup?: TierSetup;
+  changesOnSteps?: ChangesOnSteps;
   settingsHref?: string;
   /** Show the base values as they are without letting anyone change them. */
   readOnly?: boolean;
@@ -273,6 +275,7 @@ export function StepInspector({
             editor={editor}
             stamp={stamp ?? (() => ({ at: new Date().toISOString() }))}
             tierSetup={tierSetup}
+            changesOnSteps={changesOnSteps}
             readOnly={readOnly}
             settingsHref={settingsHref}
           />

@@ -29,6 +29,10 @@ export {
 export { loadAnalysisRules, saveAnalysisRules, type AnalysisRules, type SaveAnalysisRulesOutcome } from "./analysis-rules";
 export * from "./capacity-setup";
 export * from "./capacity-figures";
+export * from "./capacity-changes";
+export * from "./sandbox-play";
+export * from "./sandbox-play-series";
+export * from "./sandbox-verdict";
 export { applyCapacityStarter, STARTER_NUMBERS, STARTER_ROLES, STARTER_TIERS, type Queryable as StarterQueryable, type StarterResult } from "./capacity-starter";
 export { loadLeverSettings, saveLeverSettings, type LeverSettings, type SaveLeverSettingsOutcome } from "./lever-settings";
 export { isRetiredStep, partitionSteps, retiredSteps } from "./retired";

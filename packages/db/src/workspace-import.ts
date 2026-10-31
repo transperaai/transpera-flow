@@ -111,6 +111,7 @@ export const IMPORT_COLUMNS = {
   edges: cols("edges", "id", "condition_tag", "from_step_id", "label", "probability", "to_step_id"),
   sandbox_scenarios: cols("sandbox_scenarios", "id", "parent_id", "name", "description", "changes", "horizon_months", "start_date", "created_at"),
   blocks: cols("blocks", "id", "name", "description", "type", "steps", "created_at"),
+  capacity_changes: cols("capacity_changes", "id", "name", "kind", "effects", "adoption", "ramp_months", "tiers", "cost_monthly", "issue_id", "source", "provenance", "created_at"),
   issues: cols(
     "issues", "id", "client_id", "created_at", "detected_key", "evidence", "evidence_metrics", "evidence_sources", "owner_person_id", "person_id", "process_id",
     "resolution", "resolution_note", "resolved_how", "role_id", "scenario_id", "severity", "source", "status", "step_id", "target_goal", "target_measure",
@@ -222,6 +223,7 @@ export interface ImportPlan {
   sandbox_scenarios: Row[];
   blocks: Row[];
   issues: Row[];
+  capacity_changes: Row[];
   services: Row[];
   service_servicing: Row[];
   client_groups: Row[];
@@ -543,6 +545,7 @@ export const IMPORT_REFS: Record<string, Ref[]> = {
   roles: [R("department_id", "departments", "null")],
   // A service whose department or tier isn't restored becomes a plain service (the pair is cleared together, below).
   services: [R("entry_process_id", "processes", "null"), R("department_id", "departments", "null"), R("tier_id", "tiers", "null")],
+  capacity_changes: [R("issue_id", "issues", "null")],
   person_tiers: [R("person_id", "people", "require"), R("tier_id", "tiers", "require")],
   person_portfolio: [R("person_id", "people", "require"), R("service_id", "services", "require")],
   service_servicing: [R("service_id", "services", "require"), R("process_id", "processes", "require")],
@@ -566,7 +569,7 @@ const LABELS: Record<string, string> = {
   churn_drivers: "churn drivers", market_conditions: "market conditions", market_schedule: "market schedule rows", clients: "clients", sources: "sources",
   sandbox_scenarios: "scenarios", blocks: "blocks", issues: "issues", services: "services", service_servicing: "servicing rules", client_groups: "client groups",
   client_services: "client services", client_assignments: "client assignments", person_skills: "skills", person_capacity_factors: "per-person times", source_links: "source links",
-  steps: "steps", edges: "edges", processes: "processes", departments: "departments", tiers: "tiers", person_tiers: "tiers served", person_portfolio: "portfolio counts",
+  steps: "steps", edges: "edges", processes: "processes", departments: "departments", tiers: "tiers", person_tiers: "tiers served", person_portfolio: "portfolio counts", capacity_changes: "capacity changes",
 };
 
 /** The rows with each reference checked against what is restored: a row whose required reference is missing is dropped; an optional one is cleared. */
@@ -800,6 +803,7 @@ export function planWorkspaceImport(
     sandbox_scenarios: sandbox.rows.map((r) => pick(r, IMPORT_COLUMNS.sandbox_scenarios)),
     blocks: flat("blocks", bundle.blocks).sort(byCreated),
     issues: issueRows,
+    capacity_changes: flat("capacity_changes", company("capacity_changes"), IMPORT_REFS.capacity_changes).sort(byCreated),
     services: flat("services", company("services"), IMPORT_REFS.services).map(pairOrNone),
     service_servicing: flat("service_servicing", company("service_servicing"), IMPORT_REFS.service_servicing),
     client_groups: flat("client_groups", company("client_groups"), IMPORT_REFS.client_groups).sort(byCreated),
@@ -854,6 +858,7 @@ export function planWorkspaceImport(
     line("person_capacity_factors", plan.person_capacity_factors.length),
     line("departments", plan.departments.length),
     line("tiers", plan.tiers.length),
+    line("capacity_changes", plan.capacity_changes.length),
     line("person_portfolio", plan.person_portfolio.length),
   ].filter((l) => l.count > 0);
   const leftOut = [

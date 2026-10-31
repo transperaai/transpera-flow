@@ -48,6 +48,7 @@ import { useEditorTour } from "./editor-tour";
 import { blockersOf, capacityGaps, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
 import type { TierSetup } from "@/lib/tier-setup";
+import type { ChangesOnSteps } from "@/components/step-base-values";
 import { SimulateFooter, type SimulatedPair } from "./simulate-footer";
 import { useBlockTools } from "./use-blocks";
 import { useEditCommands } from "./use-edit-commands";
@@ -76,9 +77,12 @@ export function EditorView({
   historyHref,
   library,
   tierSetup,
+  changesOnSteps,
 }: {
   /** The workspace's tiers and their deliverables, for the step base values (capacity P4). */
   tierSetup?: TierSetup;
+  /** The workspace's stored changes, for the list on a step (capacity P7). */
+  changesOnSteps?: ChangesOnSteps;
   live: ProcessBundle;
   draft: ProcessBundle | null;
   /** How edits are saved: to the database as the signed-in user, or in memory on the demo. Viewers can't open the Editor. */
@@ -418,6 +422,7 @@ export function EditorView({
             blocks={blockTools}
             company={company}
             tierSetup={tierSetup}
+            changesOnSteps={changesOnSteps}
             settingsHref={settingsHref}
             draft={
               marksChanges

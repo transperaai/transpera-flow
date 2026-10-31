@@ -326,6 +326,12 @@ export interface EngineClient {
    * `EnginePerson.portfolio`. Omitted: the manager is whoever `assignments` names for the step's role, or the role's pool.
    */
   manager?: string;
+  /**
+   * The 1-based month of the run this client leaves in (the Sandbox's "a named client leaves in a month"): at the first weekly
+   * churn tick on or after that month's start it is removed, as if it had churned (it counts as lost, with its fee). Its churn
+   * draw is still made, so no other client's draws move. Omitted: it stays until it churns, as before this field existed.
+   */
+  leavesMonth?: number;
 }
 
 /** A named client's own values (requirements section 4). Each replaces the tier's; unset keeps it. */
@@ -444,6 +450,16 @@ export type StepChangeEffect =
   | { step: string; part: "automatable"; remove: number; residualHours?: number }
   /** Speeds the augmentable part up by `factor` (at least 1). */
   | { step: string; part: "augmentable"; factor: number };
+
+/** Clients won in one month beyond the lead flow (`EngineModel.wonClients`). */
+export interface WonClientsEntry {
+  /** A service id. */
+  service: string;
+  /** 1-based month of the run. */
+  month: number;
+  /** Whole clients (rounded; capped at 500 an entry). */
+  count: number;
+}
 
 /**
  * An automation or augmentation that acts on parts of steps (D8; requirements section 7): never a new time. The future time
@@ -672,6 +688,13 @@ export interface EngineModel {
    * as before this field existed. Read by the simulation from engine 1.16.0.
    */
   changes?: EngineStepChange[];
+  /**
+   * Extra clients won during the run, beyond what the lead flow brings (the Sandbox's "Win new clients"): each `count` of `service`
+   * (a service id) is won in the 1-based `month`, spread evenly through it. They skip the sales steps up to the sale: each goes straight
+   * to the steps after the sale (onboarding) if the pipeline has any, else straight to a won client, and is placed like any won client
+   * (`placeNewClients`). They draw nothing from the lead flow's streams. Omitted or empty: none, as before this field existed.
+   */
+  wonClients?: WonClientsEntry[];
   entry: string;
   /** The terminal `won` and `lost` end steps' ids. */
   sinks: { won: string; lost: string };
