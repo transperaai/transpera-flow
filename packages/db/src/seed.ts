@@ -53,7 +53,7 @@ export function seedSql(
   for (const b of bundles) {
     out.push(`-- ${b.workspace.name}\n`);
     out.push(insert("workspaces", [{ id: b.workspace.id, name: b.workspace.name, slug: b.workspace.slug, settings: b.workspace.settings }]));
-    out.push(insert("roles", b.roles.map((r) => ({ ...r }))));
+    out.push(insert("roles", b.roles.map(({ leadership, ...r }) => (leadership ? { ...r, leadership } : r))));
     out.push(insert("people", b.people.map((r) => ({ ...r }))));
     out.push(insert("person_roles", b.personRoles.map((r) => ({ ...r }))));
     const { live_revision_id, ...process } = b.process;
