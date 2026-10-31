@@ -3,7 +3,7 @@
 // simulated health and churn for the Clients page. Pure, so it can be unit
 // tested.
 
-import { engineRecurrence, parseRecurrence, type RecurrenceJson } from "@transpera-flow/db";
+import { engineRecurrence, parseRecurrence, type RecurrenceDriver, type RecurrenceJson } from "@transpera-flow/db";
 import { DEFAULT_HEALTH_RULES, recurrenceLabel, type ClientResult } from "@transpera-flow/engine";
 
 /** Recurrences offered in settings, most common first. Stored values that aren't one of these are offered too. */
@@ -19,10 +19,35 @@ export const RECURRENCE_PRESETS: RecurrenceJson[] = [
   { poisson_per_month: 4 },
 ];
 
-/** A recurrence in words: "monthly", "fortnightly", "ad hoc, about 2 a month". */
+/** What a "From the tier" recurrence can follow, in the words the tier's deliverables use. */
+export const DRIVER_CHOICES: { value: RecurrenceDriver; label: string }[] = [
+  { value: "words", label: "Words" },
+  { value: "links", label: "Links" },
+  { value: "techHours", label: "Tech hours" },
+  { value: "meetings", label: "Meetings" },
+  { value: "builds", label: "Builds" },
+  { value: "creativeSets", label: "Creative sets" },
+  { value: "channels", label: "Channels" },
+  { value: "adhoc", label: "Ad hoc requests" },
+];
+
+/** Where "From the tier" starts: one task a month for every 1000 words. */
+export const TIER_RECURRENCE_START: RecurrenceJson = { perMonth: 1, driver: "words", per: 1000 };
+
+/** The three ways a link can be paced. */
+export type RecurrenceKind = "fixed" | "adhoc" | "tier";
+
+export const recurrenceKind = (r: RecurrenceJson): RecurrenceKind => ("driver" in r ? "tier" : "poisson_per_month" in r ? "adhoc" : "fixed");
+
+/** A recurrence in words: "monthly", "fortnightly", "ad hoc, about 2 a month", "1 a month per 1000 words, from the tier". */
 export function recurrenceText(r: RecurrenceJson): string {
   const e = engineRecurrence(r);
   if (!e) return "–";
+  if ("driver" in r) {
+    const n = (x: number) => String(Math.round(x * 100) / 100);
+    const word = (DRIVER_CHOICES.find((d) => d.value === r.driver)?.label ?? r.driver).toLowerCase();
+    return `${n(r.perMonth)} a month per ${r.per && r.per !== 1 ? `${n(r.per)} ` : ""}${word}, from the tier`;
+  }
   if ("every" in r && r.every === "month" && Math.abs(r.times - 1 / 3) < 1e-9) return "quarterly";
   return recurrenceLabel(e);
 }

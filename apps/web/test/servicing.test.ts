@@ -10,7 +10,7 @@ import { detectIssues, simulate } from "@transpera-flow/engine";
 import { MemoryDraftBackend, DraftSession } from "@/lib/drafts/session";
 import { promoteInput } from "@/lib/issues/register";
 import { parsePromoteInput } from "@/lib/issues/validate";
-import { clientRetention, recurrenceFromValue, recurrenceOptions, recurrenceText, RECURRENCE_PRESETS } from "@/lib/servicing";
+import { clientRetention, recurrenceFromValue, recurrenceKind, recurrenceOptions, recurrenceText, RECURRENCE_PRESETS, TIER_RECURRENCE_START } from "@/lib/servicing";
 
 // Client servicing in the app (issue #19) and opening never-published processes (issue #76).
 
@@ -32,6 +32,15 @@ describe("recurrences in settings", () => {
     for (const o of recurrenceOptions(null)) expect(JSON.stringify(recurrenceFromValue(o.value))).toBe(o.value);
     expect(recurrenceFromValue("{\"every\":\"day\",\"times\":1}")).toBeNull();
     expect(recurrenceFromValue("not json")).toBeNull();
+  });
+
+  it("words a recurrence that follows the tier, and round-trips it", () => {
+    const tier = { perMonth: 1, driver: "techHours" as const, per: 2 };
+    expect(recurrenceText(tier)).toBe("1 a month per 2 tech hours, from the tier");
+    expect(recurrenceText(TIER_RECURRENCE_START)).toBe("1 a month per 1000 words, from the tier");
+    expect(recurrenceKind(tier)).toBe("tier");
+    expect(recurrenceFromValue(JSON.stringify(tier))).toEqual(tier);
+    expect(recurrenceOptions(tier)[0]).toEqual({ value: JSON.stringify(tier), label: "1 a month per 2 tech hours, from the tier" });
   });
 
   it("offers a stored value that isn't a preset", () => {
