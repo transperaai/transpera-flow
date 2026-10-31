@@ -52,8 +52,9 @@ brief has a default: use it.
 
 | Brief | Branch | Migration versions |
 |---|---|---|
-| `p0-cuts-brief.md` | `claude/cap-p0-cuts` | `20270118000000`–`20270118009999` |
+| `p0-cuts-brief.md` | `claude/cap-p0-cuts` | `20270118000000`–`20270118009999`. Merged in #253 |
 | `p1-setup-brief.md` | `claude/cap-p1-setup` | `20270119000000`–`20270119009999` |
 | `p23-interface-brief.md` | `claude/cap-p23-interface` | none (engine types only). Merged in #251 |
 | `p2-engine-inputs-brief.md` | `claude/cap-p2-engine` | none (engine only). Merged in #252 |
-| `p3-engine-changes-brief.md` | `claude/cap-p3-changes` | none (engine only) |
+| `p3-engine-changes-brief.md` | `claude/cap-p3-changes` | none (engine only). Merged in #254 |
+| `p4-editor-brief.md` | `claude/cap-p4-editor` | `20270120000000`–`20270120009999` |
