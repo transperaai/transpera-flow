@@ -43,7 +43,6 @@ export interface ImportPreview {
   /** A /2 file: what it carries beyond the steps, as the upload would write it. */
   extras?: {
     sources: { title: string; kind: string; date: string | null }[];
-    firstPrinciplesParts: number;
     /** Left out or changed, in plain words. */
     notes: string[];
   };
@@ -88,7 +87,6 @@ export async function previewProcessFile(ctx: ImportContext, workspaceId: string
     const plan = await planFileExtras(ctx, ws, file, previewIds(file));
     extras = {
       sources: (file.sources ?? []).map((x) => ({ title: x.title, kind: x.kind, date: x.date ?? null })),
-      firstPrinciplesParts: plan.firstPrinciplesParts,
       notes: plan.notes,
     };
   }
@@ -306,7 +304,7 @@ export async function importProcessFile(ctx: ImportContext, file: ProcessFile, o
       processId: ids.processId,
       importSource: opts.source,
       sources: plan.sources,
-      extras: { ...(plan.firstPrinciples ? { first_principles: plan.firstPrinciples as never } : {}) },
+      extras: {},
     };
   }
   const out = await importNewProcess(ctx, ws.id, json, [], bundle);

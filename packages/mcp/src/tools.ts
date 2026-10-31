@@ -1,13 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { PROCESS_TEMPLATES } from "@transpera-flow/db/process-import";
-import { listProcesses, loadDeleteCandidates, loadLiveCompanyPart, loadProcessBundle, ModelError, resolveBundlePurposes, toEngineModel, workspacePurposes, type WorkspaceSettings } from "@transpera-flow/db";
+import { listProcesses, loadLiveCompanyPart, loadProcessBundle, ModelError, resolveBundlePurposes, toEngineModel, workspacePurposes, type WorkspaceSettings } from "@transpera-flow/db";
 import { applyPatches, isBlocking, MAX_PATCHES, PATCH_OPS, simulate, type EngineModel, type ScenarioPatch, type SimulationResult } from "@transpera-flow/engine";
 import { resolveProcess, resolveWorkspace, revisionIdFor, visibleWorkspaces, matchWorkspace, type ToolContext } from "./context";
 import { runTool, ToolError } from "./result";
 import { ANALYSIS_TOOL_NAMES, registerAnalysisTools } from "./analysis-tools";
 import { isRunDate, runSaved } from "./saved-scenarios";
-import { FIRST_PRINCIPLES_TOOL_NAMES, registerFirstPrinciplesTools } from "./first-principles-tools";
 import { FACT_TOOL_NAMES, registerFactTools } from "./facts-tools";
 
 /** The browser's defaults (apps/web useSimulation): 30 replications, seed 1. */
@@ -23,7 +22,6 @@ export const TOOL_NAMES = [
   "run_scenario",
   "list_templates",
   ...ANALYSIS_TOOL_NAMES,
-  ...FIRST_PRINCIPLES_TOOL_NAMES,
   ...FACT_TOOL_NAMES,
 ] as const;
 
@@ -215,12 +213,12 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         if (proc.is_company) {
           assumptions.push("This is the company map: each step holds a process (its child_process_id) at the position the map draws it; each edge is a handoff line between two of them. It is layout only: nothing here is simulated.");
         }
-        // What each working step's purpose comes to, with the process's first-principles delete list (Automatic reads it).
+        // What each working step's purpose comes to.
         const categories = workspacePurposes(ws.settings as WorkspaceSettings);
         const names = new Map(categories.map((c) => [c.key, c.name]));
         const resolved = proc.is_company
           ? new Map<string, { key: string; source: string }>()
-          : resolveBundlePurposes({ ...bundle, deleteCandidates: await loadDeleteCandidates(ctx.db, [{ processId: proc.id, revisionId: bundle.revision.id }]) });
+          : resolveBundlePurposes(bundle);
         return {
           process: { ...bundle.process, draft_revision_id: proc.draft_revision_id },
           revision: bundle.revision,
@@ -341,7 +339,6 @@ export function createMcpServer(ctx: ToolContext): McpServer {
   );
 
   registerAnalysisTools(server, ctx);
-  registerFirstPrinciplesTools(server, ctx);
   registerFactTools(server, ctx);
   return server;
 }

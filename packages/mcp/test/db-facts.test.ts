@@ -91,7 +91,6 @@ describe("the facts, issues, sources and solutions over the connector", () => {
     for (const [tool, args] of [
       ["list_sources", {}],
       ["list_solutions", {}],
-      ["get_first_principles", { process: "Sales" }],
       ["get_process", { process: "Sales" }],
     ] as const) {
       const r = await call(mcpViewer, tool, args);

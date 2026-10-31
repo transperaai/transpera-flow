@@ -468,37 +468,5 @@
       "from": "onboarding",
       "to": "onboarded"
     }
-  ],
-  "first_principles": {
-    "requirements": [
-      {
-        "text": "Every proposal goes past Tom for a margin check before it goes to the client.",
-        "owner": "Tom Whitfield",
-        "why": "A check on margin before the client sees the price.",
-        "step": "pricing",
-        "evidence": [
-          {
-            "source": "interview-tom",
-            "speaker": "Tom Whitfield",
-            "time": "00:06:36",
-            "quote": "Every proposal goes past me for the margin check before it goes to the client."
-          }
-        ],
-        "assumed": "Tom does the check and says it has always been his; nobody said who set the rule."
-      },
-      {
-        "text": "A proposal reaches the client within five working days of the discovery call.",
-        "why": "It is promised in the email Grace sends after the call.",
-        "step": "proposal",
-        "evidence": [
-          {
-            "source": "interview-grace",
-            "speaker": "Grace Adeyemi",
-            "time": "00:12:41",
-            "quote": "we promise a proposal within five working days of the call."
-          }
-        ]
-      }
-    ]
-  }
+  ]
 }

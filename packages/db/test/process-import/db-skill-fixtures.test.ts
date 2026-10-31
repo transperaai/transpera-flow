@@ -108,12 +108,11 @@ describe("uploading the process-file skill's fixtures", () => {
     expect(preview.unknownRoles).toEqual([]);
     expect(preview.unknownPeople).toEqual([]);
     expect(preview.extras!.sources.map((s) => s.title)).toEqual(["Tidewater interview: Hana Iqbal, account manager", "Tidewater interview: Owen Hart, SEO specialist"]);
-    expect(preview.extras!.firstPrinciplesParts).toBeGreaterThan(0);
     expect(preview.gap.gaps.map((g) => g.text)).toEqual(["Director review has no hands-on time", "No recurrence: link this process to a service and set how often it repeats in Settings"]);
     expect(await companyCounts(w.workspaceId)).toEqual(before);
 
     const r = await importProcessFile(w.ctx, file, { workspaceId: w.workspaceId, source: "tidewater-monthly-client-report.json" });
-    expect(r).toMatchObject({ steps: 8, links: 8, bundle: { sources: 2, first_principles: true } });
+    expect(r).toMatchObject({ steps: 8, links: 8, bundle: { sources: 2 } });
     const x = await written(w, "Monthly client report", r.revision_id);
     expect(x.proc).toMatchObject({ live_revision_id: null, draft_revision_id: r.revision_id, source: "import", kind: "servicing" });
 
@@ -142,12 +141,6 @@ describe("uploading the process-file skill's fixtures", () => {
       { type: "perception_gap", title: "Sources disagree on Director review: rework rate" },
       { type: "perception_gap", title: "Sources disagree on Pull ranking data: hands-on time" },
     ]);
-
-    // First principles are on the draft: the requirement has an owner who is a person, and the measure is the stated promise.
-    const fp = (await q("select * from first_principles where process_id = $1", [x.proc.id]))[0];
-    expect(fp).toMatchObject({ revision_id: r.revision_id });
-    expect(fp.measures[0]).toMatchObject({ kpi: "cycleHours", comparator: "atMost", target: 40 });
-    expect(fp.requirements[0].owner_person_id).not.toBeNull();
   });
 
   it("Copperleaf: Enquiry to signed client lands as a draft, and what is missing is marked as missing", async () => {
@@ -166,11 +159,10 @@ describe("uploading the process-file skill's fixtures", () => {
     expect(preview.unknownRoles).toEqual(["Designer"]);
     expect(preview.unknownPeople).toEqual([]);
     expect(preview.gap.gaps.map((g) => g.text)).toEqual(["Pitch deck has no role", "Send contract has no hands-on time"]);
-    expect(preview.extras!.firstPrinciplesParts).toBeGreaterThan(0);
     expect(await companyCounts(w.workspaceId)).toEqual(before);
 
     const r = await importProcessFile(w.ctx, file, { workspaceId: w.workspaceId, source: "copperleaf-enquiry-to-signed-client.json" });
-    expect(r).toMatchObject({ steps: 15, links: 14, bundle: { sources: 2, first_principles: true } });
+    expect(r).toMatchObject({ steps: 15, links: 14, bundle: { sources: 2 } });
     expect(r.warnings).toContain("One step has no role: the file's role isn't one of your roles and wasn't mapped to one.");
     const x = await written(w, "Enquiry to signed client", r.revision_id);
     expect(x.proc).toMatchObject({ live_revision_id: null, draft_revision_id: r.revision_id, source: "import", kind: "pipeline" });
@@ -221,12 +213,5 @@ describe("uploading the process-file skill's fixtures", () => {
     expect(x.links.filter((l) => l.kind === "process").map((l) => l.source_id).sort()).toEqual([grace.id, tom.id].sort());
     expect(await companyCounts(w.workspaceId)).toEqual({ ...before, issues: before.issues + 4 });
     expect(x.issues.map((i) => i.type)).toEqual(["perception_gap", "perception_gap", "perception_gap", "perception_gap"]);
-
-    // First principles: only the two rules a speaker stated.
-    const fp = (await q("select * from first_principles where process_id = $1", [x.proc.id]))[0];
-    expect(fp.requirements).toHaveLength(2);
-    expect(fp.requirements[0]).toMatchObject({ step_id: s["Pricing sign-off"].id });
-    expect(fp.requirements[0].owner_person_id).not.toBeNull();
-    expect(fp.measures).toEqual([]);
   });
 });

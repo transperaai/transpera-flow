@@ -1,5 +1,5 @@
 // What an outside analysis needs, over the connector (issue #175, B17; decision D40): the facts the engine measures, the sources
-// and the solutions. With get_process (the model), run_scenario (runs), list_issues (issues) and get_first_principles, Claude or
+// and the solutions. With get_process (the model), run_scenario (runs), and list_issues (issues), Claude or
 // ChatGPT outside the app can make an assessment of their own. Every tool reads as the token's user: RLS decides what is visible
 // (docs/adr/0018-mcp-tokens-checked-in-app-code.md). Read-only (docs/plans/cut-list.md item 5): findings, AI analyses and
 // proposing anything are gone. Every list is bounded: facts are the worst first up to a limit with their sentences trimmed,
@@ -7,8 +7,7 @@
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { loadFirstPrinciples } from "@transpera-flow/db";
-import { absenceTest, compareCostsDesc, detectIssues, RATINGS, resolveMoney, shadowPricesFor, simulate, successMeasureSource, toRatingConfig, type DetectedIssue } from "@transpera-flow/engine";
+import { absenceTest, compareCostsDesc, detectIssues, RATINGS, resolveMoney, shadowPricesFor, simulate, toRatingConfig, type DetectedIssue } from "@transpera-flow/engine";
 import { loadLiveModel, processSteps } from "./analysis-tools";
 import { resolveProcess, resolveWorkspace, type ProcessWithDraft, type ToolContext, type WorkspaceRef } from "./context";
 import { runTool } from "./result";
@@ -63,12 +62,10 @@ export async function liveFacts(
   const run = simulate(loaded.model, REPS, SEED);
   const config = toRatingConfig({}, loaded.model.hoursPerWeek);
   const money = { ...resolveMoney({}), currency: loaded.bundle.workspace.settings.currency };
-  const fp = await loadFirstPrinciples(ctx.db, proc.id, loaded.bundle.revision.id).catch(() => null);
-  const successMeasures = fp?.doc ? successMeasureSource(fp.doc, proc.id) : undefined;
   const absence = absenceTest(loaded.model, { seed: SEED, weeks: config.absence.weeks, timeBudgetMs: ABSENCE_BUDGET_MS });
   if (!absence.complete) assumptions.push(`The absence test ran out of time and tested ${absence.people.length} people; key-person facts cover only those.`);
   const rate = (shadowPrices?: Record<string, number>) =>
-    detectIssues(loaded.model, run, config, { processId: proc.id, absence, cost: money, ...(successMeasures ? { successMeasures } : {}), ...(shadowPrices ? { shadowPrices } : {}) });
+    detectIssues(loaded.model, run, config, { processId: proc.id, absence, cost: money, ...(shadowPrices ? { shadowPrices } : {}) });
   const roleIds = [...new Set(rate().flatMap((d) => (d.key.startsWith("capacity:") && d.roleId ? [d.roleId] : [])))];
   const shadowPrices = roleIds.length ? shadowPricesFor(loaded.model, roleIds, { reps: REPS, seed: SEED, timeBudgetMs: SHADOW_BUDGET_MS }) : undefined;
   const steps = new Map(loaded.bundle.steps.concat((loaded.bundle.otherProcesses ?? []).flatMap((o) => o.steps)).map((s) => [s.id, s.name]));

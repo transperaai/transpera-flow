@@ -1,12 +1,12 @@
-// What `transpera-process/2` adds to the /1 file (issue #167, B14): evidence for every number, a list of sources, and first
-// principles. (It used to carry facts about the company and proposed issues and ideas as well; Suggestions are gone,
-// docs/plans/cut-list.md item 2, and a file that still has them gets a warning that they are not read.) The steps, links and groups are checked in process-file.ts
+// What `transpera-process/2` adds to the /1 file (issue #167, B14): evidence for every number and a list of sources.
+// (It used to carry facts about the company, proposed issues and ideas, and first principles as well; they are gone,
+// and a file that still has them gets a warning that they are not read.) The steps, links and groups are checked in process-file.ts
 // (shared with /1); this module checks the new parts and holds their types, schema pieces and the prompt's extra rules.
 // Pure: no I/O and no framework.
 //
-// A file never changes anything live: first principles go to the new draft; sources are added and linked to the process.
+// A file never changes anything live: sources are added and linked to the process.
 
-// The engine's lists (ratings, issue types, first-principles values, success measures) are written out here, not imported: this
+// The engine's lists (ratings, issue types) are written out here, not imported: this
 // module and the schema generator (scripts/gen-import-schema.ts) run under plain Node, which can't load the engine's source. A
 // test (process-file-2.test.ts) fails if any list drifts from the engine's.
 
@@ -14,12 +14,6 @@ import { isObject, norm, q, suggest } from "@transpera-flow/db/process-file-util
 
 export const PROCESS_FILE_FORMAT_2 = "transpera-process/2";
 
-export const FP_KINDS = ["truth", "assumption"] as const;
-export const FP_VERDICTS = ["keep", "change", "drop", "challenge"] as const;
-export const FP_COMPARATORS = ["atLeast", "atMost"] as const;
-export const SUCCESS_KPI_KEYS = ["won", "winsPerWeek", "winRate", "newMrr", "billed", "cycleHours", "labour", "wipEnd"] as const;
-const FP_MAX_ITEMS = 50;
-const FP_MAX_CHAIN = 10;
 
 export const SOURCE_KINDS = ["transcript", "notes", "sop", "spreadsheet", "data", "screenshot", "other"] as const;
 export type FileSourceKind = (typeof SOURCE_KINDS)[number];
@@ -76,14 +70,6 @@ export interface FileSource {
 export interface FileRange {
   min: number;
   max: number;
-}
-
-export interface FileFirstPrinciples {
-  job?: Backing & { who?: string; progress?: string; situation?: string; done?: string };
-  truths: (Backing & { text: string; kind?: (typeof FP_KINDS)[number]; test?: string })[];
-  requirements: (Backing & { text: string; owner?: string; why?: string; verdict?: (typeof FP_VERDICTS)[number]; step?: string })[];
-  measures: (Backing & { text: string; kpi?: (typeof SUCCESS_KPI_KEYS)[number]; comparator?: (typeof FP_COMPARATORS)[number]; target?: number; horizon?: string })[];
-  why?: Backing & { problem?: string; chain?: string[]; root?: string };
 }
 
 /** What the v2 checker needs from the file's steps. */
@@ -397,139 +383,8 @@ export function readStepExtras(raw: Record<string, unknown>, label: string, env:
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// First principles
-// ---------------------------------------------------------------------------
-
-const ITEM_FIELDS = ["evidence", "assumed"];
-
-const FP_KEYS = ["job", "truths", "requirements", "measures", "why"];
-
-/** The file's `first_principles`: filled only where the materials say so. */
-export function checkFirstPrinciples(raw: unknown, steps: StepsView, env: Env): FileFirstPrinciples | undefined {
-  if (raw === undefined) return undefined;
-  if (!isObject(raw)) {
-    env.errors.push('"first_principles" should be an object with job, truths, requirements, measures and why.');
-    return undefined;
-  }
-  unknownFields(raw, FP_KEYS, "first_principles", env);
-  const fp: FileFirstPrinciples = { truths: [], requirements: [], measures: [] };
-  const items = (v: unknown, key: string): unknown[] => {
-    if (v === undefined || v === null) return [];
-    if (!Array.isArray(v)) {
-      env.errors.push(`first_principles.${key} should be a list.`);
-      return [];
-    }
-    if (v.length > FP_MAX_ITEMS) env.errors.push(`first_principles.${key} lists ${v.length}; the most is ${FP_MAX_ITEMS}.`);
-    return v.slice(0, FP_MAX_ITEMS);
-  };
-
-  if (raw.job !== undefined) {
-    if (!isObject(raw.job)) env.errors.push("first_principles.job should be an object with who, progress, situation and done.");
-    else {
-      const j = raw.job;
-      unknownFields(j, ["who", "progress", "situation", "done", ...ITEM_FIELDS], "first_principles.job", env);
-      const job: NonNullable<FileFirstPrinciples["job"]> = { ...readBacking(j, "first_principles.job", env, { warnIfBare: true }) };
-      for (const k of ["who", "progress", "situation", "done"] as const) {
-        const v = text(j[k], MAX_TEXT, "first_principles.job", k, env);
-        if (v) job[k] = v;
-      }
-      fp.job = job;
-    }
-  }
-
-  items(raw.truths, "truths").forEach((r, i) => {
-    const where = `first_principles.truths item ${i + 1}`;
-    if (!isObject(r)) return void env.errors.push(`${where} should be an object with text.`);
-    const t = text(r.text, MAX_TEXT, where, "text", env);
-    if (!t) return void env.errors.push(`${where} has no text.`);
-    unknownFields(r, ["text", "kind", "test", ...ITEM_FIELDS], where, env);
-    const item: FileFirstPrinciples["truths"][number] = { text: t, ...readBacking(r, `${where} ${q(t.slice(0, 40))}`, env, { warnIfBare: true }) };
-    if (r.kind !== undefined) {
-      if (typeof r.kind === "string" && (FP_KINDS as readonly string[]).includes(r.kind)) item.kind = r.kind as (typeof FP_KINDS)[number];
-      else env.errors.push(`${where}: kind should be truth or assumption.`);
-    }
-    const test = text(r.test, MAX_TEXT, where, "test", env);
-    if (test) item.test = test;
-    fp.truths.push(item);
-  });
-
-  const ref = (v: unknown, where: string): string | undefined => {
-    if (v === undefined || v === null) return undefined;
-    if (typeof v !== "string" || !steps.has(v.trim())) {
-      const near = typeof v === "string" ? suggest(v.trim(), steps.ids, env.budget) : null;
-      env.errors.push(`${where} names ${typeof v === "string" ? q(v) : "something"} as its step, which isn't a step.${near ? ` Did you mean ${q(near)}?` : ""}`);
-      return undefined;
-    }
-    return v.trim();
-  };
-  items(raw.requirements, "requirements").forEach((r, i) => {
-    const where = `first_principles.requirements item ${i + 1}`;
-    if (!isObject(r)) return void env.errors.push(`${where} should be an object with text.`);
-    const t = text(r.text, MAX_TEXT, where, "text", env);
-    if (!t) return void env.errors.push(`${where} has no text.`);
-    unknownFields(r, ["text", "owner", "why", "verdict", "step", ...ITEM_FIELDS], where, env);
-    const item: FileFirstPrinciples["requirements"][number] = { text: t, ...readBacking(r, `${where} ${q(t.slice(0, 40))}`, env, { warnIfBare: true }) };
-    const owner = text(r.owner, 200, where, "owner", env);
-    if (owner) item.owner = owner;
-    const why = text(r.why, MAX_TEXT, where, "why", env);
-    if (why) item.why = why;
-    if (r.verdict !== undefined) {
-      if (typeof r.verdict === "string" && (FP_VERDICTS as readonly string[]).includes(r.verdict)) item.verdict = r.verdict as (typeof FP_VERDICTS)[number];
-      else env.errors.push(`${where}: verdict should be keep, change, drop or challenge.`);
-    }
-    const step = ref(r.step, where);
-    if (step) item.step = step;
-    fp.requirements.push(item);
-  });
-
-  items(raw.measures, "measures").forEach((r, i) => {
-    const where = `first_principles.measures item ${i + 1}`;
-    if (!isObject(r)) return void env.errors.push(`${where} should be an object with text.`);
-    const t = text(r.text, MAX_TEXT, where, "text", env);
-    if (!t) return void env.errors.push(`${where} has no text.`);
-    unknownFields(r, ["text", "kpi", "comparator", "target", "horizon", ...ITEM_FIELDS], where, env);
-    const item: FileFirstPrinciples["measures"][number] = { text: t, ...readBacking(r, `${where} ${q(t.slice(0, 40))}`, env, { warnIfBare: true }) };
-    if (r.kpi !== undefined && r.kpi !== null) {
-      if (typeof r.kpi === "string" && (SUCCESS_KPI_KEYS as readonly string[]).includes(r.kpi)) item.kpi = r.kpi as (typeof SUCCESS_KPI_KEYS)[number];
-      else env.errors.push(`${where}: kpi should be one of ${SUCCESS_KPI_KEYS.join(", ")}, or left out.`);
-    }
-    if (r.comparator !== undefined) {
-      if (typeof r.comparator === "string" && (FP_COMPARATORS as readonly string[]).includes(r.comparator)) item.comparator = r.comparator as (typeof FP_COMPARATORS)[number];
-      else env.errors.push(`${where}: comparator should be atLeast or atMost.`);
-    }
-    const target = number(r.target, where, "target", -1e12, 1e12, env, "in the unit people read: a win rate of 30% is 30");
-    if (target !== undefined) item.target = target;
-    const horizon = text(r.horizon, 200, where, "horizon", env);
-    if (horizon) item.horizon = horizon;
-    fp.measures.push(item);
-  });
-
-  if (raw.why !== undefined) {
-    if (!isObject(raw.why)) env.errors.push("first_principles.why should be an object with problem, chain and root.");
-    else {
-      const w = raw.why;
-      unknownFields(w, ["problem", "chain", "root", ...ITEM_FIELDS], "first_principles.why", env);
-      const why: NonNullable<FileFirstPrinciples["why"]> = { ...readBacking(w, "first_principles.why", env, { warnIfBare: true }) };
-      const problem = text(w.problem, MAX_TEXT, "first_principles.why", "problem", env);
-      if (problem) why.problem = problem;
-      const root = text(w.root, MAX_TEXT, "first_principles.why", "root", env);
-      if (root) why.root = root;
-      const chain = strings(w.chain, "first_principles.why", "chain", FP_MAX_CHAIN, env);
-      if (chain?.length) why.chain = chain;
-      fp.why = why;
-    }
-  }
-  return fp;
-}
-
 /** How many things each v2 section will make, for the preview and for tests. */
-export function sectionCounts(file: {
-  sources?: readonly FileSource[];
-  first_principles?: FileFirstPrinciples;
-}): { sources: number; firstPrinciples: number } {
-  const f = file.first_principles;
-  const firstPrinciples = f ? (f.job ? 1 : 0) + f.truths.length + f.requirements.length + f.measures.length + (f.why ? 1 : 0) : 0;
-  return { sources: file.sources?.length ?? 0, firstPrinciples };
+export function sectionCounts(file: { sources?: readonly FileSource[] }): { sources: number } {
+  return { sources: file.sources?.length ?? 0 };
 }
 

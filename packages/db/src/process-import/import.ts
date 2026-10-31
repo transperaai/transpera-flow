@@ -375,14 +375,13 @@ export interface ImportBundle {
   importSource: string;
   /** Sources to add. Each `id` is a placeholder the evidence cites; the database replaces it with the id it makes. Each is linked to the process. */
   sources: { id: string; kind: string; title: string; speakers: string[]; recorded_at: string | null; body: string | null }[];
-  /** The rest of the extras, as `import_process_bundle` takes them: `first_principles` (its columns). */
-  extras: { first_principles?: Json };
+  /** The rest of the extras, as `import_process_bundle` takes them (none today). */
+  extras: Record<string, never>;
 }
 
 /** What `import_process_bundle` wrote beyond the process. */
 export interface ImportBundleResult {
   sources: number;
-  first_principles: boolean;
 }
 
 /**
@@ -518,7 +517,7 @@ export async function importNewProcess(ctx: ImportContext, workspaceId: string, 
   if (bundle) {
     const out = data as unknown as { processes: typeof made } & ImportBundleResult;
     made = out.processes;
-    scope.bundleResult = { sources: out.sources, first_principles: out.first_principles };
+    scope.bundleResult = { sources: out.sources };
   }
   prepared.settle(new Map(made.map((r) => [r.process_id, r])));
   return prepared.write();

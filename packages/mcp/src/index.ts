@@ -6,5 +6,4 @@ export { generateApiToken, hashApiToken, looksLikeApiToken } from "./tokens";
 export { applyOverrides, createMcpServer, DEFAULT_REPS, DEFAULT_SEED, summarizeRun, TOOL_NAMES } from "./tools";
 export { ANALYSIS_TOOL_NAMES, DEFAULT_ROBUSTNESS_SECONDS, MAX_ROBUSTNESS_SECONDS } from "./analysis-tools";
 export { bottleneckReport, checkScenarioRobustness, compareScenarios, matchNamed, robustnessParameters, stackPatches, type NamedScenario } from "./analysis";
-export { FIRST_PRINCIPLES_TOOL_NAMES } from "./first-principles-tools";
 export { FACT_TOOL_NAMES } from "./facts-tools";
