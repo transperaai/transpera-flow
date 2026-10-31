@@ -118,14 +118,15 @@ describe("the example as an engine model", () => {
     expect(fx).toBeDefined();
   });
 
-  it("has each tier's deliverables and ad-hoc rule, and a fixed rate on every servicing link (until driver recurrences can be stored)", () => {
+  it("has each tier's deliverables and ad-hoc rule, and the fixture's recurrence on every servicing link", () => {
     for (const sv of Object.values(model.services!)) {
       const f = Object.values(fixture.services!).find((x) => x.name === sv.name)!;
       expect(sv.deliverables, sv.name).toEqual(f.deliverables);
       expect(sv.adhoc, sv.name).toEqual(f.adhoc);
       expect(sv.department).not.toBeUndefined();
       expect(sv.servicing!.length, sv.name).toBeGreaterThan(0);
-      for (const l of sv.servicing!) expect("driver" in l.recurrence, sv.name).toBe(false);
+      const key = (l: { process: string; recurrence: unknown }, m: typeof model) => `${m.servicingProcesses![l.process]!.name} ${JSON.stringify(l.recurrence)}`;
+      expect(sv.servicing!.map((l) => key(l, model)).sort(), sv.name).toEqual(f.servicing!.map((l) => key(l, fixture)).sort());
     }
   });
 
@@ -170,7 +171,8 @@ describe("won clients are split by the prototype's department x tier mix", () =>
  * The step fields P4 maps (the work split, tier multipliers, routing to the client's manager) and the list of changes, copied from the fixture by process and step name, for a model that doesn't have them yet. A no-op once P4's mapping puts them on the model's own steps.
  */
 function withP4StepFields(m: EngineModel, from: EngineModel): { model: EngineModel; patched: boolean } {
-  if (m.steps.some((s) => s.toClientManager)) return { model: m, patched: false };
+  // Once the mapping puts the step fields on the model's own steps (P4), only the changes (not stored in the database yet) are copied.
+  const hasStepFields = m.steps.some((s) => s.toClientManager);
   const fx = new Map(from.steps.map((s) => [s.id, s]));
   const byId = new Map<string, EngineModel["steps"][number]>();
   const mine = new Map<string, string>();
@@ -187,7 +189,7 @@ function withP4StepFields(m: EngineModel, from: EngineModel): { model: EngineMod
     }
   }
   return {
-    patched: true,
+    patched: !hasStepFields || m.changes === undefined,
     model: {
       ...m,
       // The list of changes isn't stored in the database yet either (the fixture has the prototype's 13).
@@ -195,12 +197,26 @@ function withP4StepFields(m: EngineModel, from: EngineModel): { model: EngineMod
         ? { changes: from.changes.map((c) => ({ ...c, effects: c.effects.map((e) => ({ ...e, step: mine.get(e.step) ?? e.step })) })) }
         : {}),
       steps: m.steps.map((s) => {
-        const f = byId.get(s.id);
+        const f = hasStepFields ? undefined : byId.get(s.id);
         return f ? { ...s, ...(f.split ? { split: f.split } : {}), ...(f.tierMultiplier ? { tierMultiplier: f.tierMultiplier } : {}), ...(f.toClientManager ? { toClientManager: true } : {}) } : s;
       }),
     },
   };
 }
+
+describe("the ids the Capacity page relies on", () => {
+  it("engine person, role and service ids are the Set up row ids, and a service's tier is the tier key", async () => {
+    const ids = async (table: string) => (await q(`select id from ${table} where workspace_id = $1`, [ws])).map((r) => r.id as string).sort();
+    expect(Object.keys(model.people!).sort()).toEqual(await ids("people"));
+    expect(Object.keys(model.roles).sort()).toEqual(await ids("roles"));
+    expect(Object.keys(model.services!).sort()).toEqual(await ids("services"));
+    expect(Object.keys(model.clients!).sort()).toEqual(await ids("clients"));
+    const tiers = (await q("select s.id, t.key, s.department_id from services s join tiers t on t.id = s.tier_id where s.workspace_id = $1", [ws])).map((r) => [r.id, r.key, r.department_id]).sort();
+    expect(Object.entries(model.services!).map(([id, s]) => [id, s.tier, s.department]).sort()).toEqual(tiers);
+    for (const p of Object.values(model.people!)) for (const t of p.tiers ?? []) expect(["T1", "T2", "T3"]).toContain(t);
+    for (const c of Object.values(model.clients!)) if (c.manager) expect(model.people![c.manager]).toBeDefined();
+  });
+});
 
 describe("busy shares against the engine fixture capacityModel()", () => {
   const fixture = capacityModel();
@@ -219,8 +235,8 @@ describe("busy shares against the engine fixture capacityModel()", () => {
     const theirs = share(fixture, fixture);
     const { model: m, patched } = withP4StepFields(model, fixture);
     // The model as the database gives it today, then with P4's step fields: the first shows what P4 still has to map.
-    if (patched) table("as the database gives it (no P4 step fields)", share(model, model), theirs);
-    const worst = table(patched ? "with P4's step fields and the changes copied from the fixture" : "as the database gives it", share(m, m), theirs);
+    if (patched) table("as the database gives it (without the changes)", share(model, model), theirs);
+    const worst = table(patched ? "with the changes copied from the fixture" : "as the database gives it", share(m, m), theirs);
     expect(worst).toBeLessThanOrEqual(15);
   }, 300_000);
 });
