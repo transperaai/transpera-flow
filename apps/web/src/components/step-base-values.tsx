@@ -31,7 +31,7 @@ import {
 import type { ProcessEditor } from "@/lib/editor/editor";
 import type { Edit } from "@/lib/editor/ops";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
-import { DEFAULT_TIER_SETUP, type TierSetup } from "@/lib/tier-setup";
+import { DEFAULT_TIER_SETUP, type DeliverableName, type TierSetup } from "@/lib/tier-setup";
 
 const sectionClass = "flex flex-col gap-3 border-t border-line pt-3";
 const DRIVER_WORDS: Record<string, string> = { words: "words", links: "links", techHours: "tech hours", meetings: "meetings", builds: "builds", creativeSets: "creative sets", channels: "channels", adhoc: "ad hoc requests" };
@@ -142,11 +142,10 @@ export function StepBaseValues({
               {links.map((l) => {
                 const r = l.recurrence as RecurrenceJson;
                 if ("driver" in r) {
-                  const service = tierSetup.services?.[l.service_id];
                   const values = tierSetup.services
                     ? tierSetup.keys.flatMap((k) => {
                         const own = Object.entries(tierSetup.services!).find(([id, s]) => s.tier === k && links.some((x) => x.service_id === id));
-                        const v = own?.[1].deliverables[r.driver as keyof NonNullable<typeof service>["deliverables"]];
+                        const v = own?.[1].deliverables[r.driver as DeliverableName];
                         return v === undefined ? [] : [`${k} ${v}`];
                       })
                     : [];
