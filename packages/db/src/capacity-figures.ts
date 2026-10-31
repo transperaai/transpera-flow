@@ -20,14 +20,25 @@ import {
   tasksPerMonth,
   type Bottlenecks,
   type EngineClient,
+  type EngineMarket,
   type EngineModel,
   type SimulationResult,
 } from "@transpera-flow/engine";
 import type { CapacitySetup, SetupPerson, SetupRole } from "./capacity-setup";
 import { tierCount, uniqueClients } from "./capacity-setup";
 
-/** Months to hire a replacement (the prototype's `hiringDelay`). Not stored in Set up yet. */
+/**
+ * Months to hire a replacement before the market stretches it (the prototype's `hiringDelay`; the Sandbox's "Hiring delay" lever starts
+ * from none). The workspace stores no base of its own, so this is the base; the workspace's market settings stretch it (`hiringDelayAt`).
+ */
 export const DEFAULT_HIRING_DELAY_MONTHS = 2;
+
+/** The hiring delay, in whole months, for a hire planned for month `i` of the run: the base x the market's "time to hire" that month (as the Sandbox does). */
+export function hiringDelayAt(market: EngineMarket | undefined, i: number, base = DEFAULT_HIRING_DELAY_MONTHS): number {
+  const months = market?.months;
+  if (!months?.length) return base;
+  return Math.max(0, Math.round(base * (months[Math.min(Math.max(0, i), months.length - 1)]!.hire ?? 1)));
+}
 /** The busy share a "goal" DLER is measured against (D24). */
 export const DLER_GOAL = 4.5;
 const MONTH_WEEKS = CAPACITY_WEEKS_PER_MONTH;
@@ -424,7 +435,19 @@ export interface HiringAdvice {
 }
 
 /** Per role: the first month its mean busy share passes its line in the 12-month run, minus the hiring delay. Roles that never pass get no month. */
-export function hiringAdvice(setup: CapacitySetup, result: SimulationResult, delayMonths = DEFAULT_HIRING_DELAY_MONTHS): HiringAdvice[] {
+export function hiringAdvice(
+  setup: CapacitySetup,
+  result: SimulationResult,
+  /** Whole months, or the delay for a hire planned for a given month (see `hiringDelayAt`). */
+  delay: number | ((month: number) => number) = DEFAULT_HIRING_DELAY_MONTHS,
+): HiringAdvice[] {
+  // A hire planned for month m is delayed by the market of month m, so find the month whose own delay lands on the month it is needed.
+  const hireBy = (needed: number): number => {
+    if (typeof delay === "number") return needed - delay;
+    let m = Math.max(0, needed - delay(needed));
+    for (let k = 0; k < 3; k++) m = Math.max(0, needed - delay(m));
+    return needed - delay(m);
+  };
   const monthly = result.monthly;
   if (!monthly) return [];
   const out: HiringAdvice[] = [];
@@ -433,7 +456,7 @@ export function hiringAdvice(setup: CapacitySetup, result: SimulationResult, del
     if (!series || role.active === false) continue;
     const values = series.map((m) => (m ? m.mean : null));
     const first = values.findIndex((v) => v !== null && v >= role.line);
-    out.push({ roleId: role.id, name: role.name, line: role.line, overFrom: first < 0 ? null : first, hireBy: first < 0 ? null : first - delayMonths, series: values });
+    out.push({ roleId: role.id, name: role.name, line: role.line, overFrom: first < 0 ? null : first, hireBy: first < 0 ? null : hireBy(first), series: values });
   }
   return out.sort((a, b) => (a.overFrom ?? 99) - (b.overFrom ?? 99));
 }
