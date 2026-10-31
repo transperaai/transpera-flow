@@ -44,6 +44,7 @@ The transcripts and per-transcript extracts are not in the repo. People are name
 | D7 | Tier multipliers live **on each step**. | 31 Oct, Austin |
 | D8 | Adoption is set **per change**. | 31 Oct, Austin |
 | D9 | DLER's "money under management" is **retainer revenue only** (no ad spend). | 31 Oct, Austin |
+| D10 | DLER's salary base **includes directors' and managers' salaries** (Austin's view; confirm with the client). | 31 Oct, Austin |
 
 ## What the transcripts tell us, in five lines
 
@@ -404,8 +405,8 @@ These are the starting scenario library. Each becomes a change (section 7) or a 
 
 **Still to ask**
 
-4. **DLER:** retainer only (D9). Which department is at 2.75 and which at 3.2, and what salary base is used (do
-   directors and management count)?
+4. **DLER:** retainer only (D9); directors and managers count (D10, confirm). Which department is at 2.75 and which
+   at 3.2?
 5. Hours a week per person; leave; salaries or bands. Is head count 22 or 24, and are the 4 offshore included? Which
    org-chart boxes are contractors or open roles?
 6. The **pricing calculator** (fee → words, links, tech hours, manager hours), and the SEO Director's capacity model.
