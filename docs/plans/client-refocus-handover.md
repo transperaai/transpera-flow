@@ -56,6 +56,22 @@ item with "What the engine already models" below.
 
 Austin decides scope. Don't start building until Austin has marked up the requirements and the keep / cut / build list.
 
+**Read the transcripts with agents, not in the main chat.** Transcripts are long, and reading them directly would fill
+the main chat's context before the requirements are written. So:
+- **Fan out.** Give each transcript (or a batch of short ones) to its own subagent (Sonnet is enough), in parallel.
+- **Brief each agent with:** the eight sections above, and the instruction to return a compact, structured extract.
+  For each section that means:
+  - the facts with their values and ranges;
+  - who said it (a role, not a name, unless Austin wants names);
+  - a short verbatim quote as evidence for each number;
+  - contradictions with other sources;
+  - questions left open.
+- **Return only the extract.** The agent must not return the transcript or long passages.
+- **Merge in the main chat.** Opus combines the extracts into `docs/plans/client-requirements.md`, reconciles
+  conflicting numbers (noting each source), and lists the gaps. If one point needs more detail, send a follow-up
+  question to the agent that read that transcript, rather than opening the transcript in the main chat.
+- **Store extracts in the scratchpad,** not the repo.
+
 **Transcripts are the client's confidential material.** Don't commit them to the repo unless Austin says to. Work
 from them in the chat or the session scratchpad.
 
