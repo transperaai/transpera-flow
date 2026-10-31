@@ -12,8 +12,6 @@ import { getAuth } from "./server";
 export interface SessionUser extends ClaimsUser {
   /** The profile name Google or Microsoft gave, or null. */
   name: string | null;
-  /** Signed in only for a restricted share link (B3): no memberships, so RLS shows them no workspace. */
-  guest: boolean;
 }
 
 /** Who the request's session cookie names, and, when nobody, whether a live session was refused by the access list. */
