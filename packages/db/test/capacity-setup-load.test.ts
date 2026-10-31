@@ -89,15 +89,15 @@ describe("loadCapacitySetup", () => {
   });
 });
 
-describe("the engine's model is untouched by Set up data", () => {
-  it("Northbeam with tiers, deliverables, salaries, portfolios and overrides keyed in gives the model of the snapshot", async () => {
+describe("the engine's model before and after a service becomes a tier", () => {
+  it("Northbeam is the snapshot until a service has a department and a tier; then Set up data reaches the engine (P2b)", async () => {
     const snapshot = JSON.parse(readFileSync(new URL("./snapshots/to-engine-model.json", import.meta.url), "utf8")) as Record<string, unknown>;
     const before = JSON.parse(JSON.stringify(toEngineModel((await loadProcessBySlug(db.dbAs({ sub: users.owner!.id, role: "authenticated", app_metadata: { agency_admin: true } }), "northbeam"))!.live, { startDate: START })));
     // The model read from the database equals the fixture's snapshot (ids are the seed's).
     expect(before).toEqual(snapshot.northbeam);
 
-    // An existing service becomes a tier of a department (the way a workspace that already sells things gets its tiers): only columns
-    // the engine doesn't read change. (A tier made new with add_tier brings new services, which are services like any other.)
+    // An existing service becomes a tier of a department (the way a workspace that already sells things gets its tiers). Since P2b that
+    // makes it a tier workspace, and what is keyed reaches the engine (test/capacity-mapping.test.ts has the row-by-row mapping).
     const dept = (await q("select id from departments where workspace_id = $1 order by sort limit 1", [ws]))[0]!.id as string;
     const tier = (await q("insert into tiers (workspace_id, key, name) values ($1, 'T1', 'Tier 1') returning id", [ws]))[0]!.id as string;
     await q("update services set department_id = $2, tier_id = $3, words = 4000, links = 8, adhoc_chance = 0.9, adhoc_requests = 6.5, price_rise_churn = 0.75 where id = (select id from services where workspace_id = $1 order by id limit 1)", [ws, dept, tier]);
@@ -113,7 +113,14 @@ describe("the engine's model is untouched by Set up data", () => {
     await q("update workspaces set settings = settings || '{\"ramp_default\": [0.3, 0.6], \"dler_includes_leadership\": false}'::jsonb where id = $1", [ws]);
 
     const after = JSON.parse(JSON.stringify(toEngineModel((await loadProcessBySlug(db.dbAs({ sub: users.owner!.id, role: "authenticated", app_metadata: { agency_admin: true } }), "northbeam"))!.live, { startDate: START })));
-    expect(after).toEqual(before);
+    const tiered = Object.values(after.services as Record<string, { tier?: string; department?: string; deliverables?: unknown }>).filter((x) => x.tier === "T1");
+    expect(tiered).toHaveLength(1);
+    expect(tiered[0]).toMatchObject({ department: dept, deliverables: { words: 4000, links: 8 } });
+    expect(after.placeNewClients).toBe("least-busy");
+    expect(Object.values(after.people as Record<string, { reservedShare?: number; tiers?: string[] }>).find((p) => p.reservedShare === 0.3)?.tiers).toEqual(["T1"]);
+    // Everything the Set up data doesn't reach is the snapshot's.
+    expect(after.horizonWeeks).toBe(before.horizonWeeks);
+    expect(after.steps).toEqual(before.steps);
   });
 });
 

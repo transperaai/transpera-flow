@@ -739,6 +739,59 @@ export interface ProcessBundle {
    */
   servicingLinks?: ServiceServicingRow[];
   otherProcesses?: ProcessPart[];
+  /**
+   * The capacity Set up data the engine reads (P1's columns, mapped by P2b: `docs/plans/capacity/p2b-mapping-brief.md`). Present only
+   * for a workspace that has at least one tier service (a service with a department and a tier); absent, the model is exactly the
+   * one built before capacity existed.
+   */
+  capacity?: CapacityInputs;
+}
+
+/** A deliverable column on a service or a client (the tier's, or a named client's own value). `null`: not entered. */
+export interface CapacityDeliverableColumns {
+  words: number | null;
+  links: number | null;
+  tech_hours: number | null;
+  meetings: number | null;
+  builds: number | null;
+  creative_sets: number | null;
+  channels: number | null;
+}
+
+/** A service's capacity columns (`services.department_id` …). */
+export interface CapacityServiceRow extends CapacityDeliverableColumns {
+  id: string;
+  department_id: string | null;
+  tier_id: string | null;
+  adhoc_chance: number | null;
+  adhoc_requests: number | null;
+}
+
+/** A named client's own values (`clients.<same names>`): each replaces its tier's; null uses the tier's. */
+export interface CapacityClientRow extends CapacityDeliverableColumns {
+  id: string;
+  hand_holding_hours: number | null;
+  adhoc_chance: number | null;
+  adhoc_requests: number | null;
+  adhoc_hours: number | null;
+  step_factor: number | null;
+}
+
+/** What the capacity mapping reads of the Set up data. Plain numbers, so a bundle can be saved and compared. */
+export interface CapacityInputs {
+  /** Tiers, in their order (`tiers.sort`): the engine's tier is the key. */
+  tiers: { id: string; key: string; sort: number }[];
+  services: CapacityServiceRow[];
+  clients: CapacityClientRow[];
+  /** Roles' kind (a client-facing role's holder is a client's manager) and unit of work. */
+  roles: { id: string; kind: "client_facing" | "shared"; unit: string | null }[];
+  /**
+   * People's team time and ramp. Read straight from `people`, so a viewer who can't see people gets none (as pay is hidden):
+   * everyone then has all their hours and no ramp.
+   */
+  people: { id: string; reserved_share: number; ramp: number[] | null }[];
+  personTiers: { person_id: string; tier_id: string }[];
+  portfolio: { person_id: string; service_id: string; client_count: number }[];
 }
 
 /**

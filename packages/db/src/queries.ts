@@ -15,6 +15,7 @@ import type { ScenarioPatch } from "@transpera-flow/engine";
 import { patchOf, type SandboxChange } from "./sandbox-levers";
 import type {
   BlockRow,
+  CapacityInputs,
   SolutionIssueRow,
   SolutionRow,
   ChurnDriverRow,
@@ -229,6 +230,80 @@ export async function loadClientGroups(db: Db, workspaceId: string): Promise<Cli
   return r as unknown as ClientGroupRow[];
 }
 
+/**
+ * The capacity Set up data the engine reads (P2b), or undefined when the workspace has no tier service (a service with a department
+ * and a tier): then nothing capacity-related reaches the model. Reads the tables as the caller; `people` is the one table a viewer who
+ * can't see people gets no rows from, so their team time and ramp are left out (like pay).
+ */
+export async function loadCapacityInputs(db: Db, workspaceId: string): Promise<CapacityInputs | undefined> {
+  const tiered = await db
+    .selectFrom("services")
+    .select("id")
+    .where("workspace_id", "=", workspaceId)
+    .where("department_id", "is not", null)
+    .where("tier_id", "is not", null)
+    .limit(1)
+    .executeTakeFirst();
+  if (!tiered) return undefined;
+  const n = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+  const [tiers, services, clients, roles, people, personTiers, portfolio] = await Promise.all([
+    db.selectFrom("tiers").select(["id", "key", "sort"]).where("workspace_id", "=", workspaceId).orderBy("sort").orderBy("key").execute(),
+    db
+      .selectFrom("services")
+      .select(["id", "department_id", "tier_id", "words", "links", "tech_hours", "meetings", "builds", "creative_sets", "channels", "adhoc_chance", "adhoc_requests"])
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    db
+      .selectFrom("clients")
+      .select(["id", "hand_holding_hours", "adhoc_chance", "adhoc_requests", "adhoc_hours", "step_factor", "words", "links", "tech_hours", "meetings", "builds", "creative_sets", "channels"])
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    db.selectFrom("roles").select(["id", "kind", "unit"]).where("workspace_id", "=", workspaceId).orderBy("id").execute(),
+    db.selectFrom("people").select(["id", "reserved_share", "ramp"]).where("workspace_id", "=", workspaceId).orderBy("id").execute(),
+    db.selectFrom("person_tiers").select(["person_id", "tier_id"]).where("workspace_id", "=", workspaceId).execute(),
+    db.selectFrom("person_portfolio").select(["person_id", "service_id", "client_count"]).where("workspace_id", "=", workspaceId).execute(),
+  ]);
+  const deliverables = (r: Record<"words" | "links" | "tech_hours" | "meetings" | "builds" | "creative_sets" | "channels", unknown>) => ({
+    words: n(r.words),
+    links: n(r.links),
+    tech_hours: n(r.tech_hours),
+    meetings: n(r.meetings),
+    builds: n(r.builds),
+    creative_sets: n(r.creative_sets),
+    channels: n(r.channels),
+  });
+  return {
+    tiers: tiers.map((t) => ({ id: t.id, key: t.key, sort: Number(t.sort) })),
+    services: services.map((s) => ({
+      id: s.id,
+      department_id: s.department_id,
+      tier_id: s.tier_id,
+      ...deliverables(s),
+      adhoc_chance: n(s.adhoc_chance),
+      adhoc_requests: n(s.adhoc_requests),
+    })),
+    clients: clients.map((c) => ({
+      id: c.id,
+      hand_holding_hours: n(c.hand_holding_hours),
+      adhoc_chance: n(c.adhoc_chance),
+      adhoc_requests: n(c.adhoc_requests),
+      adhoc_hours: n(c.adhoc_hours),
+      step_factor: n(c.step_factor),
+      ...deliverables(c),
+    })),
+    roles: roles.map((r) => ({ id: r.id, kind: r.kind === "shared" ? ("shared" as const) : ("client_facing" as const), unit: r.unit })),
+    people: people.map((p) => ({
+      id: p.id,
+      reserved_share: Number(p.reserved_share),
+      ramp: Array.isArray(p.ramp) && p.ramp.every((x) => typeof x === "number") ? (p.ramp as number[]) : null,
+    })),
+    personTiers,
+    portfolio: portfolio.map((r) => ({ person_id: r.person_id, service_id: r.service_id, client_count: Number(r.client_count) })),
+  };
+}
+
 /** The `ChurnDriverRow` columns. */
 export const CHURN_DRIVER_COLUMNS = "id, workspace_id, driver, name, description, example, weight, enabled, value, month, chance, effect, effect_months, provenance" as const;
 
@@ -271,7 +346,7 @@ export async function loadProcessBundle(
   const ws = workspace.id;
   // People, roles held, skills, leave and assignments: the stored rows for editors, labels and no pay for members.
   const teamLoad = loadTeam(db, ws);
-  const [revision, roles, steps, edges, team, services, leadSources, seasonality, demand, roster, clientGroups, churnDrivers, servicing, market, settingsProvenance] =
+  const [revision, roles, steps, edges, team, services, leadSources, seasonality, demand, roster, clientGroups, churnDrivers, servicing, market, settingsProvenance, capacity] =
     await Promise.all([
       db.selectFrom("process_revisions").select(["id", "workspace_id", "process_id", "number", "status"]).where("id", "=", revisionId).executeTakeFirstOrThrow(),
       db.selectFrom("roles").selectAll().where("workspace_id", "=", ws).execute(),
@@ -290,6 +365,7 @@ export async function loadProcessBundle(
       process.is_company ? { servicingLinks: [], otherProcesses: [] } : loadServicingContext(db, ws, process, revisionId),
       loadMarket(db, ws),
       db.selectFrom("workspaces").select("provenance").where("id", "=", ws).executeTakeFirst(),
+      loadCapacityInputs(db, ws),
     ]);
   const wsProvenance = settingsProvenance?.provenance;
 
@@ -328,6 +404,8 @@ export async function loadProcessBundle(
     churnDrivers,
     ...servicing,
     ...market,
+    // Only a workspace with a tier service has any (P2b); the key is left out otherwise so the bundle is as it was.
+    ...(capacity ? { capacity } : {}),
   };
 }
 

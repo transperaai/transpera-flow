@@ -380,3 +380,53 @@ describe("item 6: the capacity model", () => {
     expect(diff).toBeCloseTo(pt.freed!.total, 6);
   });
 });
+
+describe("least-busy placement counts the full step time (P2b)", () => {
+  /**
+   * Ann looks after a Tier 1 client and Bob a Tier 2 client with the same deliverables; the won clients are Tier 3. Which of them is
+   * busier depends only on the step's tier multiplier or change, so placement must see it.
+   */
+  const placing = (o: Pick<Opts, "mult" | "changes" | "split">): EngineModel => {
+    const base = model({
+      ...o,
+      weeks: 40,
+      tiers: { sa: "T1", sb: "T2", sw: "T3" },
+      clients: {
+        c1: { name: "C1", services: ["sa"], mrr: 4330, assignments: { r: "ann" } },
+        c2: { name: "C2", services: ["sb"], mrr: 4330, assignments: { r: "bob" } },
+      },
+      extra: { leadsPerWeek: 1.5, placeNewClients: "least-busy" },
+    });
+    // Won clients are light (one task a month), so one existing client's difference is several of them.
+    return { ...base, services: { ...base.services!, sa: { ...base.services!.sa!, mixShare: 0 }, sb: { ...base.services!.sb!, mixShare: 0 }, sw: { ...base.services!.sw!, deliverables: { meetings: 1 } } } };
+  };
+  /** Won clients by the first person who worked on each. */
+  const placedCounts = (m: EngineModel): Record<string, number> => {
+    const seen = new Set<string>();
+    const out: Record<string, number> = {};
+    for (const e of runOnce(m, 3, true).entities ?? []) {
+      const c = e.servicing?.client;
+      const person = e.trace.find((seg) => seg.person)?.person;
+      if (!c || !c.startsWith("won:") || !person || seen.has(c)) continue;
+      seen.add(c);
+      out[person] = (out[person] ?? 0) + 1;
+    }
+    return out;
+  };
+
+  it("with no multiplier and no change two alike people share the won clients about evenly", () => {
+    const c = placedCounts(placing({}));
+    expect(Math.abs((c.ann ?? 0) - (c.bob ?? 0))).toBeLessThanOrEqual(1);
+  });
+
+  it("a Tier 1 multiplier makes Ann the busier, so Bob is given more of the won clients", () => {
+    const c = placedCounts(placing({ mult: { T1: 3 } }));
+    expect(c.bob!).toBeGreaterThan(c.ann ?? 0);
+  });
+
+  it("a change that cuts Tier 1 work makes Ann the less busy, so Ann is given more of the won clients", () => {
+    const m = placing({ split: { automatable: 1, augmentable: 0, manual: 0 }, changes: [automation("a", { tiers: ["T1"] }, 0.9)] });
+    const c = placedCounts(m);
+    expect(c.ann!).toBeGreaterThan(c.bob ?? 0);
+  });
+});
