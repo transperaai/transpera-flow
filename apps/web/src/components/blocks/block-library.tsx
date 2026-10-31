@@ -11,16 +11,18 @@ import { Help } from "@/components/help";
 import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Page } from "@/components/shell/page";
+import { isGroup } from "@transpera-flow/db";
+import { SplitBar, SplitLegend } from "@/components/split-bar";
 import { blockStepCount, readBlock } from "@/lib/blocks/blocks";
 import { useDemoBlocks } from "@/lib/blocks/demo";
 import { cn } from "@/lib/utils";
 import { BlockMap } from "./block-map";
 import { EDIT_ONLY } from "@/lib/phone";
 
-/** "Used in 2 solutions". Solutions arrive with A49 and don't record the blocks they use yet, so until then it is 0. */
+/** "Used in 2 solutions": the solutions whose map holds a group put in from this block (lib/blocks/usage.ts). */
 export const usageText = (n: number) => `Used in ${n} ${n === 1 ? "solution" : "solutions"}`;
 
-export function BlockLibrary({ blocks, mode, newHref }: { blocks: BlockRow[]; mode: "live" | "readonly" | "demo"; newHref: string | null }) {
+export function BlockLibrary({ blocks, mode, newHref, usage = {} }: { blocks: BlockRow[]; mode: "live" | "readonly" | "demo"; newHref: string | null; usage?: Record<string, number> }) {
   const demo = useDemoBlocks();
   const list = mode === "demo" ? demo : blocks;
   return (
@@ -63,10 +65,10 @@ export function BlockLibrary({ blocks, mode, newHref }: { blocks: BlockRow[]; mo
                   <div className="flex flex-col gap-2 px-(--card-spacing)">
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <span className="flex items-center text-xs text-muted-foreground">
-                        {usageText(0)}
+                        <span data-used-in={b.id}>{usageText(usage[b.id] ?? 0)}</span>
                         <Help
                           label="Used in"
-                          description="How many saved solutions use this block. Solutions are not built yet, so it shows 0 until they are."
+                          description="How many saved solutions have this block in their map. A block put into one solution twice counts once."
                           example="Once “Client sign-off” sits in two solutions, this reads “Used in 2 solutions”."
                         />
                       </span>
@@ -80,6 +82,7 @@ export function BlockLibrary({ blocks, mode, newHref }: { blocks: BlockRow[]; mo
                   <div className="overflow-x-auto px-(--card-spacing)">
                     <BlockMap block={block} label={`Map of ${b.name}: ${steps} ${steps === 1 ? "step" : "steps"}`} />
                   </div>
+                  <BlockSteps block={block} />
                 </Card>
               </li>
             );
@@ -87,5 +90,31 @@ export function BlockLibrary({ blocks, mode, newHref }: { blocks: BlockRow[]; mo
         </ul>
       )}
     </Page>
+  );
+}
+
+/** Each step of a block with its work split, tier multipliers and whether it goes to the client's manager: the base values a block carries. */
+export function BlockSteps({ block }: { block: ReturnType<typeof readBlock> }) {
+  const steps = block.steps.filter((s) => !isGroup(s));
+  if (!steps.length) return null;
+  const withSplit = steps.some((s) => s.split);
+  return (
+    <div className="flex flex-col gap-1.5 px-(--card-spacing)" data-block-steps>
+      <ul className="flex flex-col gap-1.5">
+        {steps.map((s) => (
+          <li key={s.id} className="grid grid-cols-[minmax(0,1fr)_7rem] items-center gap-x-3 text-xs" data-block-step>
+            <span className="min-w-0 truncate">
+              {s.name}
+              {s.to_client_manager && <span className="ml-1.5 text-fg-2">· the client&apos;s manager</span>}
+              {s.tier_multiplier && Object.keys(s.tier_multiplier).length > 0 && (
+                <span className="ml-1.5 text-fg-2">· {Object.entries(s.tier_multiplier).map(([k, v]) => `${k} ×${v}`).join(", ")}</span>
+              )}
+            </span>
+            {s.split ? <SplitBar split={s.split} /> : <span className="text-fg-2">No split</span>}
+          </li>
+        ))}
+      </ul>
+      {withSplit && <SplitLegend />}
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { capacityModel, checkCapacityInputs, simulate, type EngineModel } from "@transpera-flow/engine";
-import { LARKSPUR_WORKSPACE_ID, NORTHBEAM_WORKSPACE_ID, loadCapacityChanges, loadProcessBySlug, toEngineModel, toEngineStepChange } from "../src";
+import { LARKSPUR_WORKSPACE_ID, NORTHBEAM_WORKSPACE_ID, changeRunModel, departmentCeiling, issueChangeFigure, loadCapacityChanges, loadCapacitySetup, loadProcessBySlug, todayModel, toEngineModel, toEngineStepChange } from "../src";
 import { EXAMPLE_BOTH, fixedRecurrence, loadCapacityExample } from "../src/fixtures/capacity-example";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
@@ -204,5 +204,23 @@ describe("busy shares against the engine fixture capacityModel()", () => {
     const m: EngineModel = { ...model, changes: stored.map((c) => toEngineStepChange(c, 1)) };
     const worst = table("with the stored changes swapped in from month 1", share(m, m), theirs);
     expect(worst).toBeLessThanOrEqual(15);
+  }, 300_000);
+});
+
+describe("what a change anchored to an issue frees (P8)", () => {
+  it("on the example workspace, the figures equal a direct engine run of the change against today", async () => {
+    const stored = await loadCapacityChanges(dbAs, ws);
+    const change = stored.find((c) => c.effects.some((e) => e.part === "automatable"))!;
+    const setup = (await loadCapacitySetup(dbAs, ws))!;
+    const today = todayModel(model);
+    const base = { model: today, result: simulate(today, 6, 1, { personTime: true }) };
+    const withChange = changeRunModel(today, change);
+    const changed = { model: withChange, result: simulate(withChange, 6, 1, { personTime: true }) };
+    const f = issueChangeFigure(setup, change, base, changed);
+    expect(f.freed).toBeCloseTo(changed.result.personTime!.freed!.byChange[change.id]!, 9);
+    expect(f.freed).toBeGreaterThan(0);
+    const dep = f.department!.id;
+    expect(f.moreClients).toBeCloseTo(departmentCeiling(setup, withChange, changed.result, dep).max - departmentCeiling(setup, today, base.result, dep).max, 9);
+    expect(f.moreClients).toBeGreaterThanOrEqual(0);
   }, 300_000);
 });

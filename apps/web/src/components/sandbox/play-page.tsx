@@ -141,7 +141,7 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
       prepare={prepare}
       map={renderMap}
       canEdit={canEdit}
-      issues={issues.filter((i) => i.status !== "resolved").map((i) => ({ id: i.id, title: i.title }))}
+      issues={issues.filter((i) => i.status !== "resolved").map((i) => ({ id: i.id, number: i.number, title: i.title }))}
       saveChange={(id, input) => saveCapacityChange(live.workspace.id, id, input)}
       removeChange={(id) => deleteCapacityChange(live.workspace.id, id)}
       exportSlot={exportSlot}

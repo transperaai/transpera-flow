@@ -33,7 +33,7 @@ function hash(text: string): string {
 export const capacityRunKey = (kind: RunKind, model: EngineModel, monthStarts?: readonly number[] | null): string =>
   `${kind}|${hash(JSON.stringify(model))}|${monthStarts ? monthStarts.join(",") : ""}|${kind === "today" ? TODAY_REPS : YEAR_REPS}|${CAPACITY_SEED}`;
 
-const CACHE_LIMIT = 6;
+const CACHE_LIMIT = 24;
 const cache = new Map<string, CapacityRun>();
 
 export function cachedRun(key: string): CapacityRun | null {
