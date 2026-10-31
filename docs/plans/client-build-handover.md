@@ -90,3 +90,22 @@ P1 alone; then P4, P6, P7, P8 in parallel.
 > `docs/plans/keep-cut-build.md`, and open the prototype at `docs/prototypes/client-capacity-app.PROTOTYPE.html`. We're
 > building the client capacity app with multiple agents. Start by asking me the open questions in the handover, then
 > write the briefs for P0, P1 and the P2/P3 engine interface, and run them in parallel worktrees.
+
+## Where it stands (end of 31 Oct build session)
+
+- **Built:** P0–P9 merged into `claude/client-refocus-handover-reqs-yu8mcx` through
+  [transperaai/transpera-flow#255](https://github.com/transperaai/transpera-flow/pull/255). Briefs and the package table
+  are in `docs/plans/capacity/`. Engine 1.17.0. Lint, typecheck, every package's tests and the web build passed on the
+  final branch.
+- **Preview:** `transpera-flow-next.vercel.app` now follows the handover branch, not
+  `claude/supabase-migration-plan-mzchlf`. Log in to Vercel first, then sign in with Google. Its Neon database (`main`)
+  has every migration up to `20270125000100`; apply later ones with `packages/db/scripts/neon-preview-migrate.sh`.
+- **Not done, on purpose:** `main` and production. Vercel deploys production from `main`, and production still runs on
+  Supabase with no `DATABASE_URL`, so merging to `main` before the Neon cutover would take it down. The cutover runbook
+  is `packages/db/scripts/copy-from-supabase/README.md` (7b rehearsal, 7c cutover). It needs Austin present: the
+  production export needs their permission rule, and production's Vercel environment needs the Neon and Better Auth
+  values.
+- **Next (Austin, 1 Nov):**
+  - QA and UI feedback on the preview;
+  - get it deploy-ready for Joe (`docs/new-client.md`, `capacity:starter`);
+  - possibly a clean new repo.
