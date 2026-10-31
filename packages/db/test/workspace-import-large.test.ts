@@ -202,7 +202,7 @@ const sqlOf = (name: string) => readFileSync(new URL(`../migrations/${name}`, im
 const OLD_MIGRATION = "20261207000000_import_workspace_bundle.sql";
 const NEW_MIGRATION = "20261215000000_bigger_restores.sql";
 /** The latest migration that defines `import_workspace_bundle` (#228 replaced B21's body, which NEW_MIGRATION still holds). */
-const LATEST_MIGRATION = "20270114000000_step_purpose.sql";
+const LATEST_MIGRATION = "20270119000000_capacity_setup.sql";
 const OLD_MD5 = "968cbd0034a0bb1479b8ee0c9eaf7962";
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 /** The text between the first `$$` and the last `$$` of a function (what `pg_proc.prosrc` holds). */

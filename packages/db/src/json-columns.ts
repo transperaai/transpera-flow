@@ -51,9 +51,13 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
     "provenance"
   ],
   "people": [
-    "provenance"
+    "provenance",
+    "ramp"
   ],
   "person_capacity_factors": [
+    "provenance"
+  ],
+  "person_portfolio": [
     "provenance"
   ],
   "person_skills": [
@@ -98,6 +102,9 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
     "provenance",
     "wait_params",
     "work_params"
+  ],
+  "tiers": [
+    "provenance"
   ],
   "workspace_headlines": [
     "numbers"
