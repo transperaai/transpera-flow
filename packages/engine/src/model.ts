@@ -966,6 +966,31 @@ export interface PersonTime {
    * manager, counted under each service the client takes.
    */
   clients: Record<string, Record<string, number>>;
+  /**
+   * Hands-on hours by part of the step (engine 1.16.0, P3): what the steps with a work split took, per person and step, a month on
+   * average. `actual` is after the changes; `before` is the same draws without any change (the tier multiplier stays), so the
+   * hours freed are `before − actual`. A step with no split is all `manual` in both. Present only when a step has a split.
+   */
+  partHours?: { actual: Record<string, Record<string, PartHours>>; before: Record<string, Record<string, PartHours>> };
+  /**
+   * Hours the changes freed, a month on average (P3; present with `partHours`). `byChange` lists every change of the model (0 when it
+   * freed nothing), `byPerson` the people it freed time for, each by change, and `total` is their sum. When two changes act on one
+   * part the earlier one in the model's `changes` list is credited first (`stepPartsDetail`). A change can free a negative number
+   * of hours (a checking time above what it removes).
+   */
+  freed?: { total: number; byChange: Record<string, number>; byPerson: Record<string, Record<string, number>> };
+  /**
+   * The same by month, everyone together, in hours in that month (not a monthly average), on the months of a monthly run: parts
+   * after and before the changes, and the hours freed per change. Present only when the run is monthly (`simulate(…, { monthly: true })`).
+   */
+  monthly?: { actual: PartHours[]; before: PartHours[]; freed: Record<string, number[]> };
+}
+
+/** Hours of hands-on time in the three parts of a step's split (`EngineStep.split`). */
+export interface PartHours {
+  automatable: number;
+  augmentable: number;
+  manual: number;
 }
 
 /** One month of a role's or person's busy share across replications. */

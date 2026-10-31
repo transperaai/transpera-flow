@@ -428,10 +428,13 @@ export {
   effectiveDeliverables,
   rampShare,
   stepParts,
+  stepPartsDetail,
   stepTimeFactor,
   tasksPerMonth,
   type EffectiveDeliverables,
+  type StepFreed,
   type StepParts,
+  type StepPartsDetail,
 } from "./capacity-inputs";
 export { SPLIT_TOLERANCE, capacityProblems, checkCapacityInputs, type CapacityProblem, type CapacityProblemCode } from "./capacity-check";
 export { capacityModel, capacityServiceId } from "./fixtures/capacity";
