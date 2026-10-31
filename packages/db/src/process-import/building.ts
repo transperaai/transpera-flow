@@ -30,6 +30,7 @@ import {
   isRetiredStep,
   openConflict,
   SERVER_DEFAULT_NOTE_PREFIX,
+  STEP_SOURCE_LABELS,
   stepValue,
   triangularRange,
   type ConflictValue,
@@ -42,6 +43,11 @@ import {
   type StepOutcome,
   type StepPatch,
   type StepRow,
+  type StepSourceLabel,
+  type StepSourcedValue,
+  type StepSplit,
+  type StepSplitNotes,
+  type TierMultiplier,
 } from "../index";
 import { ImportError } from "./errors";
 
@@ -89,6 +95,16 @@ export interface StepFields {
   notes?: string | null;
   sla_hours?: number | null;
   current_wip?: number | null;
+  /** Base values for capacity (P4): the shares of the step's time that can be automated, augmented or only done by hand (sum to 1). */
+  split?: StepSplit | null;
+  /** One line of words for each part of the split. */
+  split_notes?: StepSplitNotes | null;
+  /** × on the step's time per tier key. */
+  tier_multiplier?: TierMultiplier | null;
+  /** The step goes to the client's manager (D32). */
+  to_client_manager?: boolean;
+  /** Where each base value came from; written as `provenance.{work|split|tier_multiplier}`. */
+  sources?: Partial<Record<StepSourcedValue, StepSourceLabel>>;
   /** The group the step sits in (a step id), null for the top level. Only import_process sets it. */
   parent_step_id?: string | null;
   /** A group's first step (one of its own steps). */
@@ -218,13 +234,56 @@ export const STEP_DEFAULTS: Record<BuildStepKind, { work_hours: number; wait_hou
 };
 
 /** The step fields a group (or a step holding a child process) can't have: the engine would ignore them. */
-const HOLDER_FIELDS = ["role_id", "person_id", "work_hours", "wait_hours", "rework_rate", "sla_hours", "current_wip", "work_params", "wait_params", "evidence", "reasoning"] as const;
+const HOLDER_FIELDS = ["role_id", "person_id", "work_hours", "wait_hours", "rework_rate", "sla_hours", "current_wip", "work_params", "wait_params", "evidence", "reasoning", "split", "tier_multiplier", "to_client_manager"] as const;
 
 /** The outcome a new end step gets: won, then lost, then done, whichever the process lacks (as in the editor). */
 export function nextOutcome(steps: readonly Pick<StepRow, "kind" | "outcome">[]): StepOutcome {
   const taken = new Set(steps.filter((s) => s.kind === "end").map((s) => s.outcome));
   return taken.has("won") ? (taken.has("lost") ? "done" : "lost") : "won";
 }
+
+const SPLIT_PARTS = ["automatable", "augmentable", "manual"] as const;
+const SPLIT_TOLERANCE = 0.001;
+
+/** Why a step's base values (capacity P4) can't be stored, in plain words, or null. The table's checks say the same. */
+export function baseValuesProblem(f: Pick<StepFields, "split" | "split_notes" | "tier_multiplier" | "sources">): string | null {
+  if (f.split) {
+    const sp = f.split as Record<string, unknown>;
+    for (const part of SPLIT_PARTS) {
+      const v = sp[part];
+      if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 1) return `the split's ${part} share must be a number from 0 to 1 (0.5 is half).`;
+    }
+    const extra = Object.keys(sp).filter((k) => !(SPLIT_PARTS as readonly string[]).includes(k));
+    if (extra.length) return `the split has only automatable, augmentable and manual shares, not ${extra.map((k) => `"${k}"`).join(", ")}.`;
+    const total = SPLIT_PARTS.reduce((n, part) => n + (sp[part] as number), 0);
+    if (Math.abs(total - 1) > SPLIT_TOLERANCE) return `the split's shares add up to ${Math.round(total * 1000) / 10}%; they must add up to 100%.`;
+  }
+  if (f.split_notes) {
+    for (const [k, v] of Object.entries(f.split_notes as Record<string, unknown>)) {
+      if (!(SPLIT_PARTS as readonly string[]).includes(k)) return `split_notes has a line for automatable, augmentable and manual, not "${k}".`;
+      if (typeof v !== "string") return `the split note for ${k} must be text.`;
+      if (v.length > 300 || /[\r\n]/.test(v)) return `the split note for ${k} must be one line of at most 300 characters.`;
+    }
+  }
+  if (f.tier_multiplier) {
+    const entries = Object.entries(f.tier_multiplier);
+    if (entries.length > 50) return "tier_multiplier lists more than 50 tiers.";
+    for (const [tier, v] of entries) {
+      if (!tier.trim() || tier.length > 40) return "a tier key in tier_multiplier must be 1 to 40 characters.";
+      if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 100) return `the multiplier for tier ${tier} must be a number from 0 to 100 (1 is the base time).`;
+    }
+  }
+  if (f.sources) {
+    for (const [k, v] of Object.entries(f.sources)) {
+      if (!["work", "split", "tier_multiplier"].includes(k)) return `sources labels work, split and tier_multiplier, not "${k}".`;
+      if (!STEP_SOURCE_LABELS.includes(v as StepSourceLabel)) return `the source of ${k} must be interview, calculator, measured or estimate.`;
+    }
+  }
+  return null;
+}
+
+/** A source label as `provenance` keeps it. */
+const sourceEntry = (stamp: Stamp, source: StepSourceLabel): Provenance => clean({ source, at: stamp.at, ...(stamp.by ? { by: stamp.by } : {}) });
 
 /** Reject values the editor's validation or the table's checks would. */
 export function checkStepFields(f: StepFields, label: string): void {
@@ -234,6 +293,8 @@ export function checkStepFields(f: StepFields, label: string): void {
   if (f.name !== undefined && (!f.name.trim() || f.name.length > 200)) bad("name must be 1–200 characters.");
   if (f.tool && f.tool.length > 200) bad("tool must be at most 200 characters.");
   if (f.notes && f.notes.length > 4000) bad("notes must be at most 4000 characters.");
+  const baseProblem = baseValuesProblem(f);
+  if (baseProblem) bad(baseProblem);
   if (f.outcome && f.kind && f.kind !== "end") bad("only end steps have an outcome.");
   if (f.kind === "group" || f.child_process_id) {
     const given = HOLDER_FIELDS.filter((k) => f[k] !== undefined && f[k] !== null && !(Array.isArray(f[k]) && (f[k] as unknown[]).length === 0));
@@ -409,6 +470,10 @@ export function buildNewStep(
     rework_to_step_id: f.rework_to_step_id ?? null,
     tool: f.tool?.trim() || null,
     purpose: null,
+    split: f.split ?? null,
+    split_notes: f.split_notes && Object.keys(f.split_notes).length ? f.split_notes : null,
+    tier_multiplier: f.tier_multiplier && Object.keys(f.tier_multiplier).length ? f.tier_multiplier : null,
+    to_client_manager: f.to_client_manager === true,
     notes: f.notes?.trim() || null,
     sla_hours: f.sla_hours ?? null,
     // The analysis rules' step settings are set in the editor, not by the building tools.
@@ -448,6 +513,8 @@ export function buildNewStep(
       assumptions.push(`Step '${name}': ${column} defaulted to ${formatParameter(column, value)} (estimated; confirm it on the canvas).`);
     }
   }
+  // The base values' source labels (capacity P4): `provenance.{work|split|tier_multiplier}`, beside the evidence marks.
+  for (const [value, label] of Object.entries(f.sources ?? {}) as [StepSourcedValue, StepSourceLabel][]) b.set(`provenance.${value}`, sourceEntry(stamp, label));
   settleFlags(b);
   const row = b.cur;
   const conflicts = EVIDENCE_COLUMNS.flatMap((column) => {

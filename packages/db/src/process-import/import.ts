@@ -74,6 +74,12 @@ interface StepFieldsJson {
   notes?: string | null;
   sla_hours?: number | null;
   current_wip?: number | null;
+  /** Base values for capacity (P4); see StepFields. */
+  split?: StepFields["split"];
+  split_notes?: StepFields["split_notes"];
+  tier_multiplier?: StepFields["tier_multiplier"];
+  to_client_manager?: boolean;
+  sources?: StepFields["sources"];
   x?: number;
   y?: number;
   evidence?: CitationJson[];
@@ -193,7 +199,7 @@ const hasCitations = (steps: readonly { evidence?: unknown[] }[]) => steps.some(
 function toFields(args: StepFieldsJson & { name?: string }, l: Lookups, where: string): StepFields {
   const f: StepFields = {};
   if (args.name !== undefined) f.name = args.name;
-  for (const key of ["kind", "outcome", "work_hours", "work_dist", "wait_hours", "wait_dist", "rework_rate", "tool", "notes", "sla_hours", "current_wip", "x", "y"] as const) {
+  for (const key of ["kind", "outcome", "work_hours", "work_dist", "wait_hours", "wait_dist", "rework_rate", "tool", "notes", "sla_hours", "current_wip", "split", "split_notes", "tier_multiplier", "to_client_manager", "sources", "x", "y"] as const) {
     if (args[key] !== undefined) (f as Record<string, unknown>)[key] = args[key];
   }
   const params = (p: ParamsJson | undefined) => p && (Object.fromEntries(Object.entries(p).filter(([, v]) => v !== undefined)) as StepFields["work_params"]);

@@ -21,8 +21,18 @@ function insert(table: string, rows: Record<string, Value>[]): string {
   return `insert into public.${table} (${cols.join(", ")}) values\n${values};\n`;
 }
 
-/** A step's row; `purpose` is left out while null (Automatic), like the fee range, so the seed loads into an older database too. */
-const seedStep = ({ purpose, ...s }: StepRow): Record<string, Value> => ({ ...s, ...(purpose !== null ? { purpose } : {}) });
+/**
+ * A step's row; `purpose` is left out while null (Automatic), like the fee range, and so are the base values (`split`, `split_notes`,
+ * `tier_multiplier`, `to_client_manager`) while none is entered, so the seed loads into an older database too.
+ */
+const seedStep = ({ purpose, split, split_notes, tier_multiplier, to_client_manager, ...s }: StepRow): Record<string, Value> => ({
+  ...s,
+  ...(purpose !== null ? { purpose } : {}),
+  ...(split !== null ? { split } : {}),
+  ...(split_notes !== null ? { split_notes } : {}),
+  ...(tier_multiplier !== null ? { tier_multiplier } : {}),
+  ...(to_client_manager ? { to_client_manager } : {}),
+});
 
 /**
  * SQL that inserts process bundles, scenarios, issues and sources. The

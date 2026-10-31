@@ -85,6 +85,9 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
   ],
   "steps": [
     "provenance",
+    "split",
+    "split_notes",
+    "tier_multiplier",
     "wait_params",
     "work_params"
   ],
