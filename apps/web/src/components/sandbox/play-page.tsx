@@ -94,7 +94,7 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
     const model = base0.segments[0]?.model;
     return { startDate: start, setup, library, winMix: (d) => (model ? winMix(setup, model, d) : {}) };
   }, [base0, start, setup, library]);
-  const prepare = useCallback((play: PlayState) => preparePlay(live, play, ctx, solutions, DEFAULT_FORECAST_MONTHS), [live, ctx, solutions]);
+  const prepare = useCallback((play: PlayState, current: readonly CapacityChangeRow[]) => preparePlay(live, play, { ...ctx, library: current }, solutions, DEFAULT_FORECAST_MONTHS), [live, ctx, solutions]);
 
   // The company map, open groups in place, playing the run on screen.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());

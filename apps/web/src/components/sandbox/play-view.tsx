@@ -38,7 +38,7 @@ export interface PlayViewProps {
   startDate: string;
   /** Today's path, ready to run, and the way to prepare a run for the levers as they stand. */
   today: PreparedPlay;
-  prepare: (play: PlayState) => PreparedPlay;
+  prepare: (play: PlayState, library: readonly CapacityChangeRow[]) => PreparedPlay;
   /** The company map with its play controls, when the page has it. */
   map?: (runs: PlayRuns) => ReactNode;
   /** Agency admins and the Owner: add, edit and remove changes. */
@@ -60,7 +60,7 @@ export function PlayView(props: PlayViewProps) {
   const [library, setLibrary] = useState(props.library);
   const [dialog, setDialog] = useState<{ existing: CapacityChangeRow | null } | null>(null);
   const months = useMemo(() => playMonths(startDate), [startDate]);
-  const runs = usePlayRuns(setup, play, today, prepare);
+  const runs = usePlayRuns(setup, play, library, today, prepare);
   const moved = !playIsDefault(play);
   const expectedWins = runs.today ? runs.today.run.result.kpi.won.mean / 12 : null;
   const tiers = setup.tiers.map((t) => ({ key: t.key, name: t.name }));
