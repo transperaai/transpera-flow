@@ -45,6 +45,16 @@ The transcripts and per-transcript extracts are not in the repo. People are name
 | D8 | Adoption is set **per change**. | 31 Oct, Austin |
 | D9 | DLER's "money under management" is **retainer revenue only** (no ad spend). | 31 Oct, Austin |
 | D10 | DLER's salary base **includes directors' and managers' salaries** (Austin's view; confirm with the client). | 31 Oct, Austin |
+| D11 | **First version answers A1–A9.** A10 (earnings per hour by tier) and A11 (retention under load) come later. | 31 Oct, Austin |
+| D12 | **Cut:** scenario share links and first principles. **Kept** (not cut): solutions (for routing changes), price rises and value ranges, the block library. | 31 Oct, Austin |
+| D13 | **Channels per client are modelled in the first version** (per tier, overridable per named client), and channels per person are shown. | 31 Oct, Austin |
+| D14 | **Later:** work priority by tier, and recurrence pinned to week of month. | 31 Oct, Austin |
+| D15 | **Out of scope:** live client health / red-flag dashboards (ops tooling, not simulation). | 31 Oct, Austin |
+| D16 | **Clients per employee counts client-facing people only.** Shared teams (content, links, tech, implementers) are shown as their own capacity. | 31 Oct, Austin |
+| D17 | **The overload threshold is set per role** (default 85%). | 31 Oct, Austin |
+| D18 | **The Owner and Agency admins** key in and edit clients, tier counts, portfolios and baselines. Viewers view. | 31 Oct, Austin |
+| D19 | **No data request to the client.** Joe keys in his own data once he has the app, so the build provides the fields and screens (section 4), with sensible defaults from section 3–6 until he does. | 31 Oct, Austin |
+| D20 | **Clickable HTML prototypes** of the new screens before the build briefs: Capacity page, "Add N clients", client entry, step baselines and changes. | 31 Oct, Austin |
 
 ## What the transcripts tell us, in five lines
 
@@ -81,10 +91,10 @@ recommendation (Must / Should / Later); Austin decides.
 | A4 | **"What takes the most time in managing clients?"** | Hours per client a month by task, tier and role, plus each named Tier 1 client, shown with ranges and where each number came from (no timesheets) | step baselines | Have (time by purpose). Small: by tier and per client | Must |
 | A5 | **"With automation X or augmentation Y, how many more clients can each person take?"** | Clients per employee now against with the change; hours freed per person a month; side by side for up to 3 changes | A1 + changes (section 7) | New | Must |
 | A6 | **"What does that do to DLER? Can we get from 3:1 to 4.5:1?"** | DLER per department (retainer ÷ salaries) now, at max clients, and with each change; clients needed to reach 4.5:1 | salaries, fees, portfolios | New | Must |
-| A7 | **"Which change frees the most time?"** | Changes ranked by hours freed, or by extra clients per employee | changes | Have ("what matters most"), once changes exist | Should |
-| A8 | **"When do I need to hire, and whom?"** | The month each role passes 85%, given expected wins, market and hiring delay | lead flow, market | Have. Small: hiring-trigger readout | Should |
-| A9 | **"What if someone leaves?"** (suggested: a 19-client manager just resigned; key relationships sit with two directors) | Whose clients go where; who goes over; how long until a hire ramps up (90 days) | portfolios, end dates | Have (end dates). Small: reassignment readout | Should |
-| A10 | **"Which tier earns the most per hour of effort?"** (suggested) | Retainer ÷ hours to serve, per tier and per named Tier 1 client: DLER per client | fees, step baselines | Small | Should |
+| A7 | **"Which change frees the most time?"** | Changes ranked by hours freed, or by extra clients per employee | changes | Have ("what matters most"), once changes exist | Must (D11) |
+| A8 | **"When do I need to hire, and whom?"** | The month each role passes 85%, given expected wins, market and hiring delay | lead flow, market | Have. Small: hiring-trigger readout | Must (D11) |
+| A9 | **"What if someone leaves?"** (suggested: a 19-client manager just resigned; key relationships sit with two directors) | Whose clients go where; who goes over; how long until a hire ramps up (90 days) | portfolios, end dates | Have (end dates). Small: reassignment readout | Must (D11) |
+| A10 | **"Which tier earns the most per hour of effort?"** (suggested) | Retainer ÷ hours to serve, per tier and per named Tier 1 client: DLER per client | fees, step baselines | Small | Later (D11) |
 | A11 | "What happens to retention if we push clients per person up?" | Clients at risk and churn as load rises | churn drivers | Have | Later |
 
 **Definition of "clients per employee"** (needs Austin's sign-off):
@@ -117,7 +127,7 @@ the current tier mix or held to one tier.
 | **Onboardings in flight** and their hours | A1; SC: "the most common cause of stretch" | 0–3 at once | Small | Must |
 | **Late work and SLA misses** (24h email, turnaround) | SP1 | — | Have | Should |
 | **Clients at risk and churn** | A11 | rate unknown | Have | Later |
-| Live client health and red flags (rankings, CPL, pacing) | asked most by staff (SD, SP2, PM, MC) | — | Out of scope: live ops tooling, not simulation. **Austin to decide** | — |
+| Live client health and red flags (rankings, CPL, pacing) | asked most by staff (SD, SP2, PM, MC) | — | Out of scope (D15) | — |
 
 ## 3. Employee levers and values
 
@@ -153,7 +163,7 @@ the current tier mix or held to one tier.
 
 | Lever | Value | Status |
 |---|---|---|
-| Overload threshold | 85% (default) | Small |
+| Overload threshold, **per role** (D17) | 85% default | Small |
 | Overtime cap | some overtime in heavy onboarding months (LB) | Have |
 | Hiring delay | "Takes time to hire" (SC); unknown, ask | Have |
 
@@ -445,11 +455,10 @@ These are the starting scenario library. Each becomes a change (section 7) or a 
 | Channels as a load driver (Performance) | New | A2 |
 | Reserved management share per person; ramp for new starters; salary input | Small | A2, A6, A9 |
 | Words → content tasks; freelancer capacity in words | Small | A3 |
-| Work priority by tier; recurrence pinned to week of month | New | realism (Should) |
+| Work priority by tier; recurrence pinned to week of month | New | Later (D14) |
 
 **Keep:** the map editor, the engine and animation, people, roles, servicing, lead flow, market, churn drivers,
 Sandbox scenarios and compare, and "what matters most".
 
-**Candidates to cut** (from the handover's lightly validated list, now checked against this spec): price rises,
-profit detail beyond DLER, client value ranges, share links, first principles, the block library, and solutions
-(if changes replace them). **Austin to confirm.**
+**Cut** (D12): scenario share links and first principles. **Kept:** solutions (routing changes), price rises and
+value ranges, the block library. The full feature-by-feature list is in `docs/plans/keep-cut-build.md`.
