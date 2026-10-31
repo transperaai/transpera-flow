@@ -635,3 +635,72 @@ export function bottleneck(setup: CapacitySetup, model: EngineModel, result: Sim
     .map(([stepId, hours]) => ({ stepId, name: stepId === "hand" ? "Hand-holding" : (nameOf.get(stepId) ?? stepId), hours }));
   return { person: top, over: top.busy - top.line, steps, next: ranked.slice(1, 5), ranking: rankBottlenecks(model, result) };
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The Overview, per department (capacity build P6)
+
+/** Whether a person whose salary counts in a department's (or the business's) DLER has none entered. False where pay is hidden. */
+export function dlerSalariesMissing(setup: CapacitySetup, departmentId: string | null): boolean {
+  if (setup.payHidden) return false;
+  const { personRole, deptOf } = lookups(setup);
+  return activePeople(setup).some((p) => {
+    const d = deptOf(p);
+    if (!d || (departmentId !== null && d !== departmentId)) return false;
+    return inDler(setup, p, personRole(p)) && p.salary_monthly === null;
+  });
+}
+
+export interface DepartmentTimePart {
+  name: string;
+  hours: number;
+  share: number;
+}
+
+/**
+ * Where a department's time goes (hours a month, from the run): every step hour its people spend, grouped by the step's purpose.
+ * `names` turns a purpose key into the words the workspace uses; hand-holding is its own part.
+ */
+export function departmentTime(setup: CapacitySetup, model: EngineModel, result: SimulationResult, departmentId: string, names: Record<string, string> = {}): { total: number; parts: DepartmentTimePart[] } {
+  const { deptOf } = lookups(setup);
+  const purposeOf = new Map(model.steps.map((s) => [s.id, s.purpose?.trim() || "Other"]));
+  const hours: Record<string, number> = {};
+  let total = 0;
+  for (const p of activePeople(setup)) {
+    if (deptOf(p) !== departmentId) continue;
+    for (const [stepId, h] of Object.entries(result.personTime?.stepHours[p.id] ?? {})) {
+      if (!(h > 0)) continue;
+      const key = stepId === "hand" ? "Hand-holding" : (purposeOf.get(stepId) ?? "Other");
+      const name = names[key] ?? key;
+      hours[name] = (hours[name] ?? 0) + h;
+      total += h;
+    }
+  }
+  return { total, parts: purposes(hours).map((x) => ({ ...x, share: total > 0 ? x.hours / total : 0 })) };
+}
+
+export interface WholeBusiness {
+  /** Organic + Performance − taking both. */
+  unique: number;
+  byDepartment: { name: string; clients: number }[];
+  both: number;
+  employees: number;
+  /** All retainers a month ÷ all employees (D22's definition of an employee). */
+  revenuePerEmployee: number | null;
+  /** All retainers ÷ all salaries. */
+  dler: DlerRow;
+}
+
+export function wholeBusiness(setup: CapacitySetup): WholeBusiness {
+  const lines = serviceLines(setup);
+  const per = setup.departments.map((d) => perEmployee(setup, d.id));
+  const employees = per.reduce((s, p) => s + p.employees, 0);
+  const dl = dler(setup).whole;
+  return {
+    unique: lines.unique,
+    byDepartment: lines.byDepartment.map((d) => ({ name: d.name, clients: d.clients })),
+    both: lines.both,
+    employees,
+    revenuePerEmployee: employees > 0 ? dl.retainers / employees : null,
+    dler: dl,
+  };
+}
