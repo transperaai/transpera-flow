@@ -127,7 +127,7 @@ window.mountPlay = ({ viewer, payHidden } = {}) => {
         today={todayPlan}
         prepare={(play, current) => prepareOnModel(play, { ...ctx, library: current })}
         canEdit={!viewer}
-        issues={[{ id: "00000000-0000-4000-8000-0000000000e1", title: "Reporting takes too long" }]}
+        issues={[{ id: "00000000-0000-4000-8000-0000000000e1", number: 3, title: "Reporting takes too long" }]}
         saveChange={async (id, input) => {
           const row: CapacityChangeRow = { id: id ?? `new-${window.__saved.length}`, provenance: {}, ...input };
           window.__saved = [...window.__saved.filter((r) => r.id !== row.id), row];
