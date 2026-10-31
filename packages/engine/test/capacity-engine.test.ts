@@ -285,4 +285,73 @@ describe("item 3: portfolios and the client's manager", () => {
   });
 });
 
+describe("item 4: per-client overrides", () => {
+  const adhocLink = [link({ perMonth: 1, driver: "adhoc" })];
+  const adhocSvc = { adhoc: { chance: 0.5, requests: 4 } };
+
+  it("overrides feed the ad-hoc rule and the deliverables (the client's own values win)", () => {
+    const m = model({ own: client({ overrides: { adhocChance: 1, adhocRequests: 6 } }), tier: client() }, { links: adhocLink, svc: adhocSvc, weeks: 52 });
+    const r = runOnce(m, 5, true);
+    // 6 a month for 12 months is about 72; the tier's 0.5 x 4 = 2 a month is about 24.
+    expect(tasksOf(r.entities, "own").length).toBeGreaterThan(50);
+    expect(tasksOf(r.entities, "tier").length).toBeLessThan(45);
+  });
+
+  it("adhocHours scales a client's ad-hoc steps so their mean total per request is adhocHours", () => {
+    const base = model({ c: client() }, { links: adhocLink, svc: { adhoc: { chance: 1, requests: 6 } }, work: 0.1 });
+    // Two steps in the ad-hoc process: 0.1 + 0.3 h = 0.4 h a request.
+    base.servicingProcesses = { care: { name: "Care", entry: "task", steps: ["task", "t2"] } };
+    base.steps = [
+      ...base.steps.map((s) => (s.id === "task" ? { ...s, next: [{ to: "t2", p: 1 }] } : s)),
+      { id: "t2", name: "T2", role: "r", work: 0.3, wait: 0, rework: 0, workDist: { kind: "constant" }, next: [{ to: "care_done", p: 1 }] },
+    ];
+    const plain = runOnce(base, 4, false);
+    const own = runOnce({ ...base, clients: { c: client({ overrides: { adhocHours: 2 } }) } }, 4, false);
+    const requests = plain.steps.task!.arrivals;
+    expect(requests).toBeGreaterThan(20);
+    // The same draws, so the same requests: each now takes 2 h, where it took 0.4 h.
+    expect(own.steps.task!.arrivals).toBe(requests);
+    const hours = (r: typeof plain) => (r.people.ann!.servicingHours + r.people.bob!.servicingHours) * 26;
+    expect(hours(plain)).toBeCloseTo(requests * 0.4, 9);
+    expect(hours(own)).toBeCloseTo(requests * 2, 9);
+  });
+
+  it("stepFactor multiplies a client's drawn times: a number for every step, or one per step", () => {
+    const base = model({ c: client() }, { work: 0.1 });
+    const hours = (clientExtra: Partial<EngineClient>) => {
+      const r = runOnce({ ...base, clients: { c: client(clientExtra) } }, 2, false);
+      return { n: r.steps.task!.arrivals, h: (r.people.ann!.servicingHours + r.people.bob!.servicingHours) * 26 };
+    };
+    const plain = hours({});
+    expect(plain.h).toBeCloseTo(plain.n * 0.1, 9);
+    expect(hours({ overrides: { stepFactor: 2 } }).h).toBeCloseTo(plain.n * 0.2, 9);
+    expect(hours({ overrides: { stepFactor: { task: 3, other: 9 } } }).h).toBeCloseTo(plain.n * 0.3, 9);
+    expect(hours({ overrides: { stepFactor: { other: 9 } } }).h).toBeCloseTo(plain.n * 0.1, 9);
+  });
+
+  it("handHoldingHours adds hours a month to the client's assignee in the role, on top of the servicing tasks", () => {
+    const m = model({ c: client({ assignments: { r: "ann" }, handHoldingHours: { r: 8.66 } }) });
+    const r = runOnce(m, 1, false);
+    // 8.66 h a month over 4.33 weeks is 2 h a week, ongoing, and the tasks still run.
+    expect(r.people.ann!.ongoingHours).toBeCloseTo(2, 9);
+    expect(r.people.bob!.ongoingHours).toBe(0);
+    expect(r.people.ann!.servicingHours).toBeGreaterThan(0);
+    const without = runOnce(model({ c: client({ assignments: { r: "ann" } }) }), 1, false);
+    expect(without.people.ann!.ongoingHours).toBe(0);
+    expect(without.people.ann!.servicingHours).toBeCloseTo(r.people.ann!.servicingHours, 1);
+  });
+
+  it("for the client-facing role the hours are the manager's", () => {
+    const dora: EnginePerson = { name: "Dora", roles: ["dir"], capacity: HPW };
+    const m = model({ c: client({ assignments: { r: "ann" }, manager: "dora", handHoldingHours: { r: 8.66 } }) }, {
+      people: { ann: { name: "Ann", roles: ["r"], capacity: HPW }, bob: { name: "Bob", roles: ["r"], capacity: HPW }, dora },
+    });
+    m.roles = { ...m.roles, dir: { name: "Director", count: 1, cost: 80, ongoing: 0 } };
+    m.steps = m.steps.map((s) => (s.id === "task" ? { ...s, toClientManager: true } : s));
+    const r = runOnce(m, 1, false);
+    expect(r.people.dora!.ongoingHours).toBeCloseTo(2, 9);
+    expect(r.people.ann!.ongoingHours).toBe(0);
+  });
+});
+
 // (later items append below)

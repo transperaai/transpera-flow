@@ -49,6 +49,27 @@ export function clientRoleLoads(model: EngineModel, client: Pick<EngineClient, "
   return out;
 }
 
+/**
+ * Hours a week of a client's unplanned hand-holding, by role id (docs/adr/0022-capacity-inputs.md): `handHoldingHours` a month /
+ * 4.33, for the roles the model has. It is load like `fallbackOngoing`, but on top of the servicing tasks, not instead of them.
+ * Empty for a client with none.
+ */
+export function clientHandHolding(model: Pick<EngineModel, "roles">, client: Pick<EngineClient, "handHoldingHours">): Record<string, number> {
+  const out: Record<string, number> = {};
+  const hh = client.handHoldingHours;
+  if (!hh) return out;
+  for (const rid of Object.keys(hh).sort()) {
+    const monthly = hh[rid]!;
+    if (rid in model.roles && Number.isFinite(monthly) && monthly > 0) out[rid] = monthly / LOAD_WEEKS_PER_MONTH;
+  }
+  return out;
+}
+
+/** Role ids of the steps that go to a client's manager (`toClientManager`): the client-facing roles. */
+export function managerRoles(model: Pick<EngineModel, "steps">): Set<string> {
+  return new Set(model.steps.flatMap((s) => (s.toClientManager && s.role ? [s.role] : [])));
+}
+
 /** Monthly churn of a client: the mean of its known services' base churn, or the model's. */
 export function clientChurnMonthly(model: EngineModel, client: Pick<EngineClient, "services">): number {
   const known = client.services.map((sid) => model.services?.[sid]).filter((sv) => sv !== undefined);
@@ -108,18 +129,25 @@ export function rosterLoads(source: EngineModel, people: Record<string, EnginePe
   for (const pid in people) out[pid] = { hours: 0, byRole: {}, clients: 0 };
   if (!model.clients) return out;
   const pools = rolePools(model, people);
+  const facing = managerRoles(model);
   for (const cid of Object.keys(model.clients)) {
     const client = model.clients[cid]!;
     const loads = clientRoleLoads(model, client);
-    for (const rid in loads) {
-      for (const c of carriersFor(pools, people, rid, client.assignments[rid])) {
+    const carry = (rid: string, weekly: number, assignee: string | undefined) => {
+      for (const c of carriersFor(pools, people, rid, assignee)) {
         const load = out[c.person]!;
-        const hours = loads[rid]! * c.share;
+        const hours = weekly * c.share;
         load.hours += hours;
         load.byRole[rid] = (load.byRole[rid] ?? 0) + hours;
       }
-    }
-    for (const pid of new Set(Object.values(client.assignments))) if (pid in out) out[pid]!.clients++;
+    };
+    for (const rid in loads) carry(rid, loads[rid]!, client.assignments[rid]);
+    // Hand-holding is on top of the servicing tasks; for a client-facing role it is the client's manager's.
+    const hand = clientHandHolding(model, client);
+    for (const rid in hand) carry(rid, hand[rid]!, facing.has(rid) && client.manager !== undefined ? client.manager : client.assignments[rid]);
+    const mine = new Set(Object.values(client.assignments));
+    if (client.manager !== undefined) mine.add(client.manager);
+    for (const pid of mine) if (pid in out) out[pid]!.clients++;
   }
   return out;
 }

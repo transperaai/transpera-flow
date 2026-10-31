@@ -32,7 +32,7 @@ import {
   type ChurnReplication,
   type DriverEvents,
 } from "./churn-drivers";
-import { carriersFor, clientChurnMonthly, clientRoleLoads, rolePools, withClientGroups } from "./clients";
+import { carriersFor, clientChurnMonthly, clientHandHolding, clientRoleLoads, managerRoles, rolePools, withClientGroups } from "./clients";
 import { effectiveDeliverables } from "./capacity-inputs";
 import {
   AT_RISK_HEALTH,
@@ -762,7 +762,9 @@ interface RosterClient {
   /** What it shares with clients of the same services and assignees (see `shapeFor`). */
   shape: ClientShape;
   /** Its services and assignees, to work its shape out again when the team changes (a planned start or end date). */
-  spec: { services: string[]; assignments: Record<string, string>; manager?: string };
+  spec: { services: string[]; assignments: Record<string, string>; manager?: string; handHoldingHours?: Record<string, number> };
+  /** Its own time factor on the steps of its servicing tasks (`overrides.stepFactor`): a number for every step or one per step id; null for none. */
+  stepFactor: number | Record<string, number> | null;
   /**
    * Churn drivers run as chances (B4): by driver slot, when the hit lasts to (hours; 0 = not hit), how many times a 10% rise's effect it
    * is (a price hit), and its own random stream (created at its first draw). All null unless the run has a driver that can be in
@@ -1791,25 +1793,32 @@ export function runOnce(
     }
     return shared;
   };
+  /** Roles whose steps go to a client's manager: hand-holding hours in these are the manager's. */
+  const facingRoles = managerRoles(model);
   /** Client shapes by their services and assignees (see `ClientShape`). */
   const shapes = new Map<string, ClientShape>();
-  const shapeFor = (client: { services: string[]; assignments: Record<string, string>; manager?: string }): ClientShape => {
+  const shapeFor = (client: { services: string[]; assignments: Record<string, string>; manager?: string; handHoldingHours?: Record<string, number> }): ClientShape => {
     let key = client.services.length === 1 ? client.services[0]! : client.services.join("\u0000");
     for (const rid in client.assignments) key += `\u0001${rid}\u0002${client.assignments[rid]}`;
     if (client.manager !== undefined) key += `\u0003${client.manager}`;
+    const hand = client.handHoldingHours ? clientHandHolding(model, client) : null;
+    if (hand) for (const rid in hand) key += `\u0004${rid}\u0005${hand[rid]}`;
     let shape = shapes.get(key);
     if (shape) return shape;
     const carriers: [PersonState, string, number][] = [];
     const uncovered: number[] = [];
     const loads = clientRoleLoads(model, client);
-    for (const rid in loads) {
-      const found = carriersFor(pools, poolPeople, rid, client.assignments[rid]);
+    const place = (rid: string, weekly: number, assignee: string | undefined) => {
+      const found = carriersFor(pools, poolPeople, rid, assignee);
       for (const c of found) {
-        carriers.push([personById.get(c.person)!, rid, loads[rid]! * c.share]);
+        carriers.push([personById.get(c.person)!, rid, weekly * c.share]);
       }
       // Nobody of the role on the team: the work is still there, undone.
-      if (!found.length && loads[rid]! > 0) uncovered.push(roleIndex.get(rid)!, loads[rid]!);
-    }
+      if (!found.length && weekly > 0) uncovered.push(roleIndex.get(rid)!, weekly);
+    };
+    for (const rid in loads) place(rid, loads[rid]!, client.assignments[rid]);
+    // Unplanned hand-holding is on top of the servicing tasks, done by the client's assignee in the role (its manager for a client-facing role).
+    if (hand) for (const rid in hand) place(rid, hand[rid]!, facingRoles.has(rid) && client.manager !== undefined ? client.manager : client.assignments[rid]);
     const assigned: PersonState[] = [];
     for (const pid of new Set(Object.values(client.assignments))) {
       const p = personById.get(pid);
@@ -1855,7 +1864,15 @@ export function runOnce(
   };
   const addClient = (
     key: string,
-    client: { services: string[]; assignments: Record<string, string>; health?: number; mrr?: number; overrides?: ClientOverrides; manager?: string },
+    client: {
+      services: string[];
+      assignments: Record<string, string>;
+      health?: number;
+      mrr?: number;
+      overrides?: ClientOverrides;
+      manager?: string;
+      handHoldingHours?: Record<string, number>;
+    },
     t: number,
     isRoster: boolean,
     weeklyBill: number,
@@ -1871,6 +1888,7 @@ export function runOnce(
       assigned: shape.assigned,
       assignees: shape.assignees,
       manager: shape.manager,
+      stepFactor: client.overrides?.stepFactor ?? null,
       active: true,
       health: client.health !== undefined && Number.isFinite(client.health) ? clampHealth(client.health) : rules.initial,
       touch: { onTime: 0, late: 0, missed: 0 },
@@ -2842,7 +2860,15 @@ export function runOnce(
         if (f !== 1) handsOn *= f;
       }
       // A servicing task of a client with its own ad-hoc hours scales the drawn time (after the draw, so no stream moves).
-      if (e.task && e.task.scale !== 1) handsOn *= e.task.scale;
+      if (e.task) {
+        if (e.task.scale !== 1) handsOn *= e.task.scale;
+        // ...and so does the client's own time factor on the step (`stepFactor`): a number for every step, or one per step id.
+        const sf = e.task.client.stepFactor;
+        if (sf !== null) {
+          const f = typeof sf === "number" ? sf : sf[st.s.id];
+          if (f !== undefined && Number.isFinite(f) && f > 0 && f !== 1) handsOn *= f;
+        }
+      }
       dur = handsOn / frac;
       st.stat.handsOnSum += handsOn;
       st.stat.handsOnN++;
