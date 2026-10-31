@@ -18,6 +18,8 @@
 --   person_tiers      the tiers a person can serve.
 --   person_portfolio  counted clients a person looks after, per service (D4).
 -- A service with department_id and tier_id both set IS that tier of that department (one active service per pair).
+-- A service is already a service to the engine: one that becomes a tier (department_id and tier_id set) changes nothing it is given, but a tier made
+-- NEW (add_tier, the capacity starter) brings new services, which enter the model like any other service until P2 decides how tiers feed it.
 --
 -- Provenance: every editable number keeps `{column: {source, at, by}}`. The source is `entered` when a person changes it, or
 -- `interview | calculator | measured | estimate`; seeded defaults are `estimate`. private.stamp_entered() stamps like
