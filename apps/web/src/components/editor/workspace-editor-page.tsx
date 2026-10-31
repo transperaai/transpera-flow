@@ -3,7 +3,7 @@ import { EditorPhoneGate } from "@/components/editor/editor-phone-gate";
 import { EditorView } from "@/components/editor/editor-view";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentViewer } from "@/lib/access-data";
-import { loadDismissedEditorTours, loadProcessForEditing, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources } from "@/lib/data";
+import { loadDismissedEditorTours, loadProcessForEditing, loadTierSetup, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources } from "@/lib/data";
 import { loadLiveParts } from "@/lib/overview/data";
 import { loadLibrary } from "@/lib/editor/library-data";
 import { exitHref, parseEditorMode, parseHorizon, parseIssueParam } from "@/lib/editor/modes";
@@ -42,12 +42,13 @@ export async function WorkspaceEditorPage({
   const canEdit = await canEditWorkspace(live.workspace.id);
   // An archived process (issue #182) is read only until it is restored: its page says so.
   if (!canEdit || live.process.archived_at) redirect(base);
-  const [scenarios, blocks, sources, viewer, tours] = await Promise.all([
+  const [scenarios, blocks, sources, viewer, tours, tierSetup] = await Promise.all([
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceBlocks(live.workspace.id),
     loadWorkspaceSources(live.workspace.id),
     currentViewer(),
     loadDismissedEditorTours(),
+    loadTierSetup(live.workspace.id),
   ]);
   const tourDismissed = tours.includes(company ? "company" : "process");
   // Solution mode built for an issue (`?issue=`, A49): the issue's steps are outlined and its target is what the verdict checks.
@@ -77,6 +78,7 @@ export async function WorkspaceEditorPage({
       exitHref={exit}
       horizonMonths={parseHorizon(searchParams.horizon)}
       library={editorMode === "draft" ? library : undefined}
+      tierSetup={tierSetup}
     />
     </SourceLinkingScope>
     </EditorPhoneGate>

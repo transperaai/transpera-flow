@@ -20,6 +20,8 @@ import {
   type StepRow,
 } from "@transpera-flow/db";
 import { EvidencePanel } from "@/components/evidence";
+import { StepBaseValues } from "@/components/step-base-values";
+import type { TierSetup } from "@/lib/tier-setup";
 import { NumberField, SelectField, TextField, type SelectOption } from "@/components/fields";
 import { ProvenanceBadge } from "@/components/provenance-badge";
 import {
@@ -102,10 +104,18 @@ export function StepInspector({
   sources = [],
   stamp,
   sourcesHref,
+  tierSetup,
+  settingsHref,
+  readOnly = false,
 }: {
   bundle: ProcessBundle;
   step: StepRow;
   editor: ProcessEditor;
+  /** The workspace's tiers and what each tier's service gets, for the base values (capacity P4). */
+  tierSetup?: TierSetup;
+  settingsHref?: string;
+  /** Show the base values as they are without letting anyone change them. */
+  readOnly?: boolean;
   /** Put focus in the first field (asked for from the step's menu). */
   autoFocus?: boolean;
   onFocused?: () => void;
@@ -257,6 +267,15 @@ export function StepInspector({
           </div>
           <Duration phase="work" title="Hands-on time" step={step} via={via} field={field} />
           <Duration phase="wait" title="Wait" step={step} via={via} field={field} />
+          <StepBaseValues
+            bundle={bundle}
+            step={step}
+            editor={editor}
+            stamp={stamp ?? (() => ({ at: new Date().toISOString() }))}
+            tierSetup={tierSetup}
+            readOnly={readOnly}
+            settingsHref={settingsHref}
+          />
           <div className={sectionClass}>
             <div className="grid grid-cols-2 gap-2">
               <NumberField

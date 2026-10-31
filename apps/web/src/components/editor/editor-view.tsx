@@ -45,8 +45,9 @@ import { IssueArea } from "./issue-area";
 import { Inspector } from "./inspector";
 import { Palette } from "./palette";
 import { useEditorTour } from "./editor-tour";
-import { findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
+import { blockersOf, capacityGaps, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
+import type { TierSetup } from "@/lib/tier-setup";
 import { SimulateFooter, type SimulatedPair } from "./simulate-footer";
 import { useBlockTools } from "./use-blocks";
 import { useEditCommands } from "./use-edit-commands";
@@ -74,7 +75,10 @@ export function EditorView({
   tourDismissed = false,
   historyHref,
   library,
+  tierSetup,
 }: {
+  /** The workspace's tiers and their deliverables, for the step base values (capacity P4). */
+  tierSetup?: TierSetup;
   live: ProcessBundle;
   draft: ProcessBundle | null;
   /** How edits are saved: to the database as the signed-in user, or in memory on the demo. Viewers can't open the Editor. */
@@ -138,7 +142,10 @@ export function EditorView({
   const liveModel = useEngineModel(live, weeks);
   const unresolved = useMemo(() => unresolvedSteps(working), [working]);
   // What the draft still lacks for meaningful numbers (issue #167): the same check as the upload preview, on the draft as edited.
-  const gaps = useMemo(() => (company || scratch ? [] : findGaps(gapInputFromBundle(working))), [company, scratch, working]);
+  const gaps = useMemo(
+    () => (company || scratch ? [] : [...findGaps(gapInputFromBundle(working)), ...capacityGaps(working, workingModel.model)]),
+    [company, scratch, working, workingModel],
+  );
 
   // Selection can outlive what it points at (after a delete or an undo).
   const selected = useMemo(() => {
@@ -410,6 +417,8 @@ export function EditorView({
             sourcesHref={sourcesHref}
             blocks={blockTools}
             company={company}
+            tierSetup={tierSetup}
+            settingsHref={settingsHref}
             draft={
               marksChanges
                 ? (step) => ({
@@ -434,7 +443,7 @@ export function EditorView({
         liveNumber={live.revision.number}
         solution={solutionMode}
         verdict={verdict}
-        incomplete={gaps.length}
+        incomplete={blockersOf(gaps).length}
       />
       )}
     </div>

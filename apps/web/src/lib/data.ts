@@ -74,6 +74,7 @@ import type { HeadlineNumbers } from "./overview/headline";
 import { roleUsage, type RoleUsage } from "./roles";
 import { rpc, rpcRows } from "@transpera-flow/db/client";
 import { getDb } from "./auth/session";
+import { readTierSetup, type TierSetup } from "./tier-setup";
 import { columnList } from "./columns";
 
 /** Workspaces the signed-in user can see (RLS decides). */
@@ -168,6 +169,11 @@ export async function loadSourceLinking(workspaceId: string): Promise<{ links: S
 }
 
 /** The categories stored on the workspace as they are (null while it has none and uses the defaults), the base a save checks against. */
+/** The workspace's tier keys and what each tier's service gets (capacity P4): P1's tables when they exist, else T1 to T3. */
+export async function loadTierSetup(workspaceId: string): Promise<TierSetup> {
+  return readTierSetup(await getDb(), workspaceId);
+}
+
 export async function loadStoredPurposes(workspaceId: string): Promise<PurposeCategory[] | null> {
   const row = await (await getDb()).selectFrom("workspaces").select(["settings"]).where("id", "=", workspaceId).executeTakeFirst();
   return (row?.settings as WorkspaceSettings | undefined)?.purposes ?? null;
