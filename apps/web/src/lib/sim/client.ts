@@ -41,14 +41,14 @@ export class SimulationClient {
 
   run(
     model: EngineModel,
-    { reps = 30, seed = 1, monthly = false, monthStarts, initialState }: { reps?: number; seed?: number; monthly?: boolean; monthStarts?: number[]; initialState?: InitialState } = {},
+    { reps = 30, seed = 1, monthly = false, monthStarts, initialState, personTime = false }: { reps?: number; seed?: number; monthly?: boolean; monthStarts?: number[]; initialState?: InitialState; personTime?: boolean } = {},
   ): Promise<SimRun> {
     this.cancel();
     const worker = this.ensureWorker();
     const id = this.nextId++;
     return new Promise<SimRun>((resolve, reject) => {
       this.pending = { id, resolve, reject };
-      worker.postMessage({ id, model, reps, seed, ...(monthly ? { monthly, ...(monthStarts ? { monthStarts } : {}) } : {}), ...(initialState ? { initialState } : {}) });
+      worker.postMessage({ id, model, reps, seed, ...(monthly ? { monthly, ...(monthStarts ? { monthStarts } : {}) } : {}), ...(initialState ? { initialState } : {}), ...(personTime ? { personTime } : {}) });
     });
   }
 
