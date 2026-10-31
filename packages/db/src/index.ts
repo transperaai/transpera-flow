@@ -290,3 +290,4 @@ export {
 } from "./person-labels";
 export { OVERTIME_COST_CLAUSE, payFreeIssueFields } from "./issue-pay";
 export { MONEY_SOURCE, moneyRegex, shareMoneyRegex } from "./money";
+export { capacitySetupFromModel } from "./fixtures/capacity-setup-from-model";

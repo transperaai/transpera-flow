@@ -473,7 +473,7 @@ export interface LeaverResult {
  * clients: their hours are shared equally by the rest of the team.
  */
 export function leaver(setup: CapacitySetup, model: EngineModel, result: SimulationResult, leaverId: string): LeaverResult | null {
-  const { personRole, deptOf } = lookups(setup);
+  const { deptOf } = lookups(setup);
   const { people } = busyShares(setup, model, result);
   const who = people.find((p) => p.id === leaverId);
   if (!who) return null;
@@ -500,7 +500,7 @@ export function leaver(setup: CapacitySetup, model: EngineModel, result: Simulat
 
   const dept = deptOf(setupPerson);
   // Candidates exclude the leaver first.
-  const candidates = people.filter((p) => p.id !== leaverId && p.kind === "client_facing" && p.departmentId === dept && hoursOf(p.id) > 0);
+  const candidates = people.filter((p) => p.id !== leaverId && p.kind === "client_facing" && p.departmentId === dept && hoursOf(p.id) > 0 && model.people?.[p.id]?.until === undefined);
   const serves = (id: string, tierKey: string): boolean => {
     const tiers = model.people?.[id]?.tiers ?? result.resolvedPeople[id]?.tiers;
     return !tiers || tiers.length === 0 || tiers.includes(tierKey);
