@@ -97,6 +97,7 @@ const role = (key: RoleKey, name: string, headcount: number, cost: number, ongoi
   headcount,
   ongoing_hours_per_client_week: ongoing,
   active: true,
+  leadership: false,
 });
 
 const step = (

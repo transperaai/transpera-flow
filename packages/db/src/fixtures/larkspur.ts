@@ -290,6 +290,7 @@ export function larkspurBundle(): ProcessBundle {
         headcount: LARKSPUR_TEAM.filter((p) => p.roles[0] === key).length,
         ongoing_hours_per_client_week: 0,
         active: true,
+        leadership: false,
       }),
     ),
     process: pipeline.process,

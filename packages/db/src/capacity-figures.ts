@@ -48,11 +48,9 @@ export function todayModel(model: EngineModel): EngineModel {
 // ---------------------------------------------------------------------------------------------------------------------
 // Who is who
 
-const LEADERSHIP = /director|head of|founder|strategy lead/i;
-
-/** Leadership: the directors and heads. (No flag is stored; it is read from the role's name. Reported in the P5 handover.) */
-export function isLeadershipRole(role: Pick<SetupRole, "name">): boolean {
-  return LEADERSHIP.test(role.name);
+/** Leadership: the roles flagged as such in Set up (`roles.leadership`). Left out of clients and revenue per employee; DLER follows its own setting. */
+export function isLeadershipRole(role: Pick<SetupRole, "leadership">): boolean {
+  return role.leadership;
 }
 
 interface Lookups {

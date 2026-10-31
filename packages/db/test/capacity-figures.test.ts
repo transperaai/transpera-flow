@@ -304,6 +304,18 @@ describe("serviceLines and perEmployee", () => {
   });
 });
 
+describe("the leadership flag", () => {
+  test("per-employee figures follow the flag on the role, not its name", () => {
+    const setup = capacitySetupFromModel(tinyModel());
+    const flipped = { ...setup, roles: setup.roles.map((r) => ({ ...r, leadership: !r.leadership })) };
+    expect(perEmployee(setup, "org").employees).toBe(3);
+    // Every flag flipped: the director is counted again, and the other two client-facing roles and the shared one drop out.
+    expect(perEmployee(flipped, "org").employees).toBeLessThan(3);
+    const none = { ...setup, roles: setup.roles.map((r) => ({ ...r, leadership: false })) };
+    expect(perEmployee(none, "org").employees).toBe(4);
+  });
+});
+
 describe("hiringAdvice", () => {
   test("the first month a role's mean busy share passes its line, less the hiring delay", () => {
     const model = tinyModel();

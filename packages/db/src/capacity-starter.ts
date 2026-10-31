@@ -49,6 +49,11 @@ export const STARTER_NUMBERS: Record<"Organic (SEO)" | "Performance", Record<str
 const DEPT_MIX = 0.5;
 
 /** The prototype's nine roles. Units are D27's; the client-facing roles have none. */
+const LEADERSHIP_NAME = /director|head of|founder|strategy lead/i;
+
+/** The starter's default for the leadership flag: the prototype's directors and heads, read from the role's name. Only a default; Set up edits the flag. */
+export const looksLikeLeadership = (name: string): boolean => LEADERSHIP_NAME.test(name);
+
 export const STARTER_ROLES: { name: string; department: "Organic (SEO)" | "Performance"; kind: "client_facing" | "shared"; line: number; rule: number | null; unit: string | null }[] = [
   { name: "SEO Director", department: "Organic (SEO)", kind: "client_facing", line: 0.85, rule: 10, unit: null },
   { name: "SEO Manager / Analyst", department: "Organic (SEO)", kind: "client_facing", line: 0.85, rule: 10, unit: null },
@@ -116,8 +121,8 @@ export async function applyCapacityStarter(db: Queryable, workspaceId: string): 
   for (const r of STARTER_ROLES) {
     const prov = ["line", ...(r.rule === null ? [] : ["rule_of_thumb"]), ...(r.unit === null ? [] : ["unit"])];
     await db.query(
-      `insert into public.roles (workspace_id, name, department_id, kind, line, rule_of_thumb, unit, provenance) values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
-      [workspaceId, r.name, depts.get(r.department), r.kind, r.line, r.rule, r.unit, estimated(prov, at)],
+      `insert into public.roles (workspace_id, name, department_id, kind, line, rule_of_thumb, unit, leadership, provenance) values ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+      [workspaceId, r.name, depts.get(r.department), r.kind, r.line, r.rule, r.unit, looksLikeLeadership(r.name), estimated(prov, at)],
     );
   }
   return { applied: true, tiers: STARTER_TIERS.length, services, roles: STARTER_ROLES.length };

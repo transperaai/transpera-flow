@@ -68,7 +68,7 @@ export function AddRole({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-function RoleItem({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" | "color" | "active">; usage: RoleUsage; canEdit: boolean }) {
+function RoleItem({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" | "color" | "active" | "leadership">; usage: RoleUsage; canEdit: boolean }) {
   return (
     <details className="group py-2">
       <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-1 py-1 hover:bg-panel-2">
@@ -84,7 +84,7 @@ function RoleItem({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" 
 }
 
 /** What else a role has (the part of a row that opens): Set up shows it under "More". */
-export function RoleMore({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" | "color" | "active">; usage: RoleUsage; canEdit: boolean }) {
+export function RoleMore({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" | "color" | "active" | "leadership">; usage: RoleUsage; canEdit: boolean }) {
   const disabled = !canEdit;
   return (
     <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2">
@@ -96,6 +96,17 @@ export function RoleMore({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | 
           onLabel="Active"
           offLabel="Inactive: hidden from pickers; steps and people that have it keep it"
           disabled={disabled} help={{ description: "Inactive roles are hidden from pickers. Steps and people that already have the role keep it.", example: "Make a role inactive when you stop using it, instead of removing it." }} />
+        {(
+          <ToggleField
+            label="Leadership"
+            value={role.leadership}
+            save={roleSaver(role.id, "leadership")}
+            onLabel="Leadership: left out of clients per employee and revenue per employee"
+            offLabel="Not leadership: counted in clients per employee and revenue per employee"
+            disabled={disabled}
+            help={{ description: "Leadership roles are left out of the clients-per-employee and revenue-per-employee figures. Whether their salaries count in DLER is a separate setting under People.", example: "Founder, Head of Client Services." }}
+          />
+        )}
         <p className="text-fg-2 sm:col-span-2">
           Used by {plural(usage.steps, "step")} · {plural(usage.people, "person", "people")}
           {usage.services > 0 && <> · {plural(usage.services, "service")} (fallback load)</>}

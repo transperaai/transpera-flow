@@ -508,6 +508,7 @@ export interface Roles {
   headcount: Generated<number>;
   id: Generated<string>;
   kind: Generated<string>;
+  leadership: Generated<boolean>;
   line: Generated<Numeric>;
   name: string;
   ongoing_hours_per_client_week: Generated<Numeric>;

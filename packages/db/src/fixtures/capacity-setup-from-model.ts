@@ -3,6 +3,7 @@
 // derived figures and the page on engine results without a database. Salaries, lines and rules are the prototype's.
 
 import type { EngineModel } from "@transpera-flow/engine";
+import { looksLikeLeadership } from "../capacity-starter";
 import type { CapacitySetup, SetupClient, SetupPerson, SetupPortfolioRow, SetupRole, SetupService } from "../capacity-setup";
 
 const SALARY: Record<string, number> = { dir_org: 12500, mgr_org: 7500, dir_perf: 12000, pmm: 7000, content: 5500, links: 2500, tech: 7500, impl: 6000, track: 7000, sales: 8000 };
@@ -58,6 +59,7 @@ export function capacitySetupFromModel(model: EngineModel, options: { payHidden?
     kind: CLIENT_FACING.has(id) ? "client_facing" : "shared",
     line: id === "dir_perf" ? 0.8 : 0.85,
     rule_of_thumb: RULE[id] ?? null,
+    leadership: looksLikeLeadership(r.name),
     unit: r.unit?.label ?? null,
     provenance: {},
   }));

@@ -66,9 +66,9 @@ function build(who: "owner" | "viewer", extraTiers: number) {
   }
   const orgT1 = services[0]!;
   const roles: SetupRole[] = [
-    { id: id("e", 1), name: "SEO Manager", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "client_facing", line: 0.85, rule_of_thumb: 10, unit: null, provenance: { line: { source: "estimate" } } },
-    { id: id("e", 2), name: "Content team", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "shared", line: 0.85, rule_of_thumb: null, unit: "words", provenance: {} },
-    { id: id("e", 3), name: "Technical SEO", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "shared", line: 0.85, rule_of_thumb: null, unit: null, provenance: {} },
+    { id: id("e", 1), name: "SEO Manager", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "client_facing", line: 0.85, rule_of_thumb: 10, unit: null, leadership: false, provenance: { line: { source: "estimate" } } },
+    { id: id("e", 2), name: "Content team", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "shared", line: 0.85, rule_of_thumb: null, unit: "words", leadership: false, provenance: {} },
+    { id: id("e", 3), name: "Technical SEO", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "shared", line: 0.85, rule_of_thumb: null, unit: null, leadership: false, provenance: {} },
   ];
   const person = (n: number, name: string, role: string, over: Partial<SetupPerson> = {}): SetupPerson => ({
     id: id("f", n), name, email: null, active: true, fte: 1, capacity_hours_week: 38, cost_rate: null, start_date: null, end_date: null, notes: null, reserved_share: 0,

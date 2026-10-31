@@ -412,7 +412,7 @@ export interface WorkspaceSettingsData {
   canEdit: boolean;
   /** agency_admin or owner: may change workspace settings. */
   canManage: boolean;
-  roles: Pick<RoleRow, "id" | "name" | "color" | "active">[];
+  roles: Pick<RoleRow, "id" | "name" | "color" | "active" | "leadership">[];
   /** How many steps (any revision), people, clients and services name each role, by role id. */
   roleUsage: Record<string, RoleUsage>;
   /** Steps someone does (working steps with a role) in the workspace's live processes, for skills. */
@@ -487,7 +487,7 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
   const [canEdit, canManage, roles, steps, people, personRoles, personSkills, personLeave, services, tags, roleSteps, team, factorRows] = await Promise.all([
     rpc(db, "can_edit_workspace", { ws }),
     rpc(db, "can_manage_workspace", { ws }),
-    db.selectFrom("roles").select(["id", "name", "color", "active"]).where("workspace_id", "=", ws).orderBy("name").execute(),
+    db.selectFrom("roles").select(["id", "name", "color", "active", "leadership"]).where("workspace_id", "=", ws).orderBy("name").execute(),
     revisions.length
       ? db
           .selectFrom("steps")

@@ -79,7 +79,7 @@ export const IMPORT_COLUMNS = {
   tiers: cols("tiers", "id", "key", "name", "sort", "both_count", "provenance", "created_at"),
   roles: cols(
     "roles", "id", "name", "color", "default_cost_rate", "headcount", "ongoing_hours_per_client_week", "active", "provenance", "created_at",
-    "department_id", "kind", "line", "rule_of_thumb", "unit",
+    "department_id", "kind", "line", "rule_of_thumb", "unit", "leadership",
   ),
   people: cols(
     "people", "id", "name", "active", "capacity_hours_week", "cost_rate", "end_date", "fte", "notes", "start_date", "provenance", "created_at",

@@ -35,7 +35,7 @@ const person = (id: string, role_ids: string[], extra: Partial<SetupPerson> = {}
   label: null, ramp: null, provenance: {}, role_ids, tier_ids: [], ...extra,
 });
 const role = (id: string, kind: "client_facing" | "shared", extra: Partial<SetupRole> = {}): SetupRole => ({
-  id, name: id, color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: null, kind, line: 0.85, rule_of_thumb: null, unit: null, provenance: {}, ...extra,
+  id, name: id, color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: null, kind, line: 0.85, rule_of_thumb: null, unit: null, leadership: false, provenance: {}, ...extra,
 });
 
 describe("tierCount", () => {

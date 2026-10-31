@@ -163,6 +163,8 @@ export interface SetupRole {
   kind: RoleKind;
   line: number;
   rule_of_thumb: number | null;
+  /** Leadership: left out of clients and revenue per employee (D22). */
+  leadership: boolean;
   unit: string | null;
   provenance: Prov;
 }
@@ -259,7 +261,7 @@ export async function loadCapacitySetup(db: Db, workspaceId: string): Promise<Ca
     db
       .selectFrom("roles")
       .select([
-        "id", "name", "color", "active", "default_cost_rate", "headcount", "ongoing_hours_per_client_week", "department_id", "kind", "line", "rule_of_thumb", "unit", "provenance",
+        "id", "name", "color", "active", "default_cost_rate", "headcount", "ongoing_hours_per_client_week", "department_id", "kind", "line", "rule_of_thumb", "unit", "leadership", "provenance",
       ])
       .where("workspace_id", "=", workspaceId)
       .orderBy("created_at")
@@ -350,6 +352,7 @@ export async function loadCapacitySetup(db: Db, workspaceId: string): Promise<Ca
       ...r,
       default_cost_rate: Number(r.default_cost_rate),
       line: Number(r.line),
+      leadership: r.leadership === true,
       kind: r.kind === "shared" ? "shared" : "client_facing",
       provenance: prov(r.provenance),
     })),
@@ -424,6 +427,7 @@ export type FieldRule =
   | { type: "number"; min: number; max: number; nullable?: boolean; integer?: boolean }
   | { type: "text"; max: number; nullable?: boolean }
   | { type: "enum"; values: readonly string[]; nullable?: boolean }
+  | { type: "boolean" }
   | { type: "id"; nullable?: boolean }
   | { type: "ramp"; nullable?: boolean };
 
@@ -479,6 +483,7 @@ export const SETUP_FIELDS = {
     line: n(0.01, 1.5),
     rule_of_thumb: n(1, 10_000, true, true),
     unit: text(60, true),
+    leadership: { type: "boolean" },
   },
   person_portfolio: { client_count: n(0, 100_000, false, true) },
 } as const satisfies Record<string, Record<string, FieldRule>>;
@@ -487,8 +492,8 @@ export type SetupTable = keyof typeof SETUP_FIELDS;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Checks one typed value against its rule; the cleaned value (text trimmed, empty text as null where allowed), or "invalid". */
-export function checkSetupValue(rule: FieldRule, value: unknown): { ok: true; value: string | number | number[] | null } | { ok: false } {
-  if (value === null || value === undefined) return rule.nullable ? { ok: true, value: null } : { ok: false };
+export function checkSetupValue(rule: FieldRule, value: unknown): { ok: true; value: string | number | boolean | number[] | null } | { ok: false } {
+  if (value === null || value === undefined) return "nullable" in rule && rule.nullable ? { ok: true, value: null } : { ok: false };
   switch (rule.type) {
     case "number": {
       if (typeof value !== "number" || !Number.isFinite(value) || value < rule.min || value > rule.max) return { ok: false };
@@ -503,6 +508,8 @@ export function checkSetupValue(rule: FieldRule, value: unknown): { ok: true; va
     }
     case "enum":
       return typeof value === "string" && rule.values.includes(value) ? { ok: true, value } : { ok: false };
+    case "boolean":
+      return typeof value === "boolean" ? { ok: true, value } : { ok: false };
     case "id":
       return typeof value === "string" && UUID.test(value) ? { ok: true, value } : { ok: false };
     case "ramp":

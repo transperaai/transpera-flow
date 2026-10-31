@@ -289,7 +289,7 @@ function PeopleTable({ setup, data }: { setup: CapacitySetup; data: WorkspaceSet
         </TableBody>
       </Table>
       <Note>
-        Also on each person, under More: email, start and end dates, leave, skills (steps they can do), per-person times, overtime cap. Ramp-up for new starters (90 days to about 80%) and the offshore / contractor label are here. Leadership (Founder, Head of Client Services, Growth Strategy Lead) isn&apos;t in the capacity figures.
+        Also on each person, under More: email, start and end dates, leave, skills (steps they can do), per-person times, overtime cap. Ramp-up for new starters (90 days to about 80%) and the offshore / contractor label are here. Roles marked as leadership (under More) aren&apos;t in clients or revenue per employee.
       </Note>
     </SettingsSection>
   );

@@ -5,13 +5,13 @@
 insert into public.workspaces (id, name, slug, settings) values
   ('a0000000-0000-4000-8000-000000000001', 'Northbeam Digital', 'northbeam', '{"hours_per_week":40,"horizon_weeks":13,"currency":"GBP","leads_per_week":7,"active_clients":26,"churn_monthly":0.03,"retainer":3800,"overtime_cap":0.1,"client_health_benchmark_low":70,"client_health_benchmark_high":80}');
 
-insert into public.roles (id, workspace_id, name, color, default_cost_rate, headcount, ongoing_hours_per_client_week, active) values
-  ('b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', 'Sales', '#2a78d6', 45, 2, 0, true),
-  ('b0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000001', 'Strategist', '#eb6834', 70, 1, 0.4, true),
-  ('b0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000001', 'Account manager', '#1baf7a', 55, 2, 1.6, true),
-  ('b0000000-0000-4000-8000-000000000004', 'a0000000-0000-4000-8000-000000000001', 'SEO specialist', '#8b5cf6', 50, 3, 2.4, true),
-  ('b0000000-0000-4000-8000-000000000005', 'a0000000-0000-4000-8000-000000000001', 'PPC specialist', '#d4a106', 50, 2, 2, true),
-  ('b0000000-0000-4000-8000-000000000006', 'a0000000-0000-4000-8000-000000000001', 'Finance', '#64748b', 40, 1, 0.3, true);
+insert into public.roles (id, workspace_id, name, color, default_cost_rate, headcount, ongoing_hours_per_client_week, active, leadership) values
+  ('b0000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', 'Sales', '#2a78d6', 45, 2, 0, true, false),
+  ('b0000000-0000-4000-8000-000000000002', 'a0000000-0000-4000-8000-000000000001', 'Strategist', '#eb6834', 70, 1, 0.4, true, false),
+  ('b0000000-0000-4000-8000-000000000003', 'a0000000-0000-4000-8000-000000000001', 'Account manager', '#1baf7a', 55, 2, 1.6, true, false),
+  ('b0000000-0000-4000-8000-000000000004', 'a0000000-0000-4000-8000-000000000001', 'SEO specialist', '#8b5cf6', 50, 3, 2.4, true, false),
+  ('b0000000-0000-4000-8000-000000000005', 'a0000000-0000-4000-8000-000000000001', 'PPC specialist', '#d4a106', 50, 2, 2, true, false),
+  ('b0000000-0000-4000-8000-000000000006', 'a0000000-0000-4000-8000-000000000001', 'Finance', '#64748b', 40, 1, 0.3, true, false);
 
 insert into public.people (id, workspace_id, name, fte, capacity_hours_week, cost_rate, active, start_date, end_date) values
   ('90000000-0000-4000-8000-000000000001', 'a0000000-0000-4000-8000-000000000001', 'Priya Shah', 1, null, null, true, null, null),
@@ -316,14 +316,14 @@ select private.relayout_company_map('a0000000-0000-4000-8000-000000000001');
 insert into public.workspaces (id, name, slug, settings) values
   ('a0000000-0000-4000-8001-000000000001', 'Larkspur Creative', 'larkspur', '{"hours_per_week":37.5,"horizon_weeks":26,"currency":"GBP","leads_per_week":5,"active_clients":18,"churn_monthly":0.04,"retainer":2600,"availability_floor":0.1,"overtime_cap":0.15,"health_missed_penalty":15,"health_initial":75}');
 
-insert into public.roles (id, workspace_id, name, color, default_cost_rate, headcount, ongoing_hours_per_client_week, active) values
-  ('b0000000-0000-4000-8001-000000000001', 'a0000000-0000-4000-8001-000000000001', 'Strategy lead', '#eb6834', 75, 1, 0, true),
-  ('b0000000-0000-4000-8001-000000000002', 'a0000000-0000-4000-8001-000000000001', 'Account manager', '#1baf7a', 50, 2, 0, true),
-  ('b0000000-0000-4000-8001-000000000003', 'a0000000-0000-4000-8001-000000000001', 'Designer', '#8b5cf6', 48, 2, 0, true),
-  ('b0000000-0000-4000-8001-000000000004', 'a0000000-0000-4000-8001-000000000001', 'Copywriter', '#2a78d6', 45, 1, 0, true),
-  ('b0000000-0000-4000-8001-000000000005', 'a0000000-0000-4000-8001-000000000001', 'Social executive', '#d4a106', 38, 2, 0, true),
-  ('b0000000-0000-4000-8001-000000000006', 'a0000000-0000-4000-8001-000000000001', 'Developer', '#0ea5a4', 60, 1, 0, true),
-  ('b0000000-0000-4000-8001-000000000007', 'a0000000-0000-4000-8001-000000000001', 'Ops & finance', '#64748b', 40, 1, 0, true);
+insert into public.roles (id, workspace_id, name, color, default_cost_rate, headcount, ongoing_hours_per_client_week, active, leadership) values
+  ('b0000000-0000-4000-8001-000000000001', 'a0000000-0000-4000-8001-000000000001', 'Strategy lead', '#eb6834', 75, 1, 0, true, false),
+  ('b0000000-0000-4000-8001-000000000002', 'a0000000-0000-4000-8001-000000000001', 'Account manager', '#1baf7a', 50, 2, 0, true, false),
+  ('b0000000-0000-4000-8001-000000000003', 'a0000000-0000-4000-8001-000000000001', 'Designer', '#8b5cf6', 48, 2, 0, true, false),
+  ('b0000000-0000-4000-8001-000000000004', 'a0000000-0000-4000-8001-000000000001', 'Copywriter', '#2a78d6', 45, 1, 0, true, false),
+  ('b0000000-0000-4000-8001-000000000005', 'a0000000-0000-4000-8001-000000000001', 'Social executive', '#d4a106', 38, 2, 0, true, false),
+  ('b0000000-0000-4000-8001-000000000006', 'a0000000-0000-4000-8001-000000000001', 'Developer', '#0ea5a4', 60, 1, 0, true, false),
+  ('b0000000-0000-4000-8001-000000000007', 'a0000000-0000-4000-8001-000000000001', 'Ops & finance', '#64748b', 40, 1, 0, true, false);
 
 insert into public.people (id, workspace_id, name, fte, capacity_hours_week, cost_rate, active, start_date, end_date) values
   ('90000000-0000-4000-8001-000000000001', 'a0000000-0000-4000-8001-000000000001', 'Hana Whitfield', 1, null, null, true, null, null),
