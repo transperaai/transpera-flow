@@ -1,11 +1,11 @@
 "use client";
 
-// Issues on the process page (issue #17): the Issues tab in the map's Insights panel, badges on the steps, Kept out of process-view.tsx so that file only wires it in.
+// Issues on the process page (issue #17): the Issues tab in the map's Insights panel, badges on the steps.
 
 import { isReadOnly } from "@/lib/mode";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
-import { detectBrokenScenarios, resolveMoney, type DetectedIssue, type EngineModel, type RetiredSteps, type SimulationResult, type SuccessMeasureSource } from "@transpera-flow/engine";
+import { detectBrokenScenarios, resolveMoney, type DetectedIssue, type EngineModel, type RetiredSteps, type SimulationResult } from "@transpera-flow/engine";
 import { processStepIds, processSteps } from "@/lib/process-steps";
 import { perceptionGapDetections } from "@/lib/issues/perception";
 import { visibleFindings } from "@/lib/rules/edit";
@@ -16,7 +16,7 @@ import { useIssues } from "@/lib/issues/use-issues";
 import { issueFormOptions } from "@/lib/issues/draft";
 import { useAbsenceTest } from "@/lib/sim/absence";
 import { IssuesRegister } from "./issues-register";
-import type { EditMode } from "./process-view";
+import type { EditMode } from "@/lib/sim/use-engine-model";
 import { StepIssueBadges } from "./step-issue-badges";
 import type { StepExtras } from "./map/step-detail";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
@@ -59,7 +59,6 @@ export function useProcessIssues({
   initialScenarios,
   registerHref,
   retired = NO_RETIRED,
-  successMeasures,
   onShowIssues,
   sources = NO_SOURCES,
   liveRevisions,
@@ -78,8 +77,6 @@ export function useProcessIssues({
   registerHref?: string;
   /** Steps the model no longer has and what replaced them, for broken-scenario issues (issue #16). */
   retired?: RetiredSteps;
-  /** The process's success measures (its first principles), which rule 11 rates; none rates nothing. */
-  successMeasures?: SuccessMeasureSource;
   /** A step's issue badge was clicked: the caller opens the panel the Issues tab is in. */
   onShowIssues?: () => void;
   /** The workspace's sources, which the Acknowledge dialog can link to an issue. */
@@ -101,7 +98,7 @@ export function useProcessIssues({
   const gaps = useMemo(() => visibleFindings(rules, perceptionGapDetections(bundle.steps)), [bundle.steps, rules]);
   // The absence test (rule 8) runs in its own worker once the baseline is done; until it returns, that rule raises nothing.
   const absence = useAbsenceTest(model && result && !running ? model : null, result?.seed ?? 1, resolveMoney(rules).absenceWeeks);
-  const found = useDetectedIssues(model, result, rules, bundle.process.id, bundle.workspace.settings.currency, absence, successMeasures);
+  const found = useDetectedIssues(model, result, rules, bundle.process.id, bundle.workspace.settings.currency, absence);
   // The run's facts (D40): read-only evidence. The issues acknowledged from one before are costed by it while the run still finds it.
   const facts = useMemo(() => (found ? visibleFindings(rules, [...broken, ...found, ...gaps]) : null), [found, broken, gaps, rules]);
   const detected = useMemo(() => (facts ? factsCostingIssues(state.issues, facts) : null), [facts, state.issues]);

@@ -19,11 +19,7 @@
 // worker, only once the two runs above are first in and only when something needs them; they don't depend on the horizon
 // and are kept for the session, so changing the horizon doesn't run them again. The trend charts load on their own.
 
-import { sortWithoutMoney } from "@transpera-flow/db";
-import { useShareFinancialsHidden } from "@/components/share/share-context";
 import type { ScreenMode } from "@/lib/mode";
-import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
-import type { FirstPrinciples } from "@transpera-flow/engine";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -91,8 +87,6 @@ export interface OverviewProps {
   /** Tracked issues: the confirmed ones colour and badge the map. */
   issues: IssueRow[];
   mode: ScreenMode;
-  /** The pipeline's live first principles, whose success measures rule 11 (goals met) rates. */
-  firstPrinciples?: FirstPrinciples | null;
   /** The workspace's solutions and their verdicts (the demo reads the ones built in this tab instead). */
   solutions?: SolutionsData;
   /** For solutions compared whose process has been published since: the version they were copied from. */
@@ -112,8 +106,6 @@ export interface OverviewProps {
   issuesHref: string;
   /** The Forecast page, linked from the team load chart. */
   forecastHref?: string;
-  /** The Share button (Agency admins, B3), made by the page that knows what is shared. */
-  share?: ReactNode;
 }
 
 const NO_BASES: SolutionBases = {};
@@ -189,7 +181,6 @@ export function Overview({
   company,
   issues,
   mode,
-  firstPrinciples,
   solutions,
   solutionBases = NO_BASES,
   startDate,
@@ -201,7 +192,6 @@ export function Overview({
   viewingMapVersion = null,
   issuesHref,
   forecastHref,
-  share,
 }: OverviewProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -254,15 +244,12 @@ export function Overview({
   // The facts (D40), from the run at the workspace's own length, rated with the documented defaults: evidence, never findings.
   const rules = ANALYSIS_DEFAULTS;
   const absence = useAbsenceTest(base && baseResult ? base : null, baseResult?.seed ?? 1, resolveMoney(rules).absenceWeeks);
-  const successMeasures = useSuccessMeasures(live.process.id, mode === "demo", firstPrinciples);
-  // A share link without Financials reads the findings in an order that never depends on money (B3).
-  const hideMoney = useShareFinancialsHidden();
   const gaps = useMemo(() => visibleFindings(rules, perceptionGapDetections(parts.flatMap((p) => p.steps))), [rules, parts]);
   // Who gets too busy, and when, over the horizon (B6): "Across the company".
   const forecastFindings = useMemo(() => (horizonModel && horizonResult ? forecastInsights(horizonModel, horizonResult, rules, start) : []), [horizonModel, horizonResult, rules, start]);
   const facts = useMemo(
-    () => (base && baseResult ? (hideMoney ? sortWithoutMoney : sortFindings)([...visibleFindings(rules, [...rerate(base, baseResult, rules, live.process.id, absence, { successMeasures }), ...gaps]), ...forecastFindings]) : null),
-    [base, baseResult, rules, live.process.id, absence, gaps, successMeasures, forecastFindings, hideMoney],
+    () => (base && baseResult ? sortFindings([...visibleFindings(rules, [...rerate(base, baseResult, rules, live.process.id, absence), ...gaps]), ...forecastFindings]) : null),
+    [base, baseResult, rules, live.process.id, absence, gaps, forecastFindings],
   );
   // Issues logged here badge the map straight away. Each part is at its live revision.
   const liveRevisions = useMemo(() => Object.fromEntries(parts.map((p) => [p.process.id, p.revision.id])), [parts]);
@@ -386,7 +373,6 @@ export function Overview({
         <PageHeader
           eyebrow="Overview"
           title={workspaceName}
-          actions={share}
           description={
             <span className="inline-flex items-center gap-2">
               <i aria-hidden className={`size-2 rounded-full ${simulating ? "animate-pulse bg-warn" : "bg-good"}`} />
@@ -517,18 +503,15 @@ export function Overview({
             <ChartCard id="time-split" title="Time split by process" note={`Of the time work spends in each process over the next ${span}, the share someone is working on it.`}>
               {timeSplit ? <TimeSplitChart rows={timeSplit} months={months} /> : error ? <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p> : chartLoading()}
             </ChartCard>
-            {/* Not on a share link: share links show no time split (sandbox phase 4). */}
-            {mode !== "share" && (
-              <ChartCard id="time-achieves" title="What the time achieves" wide note={`The team's working time over the next ${span}, by what the steps achieve, as a share of the hours available. Hands-on against waiting is above.`}>
-                {horizonResult?.monthly ? (
-                  <TimeAchieves monthly={horizonResult.monthly} hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek} start={start} categories={purposeCategories} sandboxHref={forecastHref} span={span} />
-                ) : error ? (
-                  <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p>
-                ) : (
-                  chartLoading()
-                )}
-              </ChartCard>
-            )}
+            <ChartCard id="time-achieves" title="What the time achieves" wide note={`The team's working time over the next ${span}, by what the steps achieve, as a share of the hours available. Hands-on against waiting is above.`}>
+              {horizonResult?.monthly ? (
+                <TimeAchieves monthly={horizonResult.monthly} hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek} start={start} categories={purposeCategories} sandboxHref={forecastHref} span={span} />
+              ) : error ? (
+                <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p>
+              ) : (
+                chartLoading()
+              )}
+            </ChartCard>
             <ChartCard
               id="team-load"
               title="Team load by role"

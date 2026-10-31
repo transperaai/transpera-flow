@@ -23,9 +23,8 @@ pnpm install
 pnpm dev            # http://localhost:3000
 ```
 
-Without `DATABASE_URL` and `BETTER_AUTH_SECRET` the app runs in **demo mode** (`/demo`), showing the
-Northbeam sample from the seed fixtures. To use a database, copy
-`apps/web/.env.example` to `apps/web/.env.local` and fill it in.
+The app needs a database and sign-in: copy `apps/web/.env.example` to `apps/web/.env.local` and fill it in. (The public `/demo`
+pages are gone; the Northbeam and Larkspur fixtures stay for the engine's golden tests and the database tests.)
 
 ## Stack and database
 
@@ -68,9 +67,9 @@ pnpm test           # database tests need Postgres, see below
 pnpm --filter @transpera-flow/web build && pnpm --filter @transpera-flow/web e2e
 ```
 
-`e2e` (needs a finished build, served without a database or auth secret, so the app is in demo mode) opens every demo page at
-400, 768 and 1024 px and in dark mode: no sideways scroll, nothing past the edge, phones read only, no light surface in
-dark mode. It runs in CI's `check` job after the build.
+`e2e` (needs a finished build, served without a database or auth secret) opens the pages that need no sign-in (today the privacy
+page; the `/demo` pages are gone) at 400, 768 and 1024 px and in dark mode: no sideways scroll, nothing past the edge, phones read
+only, no light surface in dark mode. It runs in CI's `check` job after the build.
 
 `pnpm test` runs the PRD §6.7 timing tests (tagged `perf`) last, on their own, so
 the other suites don't share the CPU with them. A package's own `pnpm test` leaves
@@ -105,7 +104,7 @@ claude mcp add --transport http transpera-flow https://<host>/api/mcp \
 
 The server is **read-only**: Claude and ChatGPT query and report, and nothing they call writes company data, sources, issues,
 drafts or processes (docs/plans/cut-list.md item 5). Tools: `list_workspaces`, `set_active_workspace` (the only state it
-changes: the token's own active-workspace setting), `get_workspace_summary`, `get_process`, `get_facts`, `get_first_principles`,
+changes: the token's own active-workspace setting), `get_workspace_summary`, `get_process`, `get_facts`,
 `list_issues`, `list_scenarios`, `list_solutions`, `list_sources`, `list_templates`, `run_scenario` (with `scenario`: a saved Sandbox scenario run month by month), `compare_scenarios`, `check_robustness`
 (time-capped; a capped check is flagged `partial`) and `get_bottlenecks` (with the shadow price: extra completions per quarter
 from one more FTE in the top bottleneck role; see `packages/engine/src/shadow-price.ts`). `run_scenario` and

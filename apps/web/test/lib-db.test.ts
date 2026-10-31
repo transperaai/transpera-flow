@@ -19,7 +19,6 @@ const { canEditWorkspace, canManageWorkspace, currentUserId, isAgencyAdmin, load
 const { listAgencyWorkspaces, listWorkspaces, loadMemberNames, loadWorkspaceHead } = await import("@/lib/data");
 const { shellCounts } = await import("@/lib/company-data");
 const { saveCapacityFactor, saveCapacityFactorSwitch, saveField, saveFields, saveHealthRule, saveLinks } = await import("@/lib/fields/server");
-const { loadShareLinks } = await import("@/lib/share/list");
 const { workspaceIsEmpty } = await import("@/lib/restore/empty");
 const { loadImports, loadLeadSourceOptions } = await import("@/lib/calibration/import-data");
 const { loadLatestChecks } = await import("@/lib/calibration/client-data");
@@ -212,24 +211,6 @@ describe("fields/server", () => {
     expect(await saveCapacityFactor(priya, null, 1.25, null)).toEqual({ status: "saved", value: null });
     actAs("viewer");
     expect(await saveCapacityFactor(priya, null, null, 1.1)).toMatchObject({ status: expect.stringMatching(/error|not_found/) });
-  });
-});
-
-describe("share links list", () => {
-  it("lists a workspace's links newest first with what they show", async () => {
-    // The snapshot check belongs to the sharing code (packages/db); this test is about the list, so insert around it.
-    await tdb.client.query("alter table share_links disable trigger user");
-    await tdb.client.query(
-      "insert into share_links (workspace_id, token_hash, kind, snapshot, engine_version, created_by) values ($1, $2, 'overview', '{}', 'test', $3)",
-      [ws, "b".repeat(64), users.owner!.id],
-    );
-    await tdb.client.query("alter table share_links enable trigger user");
-    actAs("owner");
-    const links = await loadShareLinks(ws);
-    expect(links).toHaveLength(1);
-    expect(links[0]).toMatchObject({ kind: "overview", mode: "view", what: "The Overview", madeBy: "Priya Shah", opens: 0, status: expect.anything() });
-    actAs("viewer");
-    expect(await loadShareLinks(ws)).toEqual([]);
   });
 });
 

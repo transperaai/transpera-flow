@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -8,8 +8,8 @@ import { SourcesPage } from "@/components/sources-page";
 import { LINK_HELP } from "@/components/sources/link-chips";
 import { SOURCE_DIALOG_HELP } from "@/components/sources/source-dialog";
 import { LIBRARY_HELP } from "@/components/sources/library-filters";
-import { demoBundle, demoCitations, demoLinkTargets, demoPageSources, demoSourceLinks, DEMO_UNLINKED_SOURCE_ID } from "@/lib/sources/demo";
-import { demoNav, flatItems, workspaceNav } from "@/lib/shell/nav";
+import { demoBundle, demoCitations, demoLinkTargets, demoPageSources, demoSourceLinks } from "@/lib/sources/demo";
+import { flatItems, workspaceNav } from "@/lib/shell/nav";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }), usePathname: () => "/demo/sources", useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/app/w/[slug]/source-actions", () => ({
@@ -113,21 +113,12 @@ describe("the Sources page", () => {
   });
 });
 
-describe("the sidebar's count", () => {
-  it("counts the sources linked to nothing beside Sources, as a warning", () => {
-    const counts = { unlinkedSources: 1 };
-    for (const groups of [demoNav({ pathname: "/demo/sources", counts }), workspaceNav({ slug: "s", pathname: "/w/s/sources", canManage: false, counts })]) {
-      const sources = flatItems(groups).find((i) => i.key === "sources")!;
-      expect(sources).toMatchObject({ count: 1, tone: "warn", countNoun: "not linked to anything", active: true });
-    }
-  });
-
-  it("matches the demo's sample: one source is unlinked", () => {
-    expect(demoPageSources().filter((s) => !demoSourceLinks().some((l) => l.source_id === s.id)).map((s) => s.id)).toEqual([DEMO_UNLINKED_SOURCE_ID]);
-    const layout = readFileSync(join(__dirname, "..", "src/app/demo/layout.tsx"), "utf8");
-    expect(layout).toContain("unlinkedSources: unlinkedSources(demoPageSources(), demoSourceLinks()).length");
-    const live = readFileSync(join(__dirname, "..", "src/app/w/[slug]/layout.tsx"), "utf8");
-    expect(live).toContain("unlinkedSources: shell.unlinkedSources");
+describe("the sidebar", () => {
+  it("does not list Sources: it is hidden from the menu, and still opens by its address", () => {
+    const groups = workspaceNav({ slug: "s", pathname: "/w/s/sources", canManage: true, counts: {} });
+    expect(flatItems(groups).map((i) => i.key)).not.toContain("sources");
+    expect(flatItems(groups).filter((i) => i.active)).toEqual([]);
+    expect(existsSync(join(__dirname, "..", "src/app/w/[slug]/sources/page.tsx"))).toBe(true);
   });
 });
 

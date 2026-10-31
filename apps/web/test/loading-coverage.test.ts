@@ -14,7 +14,6 @@ const INHERITS: Record<string, string> = {
   "settings/access": "inherit settings/loading.tsx",
   "settings/branding": "inherit settings/loading.tsx",
   "settings/calibration": "inherit settings/loading.tsx",
-  "settings/levers": "inherit settings/loading.tsx",
   "settings/purposes": "inherit settings/loading.tsx",
 };
 

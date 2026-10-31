@@ -1,7 +1,7 @@
 "use client";
 
 // The process page (issue #103, A38): a read-only review of one process on a single scrolling column, no tabs and no
-// drawers. About this process, First principles, Map, Facts from the run (the evidence, B17), Issues and solutions (one section, each issue with its status track), then Supporting data and, closed at the bottom, Sources. Editing happens in the
+// drawers. About this process, Map, Facts from the run (the evidence, B17), Issues and solutions (one section, each issue with its status track), then Supporting data and, closed at the bottom, Sources. Editing happens in the
 // Editor (A39), which "✎ Open in Editor" opens; History (A40) lists the earlier versions this page can show.
 
 import { isReadOnly } from "@/lib/mode";
@@ -10,14 +10,13 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
-import { RATING_LABELS, type FirstPrinciples, type Rating } from "@transpera-flow/engine";
+import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { AboutProcess } from "@/components/about-process";
 import { Help } from "@/components/help";
 import { IssueTrackView } from "@/components/issue-track";
 import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { FactsList } from "@/components/facts-list";
-import { FirstPrinciplesCard } from "@/components/first-principles/first-principles-card";
 import { findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -30,8 +29,6 @@ import { linkedSolutions, trackOf } from "@/lib/process-page/track";
 import { buildSolutionHref } from "@/lib/solutions/links";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { withHorizon } from "@/lib/editor/modes";
-import { useDemoFirstPrinciples } from "@/lib/first-principles/demo-store";
-import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import { horizonWeeks, isHorizonMonths } from "@/lib/horizon";
 import { processStepIds, processSteps } from "@/lib/process-steps";
 import { useSimulation } from "@/lib/sim/use-simulation";
@@ -41,12 +38,11 @@ import { ProcessCanvas } from "./process-canvas";
 import { ProcessSolutions, type SolutionsData } from "./solutions/process-solutions";
 import { NO_SOLUTIONS_DATA } from "@/lib/solutions/cards";
 import { useProcessIssues } from "./process-issues";
-import { useEngineModel, type EditMode } from "./process-view";
+import { useEngineModel, type EditMode } from "@/lib/sim/use-engine-model";
 import { ServicingBanner } from "./servicing-banner";
 import { UtilisationBars } from "./utilisation-bars";
 import { WaitByStep } from "./wait-by-step";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
-import { PLAY_HELP, PlaySection, type PlayConfig } from "@/components/share/play-section";
 import { EDIT_ONLY } from "@/lib/phone";
 
 const RATING_PILL: Record<Rating, string> = {
@@ -79,15 +75,10 @@ export function ProcessPage({
   historyHref,
   solutions,
   inside = [],
-  firstPrinciples,
   processPicker,
   notice,
-  play,
   aboutInfo,
-  share,
 }: {
-  /** The Share button (Agency admins, B3), made by the page that knows what is shared. */
-  share?: ReactNode;
   /** What "About this process" needs from the server: where the process sits on the company map, whether a draft is open, and who last changed it. */
   aboutInfo?: { trail: string[]; hasDraft: boolean; lastChange: { at: string | null; by: string } | null };
   /** The process at the version on screen: live, or an earlier one when `viewingVersion` is set. */
@@ -118,12 +109,8 @@ export function ProcessPage({
   solutions?: { data: SolutionsData; base: string; viewerId?: string | null; memberNames?: Readonly<Record<string, string>> };
   /** Processes inside this one. */
   inside?: ChildProcess[];
-  /** The version's first principles for the card at the top (A54); on the demo the answers edited in this tab replace `doc`. */
-  firstPrinciples?: { doc: FirstPrinciples | null; href: string; draftChanged?: boolean; inheritedFrom?: number | null };
   processPicker?: ReactNode;
   notice?: ReactNode;
-  /** A play link's visitor (B4): shows "Try your own changes" after the map, with the levers the workspace shows (nothing is saved). Nowhere else renders levers on this page. */
-  play?: PlayConfig;
 }) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -143,11 +130,6 @@ export function ProcessPage({
     const q = next.toString();
     return q ? `${pathname}?${q}` : pathname;
   })();
-
-  // First principles (A54): the card shows them, and their success measures feed rule 11 (goals met) in the facts.
-  const demoFirstPrinciples = useDemoFirstPrinciples(bundle.process.id);
-  const fpDoc = mode === "demo" ? demoFirstPrinciples : (firstPrinciples?.doc ?? null);
-  const successMeasures = useSuccessMeasures(bundle.process.id, mode === "demo", firstPrinciples?.doc);
 
   // Solutions: the demo keeps its own in this tab. Each issue's status track and the "Other improvements" read them.
   const inTab = useDemoSolutions();
@@ -178,7 +160,6 @@ export function ProcessPage({
     sources,
     // A dismissed insight is measured against the live revision; an earlier version or a draft isn't one.
     liveRevisions: liveRevisions ?? (viewingVersion === null && liveVersion > 0 ? { [bundle.process.id]: bundle.revision.id } : undefined),
-    successMeasures,
     // A badge on the map takes you down to the issues on that step.
     onShowIssues: () => document.getElementById("issues")?.scrollIntoView({ behavior: "smooth", block: "start" }),
   });
@@ -199,8 +180,8 @@ export function ProcessPage({
     const linked = linking
       ? new Set(linking.links.filter((l) => (l.kind === "process" && l.process_id && ids.has(l.process_id)) || (l.kind === "step" && l.step_id && stepIds.has(l.step_id))).map((l) => l.source_id))
       : null;
-    return aboutProcess({ bundle, doc: fpDoc, trail: aboutInfo?.trail ?? [], liveVersion, hasDraft: aboutInfo?.hasDraft ?? false, sources: linked ? linked.size : null, lastChange: aboutInfo?.lastChange ?? null });
-  }, [bundle, fpDoc, aboutInfo, liveVersion, linking, stepIds]);
+    return aboutProcess({ bundle, trail: aboutInfo?.trail ?? [], liveVersion, hasDraft: aboutInfo?.hasDraft ?? false, sources: linked ? linked.size : null, lastChange: aboutInfo?.lastChange ?? null });
+  }, [bundle, aboutInfo, liveVersion, linking, stepIds]);
   const supporting = useMemo(
     () =>
       model
@@ -263,12 +244,9 @@ export function ProcessPage({
             )}
           </div>
           <div className="flex items-center gap-2">
-            {share}
-            {mode !== "share" && (
-              <Button asChild variant="outline">
-                <Link href={historyHref}>History</Link>
-              </Button>
-            )}
+            <Button asChild variant="outline">
+              <Link href={historyHref}>History</Link>
+            </Button>
             {editHref && (
               <Button asChild className={`bg-edit text-edit-fg hover:bg-edit/90 ${EDIT_ONLY}`} data-edit-entry>
                 <Link href={withHorizon(editHref, pickedMonths)}>✎ Open in Editor</Link>
@@ -291,22 +269,6 @@ export function ProcessPage({
         )}
 
         <AboutProcess about={about} />
-
-        <Section
-          id="first-principles"
-          title="First principles"
-        >
-          <FirstPrinciplesCard
-            bundle={bundle}
-            doc={fpDoc}
-            model={model}
-            result={result}
-            href={firstPrinciples?.href ?? "#first-principles"}
-            canEdit={!isReadOnly(mode) && !old}
-            draftChanged={firstPrinciples?.draftChanged}
-            inheritedFrom={firstPrinciples?.inheritedFrom}
-          />
-        </Section>
 
         <Section
           id="map"
@@ -360,12 +322,6 @@ export function ProcessPage({
             }
           />
         </Section>
-
-        {play && model && (
-          <Section id="try-changes" title="Try your own changes" hint="Move the levers the team shows to see what would change. Nothing is saved." help={PLAY_HELP.section}>
-            <PlaySection model={model} baseline={sim.run} bundle={bundle} play={play} />
-          </Section>
-        )}
 
         <Section id="facts" title="Facts from the run" hint="What the simulation measured. These are evidence, not issues: log an issue below when one matters.">
           <FactsList facts={issuesUi.facts} currency={bundle.workspace.settings.currency} stepName={(id) => stepNameOf.get(id) ?? null} />

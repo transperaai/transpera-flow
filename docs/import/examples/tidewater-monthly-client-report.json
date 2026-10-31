@@ -248,54 +248,5 @@
       "from": "follow-up",
       "to": "delivered"
     }
-  ],
-  "first_principles": {
-    "truths": [
-      {
-        "text": "Reports go out within five working days of month end.",
-        "kind": "truth",
-        "evidence": [
-          {
-            "source": "interview-hana",
-            "speaker": "Hana Iqbal",
-            "time": "00:05:14",
-            "quote": "it's in the retainer terms. Report within five working days of month end."
-          }
-        ]
-      }
-    ],
-    "requirements": [
-      {
-        "text": "Callum reviews every report before it goes out.",
-        "owner": "Callum Reid",
-        "step": "review",
-        "evidence": [
-          {
-            "source": "interview-hana",
-            "speaker": "Hana Iqbal",
-            "time": "00:02:41",
-            "quote": "He reviews every report before it goes out."
-          }
-        ],
-        "assumed": "Hana does not say who set the rule; Callum is named as the person who does the review."
-      }
-    ],
-    "measures": [
-      {
-        "text": "Report within five working days of month end",
-        "kpi": "cycleHours",
-        "comparator": "atMost",
-        "target": 40,
-        "evidence": [
-          {
-            "source": "interview-hana",
-            "speaker": "Hana Iqbal",
-            "time": "00:05:14",
-            "quote": "Report within five working days of month end."
-          }
-        ],
-        "assumed": "Five working days at 8 hours a day (Tidewater works a 40 hour week) is 40 working hours."
-      }
-    ]
-  }
+  ]
 }

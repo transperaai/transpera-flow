@@ -50,7 +50,7 @@ Settings → Environment Variables. "Sensitive" variables cannot be read back af
 |---|---|---|---|---|
 | `DATABASE_URL` | Neon owner connection (migrations, Better Auth, sign-in access) | Production, Preview | Set by the Neon integration | Neon integration (section 2) |
 | `APP_DATABASE_URL` | `authenticator` connection the app's queries use | Production, Preview | Yes | Claude via API |
-| `BETTER_AUTH_SECRET` | Signs sessions; 32+ random characters. Without it (or `DATABASE_URL`) the app runs in demo mode | Production, Preview | Yes | Claude via API, generated, never printed |
+| `BETTER_AUTH_SECRET` | Signs sessions; 32+ random characters. Without it (or `DATABASE_URL`) the app does not start (there is no demo mode now) | Production, Preview | Yes | Claude via API, generated, never printed |
 | `OAUTH_PROXY_SECRET` | Signs the preview-to-alias sign-in hand-off | Production, Preview | Yes | Claude via API, generated, never printed |
 | `PREVIEW_ALIAS_URL` | The stable preview alias, if you made one (for example `https://acme-flow-next.vercel.app`). Only this deployment's own alias is trusted | Production, Preview | No | Claude via API |
 | `BETTER_AUTH_URL` | This deployment's own URL. Production: the production URL. Preview: the stable preview alias | Production, Preview (different values) | No | Claude via API (Austin may in the dashboard) |
@@ -93,7 +93,7 @@ Other preview URLs sign in through the alias (Better Auth's OAuth proxy), so the
 
 ## 9. First sign-in and smoke test
 
-1. Open the production URL, sign in with the `ACCESS_ADMIN_EMAILS` address (the Owner). Expect the app, not an access-denied page or `/demo`.
+1. Open the production URL, sign in with the `ACCESS_ADMIN_EMAILS` address (the Owner). Expect the app, not an access-denied page.
 2. Settings → Access: add the client's domain and emails.
 3. Create or upload a process, run a simulation, reload: it persists (database and app login work).
 4. Sign in with an address not on the list: it is refused.

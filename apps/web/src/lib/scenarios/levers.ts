@@ -8,8 +8,10 @@
 
 import { pooledClientReads, type Viewer } from "@transpera-flow/db";
 import { headcount, type EngineModel, type ScenarioPatch } from "@transpera-flow/engine";
-import { PLAY_CAPS } from "@/lib/share/play-input";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
+
+/** The most a slider reaches, whatever the model holds. */
+const PLAY_CAPS = { leads: 10000, clients: 100000, price: 10000000, headcount: 500 } as const;
 
 export type LeverGroup = "demand" | "people" | "process" | "clients" | "finances" | "market";
 export type LeverUnit = "per_week" | "clients" | "share" | "money" | "people" | "fte" | "hours";

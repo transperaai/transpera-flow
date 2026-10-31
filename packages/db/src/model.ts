@@ -54,7 +54,7 @@ export interface ModelOptions {
   planned?: boolean;
   /**
    * Put each working step's purpose key on the model (sandbox phase 4, `EngineStep.purpose`): reporting only, no number changes.
-   * Off (the default): exactly the model as before. Needs `bundle.deleteCandidates` for the "Could be removed" rule.
+   * Off (the default): exactly the model as before.
    */
   purposes?: boolean;
 }
@@ -374,11 +374,9 @@ function stepRowsOf(bundle: ProcessBundle): Map<string, { row: StepRow; kind: st
 /** Every step's resolved purpose (`resolvePurpose`), given the pipeline steps after the sale. Pure. */
 function resolveAll(bundle: ProcessBundle, afterSale: ReadonlySet<string>): Map<string, { key: string; source: PurposeSource }> {
   const keys = new Set(workspacePurposes(bundle.workspace.settings).map((c) => c.key));
-  const candidates = new Map(Object.entries(bundle.deleteCandidates ?? {}).map(([id, steps]) => [id, new Set(steps)]));
-  const none = new Set<string>();
   const out = new Map<string, { key: string; source: PurposeSource }>();
   for (const [id, { row, kind }] of stepRowsOf(bundle)) {
-    out.set(id, resolvePurpose(row, kind, candidates.get(row.process_id) ?? none, keys, afterSale.has(id)));
+    out.set(id, resolvePurpose(row, kind, keys, afterSale.has(id)));
   }
   return out;
 }

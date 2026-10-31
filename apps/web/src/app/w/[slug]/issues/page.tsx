@@ -3,7 +3,6 @@ import { createProcess } from "@/app/w/[slug]/process-actions";
 import { NotPublished } from "@/components/shell/not-published";
 import { Page } from "@/components/shell/page";
 import { IssuesPage } from "@/components/issues-page";
-import { loadLiveFirstPrinciples } from "@/lib/first-principles/data";
 import { canEditWorkspace } from "@/lib/access-data";
 import { loadLiveProcess, loadProcessNames, loadPublishState, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
@@ -35,14 +34,13 @@ export default async function WorkspaceIssuesPage(props: PageProps<"/w/[slug]/is
     );
   }
   const ws = bundle.workspace.id;
-  const [canEdit, issues, scenarios, processes, sources, liveRevisions, firstPrinciples, solutions] = await Promise.all([
+  const [canEdit, issues, scenarios, processes, sources, liveRevisions, solutions] = await Promise.all([
     canEditWorkspace(ws),
     loadWorkspaceIssues(ws),
     loadWorkspaceScenarios(ws),
     loadProcessNames(ws),
     loadWorkspaceSources(ws),
     loadWorkspaceLiveRevisionIds(ws),
-    loadLiveFirstPrinciples(bundle.process.id, bundle.revision.id),
     loadWorkspaceSolutions(ws),
   ]);
   return (
@@ -59,7 +57,6 @@ export default async function WorkspaceIssuesPage(props: PageProps<"/w/[slug]/is
         sources={sources}
         liveRevisions={liveRevisions}
         solutions={solutions}
-        firstPrinciples={firstPrinciples}
         base={`/w/${slug}`}
         mode={canEdit ? "live" : "readonly"}
       />

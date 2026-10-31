@@ -28,7 +28,6 @@ const argsFor: Record<string, Record<string, unknown>> = {
   get_facts: { process: NORTHBEAM_PROCESS_ID },
   list_sources: {},
   list_solutions: {},
-  get_first_principles: { process: NORTHBEAM_PROCESS_ID },
 };
 
 beforeAll(async () => {

@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,7 +10,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   // Render per request: sign-in settings are read at runtime, not build time.
   await connection();
   const env = authEnv();
-  if (!env) redirect("/demo");
+  if (!env) notFound();
   const { error } = await searchParams;
   return (
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-6 px-4 py-16">

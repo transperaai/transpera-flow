@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultCompanyPart, partOf, toEngineModel } from "@transpera-flow/db";
 import { simulate, type DetectedIssue } from "@transpera-flow/engine";
-import { demoLandingRedirect } from "@/lib/demo/landing";
 import { litIds } from "@/lib/map/highlight";
 import { companyMap } from "@/lib/overview/company-map";
 import { labelIndexes, monthLabel, niceTicks } from "@/lib/overview/axis";
@@ -165,15 +164,6 @@ describe("the MRR series", () => {
     const shorter = mrrSeries({ ...model, horizonWeeks: 4 }, [1], [runs[0]!]);
     const longer = mrrSeries({ ...model, horizonWeeks: 9 }, months, runs);
     expect(shorter[1]).toEqual(longer[1]);
-  });
-});
-
-describe("the old demo links", () => {
-  it("send ?process= and ?nested=1 to the process page", () => {
-    expect(demoLandingRedirect("abc", undefined)).toBe("/demo/p/abc");
-    expect(demoLandingRedirect("abc", "1")).toBe("/demo/p/abc?nested=1");
-    expect(demoLandingRedirect(undefined, "1")).toMatch(/^\/demo\/p\/[0-9a-f-]+\?nested=1$/);
-    expect(demoLandingRedirect(undefined, undefined)).toBeNull();
   });
 });
 

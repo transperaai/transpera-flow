@@ -8,7 +8,6 @@
 // goes ahead (something is odd, or was filled in for you). Every message names the step or link it is about.
 
 import {
-  checkFirstPrinciples,
   checkSources,
   PROCESS_FILE_FORMAT_2,
   readAssumed,
@@ -17,7 +16,6 @@ import {
   STEP_FIELDS_2,
   type EvidenceField,
   type FileCitation,
-  type FileFirstPrinciples,
   type FileRange,
   type FileSource,
   type Env,
@@ -100,7 +98,6 @@ export interface ProcessFile {
   groups: ProcessFileGroup[];
   // What /2 adds (a /1 file never has these).
   sources?: FileSource[];
-  first_principles?: FileFirstPrinciples;
 }
 
 export interface ProcessFileCheck {
@@ -215,7 +212,7 @@ export const PROCESS_FILE_EXAMPLE = {
 // ---------------------------------------------------------------------------
 
 const TOP_FIELDS = ["$schema", "format", "name", "kind", "description", "entity_name", "steps", "links", "groups"];
-const TOP_FIELDS_2 = [...TOP_FIELDS, "sources", "first_principles"];
+const TOP_FIELDS_2 = [...TOP_FIELDS, "sources"];
 const STEP_FIELDS = ["id", "name", "type", "role", "person", "hands_on_hours", "wait_hours", "rework_rate", "notes", "x", "y"];
 const STEP_FIELDS_V2 = [...STEP_FIELDS, ...STEP_FIELDS_2];
 const LINK_FIELDS = ["from", "to", "probability", "label"];
@@ -523,7 +520,6 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
   }
 
   // What /2 adds: where rework goes, then the sections that refer to the steps.
-  let firstPrinciples: FileFirstPrinciples | undefined;
   if (v2) {
     for (const s of steps) {
       if (s.rework_to === undefined) continue;
@@ -535,8 +531,6 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
         warnings.push(`Step ${q(s.name)} sends rework back to ${q(byId.get(s.rework_to)!.name)} but has no rework_rate, so nothing is sent back yet.`);
       }
     }
-    const view = { ids, has: (id: string) => byId.has(id), name: stepName };
-    firstPrinciples = checkFirstPrinciples(input.first_principles, view, env);
   }
 
   if (errors.length) return fail();
@@ -659,7 +653,7 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
       steps: normalised,
       links,
       groups,
-      ...(v2 ? { sources: env.sources, ...(firstPrinciples ? { first_principles: firstPrinciples } : {}) } : {}),
+      ...(v2 ? { sources: env.sources, } : {}),
     },
     errors,
     warnings,
