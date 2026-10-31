@@ -22,7 +22,7 @@
 
 import type { EngineModel, EnginePerson, EngineStep } from "./model";
 import { withClientGroups } from "./clients";
-import { healthRules, servicingLinks, tasksPerWeek } from "./servicing";
+import { clientTasksPerWeek, healthRules, servicingLinks } from "./servicing";
 
 /** Servicing tasks a week per servicing process from the roster's clients, in process id order. */
 export function servicingTasksPerWeek(m: EngineModel): Map<string, number> {
@@ -33,7 +33,7 @@ export function servicingTasksPerWeek(m: EngineModel): Map<string, number> {
     for (const sid of client.services) {
       const service = m.services?.[sid];
       if (!service) continue;
-      for (const link of servicingLinks(m, service)) out.set(link.process, (out.get(link.process) ?? 0) + tasksPerWeek(link.recurrence));
+      for (const link of servicingLinks(m, service)) out.set(link.process, (out.get(link.process) ?? 0) + clientTasksPerWeek(m, client, sid, link.recurrence));
     }
   }
   return new Map([...out].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));

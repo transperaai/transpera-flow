@@ -11,7 +11,6 @@ import {
   northbeamServicingStepIds,
   northbeamStepIds,
   toEngineModel,
-  NORTHBEAM_PROCESS_ID,
   DEFAULT_PURPOSES,
   speedsNormalisedFor,
   usesCapacityFactors,
@@ -661,7 +660,6 @@ describe("step purposes (sandbox phase 4)", () => {
 
   it("without the option the model is exactly today's: no step has a purpose", () => {
     const b = northbeamBundle();
-    expect(toEngineModel(b, { startDate: START })).toEqual(toEngineModel({ ...b, deleteCandidates: { [NORTHBEAM_PROCESS_ID]: [northbeamStepIds.audit] } }, { startDate: START }));
     expect(toEngineModel(b, { startDate: START }).steps.every((s) => s.purpose === undefined)).toBe(true);
   });
 
@@ -681,20 +679,14 @@ describe("step purposes (sandbox phase 4)", () => {
     for (const s of servicing) expect(s.purpose, s.name).toBe("client_job");
   });
 
-  it("a chosen purpose wins; a step listed to delete is removable; a deleted category reads as Automatic", () => {
+  it("a chosen purpose wins; a deleted category reads as Automatic", () => {
     const audit = northbeamStepIds.audit;
     const decision = northbeamStepIds.decision;
-    const b = bundleWith({ deleteCandidates: { [NORTHBEAM_PROCESS_ID]: [audit, decision] } }, { id: decision, purpose: "coordination" });
-    const m = toEngineModel(b, { startDate: START, purposes: true });
-    expect(purposeOf(m, audit)).toBe("removable");
+    const m = toEngineModel(bundleWith({}, { id: decision, purpose: "coordination" }), { startDate: START, purposes: true });
+    expect(purposeOf(m, audit)).toBe("winning");
     expect(purposeOf(m, decision)).toBe("coordination");
     const gone = toEngineModel(bundleWith({}, { id: audit, purpose: "c12345678" }), { startDate: START, purposes: true });
     expect(purposeOf(gone, audit)).toBe("winning");
-  });
-
-  it("deleteCandidates absent skips the delete rule", () => {
-    const m = toEngineModel(northbeamBundle(), { startDate: START, purposes: true });
-    expect(purposeOf(m, northbeamStepIds.audit)).toBe("winning");
   });
 
   it("a renamed category keeps its key; a workspace list without 'required' reads a step that chose it as Automatic", () => {

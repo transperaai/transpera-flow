@@ -29,7 +29,6 @@ export interface Functions {
   mcp_token_lookup: { Args: { p_token_hash: string }; Returns: { user_id: string; token_id: string; email: string | null; agency_admin: boolean; active_workspace_id: string | null; allowed: boolean; retry_after_seconds: number }[] };
   my_person_id: { Args: { ws: string }; Returns: string };
   open_draft: { Args: { target_process: string }; Returns: Json };
-  open_share_link: { Args: { token: string }; Returns: Json };
   publish_process: { Args: { target_process: string; accept_estimates?: boolean }; Returns: Json };
   record_calibration: { Args: { p_workspace: string; p_process: string; p_file_name: string; p_column_map: Json; p_row_count: number; p_results: Json; p_keys: string[] }; Returns: Json };
   record_calibration_import: { Args: { p_workspace: string; p_process: string; p_kind: string; p_file_name: string; p_column_map: Json; p_row_count: number; p_details: Json; p_results: Json; p_keys: string[] }; Returns: Json };
@@ -48,7 +47,6 @@ export interface Functions {
   save_links: { Args: { target: string; owner: Json; member: string; base: Json; next: Json }; Returns: Json };
   save_solution: { Args: { p_workspace: string; p_process: string; p_base_revision: string; p_name: string; p_steps: Json; p_changed?: Json; p_levers?: Json; p_links?: Json }; Returns: Json };
   search_sources: { Args: { p_workspace: string; p_search?: string; p_kind?: string; p_process?: string; p_unlinked?: boolean; p_sort?: string; p_limit?: number; p_offset?: number }; Returns: { id: string; workspace_id: string; kind: string; title: string; speakers: string[]; recorded_at: string | null; file_url: string | null; created_at: string; updated_at: string; excerpt: string; has_body: boolean; total: number }[] };
-  share_team_capacity: { Args: { ws: string; show_people: boolean }; Returns: Json };
   take_link_fetch: { Args: never; Returns: number };
   team_capacity: { Args: { ws: string }; Returns: Json };
   unlinked_source_count: { Args: { p_workspace: string }; Returns: number };

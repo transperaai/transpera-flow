@@ -543,7 +543,8 @@ describe("planWorkspaceImport", () => {
     const beta = plan.processes.find((p) => p.name === "Beta")!;
     expect(beta.archived).toBe(true);
     expect(beta.steps.map((s) => s.name)).toEqual(["b1"]);
-    expect(beta.first_principles).toEqual({ job_done: "x" });
+    // A version that still carries first principles (an older backup) is accepted, and the row is not read.
+    expect(beta).not.toHaveProperty("first_principles");
     expect(summary.leftOut.find((l) => l.key === "unpublished_drafts")!.count).toBe(1);
     expect(summary.leftOut.find((l) => l.key === "older_versions")!.count).toBe(1);
     expect(placeholderOf.has(ids.pCompany!)).toBe(true);

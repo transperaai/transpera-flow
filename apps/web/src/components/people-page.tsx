@@ -11,7 +11,7 @@ import { ABSENCE_MAX_PEOPLE, RATING_LABELS, clientHealthSummary, resolveMoney, t
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
-import { useEngineModel } from "@/components/process-view";
+import { useEngineModel } from "@/lib/sim/use-engine-model";
 import { EmptyState } from "@/components/shell/empty-state";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";

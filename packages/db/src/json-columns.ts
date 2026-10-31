@@ -32,14 +32,6 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
   "demand_settings": [
     "provenance"
   ],
-  "first_principles": [
-    "deletes",
-    "improvements",
-    "measures",
-    "requirements",
-    "statements",
-    "why_chain"
-  ],
   "issue_events": [
     "detail"
   ],
@@ -89,9 +81,6 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
   "services": [
     "fallback_ongoing_load",
     "provenance"
-  ],
-  "share_links": [
-    "snapshot"
   ],
   "solutions": [
     "changed_step_ids",

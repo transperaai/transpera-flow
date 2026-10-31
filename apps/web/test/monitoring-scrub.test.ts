@@ -289,7 +289,7 @@ describe("scrubUrl", () => {
     [`https://api.example.test/v1/sources/${UUID}/${UUID}/${UUID}/Maya%20Collins%20interview.pdf`, `https://api.example.test/v1/sources/${UUID}/${UUID}/${UUID}/[part]`],
     [`https://api.example.test/v1/sources/${UUID}/maya-collins.pdf?token=abc`, `https://api.example.test/v1/sources/${UUID}/[part]`],
     ["https://api.example.test/v1/rpc/import_workspace_bundle", "https://api.example.test/v1/[part]/[part]"],
-    [`/w/acme/p/${UUID}/first-principles`, `/w/[slug]/p/${UUID}/first-principles`],
+    [`/w/acme/p/${UUID}/history`, `/w/[slug]/p/${UUID}/history`],
     ["/w/acme/people/maya", "/w/[slug]/people/[part]"],
     ["/something/new/Maya", "/[part]/new/[part]"],
     ["https://app.example.com/_next/static/chunks/0vr2yp4jytrc4.js", "https://app.example.com/_next/static/chunks/0vr2yp4jytrc4.js"],
@@ -310,10 +310,9 @@ describe("ROUTE_WORDS", () => {
       .flatMap((e) => [e.name, ...segments(join(dir, e.name))]);
 
   it("keeps every static route segment of the app, so a report still says which page failed", () => {
-    // /demo/larkspur is named after a fixture client: it reads [part], like any name.
-    const statics = [...new Set(segments(appDir))].filter((s) => !/^[[(@_]/.test(s) && s !== "larkspur");
+    const statics = [...new Set(segments(appDir))].filter((s) => !/^[[(@_]/.test(s));
     expect(statics.length).toBeGreaterThan(20);
-    for (const segment of statics) expect(scrubUrl(`/demo/${segment}`), segment).toBe(`/demo/${segment}`);
+    for (const segment of statics) expect(scrubUrl(`/api/${segment}`), segment).toBe(`/api/${segment}`);
   });
 
   it("holds no fixture name and none of the common first names", () => {

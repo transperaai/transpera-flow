@@ -20,8 +20,7 @@ const COMPANY_SUBJECTS = new Set(["role", "person", "client", "group", "driver",
 /**
  * Which process a fact belongs to, or `COMPANY_GROUP`. A fact about a role, a person, a client group, a churn
  * driver or the forecast is the company's, even when it shows on the step where the work is; one about a step is that
- * step's process; the cycle-time rule names its process; success measures are the company model's (the pipeline's)
- * first principles.
+ * step's process; the cycle-time rule names its process.
  */
 export function groupOfFact(fact: Pick<DetectedIssue, "key" | "stepId">, processOfStep: (stepId: string) => string | null | undefined, pipelineId: string): string {
   const [detector, subject, id] = fact.key.split(":");

@@ -54,4 +54,6 @@ brief has a default: use it.
 |---|---|---|
 | `p0-cuts-brief.md` | `claude/cap-p0-cuts` | `20270118000000`–`20270118009999` |
 | `p1-setup-brief.md` | `claude/cap-p1-setup` | `20270119000000`–`20270119009999` |
-| `p23-interface-brief.md` | `claude/cap-p23-interface` | none (engine types only) |
+| `p23-interface-brief.md` | `claude/cap-p23-interface` | none (engine types only). Merged in #251 |
+| `p2-engine-inputs-brief.md` | `claude/cap-p2-engine` | none (engine only). Merged in #252 |
+| `p3-engine-changes-brief.md` | `claude/cap-p3-changes` | none (engine only) |

@@ -175,44 +175,5 @@
       "probability": 0.4,
       "label": "Declines"
     }
-  ],
-  "first_principles": {
-    "job": {
-      "who": "A founder who needs marketing help",
-      "done": "A signed engagement letter they trust",
-      "evidence": [
-        {
-          "source": "sales-sop",
-          "time": "page 1",
-          "quote": "Every enquiry gets a reply the same day."
-        }
-      ]
-    },
-    "requirements": [
-      {
-        "text": "Every enquiry gets a reply the same day",
-        "owner": "Maya Chen",
-        "why": "It is how the firm wins on trust.",
-        "verdict": "keep",
-        "step": "review",
-        "evidence": [
-          {
-            "source": "sales-sop",
-            "time": "page 1",
-            "quote": "Every enquiry gets a reply the same day."
-          }
-        ]
-      }
-    ],
-    "measures": [
-      {
-        "text": "Win rate of at least 30%",
-        "kpi": "winRate",
-        "comparator": "atLeast",
-        "target": 30,
-        "horizon": "6 months",
-        "assumed": "Austin's goal for the year; no history to check it against."
-      }
-    ]
-  }
+  ]
 }

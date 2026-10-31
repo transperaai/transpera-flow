@@ -29,7 +29,6 @@ import { ISSUE_STATUSES, type IssueField } from "@/lib/issues/validate";
 import { draftFromIssue, emptyDraft, toSaveInput, type IssueDraft, type IssueFormOptions } from "@/lib/issues/draft";
 import { buttonVariants } from "@/components/ui/button";
 import { IssueCostText, visibleCostMethod } from "@/components/money-hidden";
-import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { NativeSelect } from "@/components/ui/native-select";
 import { AcknowledgeDialog } from "./acknowledge-dialog";
 import { SelectField, TextField, type SelectOption } from "./fields";
@@ -314,7 +313,6 @@ function IssueItem({
 }) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const hideMoney = useShareFinancialsHidden();
   const v = entryView(entry);
   const fix = fixFor(entry, scenarios);
   // A fix that needs attention must be re-pointed (issue #16).
@@ -373,11 +371,11 @@ function IssueItem({
       <p className="text-sm font-semibold">{v.title}</p>
       {v.evidence && <p className="mt-0.5 text-xs text-fg-2">{v.evidence}</p>}
       {entry.kind === "detected" || entry.detection ? (
-        <p className="mt-0.5 text-xs text-fg-2" data-cost title={visibleCostMethod(v.cost, hideMoney)}>
+        <p className="mt-0.5 text-xs text-fg-2" data-cost title={visibleCostMethod(v.cost)}>
           <span className="font-medium">
             <IssueCostText cost={v.cost ?? null} currency={currency} />
           </span>
-          {visibleCostMethod(v.cost, hideMoney) ? <span className="text-fg-3"> · {visibleCostMethod(v.cost, hideMoney)}</span> : null}
+          {visibleCostMethod(v.cost) ? <span className="text-fg-3"> · {visibleCostMethod(v.cost)}</span> : null}
         </p>
       ) : null}
       {where.length > 0 && <p className="mt-0.5 text-xs text-fg-3">{where.join(" · ")}</p>}

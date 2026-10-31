@@ -112,7 +112,6 @@ export async function previewUpload(workspaceId: string, _slug: string, input: P
           ? {
               extras: {
                 sources: p.extras.sources,
-                firstPrinciplesParts: p.extras.firstPrinciplesParts,
                 notes: p.extras.notes,
                 conflicts: check.conflicts ?? [],
               },

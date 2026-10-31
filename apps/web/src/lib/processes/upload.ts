@@ -37,8 +37,6 @@ export interface UploadPreview {
 /** What a /2 file carries beyond its steps, counted per section for the preview.  */
 export interface UploadExtras {
   sources: { title: string; kind: string; date: string | null }[];
-  /** How many parts of the first principles the file fills (job, truths, requirements, ...). */
-  firstPrinciplesParts: number;
   /** Things the upload will leave out or change, in plain words. */
   notes: string[];
   /** Where the file's sources disagree with each other. */

@@ -1,15 +1,11 @@
 // "About this process" (issue #174): plain attributes of a process, worked out from what the page already has. Pure.
 
 import type { EdgeRow, ProcessBundle, ProvenanceMap, StepRow } from "@transpera-flow/db";
-import type { FirstPrinciples } from "@transpera-flow/engine";
 import { formatPublished } from "@/lib/history/versions";
 import { processSteps } from "@/lib/process-steps";
-import { namedForViewer, viewerOf } from "@/lib/viewer";
 
 export interface About {
   type: "Pipeline" | "Servicing";
-  /** Who owns the first-principles requirements (the one named most, both when tied, "Shared" when more tie); null when none is named. */
-  owner: string | null;
   steps: number;
   roles: number;
   /** The processes this one sits inside, outermost first (empty: it is at the top of the company map). */
@@ -57,22 +53,8 @@ export function citedNumbers(steps: readonly Pick<StepRow, "id" | "kind" | "chil
   return of === 0 ? null : { cited, of };
 }
 
-/** The named owner of most first-principles requirements: both when two tie, "Shared" when more. A person in People, else the name typed. */
-export function ownerOf(doc: FirstPrinciples | null, personName: (id: string) => string | null): string | null {
-  const count = new Map<string, number>();
-  for (const r of doc?.requirements ?? []) {
-    const name = r.owner_person_id ? personName(r.owner_person_id) : r.owner_text.trim() || null;
-    if (name) count.set(name, (count.get(name) ?? 0) + 1);
-  }
-  const ranked = [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  if (ranked.length === 0) return null;
-  const tied = ranked.filter(([, n]) => n === ranked[0]![1]).map(([name]) => name);
-  return tied.length === 1 ? tied[0]! : tied.length === 2 ? `${tied[0]} and ${tied[1]}` : "Shared";
-}
-
 export function aboutProcess(input: {
   bundle: ProcessBundle;
-  doc: FirstPrinciples | null;
   trail: readonly string[];
   liveVersion: number;
   hasDraft: boolean;
@@ -81,12 +63,10 @@ export function aboutProcess(input: {
 }): About {
   const all = processSteps(input.bundle);
   const steps = all.filter((s) => isWorking(s.kind) && !s.child_process_id);
-  const names = new Map(namedForViewer(viewerOf(input.bundle), input.bundle.people).map((p) => [p.id, p.name]));
   const lc = input.lastChange;
   const edges = [...input.bundle.edges, ...(input.bundle.otherProcesses ?? []).flatMap((o) => o.edges)];
   return {
     type: input.bundle.process.kind === "servicing" ? "Servicing" : "Pipeline",
-    owner: ownerOf(input.doc, (id) => names.get(id) ?? null),
     steps: steps.length,
     roles: new Set(steps.flatMap((s) => (s.role_id ? [s.role_id] : []))).size,
     trail: [...input.trail],
@@ -103,7 +83,6 @@ export function aboutLine(a: About): { label: string; value: string }[] {
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const out: { label: string; value: string }[] = [
     { label: "Type", value: a.type },
-    { label: "Requirements owner", value: a.owner ?? "Not named yet" },
     { label: "Size", value: `${plural(a.steps, "step", "steps")}, ${plural(a.roles, "role", "roles")}` },
     { label: "On the company map", value: a.trail.length ? `Inside ${a.trail.join(" › ")}` : "Top level" },
     { label: "Version", value: `${a.version === null ? "Not published yet" : `Live is version ${a.version}`}${a.draft ? ", draft open" : ""}` },

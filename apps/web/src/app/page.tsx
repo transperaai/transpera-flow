@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { AgencyWorkspaceTable } from "@/components/agency-workspace-table";
 import { AppHeader } from "@/components/app-header";
@@ -16,7 +16,8 @@ import { NewWorkspaceForm } from "./new-workspace-form";
 export default async function HomePage() {
   // Render per request: Auth and database settings are read at runtime, not build time.
   await connection();
-  if (!authEnv()) redirect("/demo");
+  // No sign-in settings: this deployment is not set up, so there is nothing to show.
+  if (!authEnv()) notFound();
   // Memberships are made at sign-in from the "Who can sign in" list (and for a new workspace by the database), so there is nothing
   // to resolve here.
   const [workspaces, admin] = await Promise.all([listWorkspaces(), isAgencyAdmin()]);

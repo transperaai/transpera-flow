@@ -30,7 +30,7 @@
 -- public.remove_tier(tier) refuses, in plain words, the last remaining tier and a tier that still has clients, a portfolio, counted
 -- clients or servicing steps. public.save_fields is redefined (a full copy of the 20261111000000 body) with `departments`, `tiers`
 -- and `person_portfolio` added to its allow-list; public.save_links is redefined (a full copy of the 20261012000000 body) with
--- `person_tiers` added. public.import_workspace_bundle is redefined (a full copy of the 20270114000000
+-- `person_tiers` added. public.import_workspace_bundle is redefined (a full copy of the 20270118000000
 -- body) so a backup restores the new tables and columns; IMPORT_COLUMNS in packages/db/src/workspace-import.ts is its twin.
 --
 -- Runs on a database full of real rows (the production copy imported at 20261231000000, then every later migration): adding
@@ -71,7 +71,7 @@
 --   drop table public.departments;
 --   drop function if exists private.stamp_entered();
 --   -- Restore the previous bodies: re-run `create or replace function public.save_fields ...` from 20261111000000_client_groups.sql,
---   -- `public.save_links` from 20261012000000_clients.sql and `public.import_workspace_bundle` from 20270114000000_step_purpose.sql.
+--   -- `public.save_links` from 20261012000000_clients.sql and `public.import_workspace_bundle` from 20270118000000_capacity_cuts.sql.
 --   update public.workspaces set settings = settings - 'ramp_default' - 'dler_includes_leadership';
 --   delete from public.schema_migrations where version = '20270119000000';
 --   commit;
@@ -668,21 +668,21 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
--- Restores carry the new tables and columns: the 20270114000000 body of public.import_workspace_bundle with the
+-- Restores carry the new tables and columns: the 20270118000000 body of public.import_workspace_bundle with the
 -- additions listed at the top of the declare block; nothing else changed.
 -- ---------------------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION public.import_workspace_bundle(p_workspace uuid, p_plan jsonb, p_label text DEFAULT NULL::text)
- RETURNS jsonb
- LANGUAGE plpgsql
- SET search_path TO ''
+create or replace function public.import_workspace_bundle(p_workspace uuid, p_plan jsonb, p_label text DEFAULT NULL::text)
+ returns jsonb
+ language plpgsql
+ set search_path = ''
  SET statement_timeout TO '40s'
-AS $$
+as $$
 declare
   -- The columns the restore accepts for each plan section: the same lists as IMPORT_COLUMNS (packages/db/src/workspace-import.ts).
   -- Everything else in a row is ignored; `workspace_id`, `created_by`, `updated_at` and every `*_by` are never read from the plan.
   -- #228: person_capacity_factors is in this list, in ref_cols, in sections and in list_sections.
-  allow constant jsonb := '{"roles":["id","name","color","default_cost_rate","headcount","ongoing_hours_per_client_week","active","provenance","created_at","department_id","kind","line","rule_of_thumb","unit"],"people":["id","name","active","capacity_hours_week","cost_rate","end_date","fte","notes","start_date","provenance","created_at","reserved_share","salary_monthly","label","ramp"],"person_roles":["person_id","role_id","created_at"],"person_leave":["id","person_id","start_date","end_date","note","created_at"],"lead_sources":["id","name","conversion_to_qualified","volume_week","provenance","created_at"],"seasonality":["id","month","multiplier","provenance","created_at"],"demand_settings":["growth_monthly","provenance","created_at"],"churn_drivers":["id","name","description","driver","enabled","example","month","value","weight","chance","effect","effect_months","provenance","created_at"],"market_conditions":["id","name","churn","conv","cycle","hire","leads","pay","price","created_at"],"market_schedule":["id","condition_id","from_month","to_month","created_at"],"lever_settings":["hidden","created_at"],"analysis_rules":["settings","created_at"],"clients":["id","name","active","health","mrr","notes","start_date","provenance","created_at","channels","hand_holding_hours","adhoc_chance","adhoc_requests","adhoc_hours","meetings","words","links","tech_hours","builds","creative_sets","step_factor"],"sources":["id","kind","title","body","recorded_at","speakers","created_at"],"processes":["id","parent_process_id","name","kind","entity_name","description"],"steps":["id","assumption","child_process_id","conflict","cost_override","current_wip","dropoff_benchmark","expected_wait_hours","entry_step_id","kind","lost_per_day_waiting","name","notes","outcome","parent_step_id","person_id","provenance","purpose","replaced_by","rework_rate","rework_to_step_id","role_id","sla_hours","target_cycle_hours","tool","wait_dist","wait_hours","wait_params","work_dist","work_hours","work_params","x","y"],"edges":["id","condition_tag","from_step_id","label","probability","to_step_id"],"first_principles":["deletes","improvements","job_done","job_progress","job_situation","job_who","measures","requirements","root_cause","statements","why_chain","why_problem"],"sandbox_scenarios":["id","parent_id","name","description","changes","horizon_months","start_date","created_at"],"blocks":["id","name","description","type","steps","created_at"],"issues":["id","client_id","created_at","detected_key","evidence","evidence_metrics","evidence_sources","owner_person_id","person_id","process_id","resolution","resolution_note","resolved_how","role_id","scenario_id","severity","source","status","step_id","target_goal","target_measure","target_now","title","type"],"services":["id","name","active","churn_health_sensitivity","churn_monthly_base","entry_process_id","fallback_ongoing_load","margin","mix_share","path_tags","price","price_high","price_low","pricing_model","tenure_months","provenance","created_at","department_id","tier_id","words","links","tech_hours","meetings","builds","creative_sets","channels","adhoc_chance","adhoc_requests","price_rise_churn"],"service_servicing":["id","process_id","service_id","recurrence","sla_hours","provenance","created_at"],"client_groups":["id","service_id","client_count","churn_monthly","fee","starting_health","stay_months","provenance","created_at"],"client_services":["client_id","service_id","start_date","created_at"],"client_assignments":["client_id","role_id","person_id","created_at"],"person_skills":["person_id","step_id","efficiency","provenance","created_at"],"person_capacity_factors":["person_id","step_id","factor","provenance"],"departments":["id","name","sort","created_at"],"tiers":["id","key","name","sort","both_count","provenance","created_at"],"person_tiers":["person_id","tier_id","created_at"],"person_portfolio":["person_id","service_id","client_count","provenance","created_at"],"source_links":["id","insight_key","issue_id","kind","process_id","source_id","step_id"]}'::jsonb;
+  allow constant jsonb := '{"roles":["id","name","color","default_cost_rate","headcount","ongoing_hours_per_client_week","active","provenance","created_at","department_id","kind","line","rule_of_thumb","unit"],"people":["id","name","active","capacity_hours_week","cost_rate","end_date","fte","notes","start_date","provenance","created_at","reserved_share","salary_monthly","label","ramp"],"person_roles":["person_id","role_id","created_at"],"person_leave":["id","person_id","start_date","end_date","note","created_at"],"lead_sources":["id","name","conversion_to_qualified","volume_week","provenance","created_at"],"seasonality":["id","month","multiplier","provenance","created_at"],"demand_settings":["growth_monthly","provenance","created_at"],"churn_drivers":["id","name","description","driver","enabled","example","month","value","weight","chance","effect","effect_months","provenance","created_at"],"market_conditions":["id","name","churn","conv","cycle","hire","leads","pay","price","created_at"],"market_schedule":["id","condition_id","from_month","to_month","created_at"],"lever_settings":["hidden","created_at"],"analysis_rules":["settings","created_at"],"clients":["id","name","active","health","mrr","notes","start_date","provenance","created_at","channels","hand_holding_hours","adhoc_chance","adhoc_requests","adhoc_hours","meetings","words","links","tech_hours","builds","creative_sets","step_factor"],"sources":["id","kind","title","body","recorded_at","speakers","created_at"],"processes":["id","parent_process_id","name","kind","entity_name","description"],"steps":["id","assumption","child_process_id","conflict","cost_override","current_wip","dropoff_benchmark","expected_wait_hours","entry_step_id","kind","lost_per_day_waiting","name","notes","outcome","parent_step_id","person_id","provenance","purpose","replaced_by","rework_rate","rework_to_step_id","role_id","sla_hours","target_cycle_hours","tool","wait_dist","wait_hours","wait_params","work_dist","work_hours","work_params","x","y"],"edges":["id","condition_tag","from_step_id","label","probability","to_step_id"],"sandbox_scenarios":["id","parent_id","name","description","changes","horizon_months","start_date","created_at"],"blocks":["id","name","description","type","steps","created_at"],"issues":["id","client_id","created_at","detected_key","evidence","evidence_metrics","evidence_sources","owner_person_id","person_id","process_id","resolution","resolution_note","resolved_how","role_id","scenario_id","severity","source","status","step_id","target_goal","target_measure","target_now","title","type"],"services":["id","name","active","churn_health_sensitivity","churn_monthly_base","entry_process_id","fallback_ongoing_load","margin","mix_share","path_tags","price","price_high","price_low","pricing_model","tenure_months","provenance","created_at","department_id","tier_id","words","links","tech_hours","meetings","builds","creative_sets","channels","adhoc_chance","adhoc_requests","price_rise_churn"],"service_servicing":["id","process_id","service_id","recurrence","sla_hours","provenance","created_at"],"client_groups":["id","service_id","client_count","churn_monthly","fee","starting_health","stay_months","provenance","created_at"],"client_services":["client_id","service_id","start_date","created_at"],"client_assignments":["client_id","role_id","person_id","created_at"],"person_skills":["person_id","step_id","efficiency","provenance","created_at"],"person_capacity_factors":["person_id","step_id","factor","provenance"],"departments":["id","name","sort","created_at"],"tiers":["id","key","name","sort","both_count","provenance","created_at"],"person_tiers":["person_id","tier_id","created_at"],"person_portfolio":["person_id","service_id","client_count","provenance","created_at"],"source_links":["id","insight_key","issue_id","kind","process_id","source_id","step_id"]}'::jsonb;
   -- The reference columns of the flat sections (IMPORT_REFS) and of steps (IMPORT_STEP_REFS). Every section that has an `id`
   -- column in `allow` is checked on `id` too.
   -- #228
@@ -774,7 +774,6 @@ begin
     where jsonb_typeof(p.value -> 'steps') is distinct from 'array' or jsonb_typeof(p.value -> 'edges') is distinct from 'array'
       or exists (select 1 from jsonb_array_elements(p.value -> 'steps') e where jsonb_typeof(e.value) is distinct from 'object')
       or exists (select 1 from jsonb_array_elements(p.value -> 'edges') e where jsonb_typeof(e.value) is distinct from 'object')
-      or (p.value -> 'first_principles' is not null and jsonb_typeof(p.value -> 'first_principles') not in ('object', 'null'))
       or (p.value -> 'layout' is not null and jsonb_typeof(p.value -> 'layout') not in ('object', 'null'))
   ) then
     raise exception 'import_workspace_bundle: every process needs lists of steps and edges' using errcode = '22023';
@@ -1034,13 +1033,6 @@ begin
               where k in ('revision_id', 'workspace_id', 'process_id', 'created_by') or (allow -> 'edges') ? k
             ) q;
             execute format('insert into public.edges (%1$s) select %1$s from jsonb_populate_recordset(null::public.edges, $1)', cols) using rows;
-          end if;
-          if jsonb_typeof(node -> 'first_principles') = 'object' then
-            select string_agg(quote_ident(c), ', ') into cols from jsonb_array_elements_text(allow -> 'first_principles') c where (node -> 'first_principles') ? c;
-            if cols is not null then
-              execute format('insert into public.first_principles (workspace_id, process_id, revision_id, %1$s) select $2, $3, $4, %1$s from jsonb_populate_record(null::public.first_principles, $1)', cols)
-                using node -> 'first_principles', p_workspace, proc, rev;
-            end if;
           end if;
         end loop;
         counts := counts || jsonb_build_object('edges', edge_total);

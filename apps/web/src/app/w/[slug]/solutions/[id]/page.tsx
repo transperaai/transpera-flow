@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { SolutionPage } from "@/components/solutions/solution-page";
-import { ShareButton } from "@/components/share/share-dialog";
 import { Page } from "@/components/shell/page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentUserId } from "@/lib/access-data";
@@ -47,7 +46,6 @@ export default async function WorkspaceSolutionPage(props: PageProps<"/w/[slug]/
         memberNames={memberNames}
         compareBase={compare?.base ?? null}
         movedOn={compare?.movedOn ?? null}
-        share={canEdit ? <ShareButton slug={slug} kind="solution" targetId={solution.id} what={solution.name} /> : undefined}
       />
       </SourceLinkingScope>
     </Page>

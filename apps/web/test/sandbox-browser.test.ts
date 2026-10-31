@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
+import { SANDBOX_ANALYSIS_SHOWN } from "@/lib/sandbox/analysis-shown";
 import { bundleHarness } from "./build-harness";
 
 // The Sandbox in a real browser, with the simulation in a real Web Worker (./sandbox-harness/entry.tsx), in the demo (scenarios kept
@@ -1284,8 +1285,9 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
   });
 });
 
-// Goal seek and "What matters most" (sandbox phase 5b), in the demo with the real worker pool.
-describe("goal seek and what matters most", { timeout: 240_000 }, () => {
+// Goal seek and "What matters most" (sandbox phase 5b), in the demo with the real worker pool. Both are hidden from the screen while
+// SANDBOX_ANALYSIS_SHOWN is off (D33): these cases run again when it is turned back on; the one after them checks they are not there.
+describe.skipIf(!SANDBOX_ANALYSIS_SHOWN)("goal seek and what matters most", { timeout: 240_000 }, () => {
   const answerKind = (page: Page) => page.locator("[data-goal-answer]").getAttribute("data-goal-answer");
 
   /** Starts a search in the open dialog and waits for its answer (or a cancel). */
@@ -1392,6 +1394,22 @@ describe("goal seek and what matters most", { timeout: 240_000 }, () => {
       await admin.page.locator("[data-goal-seek]").waitFor();
       expect(admin.errors).toEqual([]);
       await Promise.all([viewer.page.close(), admin.page.close()]);
+    });
+  }
+});
+
+// While SANDBOX_ANALYSIS_SHOWN is off (D33), nobody sees goal seek or "What matters most", an admin included.
+describe.skipIf(SANDBOX_ANALYSIS_SHOWN)("goal seek and what matters most are hidden", { timeout: 180_000 }, () => {
+  for (const width of [1440, 640, 400]) {
+    it(`shows an admin neither at ${width}px, and the rest of the Sandbox still runs`, async () => {
+      const admin = await mount(width);
+      await pick(admin.page, "Hire in March");
+      await waitRuns(admin.page, 1);
+      for (const sel of ["[data-goal-open]", "[data-goal-seek]", "[data-tornado]", "[data-tornado-start]"]) expect(await admin.page.locator(sel).count(), sel).toBe(0);
+      expect(await admin.page.getByText(/Find a value|What matters most/).count()).toBe(0);
+      expect(await admin.page.locator("[data-scenario-compare]").count()).toBe(1);
+      expect(admin.errors).toEqual([]);
+      await admin.page.close();
     });
   }
 });

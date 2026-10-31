@@ -28,7 +28,7 @@ export const DEFAULT_PURPOSES: readonly PurposeCategory[] = [
   { key: "winning", name: "Winning work", description: "Sales and onboarding." },
   { key: "coordination", name: "Coordination", description: "Hand-offs, meetings and chasing." },
   { key: "fixing", name: "Fixing", description: "Rework and corrections." },
-  { key: "removable", name: "Could be removed", description: "Steps the first principles mark to delete." },
+  { key: "removable", name: "Could be removed", description: "Steps that could be dropped." },
 ];
 export const MIN_PURPOSES = 5;
 export const MAX_PURPOSES = 12;
@@ -84,25 +84,22 @@ export function newPurposeKey(existing: Iterable<string> = []): string {
   }
 }
 
-export type PurposeSource = "chosen" | "first_principles" | "process_kind" | "deleted_category";
+export type PurposeSource = "chosen" | "process_kind" | "deleted_category";
 
 /**
- * A step's purpose (Austin, 29 Oct): its own key when it is in the list; else "Could be removed" when its process's first
- * principles list it to delete (and it was not put back); else by where it sits: client work moves the client's job forward, and
+ * A step's purpose (Austin, 29 Oct): its own key when it is in the list; else by where it sits: client work moves the client's job forward, and
  * so does a pipeline step after the sale (`afterSale`: every step after the deciding step on the won path; Austin, 30 Oct: the
  * deciding step itself counts as winning work, like every step before it). A stored key the list no longer has reads as Automatic (`deleted_category`).
  */
 export function resolvePurpose(
   step: { id: string; purpose: string | null },
   processKind: string,
-  deleteCandidates: ReadonlySet<string>,
   keys: ReadonlySet<string>,
   afterSale = false,
 ): { key: string; source: PurposeSource } {
   const stored = step.purpose;
   if (stored !== null && stored !== undefined && stored !== UPKEEP_PURPOSE && keys.has(stored)) return { key: stored, source: "chosen" };
   const gone = stored !== null && stored !== undefined;
-  if (deleteCandidates.has(step.id)) return { key: "removable", source: gone ? "deleted_category" : "first_principles" };
   const key = processKind === "servicing" || afterSale ? CLIENT_JOB_PURPOSE : "winning";
   return { key, source: gone ? "deleted_category" : "process_kind" };
 }

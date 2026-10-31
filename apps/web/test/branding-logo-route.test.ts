@@ -5,7 +5,7 @@ import { createWorld, signInAs, signOut, type World } from "./action-harness";
 
 // The logo route (step 4): GET /api/branding/<workspace id>/logo serves the bytes in `workspace_logos` through the database
 // function `workspace_logo(uuid)`, with the hash as its ETag, a 304 when it comes back, and a cache lifetime. Anyone may ask,
-// signed out too (a share link's visitors see the logo): the proxy lets exactly this path through without a session cookie.
+// signed in (the proxy sends a request without a session cookie to sign in).
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/auth/session", async () => (await import("./action-harness")).sessionMock);
@@ -108,9 +108,8 @@ describe("the proxy", () => {
   const through = (path: string) => proxy(new NextRequest(`http://localhost${path}`));
   const redirected = (path: string) => through(path).headers.get("location")?.replace(/\/$/, "").endsWith("/login") === true;
 
-  it("lets the logo route through without a session cookie, and nothing else under /api/branding", () => {
-    expect(redirected(`/api/branding/${WS}/logo`)).toBe(false);
-    for (const path of ["/api/branding", "/api/branding/", `/api/branding/${WS}`, `/api/branding/${WS}/logo/x`, `/api/branding/${WS}/other`, "/api/branding/not-a-uuid/logo", `/api/branding/${WS}/../logo`, "/w/northbeam"]) {
+  it("sends a request for the logo without a session cookie to sign in, like any other page", () => {
+    for (const path of [`/api/branding/${WS}/logo`, "/api/branding", `/api/branding/${WS}`, "/w/northbeam"]) {
       expect([path, redirected(path)], path).toEqual([path, true]);
     }
   });

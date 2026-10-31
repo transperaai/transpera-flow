@@ -234,28 +234,6 @@ export interface Edges {
   workspace_id: string;
 }
 
-export interface FirstPrinciples {
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  deletes: Generated<Json>;
-  id: Generated<string>;
-  improvements: Generated<Json>;
-  job_done: Generated<string>;
-  job_progress: Generated<string>;
-  job_situation: Generated<string>;
-  job_who: Generated<string>;
-  measures: Generated<Json>;
-  process_id: string;
-  requirements: Generated<Json>;
-  revision_id: string;
-  root_cause: Generated<string>;
-  statements: Generated<Json>;
-  updated_at: Generated<string>;
-  why_chain: Generated<Json>;
-  why_problem: Generated<string>;
-  workspace_id: string;
-}
-
 export interface IssueEvents {
   actor: string | null;
   at: Generated<string>;
@@ -643,29 +621,6 @@ export interface ServiceServicing {
   workspace_id: string;
 }
 
-export interface ShareLinks {
-  allowed_emails: Generated<string[]>;
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  engine_version: string;
-  expires_at: string | null;
-  id: Generated<string>;
-  kind: string;
-  label: string | null;
-  last_opened_at: string | null;
-  mode: Generated<string>;
-  opens: Generated<number>;
-  revoked_at: string | null;
-  revoked_by: string | null;
-  show_financials: Generated<boolean>;
-  show_people: Generated<boolean>;
-  snapshot: Json;
-  snapshot_at: Generated<string>;
-  target_id: string | null;
-  token_hash: string;
-  workspace_id: string;
-}
-
 export interface SolutionIssues {
   auto_note: Generated<string>;
   auto_verdict: string | null;
@@ -835,7 +790,6 @@ export interface DB {
   departments: Departments;
   deployment_access: DeploymentAccess;
   edges: Edges;
-  first_principles: FirstPrinciples;
   issue_events: IssueEvents;
   issue_links: IssueLinks;
   issue_owners: IssueOwners;
@@ -864,7 +818,6 @@ export interface DB {
   seasonality: Seasonality;
   service_servicing: ServiceServicing;
   services: Services;
-  share_links: ShareLinks;
   solution_issues: SolutionIssues;
   solutions: Solutions;
   source_links: SourceLinks;

@@ -71,7 +71,7 @@ const cols = <T extends keyof DB>(_table: T, ...c: (keyof Selectable<DB[T]> & st
  * The columns the restore accepts for each plan section (everything else is dropped). `workspace_id`, `created_by`,
  * `updated_at` and every `*_by` are never sent. `created_at` is carried where loaders order by it, and not on steps or edges
  * (the database tells an import's own edges from later edits by `created_at < now()`). Extras the plan adds beyond table
- * columns: `processes` also has archived, layout, steps, edges and first_principles; `issues` also has links, owner_ids and
+ * columns: `processes` also has archived, layout, steps, edges; `issues` also has links, owner_ids and
  * source_ids; `market_schedule` may carry `condition_preset` in place of `condition_id`.
  */
 export const IMPORT_COLUMNS = {
@@ -109,10 +109,6 @@ export const IMPORT_COLUMNS = {
     "role_id", "sla_hours", "target_cycle_hours", "tool", "wait_dist", "wait_hours", "wait_params", "work_dist", "work_hours", "work_params", "x", "y",
   ),
   edges: cols("edges", "id", "condition_tag", "from_step_id", "label", "probability", "to_step_id"),
-  first_principles: cols(
-    "first_principles", "deletes", "improvements", "job_done", "job_progress", "job_situation", "job_who", "measures", "requirements", "root_cause", "statements",
-    "why_chain", "why_problem",
-  ),
   sandbox_scenarios: cols("sandbox_scenarios", "id", "parent_id", "name", "description", "changes", "horizon_months", "start_date", "created_at"),
   blocks: cols("blocks", "id", "name", "description", "type", "steps", "created_at"),
   issues: cols(
@@ -199,7 +195,6 @@ export interface PlanProcess {
   layout: unknown;
   steps: Row[];
   edges: Row[];
-  first_principles: Row | null;
 }
 
 /** The restore function's `p_plan`: placeholders only (`00000000-0000-4000-8000-` and a rank). */
@@ -348,7 +343,6 @@ function shapeProblem(v: Row): string | null {
       if (!Array.isArray(ver.steps) || !Array.isArray(ver.edges)) return "a version has no list of steps or edges";
       const s = checkTable("the steps of a version", ver.steps, true) ?? checkTable("the edges of a version", ver.edges, true);
       if (s) return s;
-      if (ver.first_principles != null && !isObj(ver.first_principles)) return "a version's first principles aren't an object";
     }
   }
   // Loops in the nesting: one walk with colours (0 new, 1 on the current path, 2 done), so a deep chain costs one pass.
@@ -369,7 +363,10 @@ function shapeProblem(v: Row): string | null {
   return null;
 }
 
-/** Every row that names a workspace, in the whole bundle. */
+/**
+ * Every row that names a workspace, in the whole bundle. (A bundle made before first principles were cut may carry a `first_principles`
+ * row on a version: it is never read, so it is neither checked nor restored, and an older bundle is not refused for having one.)
+ */
 function* allRows(b: WorkspaceBundle): Generator<Row> {
   for (const rows of Object.values(b.company_model)) yield* rowsOf(rows);
   for (const p of b.processes) {
@@ -378,7 +375,6 @@ function* allRows(b: WorkspaceBundle): Generator<Row> {
       yield v;
       yield* rowsOf(v.steps);
       yield* rowsOf(v.edges);
-      if (isObj(v.first_principles)) yield v.first_principles;
     }
   }
   for (const k of ["solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) yield* b[k];
@@ -711,7 +707,6 @@ export function planWorkspaceImport(
       layout: version.layout ?? {},
       steps,
       edges: edges.map((e) => pick(e, IMPORT_COLUMNS.edges)),
-      first_principles: isObj(version.first_principles) ? pick(version.first_principles, IMPORT_COLUMNS.first_principles) : null,
     };
   });
   const processes = parentsFirst(processRows, "parent_process_id") as unknown as PlanProcess[];

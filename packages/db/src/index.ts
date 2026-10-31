@@ -30,20 +30,6 @@ export { loadAnalysisRules, saveAnalysisRules, type AnalysisRules, type SaveAnal
 export * from "./capacity-setup";
 export { applyCapacityStarter, STARTER_NUMBERS, STARTER_ROLES, STARTER_TIERS, type Queryable as StarterQueryable, type StarterResult } from "./capacity-starter";
 export { loadLeverSettings, saveLeverSettings, type LeverSettings, type SaveLeverSettingsOutcome } from "./lever-settings";
-export {
-  FIRST_PRINCIPLES_COLUMNS,
-  firstPrinciplesDiffer,
-  firstPrinciplesFromRow,
-  firstPrinciplesToColumns,
-  loadDeleteCandidates,
-  loadFirstPrinciples,
-  loadFirstPrinciplesFor,
-  resolveFirstPrinciples,
-  saveFirstPrinciples,
-  type FirstPrinciplesOwner,
-  type ResolvedFirstPrinciples,
-  type SaveFirstPrinciplesOutcome,
-} from "./first-principles";
 export { isRetiredStep, partitionSteps, retiredSteps } from "./retired";
 export {
   absolutePositions,
@@ -278,7 +264,6 @@ export {
   type Backing,
   type EvidenceField,
   type FileCitation,
-  type FileFirstPrinciples,
   type FileRange,
   type FileSource,
 } from "./process-file-2";
@@ -303,5 +288,4 @@ export {
   hideAiIssueKey,
 } from "./person-labels";
 export { OVERTIME_COST_CLAUSE, payFreeIssueFields } from "./issue-pay";
-export * from "./share";
 export { MONEY_SOURCE, moneyRegex, shareMoneyRegex } from "./money";

@@ -107,7 +107,6 @@ window.mountSandbox = ({ mode, url, broken, many, dan, nobody, leah, rise }) => 
         sources={demoSources()}
         mode={mode}
         issuesHref="/demo/issues"
-        leversHref="/demo/settings/levers"
         startDate={DEMO_FORECAST_START}
         scenarios={mode === "readonly" ? saved : undefined}
         solutions={solutions}

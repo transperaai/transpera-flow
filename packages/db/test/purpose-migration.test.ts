@@ -6,7 +6,6 @@ import {
   DEFAULT_PURPOSES,
   NORTHBEAM_PROCESS_ID,
   NORTHBEAM_WORKSPACE_ID,
-  SHARE_NON_TEXT_KEYS,
   exportWorkspaceBundle,
   northbeamStepIds,
   planWorkspaceImport,
@@ -216,15 +215,7 @@ describe("settings.purposes on a workspace", () => {
   });
 });
 
-describe("share snapshots and restores", () => {
-  it("'purpose' is on the SQL non-text list, which still equals SHARE_NON_TEXT_KEYS", async () => {
-    const [{ src }] = (await q("select pg_get_functiondef('private.share_snapshot_problem(uuid, text, jsonb, boolean, boolean)'::regprocedure) as src")) as unknown as [{ src: string }];
-    const list = /non_text_keys constant text\[\] := array\[([^\]]*)\]/.exec(src)![1]!;
-    const sql = [...list.matchAll(/'([^']+)'/g)].map((m) => m[1]!).sort();
-    expect(sql).toContain("purpose");
-    expect(sql).toEqual([...SHARE_NON_TEXT_KEYS].sort());
-  });
-
+describe("restores", () => {
   async function exportOf(workspaceId: string): Promise<WorkspaceBundle> {
     const bundle = await db.as(admin.claims, async (c) => {
       const read: TableReader = async (table, wsId) => {

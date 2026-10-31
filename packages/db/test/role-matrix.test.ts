@@ -269,17 +269,6 @@ const TABLES: TableCase[] = [
     update: ["update workspace_headlines set horizon_weeks = horizon_weeks where workspace_id = $1", [ws]],
     delete: null,
   },
-  // Share links (B3): Agency admins and the Owner only; links are revoked, never deleted (asserted below).
-  {
-    table: "share_links",
-    insert: (tag) => [
-      "insert into share_links (workspace_id, token_hash, kind, snapshot, engine_version) values ($1, $2, 'overview', $3::jsonb, '1.8.0')",
-      [ws, (tag === "seed" ? "a" : "b").repeat(64), JSON.stringify({ v: 1, kind: "overview", toggles: { people: false, financials: false } })],
-    ],
-    update: ["update share_links set label = 'x' where workspace_id = $1 and engine_version = '1.8.0'", [ws]],
-    delete: null,
-    reads: "editors",
-  },
   {
     table: "calibrations",
     insert: (tag) => [
@@ -505,7 +494,7 @@ describe("writes", () => {
 
   it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, clients and headlines are never deleted", async () => {
     await db.as(callers.admin!.claims, async (c) => {
-      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["capacity_factor_proposals", "delete from capacity_factor_proposals"], ["capacity_factor_proposals", "update capacity_factor_proposals set step_id = step_id"], ["clients", "delete from clients"], ["share_links", "delete from share_links"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
+      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["capacity_factor_proposals", "delete from capacity_factor_proposals"], ["capacity_factor_proposals", "update capacity_factor_proposals set step_id = step_id"], ["clients", "delete from clients"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
         expect(await refused(c, () => c.query(verb)), table).toBe("refused");
       }
     });
@@ -581,8 +570,6 @@ describe("functions", () => {
         c.query("select public.save_solution($1, $2, $3, 'Matrix', $4::jsonb, '[]', '[]', '[]') as r", [ws, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, bundle]),
       refusal: { throws: /you cannot edit this workspace/ },
     },
-    // B3: only those who may make share links get team inputs for one (no pay for anyone).
-    { name: "share_team_capacity", call: (c) => c.query("select public.share_team_capacity($1, false) as r", [ws]), refusal: { throws: /you cannot make share links/ } },
     { name: "save_issue", call: (c) => c.query("select public.save_issue($1, $2::jsonb, $3) as r", [ws, JSON.stringify({ status: "open" }), openIssue]), refusal: { throws: /you cannot change issues/ } },
     {
       name: "resolve_issue",
@@ -932,26 +919,8 @@ describe("workspace_headlines and agency_workspace_list (B1 3/3)", () => {
   });
 });
 
-describe("open_share_link (B3)", () => {
-  it("anon and every signed-in role may call it, and an unknown token gets nothing from any of them", async () => {
-    const tok = "z".repeat(43);
-    await db.client.query("begin");
-    try {
-      await db.client.query("set local role anon");
-      expect((await db.client.query("select public.open_share_link($1) as r", [tok])).rows[0].r).toBeNull();
-    } finally {
-      await db.client.query("rollback");
-    }
-    for (const role of Object.keys(ROLES) as RoleName[]) {
-      await db.as(callers[role]!.claims, async (c) => {
-        expect((await c.query("select public.open_share_link($1) as r", [tok])).rows[0].r, role).toBeNull();
-      });
-    }
-  });
-});
-
-describe("play links (B4): they write nothing", () => {
-  it("anon holds no INSERT, UPDATE, DELETE or TRUNCATE on any table, and the public functions anon can execute are the helpers, the token functions and open_share_link", async () => {
+describe("anon writes nothing", () => {
+  it("anon holds no INSERT, UPDATE, DELETE or TRUNCATE on any table, and the public functions anon can execute are the helpers and the token functions", async () => {
     await db.client.query("begin");
     try {
       const writes = (
@@ -966,15 +935,15 @@ describe("play links (B4): they write nothing", () => {
       const fns = (
         await db.client.query("select p.proname from pg_proc p where p.pronamespace = 'public'::regnamespace and has_function_privilege('anon', p.oid, 'execute') order by 1")
       ).rows.map((r) => r.proname as string);
-      // The stable helpers the policies use, the token functions, B3's open_share_link ..., and mcp_token_lookup, which /api/mcp
+      // The stable helpers the policies use, the token functions, and mcp_token_lookup, which /api/mcp
       // calls as anon with a token's hash (ADR 0018). Sending a visitor's idea (submit_play_proposal) is gone.
       expect(fns).toEqual([
         "api_tokens_keep_revoked", "audit_access_change", "can_edit_workspace", "can_manage_workspace", "can_read_workspace", "edit_drafts_only",
-        "is_agency_admin", "is_free_mail_domain", "mcp_token_lookup", "open_share_link", "set_updated_at",
+        "is_agency_admin", "is_free_mail_domain", "mcp_token_lookup", "set_updated_at",
         "stamp_provenance", "use_api_token", "workspace_logo", "workspace_role",
       ]);
       // And none of the functions that acted on visitors' ideas or built solutions exists any more, or is open to anon.
-      for (const f of ["play_proposal_contacts", "review_proposals", "review_suggestions", "build_proposal", "submit_play_proposal", "save_solution", "play_patch_problem", "lever_kind_ids", "share_team_capacity"]) expect(fns, f).not.toContain(f);
+      for (const f of ["play_proposal_contacts", "review_proposals", "review_suggestions", "build_proposal", "submit_play_proposal", "save_solution", "play_patch_problem", "lever_kind_ids", "share_team_capacity", "open_share_link"]) expect(fns, f).not.toContain(f);
       for (const f of ["play_proposal_contacts", "review_proposals", "review_suggestions", "build_proposal", "submit_play_proposal", "play_patch_problem"]) {
         expect((await db.client.query("select count(*)::int n from pg_proc where proname = $1", [f])).rows[0].n, `${f} is dropped`).toBe(0);
       }

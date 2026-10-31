@@ -68,8 +68,6 @@ export interface IssuePageProps {
   solutions?: SolutionsData;
   /** Member names by user id (the person linked to each membership), so the history says who by name. */
   memberNames?: Readonly<Record<string, string>>;
-  /** The Share button (Agency admins, B3), made by the page that knows what is shared. */
-  share?: ReactNode;
 }
 
 export function IssuePage(props: IssuePageProps) {
@@ -160,7 +158,6 @@ export function IssuePage(props: IssuePageProps) {
         </div>
         {canEdit && (
           <div className={`flex flex-wrap items-center gap-2 ${EDIT_ONLY}`} data-edit-entry>
-            {props.share}
             <span className="flex items-center">
               <Button type="button" variant="outline" onClick={() => setEdit(true)}>
                 Edit

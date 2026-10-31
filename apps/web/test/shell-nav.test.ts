@@ -2,7 +2,7 @@ import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceShell } from "@/components/shell/workspace-shell";
-import { countLabel, demoNav, flatItems, workspaceNav, type NavGroup, type NavItem } from "@/lib/shell/nav";
+import { countLabel, flatItems, workspaceNav, type NavGroup, type NavItem } from "@/lib/shell/nav";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }), usePathname: () => "/w/s", useSearchParams: () => new URLSearchParams() }));
 
@@ -22,7 +22,7 @@ describe("workspaceNav: groups and order", () => {
       ["overview", "processes"],
       ["issues", "solutions", "library"],
       ["setup-clients", "setup-people"],
-      ["sources", "people", "sandbox", "settings", "access"],
+      ["people", "sandbox", "settings", "access"],
     ]);
   });
   it("labels the items as the prototype does", () => {
@@ -34,7 +34,6 @@ describe("workspaceNav: groups and order", () => {
       "Block library",
       "Tiers & clients",
       "People & roles",
-      "Sources",
       "People",
       "Sandbox",
       "Settings",
@@ -61,14 +60,12 @@ describe("workspaceNav: the active item", () => {
   });
   it("is Overview on its own page", () => expect(active(nav("/w/s/overview"))).toEqual(["overview"]));
   it("is Settings on exactly /settings", () => expect(active(nav("/w/s/settings"))).toEqual(["settings"]));
-  it("is Settings on /settings/levers (Levers)", () => expect(active(nav("/w/s/settings/levers"))).toEqual(["settings"]));
   it("is Access, not Settings, on /settings/access", () => expect(active(nav("/w/s/settings/access"))).toEqual(["access"]));
   it("is the matching item on each of the other pages", () => {
     for (const [path, key] of [
       ["/w/s/issues", "issues"],
       ["/w/s/solutions", "solutions"],
       ["/w/s/blocks", "library"],
-      ["/w/s/sources", "sources"],
     ] as const)
       expect(active(nav(path))).toEqual([key]);
   });
@@ -95,7 +92,6 @@ describe("workspaceNav: hrefs", () => {
       "/w/s/blocks",
       "/w/s/setup/clients",
       "/w/s/setup/people",
-      "/w/s/sources",
       "/w/s/people",
       "/w/s/sandbox",
       "/w/s/settings",
@@ -110,12 +106,15 @@ describe("workspaceNav: hrefs", () => {
 });
 
 describe("workspaceNav: counts", () => {
-  const counts = { processes: 3, openIssues: 4, solutions: 0, unlinkedSources: 1 };
-  it("counts processes and open issues, and warns about unlinked sources", () => {
+  const counts = { processes: 3, openIssues: 4, solutions: 0 };
+  it("counts processes and open issues", () => {
     const g = nav("/w/s", { counts });
     expect(item(g, "processes")).toMatchObject({ count: 3, tone: "plain" });
     expect(item(g, "issues")).toMatchObject({ count: 4, tone: "plain", countNoun: "open" });
-    expect(item(g, "sources")).toMatchObject({ count: 1, tone: "warn" });
+  });
+  it("does not list Sources: it is hidden from the menu (the page still opens by its address)", () => {
+    expect(item(nav("/w/s", { counts }), "sources")).toBeUndefined();
+    expect(active(nav("/w/s/sources"))).toEqual([]);
   });
   it("has no count where nothing is counted", () => {
     const g = nav("/w/s", { counts });
@@ -129,50 +128,20 @@ describe("workspaceNav: counts", () => {
   });
 });
 
-describe("demoNav", () => {
-  const d = (pathname: string, counts = { openIssues: 5, processes: 4 }) => demoNav({ pathname, counts });
-  it("lists Northbeam's items in the same groups, without Settings or Access", () => {
-    const g = d("/demo");
-    expect(g.map((x) => x.items.map((i) => i.key))).toEqual([
-      ["overview", "processes"],
-      ["issues", "solutions", "library"],
-      ["sources", "people", "sandbox", "levers"],
-    ]);
-  });
+describe("workspaceNav: pages that are gone", () => {
   it("has no AI analysis item or page: in-app AI is gone (cut list item 1)", () => {
-    expect(item(d("/demo"), "ai")).toBeUndefined();
     expect(item(nav("/w/s"), "ai")).toBeUndefined();
     expect(active(nav("/w/s/settings/ai"))).toEqual([]);
   });
   it("has no Analysis rules item: the rules editor is gone (B17, D40)", () => {
-    expect(item(d("/demo"), "rules")).toBeUndefined();
     expect(active(nav("/w/s/settings/rules"))).toEqual([]);
   });
-  it("marks Levers active on its page", () => {
-    expect(active(d("/demo/settings/levers"))).toEqual(["levers"]);
-    expect(item(d("/demo"), "levers")?.href).toBe("/demo/settings/levers");
-  });
-  it("marks the active page", () => {
-    expect(active(d("/demo"))).toEqual(["overview"]);
-    expect(active(d("/demo/p/abc"))).toEqual(["processes"]);
-    expect(active(d("/demo/processes"))).toEqual(["processes"]);
-    expect(active(d("/demo/issues"))).toEqual(["issues"]);
-    expect(active(d("/demo/sources"))).toEqual(["sources"]);
-    expect(active(d("/demo/overview"))).toEqual(["overview"]);
-    expect(active(d("/demo/people"))).toEqual(["people"]);
-    expect(active(d("/demo/sandbox"))).toEqual(["sandbox"]);
-  });
-  it("sends Issues to its own page", () => expect(item(d("/demo"), "issues")).toMatchObject({ href: "/demo/issues" }));
-  it("counts the seed's open issues and processes", () => {
-    expect(item(d("/demo"), "issues")?.count).toBe(5);
-    expect(item(d("/demo"), "processes")?.count).toBe(4);
-  });
-  it("shows only Processes and Issues on Larkspur, which is a read-only map", () => {
-    const items = flatItems(d("/demo/larkspur"));
-    expect(items.map((i) => i.key)).toEqual(["processes", "issues"]);
-    expect(active(d("/demo/larkspur"))).toEqual(["processes"]);
-    expect(items.map((i) => i.href)).toEqual(["/demo/larkspur", "/demo/larkspur?panel=issues"]);
-    expect(items[1]?.panel).toBe("issues");
+  it("has no Levers or Share links item: both are gone (P0)", () => {
+    const keys = flatItems(nav("/w/s")).map((i) => i.key);
+    expect(keys).not.toContain("levers");
+    expect(keys).not.toContain("share");
+    expect(active(nav("/w/s/settings/levers"))).toEqual([]);
+    expect(active(nav("/w/s/share"))).toEqual([]);
   });
 });
 

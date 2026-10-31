@@ -95,14 +95,10 @@ describe("purposes over the connector", () => {
     expect(byName(r.data.steps, "Won").purpose_resolved).toBeNull();
   });
 
-  it("a step listed to delete in First principles is Could be removed, and a chosen purpose wins", async () => {
-    const [q, c] = (await admin.query("select id, name from steps where revision_id = $1 and name in ('Qualify', 'Chase') order by name desc", [ids.revision])).rows as { id: string; name: string }[];
-    const deletes = [{ step_id: q!.id, breaks_if_removed: "", agreed_by: null, added_back: false }, { step_id: c!.id, breaks_if_removed: "", agreed_by: null, added_back: true }];
-    await admin.query("insert into first_principles (workspace_id, process_id, revision_id, deletes) values ($1, $2, $3, $4::jsonb)", [ids.ws, ids.process, ids.revision, JSON.stringify(deletes)]);
+  it("a chosen purpose wins over Automatic", async () => {
     // Published steps are fixed for the app's users; the migration-style owner write sets a chosen purpose.
     await admin.query("update steps set purpose = 'coordination' where revision_id = $1 and name = 'Chase'", [ids.revision]);
     const r = await getProcess();
-    expect(byName(r.data.steps, "Qualify")).toMatchObject({ purpose: null, purpose_resolved: { key: "removable", source: "first_principles" } });
     expect(byName(r.data.steps, "Chase")).toMatchObject({ purpose: "coordination", purpose_resolved: { key: "coordination", source: "chosen" } });
   });
 

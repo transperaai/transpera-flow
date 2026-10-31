@@ -97,7 +97,7 @@ export function PurposesSettings({
       title: `Delete “${c.name}”?`,
       description:
         n > 0
-          ? `${n} ${n === 1 ? "step has" : "steps have"} chosen it. They are not changed: they fall back to Automatic (the first principles, then the process) until you pick another.`
+          ? `${n} ${n === 1 ? "step has" : "steps have"} chosen it. They are not changed: they fall back to Automatic (worked out from the process) until you pick another.`
           : "No step has chosen it.",
       confirm: "Delete",
       onConfirm: () => {
@@ -144,7 +144,7 @@ export function PurposesSettings({
     <Page
       title="Purposes"
       eyebrow="Settings"
-      description="What the work of each step achieves. A step's purpose is set in the editor; Automatic uses the first principles (a step listed to delete is “Could be removed”) and then the process: sales pipelines are Winning work up to and including the step that decides the sale, and everything after it, and client work, move the client's job forward."
+      description="What the work of each step achieves. A step's purpose is set in the editor; Automatic uses the process: sales pipelines are Winning work up to and including the step that decides the sale, and everything after it, and client work, move the client's job forward."
       actions={
         <>
           <span role="status" aria-live="polite" className="text-xs text-muted-foreground" data-save-status>

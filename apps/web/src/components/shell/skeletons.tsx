@@ -196,7 +196,7 @@ export function OverviewSkeleton() {
   );
 }
 
-/** The process page: the sticky top bar, the pill row, About, the First principles card and the map. */
+/** The process page: the sticky top bar, the pill row, About and the map. */
 export function ProcessPageSkeleton() {
   return (
     <div className="flex min-h-svh flex-1 flex-col">
@@ -235,7 +235,7 @@ export function ProcessPageSkeleton() {
   );
 }
 
-/** The top bar of a page outside `Page` (the process page, First principles): the sidebar toggle and a line for the process picker. */
+/** The top bar of a page outside `Page` (the process page): the sidebar toggle and a line for the process picker. */
 function ProcessTopBar() {
   return (
     <div className="sticky top-0 z-20 flex items-center gap-x-2 border-b bg-background/95 px-4 py-2 backdrop-blur">
@@ -257,28 +257,6 @@ export function HistorySkeleton() {
           <h2 className="font-heading text-2xl leading-tight font-semibold tracking-tight">Process history</h2>
         </header>
         <TableRows columns={4} rows={6} />
-      </Loading>
-    </div>
-  );
-}
-
-/** A process's First principles flow: the process page's top bar, the breadcrumb and title, then the form. */
-export function FirstPrinciplesSkeleton() {
-  return (
-    <div className="flex min-h-svh flex-1 flex-col">
-      <ProcessTopBar />
-      <Loading name="first-principles" label="Loading the first principles" className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-5">
-        <header className="flex flex-col gap-1.5" aria-hidden>
-          <Skeleton className="h-3 w-56" />
-          <Skeleton className="h-8 w-2/3" />
-          <Skeleton className="h-4 w-full max-w-3xl" />
-        </header>
-        <Card className="gap-4 px-4 py-4" aria-hidden>
-          <Skeleton className="h-5 w-40" />
-          {Array.from({ length: 4 }, (_, i) => (
-            <FieldRow key={i} />
-          ))}
-        </Card>
       </Loading>
     </div>
   );

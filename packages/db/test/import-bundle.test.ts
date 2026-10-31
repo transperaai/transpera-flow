@@ -96,12 +96,11 @@ const count = async (sql: string, params: unknown[] = []) => Number((await db.cl
 function extras(source: string) {
   return {
     sources: [{ ref: source, kind: "transcript", title: `Talk with Sam ${source.slice(0, 8)}`, speakers: ["Sam"], recorded_at: "2026-09-30", body: "Sam: Fifteen minutes." }],
-    first_principles: { job_who: "A founder", job_done: "Signed", statements: [{ text: "Leads go cold", kind: "truth", source: "Sam", test: "", linked_parameter: null }], requirements: [], deletes: [], improvements: [], why_problem: "", why_chain: [""], root_cause: "", measures: [] },
   };
 }
 
 describe("import_process_bundle", () => {
-  it("writes the process, sources, links and first principles as the signed-in editor, and touches nothing company-level", async () => {
+  it("writes the process, sources and links as the signed-in editor, and touches nothing company-level", async () => {
     const source = randomUUID();
     const n = node("Bundle ok", source);
     const peopleBefore = await count("select count(*) n from people where workspace_id = $1", [ws]);
@@ -110,7 +109,7 @@ describe("import_process_bundle", () => {
     await as(editor.claims, async (c) => {
       const { rows } = await c.query("select public.import_process_bundle($1, $2, '[]', $3) r", [ws, JSON.stringify([n.node]), JSON.stringify(extras(source))]);
       const r = rows[0].r;
-      expect(r).toEqual({ processes: expect.any(Array), sources: 1, first_principles: true });
+      expect(r).toEqual({ processes: expect.any(Array), sources: 1 });
       expect(r.processes).toHaveLength(1);
       const rev = r.processes[0].revision_id;
 
@@ -126,7 +125,6 @@ describe("import_process_bundle", () => {
         { kind: "process", process_id: n.node.id, step_id: null },
         { kind: "step", process_id: n.node.id, step_id: n.ids.review },
       ]);
-      expect((await c.query("select job_who, job_done, statements, revision_id from first_principles where process_id = $1", [n.node.id])).rows[0]).toMatchObject({ job_who: "A founder", job_done: "Signed", revision_id: rev });
       // The cited source id was rewritten inside the step's provenance too.
       expect((await c.query("select provenance -> 'work_hours' -> 'evidence' -> 0 ->> 'source_id' s from steps where revision_id = $1 and name = 'Review'", [rev])).rows[0].s).toBe(sid);
     });
@@ -136,11 +134,10 @@ describe("import_process_bundle", () => {
     expect(await count("select count(*) n from issues where workspace_id = $1", [ws])).toBe(issuesBefore);
   });
 
-  it("is all or nothing: bad first principles, a bad source or a name already taken leaves no process, source, link or row behind", async () => {
+  it("is all or nothing: a bad source or a name already taken leaves no process, source, link or row behind", async () => {
     const taken = node("Bundle ok", randomUUID());
     const cases: [string, ReturnType<typeof node>, (e: ReturnType<typeof extras>) => void, RegExp][] = [
       ["a name already taken", taken, () => {}, /You already have a process called 'Bundle ok'/],
-      ["a first principles list that isn't a list", node("Bundle bad fp", ""), (e) => ((e.first_principles as { statements: unknown }).statements = { not: "a list" }), /first_principles_statements_check/],
       ["a source with no title", node("Bundle bad source", ""), (e) => (e.sources[0]!.title = " "), /sources_title_length/],
     ];
     for (const [what, n, change, message] of cases) {
@@ -152,7 +149,6 @@ describe("import_process_bundle", () => {
         processes: await count("select count(*) n from processes where workspace_id = $1", [ws]),
         sources: await count("select count(*) n from sources where workspace_id = $1", [ws]),
         links: await count("select count(*) n from source_links where workspace_id = $1", [ws]),
-        fp: await count("select count(*) n from first_principles where workspace_id = $1", [ws]),
       };
       await expect(
         as(editor.claims, (c) => c.query("select public.import_process_bundle($1, $2, '[]', $3)", [ws, JSON.stringify([bundle.node]), JSON.stringify(e)])),
@@ -162,7 +158,6 @@ describe("import_process_bundle", () => {
         processes: await count("select count(*) n from processes where workspace_id = $1", [ws]),
         sources: await count("select count(*) n from sources where workspace_id = $1", [ws]),
         links: await count("select count(*) n from source_links where workspace_id = $1", [ws]),
-        fp: await count("select count(*) n from first_principles where workspace_id = $1", [ws]),
       }, what).toEqual(before);
     }
   });
@@ -171,7 +166,7 @@ describe("import_process_bundle", () => {
     const n = node("Bundle bare", randomUUID());
     await as(editor.claims, async (c) => {
       const r = (await c.query("select public.import_process_bundle($1, $2) r", [ws, JSON.stringify([n.node])])).rows[0].r;
-      expect(r).toMatchObject({ sources: 0, first_principles: false });
+      expect(r).toMatchObject({ sources: 0 });
     });
     for (const [bad, message] of [
       [{ sources: Array.from({ length: 51 }, () => ({})) }, /at most 50 sources in one import/],
@@ -253,13 +248,18 @@ describe("hardening", () => {
     as(editor.claims, async (c) => (await c.query("select public.import_process_bundle($1, $2, '[]', $3) r", [ws, JSON.stringify([n.node]), JSON.stringify(ex)])).rows[0].r);
 
   it("a section that is JSON null is a section that is left out", async () => {
-    const r = await call(node("Bundle nulls", ""), { sources: null, first_principles: null });
-    expect(r).toMatchObject({ sources: 0, first_principles: false });
+    const r = await call(node("Bundle nulls", ""), { sources: null });
+    expect(r).toMatchObject({ sources: 0 });
+  });
+
+  it("first_principles in the extras (an older caller) is ignored, not an error, and writes nothing", async () => {
+    const r = await call(node("Bundle old fp", ""), { first_principles: { job_who: "A founder", statements: { not: "a list" } } });
+    expect(r).toEqual({ processes: expect.any(Array), sources: 0 });
   });
 
   it("the extras an upload used to carry for Suggestions (suggestions, proposals) are ignored, not an error, and write nothing", async () => {
     const r = await call(node("Bundle legacy extras", ""), { suggestions: Array.from({ length: 301 }, () => ({})), proposals: [{ kind: "issue" }], import_source: "old.json" });
-    expect(r).toEqual({ processes: expect.any(Array), sources: 0, first_principles: false });
+    expect(r).toEqual({ processes: expect.any(Array), sources: 0 });
   });
 
   it("refuses more than 2,000,000 characters of source text in all, in plain words", async () => {

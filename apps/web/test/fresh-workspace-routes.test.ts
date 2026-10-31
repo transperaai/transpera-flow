@@ -207,7 +207,6 @@ describe("the start page for editors", () => {
 // The route returns the page component unevaluated; resolving it runs the page, as Next does.
 const route = (load: () => Promise<unknown>) => async () => async (p: unknown) => resolve(await ((await load()) as (p: unknown) => Promise<ReactNode>)(p));
 const processPage = route(() => import("@/app/w/[slug]/p/[processId]/page").then((m) => m.default));
-const principlesPage = route(() => import("@/app/w/[slug]/p/[processId]/first-principles/page").then((m) => m.default));
 
 describe("the company map's own URLs", () => {
   const at = (processId: string, searchParams: Record<string, string> = {}) => ({ params: Promise.resolve({ slug: FRESH_SLUG, processId }), searchParams: Promise.resolve(searchParams) });
@@ -221,15 +220,9 @@ describe("the company map's own URLs", () => {
     await expect((await processPage())(at(COMPANY_ID, { version: "2" }))).rejects.toThrow(`REDIRECT /w/${FRESH_SLUG}?version=2`);
   });
 
-  it("/p/<companyId>/first-principles redirects to the Overview", async () => {
-    await expect((await principlesPage())(at(COMPANY_ID))).rejects.toThrow(`REDIRECT /w/${FRESH_SLUG}`);
-    expect(state.notFound).toBe(0);
-  });
-
   it("still answers 404 for any other unknown id", async () => {
     await expect((await processPage())(at(UNKNOWN_ID))).rejects.toThrow("NOT_FOUND");
-    await expect((await principlesPage())(at(UNKNOWN_ID))).rejects.toThrow("NOT_FOUND");
-    expect(state.notFound).toBe(2);
+    expect(state.notFound).toBe(1);
   });
 });
 
@@ -246,7 +239,6 @@ describe("a workspace that doesn't exist", () => {
   it("answers 404 for the company map's URLs too", async () => {
     const at = { params: Promise.resolve({ slug: "no-such-workspace", processId: COMPANY_ID }), searchParams: Promise.resolve({}) };
     await expect((await processPage())(at)).rejects.toThrow("NOT_FOUND");
-    await expect((await principlesPage())(at)).rejects.toThrow("NOT_FOUND");
   });
 });
 

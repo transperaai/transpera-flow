@@ -22,8 +22,6 @@ const { loadProcessCard, loadProcessesAndArchived, loadProcessesPage } = await i
 const { loadLibrary } = await import("@/lib/editor/library-data");
 const { loadCalibrationPage } = await import("@/lib/calibration/data");
 const { loadClientCalibration } = await import("@/lib/calibration/client-data");
-const { loadWorkspaceLeverSettings } = await import("@/lib/levers/data");
-const { loadProcessFirstPrinciples } = await import("@/lib/first-principles/data");
 const { loadLiveCompany, loadLiveParts } = await import("@/lib/overview/data");
 
 let tdb: TestDb;
@@ -163,14 +161,5 @@ describe("calibration pages", () => {
     expect(clients!.workspaceId).toBe(ws);
     expect(clients!.history).toEqual([]);
     expect(clients!.runs.length).toBeGreaterThan(0);
-  });
-});
-
-describe("settings loaders that fall back", () => {
-  it("reads the AI, lever and first-principles settings", async () => {
-    actAs("viewer");
-    expect(await loadWorkspaceLeverSettings(ws)).toHaveProperty("hidden");
-    const fp = await loadProcessFirstPrinciples(processId, [randomUUID()]);
-    expect(Object.values(fp)[0]).toMatchObject({ doc: null });
   });
 });
