@@ -259,6 +259,93 @@
             "minimum": 0,
             "description": "Items sitting at the step right now."
           },
+          "split": {
+            "type": "object",
+            "required": [
+              "automatable",
+              "augmentable",
+              "manual"
+            ],
+            "description": "How the step's hands-on time divides: automatable (gathering and collating: pulling numbers, drafting from data), augmentable (judging: a tool can help but a person decides) and manual (checking, deciding, the client call). Shares from 0 to 1 that add up to 1. Only when the sources say how the work divides.",
+            "properties": {
+              "automatable": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "augmentable": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "manual": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "split_notes": {
+            "type": "object",
+            "description": "One line of words on what each part of the split is, e.g. \"Pull spend and budgets, spot under-pacing\".",
+            "properties": {
+              "automatable": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "augmentable": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "manual": {
+                "type": "string",
+                "maxLength": 300
+              }
+            }
+          },
+          "tier_multiplier": {
+            "type": "object",
+            "description": "× on the step's time for a client of each tier, by tier name, e.g. {\"T1\": 1.3, \"T2\": 1, \"T3\": 0.8}. A tier not listed is 1. Only when the sources say a tier takes longer or shorter.",
+            "additionalProperties": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
+          },
+          "to_client_manager": {
+            "type": "boolean",
+            "description": "True when the step is done by the client's own manager, whatever their role. Keep the role as the fallback."
+          },
+          "sources": {
+            "type": "object",
+            "description": "Where a value came from, by value (work, split, tier_multiplier): interview, calculator, measured, estimate.",
+            "properties": {
+              "work": {
+                "enum": [
+                  "interview",
+                  "calculator",
+                  "measured",
+                  "estimate"
+                ]
+              },
+              "split": {
+                "enum": [
+                  "interview",
+                  "calculator",
+                  "measured",
+                  "estimate"
+                ]
+              },
+              "tier_multiplier": {
+                "enum": [
+                  "interview",
+                  "calculator",
+                  "measured",
+                  "estimate"
+                ]
+              }
+            }
+          },
           "evidence": {
             "type": "object",
             "description": "Quotes by value: hands_on_hours, wait_hours, rework_rate, waiting_now, sla_hours. Every number that came from a source should have its quote.",
