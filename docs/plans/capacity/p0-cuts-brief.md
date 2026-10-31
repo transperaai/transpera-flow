@@ -115,7 +115,7 @@ has one for cuts.
 - Add a db test that the dropped objects are gone and that a workspace bundle export and restore still round-trips.
   `workspace-bundle.ts` and `workspace-import.ts` may carry share or first-principles rows. Remove them from the
   bundle, and make restore **ignore** them in older bundles. Don't reject an older bundle.
-- Run `gen:types`, `gen:seed` and `gen:bootstrap`.
+- Run `gen:types`, `gen:seed` and `gen:import-schema`.
 
 ## Done when
 
