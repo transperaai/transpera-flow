@@ -63,6 +63,8 @@ The transcripts and per-transcript extracts are not in the repo. People are name
 | D26 | **Tiers can be added and removed.** Ad-hoc requests per tier (overridable per named client) are **chance a client asks in a month × requests when they ask × size of each**. | 31 Oct, Austin |
 | D27 | **Shared teams work in their own unit and rate**: content in words (writing and editing words an hour), link outreach in links, tech in ticket hours, Performance specialists in tasks (campaign builds, creative sets, PPC hygiene), tracking in set-ups and incidents. Full role list to confirm. | 31 Oct, Austin |
 | D28 | **Every baseline in Set up (lead flow, market, churn and the rest) is also a Sandbox lever.** The Sandbox design is to be agreed in a dedicated session. | 31 Oct, Austin |
+| D29 | **The Sandbox is a free-play simulator**: levers on the left (market from a month, leads, win rate, churn, price change with tiers, start month and client reaction, clients won per month and for how long, a named client leaving, people leaving, hires, each automation from a month), live results on the right. It opens with a plain-English **verdict** (clients, retainers, DLER at month 12 against today's path; which teams and people go over their line and when to hire), then charts against today's path, then save and compare. | 31 Oct, Austin |
+| D30 | **Capacity widgets lead with the answer in a sentence**, then a picture, with "How this works" folded away: room for more clients per department (gauge and who can take the next client), what if someone leaves (before/after per person), time to serve one client (per-tier cards), the next 12 months (what to do, then a small chart per team). | 31 Oct, Austin |
 
 ## What the transcripts tell us, in five lines
 
