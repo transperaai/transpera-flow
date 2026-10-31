@@ -4,7 +4,9 @@
       "Bash(bash packages/db/scripts/prod-sql.sh *)",
       "Bash(packages/db/scripts/prod-sql.sh *)",
       "Bash(packages/db/scripts/neon-preview-migrate.sh)",
-      "Bash(packages/db/scripts/neon-preview-migrate.sh --dry-run)"
+      "Bash(packages/db/scripts/neon-preview-migrate.sh --dry-run)",
+      "Bash(packages/db/scripts/neon-preview-example.sh --list)",
+      "Bash(packages/db/scripts/neon-preview-example.sh --workspace *)"
     ]
   }
 }
