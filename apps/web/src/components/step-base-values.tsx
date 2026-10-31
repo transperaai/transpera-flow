@@ -92,6 +92,7 @@ export function StepBaseValues({
   tierSetup = DEFAULT_TIER_SETUP,
   readOnly = false,
   settingsHref,
+  changesOnSteps,
 }: {
   bundle: ProcessBundle;
   step: StepRow;
@@ -100,6 +101,8 @@ export function StepBaseValues({
   tierSetup?: TierSetup;
   readOnly?: boolean;
   settingsHref?: string;
+  /** The workspace's stored changes (capacity P7) and the Sandbox's address, for the list of changes that act on this step. */
+  changesOnSteps?: ChangesOnSteps;
 }) {
   const servicing = bundle.process.kind === "servicing";
   const run = (build: (b: ProcessBundle) => Edit | null) => editor.run(build);
@@ -281,7 +284,34 @@ export function StepBaseValues({
       </div>
 
       {/* Changes that act on this step are stored by the Sandbox (P7); this slot is left for them. */}
-      <div data-slot="changes-on-step" hidden />
+      <ChangesOnStep stepId={step.id} data={changesOnSteps} />
+    </div>
+  );
+}
+
+/** The stored changes that can act on steps, with where the Sandbox is (capacity P7). */
+export interface ChangesOnSteps {
+  sandboxHref: string;
+  changes: { id: string; name: string; kind: "automation" | "augmentation"; steps: string[] }[];
+}
+
+/** "Changes that act on this step": read only, with a link to the Sandbox, where a change is swapped in or edited. */
+function ChangesOnStep({ stepId, data }: { stepId: string; data?: ChangesOnSteps }) {
+  const mine = (data?.changes ?? []).filter((c) => c.steps.includes(stepId));
+  if (!data || !mine.length) return <div data-slot="changes-on-step" hidden />;
+  return (
+    <div className="flex flex-col gap-1 border-t border-line pt-3 text-sm" data-slot="changes-on-step">
+      <h4 className="text-xs font-semibold tracking-wide text-fg-3 uppercase">Changes that act on this step</h4>
+      <ul className="list-disc pl-4">
+        {mine.map((c) => (
+          <li key={c.id} data-change-on-step={c.id}>
+            {c.name} <span className="text-xs text-muted-foreground">({c.kind})</span>
+          </li>
+        ))}
+      </ul>
+      <a href={data.sandboxHref} className="text-xs font-medium text-accent hover:underline">
+        Swap one in or edit it in the Sandbox
+      </a>
     </div>
   );
 }
