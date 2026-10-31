@@ -257,7 +257,7 @@ describe("copying a step row carries the new columns", () => {
   });
 });
 
-  const audit = northbeamStepIds.audit;
+describe("the workspace bundle", () => {
   async function exportOf(workspaceId: string): Promise<WorkspaceBundle> {
     const bundle = await db.as(admin.claims, async (c) => {
       const read: TableReader = async (table, wsId) => {
