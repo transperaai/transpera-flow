@@ -130,6 +130,22 @@ the app should say which of the two a figure comes from.
   unchanged). `stepParts` and `stepTimeFactor` are otherwise as defined. `plannedHours` (the busy share used to place a won client) used the
   step's plain `work` × the client's factor; since 1.17.0 (P2b) it uses `work` × the full step-time factor too (tier multiplier and changes).
 
+## P2b: how the database feeds the engine (engine 1.17.0)
+
+`docs/plans/capacity/p2b-mapping-brief.md`; the mapping is `packages/db/src/capacity-model.ts`, called from `toEngineModel`.
+
+- **Only in a tier workspace**: one with an active service that has a department and a tier. Every other workspace (and every fixture and seed) maps to the model it
+  always did (`engine-model-snapshot.test.ts`). The bundle carries a `capacity` key only then (`loadCapacityInputs`).
+- **What maps**: a service's department id and tier key, its deliverables and ad-hoc rule (a blank column is left out, not 0; the ad-hoc rule needs both numbers);
+  a named client's overrides, its manager (its assignment in a client-facing role) and hand-holding hours (on that role); counted clients (`clientMix: "groups-add"`,
+  each tier service's count = its group's count + everyone's portfolio); people's portfolio, team time (left out when 0), tiers (none: every tier), and ramp (their own,
+  else `settings.ramp_default`, only for someone who starts after the run starts); roles' unit; `placeNewClients: "least-busy"`.
+- **Not mapped here**: step fields (split, tier multiplier, `toClientManager`, sources) and driver recurrences are P4's. Hand-holding hours for a client with no
+  client-facing manager have no role to sit on. `people.reserved_share` and `ramp` are read from `people`, so a viewer who cannot see people gets none (as for pay).
+- **Won clients** land on the tier services by their `mix_share`; the starter's shares are the prototype's department x tier mix (0.05 / 0.2 / 0.25 per department).
+- **The example workspace** (`fixtures/capacity-example.ts`, `pnpm --filter @transpera-flow/db capacity:example --workspace <slug>`): the prototype's made-up agency,
+  read from `capacityModel()`, loaded into an empty workspace. Never the client's.
+
 ## Consequences
 
 - P1 maps columns to these names and stores `TierDeliverables`, overrides and the like as it likes; it never needs the engine to run.
