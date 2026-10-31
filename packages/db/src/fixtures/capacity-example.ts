@@ -62,7 +62,7 @@ const PERSON_EXTRAS: Record<string, { salary: number; title: string; label?: "co
 const DEPARTMENT_NAME: Record<string, string> = { org: "Organic (SEO)", perf: "Performance" };
 
 export type ExampleResult =
-  | { applied: true; people: number; clients: number; processes: number; steps: number; links: number; stepBaseValues: boolean; driverRecurrences: boolean }
+  | { applied: true; people: number; clients: number; processes: number; steps: number; links: number; stepBaseValues: boolean; driverRecurrences: boolean; changes: number }
   | { applied: false; reason: string };
 
 const ESTIMATE = (at: string) => JSON.stringify({ source: "estimate", at });
@@ -180,6 +180,8 @@ export async function loadCapacityExample(db: Queryable, workspaceId: string, to
   // ---- processes and steps ----------------------------------------------------------------------------------------------------------
   const stepById = new Map(model.steps.map((s) => [s.id, s]));
   let steps = 0;
+  /** The model's step id -> the id of the step row it became (what a stored change points at). */
+  const stepDbIds = new Map<string, string>();
   /** A published process: a start step, the given steps in `list` order, and the end steps `ends` (id -> outcome). Returns its id. */
   const makeProcess = async (name: string, kind: "pipeline" | "servicing", entity: string, entry: string, list: EngineStep[], ends: Record<string, "won" | "lost" | "done">) => {
     const processId = randomUUID();
@@ -202,7 +204,10 @@ export async function loadCapacityExample(db: Queryable, workspaceId: string, to
       steps++;
     };
     await insertStep(startId, "Start", "start", 40, 60);
-    for (const s of list) ids.set(s.id, randomUUID());
+    for (const s of list) {
+      ids.set(s.id, randomUUID());
+      stepDbIds.set(s.id, ids.get(s.id)!);
+    }
     for (const [i, s] of list.entries()) {
       await insertStep(ids.get(s.id)!, s.name, "task", 220 + i * 240, 60, {
         role: s.role ? roleIds.get(s.role) : undefined,
@@ -248,5 +253,18 @@ export async function loadCapacityExample(db: Queryable, workspaceId: string, to
       links++;
     }
   }
-  return { applied: true, people: personIds.size, clients, processes, steps, links, stepBaseValues, driverRecurrences };
+
+  // ---- the prototype's 13 changes (P7): stored, so the Sandbox can swap them in. Their effects point at the step rows above ----------------------
+  let changes = 0;
+  if ((await rows("select 1 from information_schema.tables where table_schema = 'public' and table_name = 'capacity_changes'")).length > 0) {
+    for (const c of model.changes ?? []) {
+      const effects = c.effects.map((e) => ({ ...e, step: stepDbIds.get(e.step) ?? e.step }));
+      await db.query(
+        "insert into public.capacity_changes (workspace_id, name, kind, effects, adoption, ramp_months, tiers, source) values ($1, $2, $3, $4::jsonb, $5, $6, $7, 'estimate')",
+        [workspaceId, c.name, c.kind, JSON.stringify(effects), c.adoption, c.rampMonths, c.tiers ?? null],
+      );
+      changes++;
+    }
+  }
+  return { applied: true, people: personIds.size, clients, processes, steps, links, stepBaseValues, driverRecurrences, changes };
 }

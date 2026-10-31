@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { capacityModel, checkCapacityInputs, simulate, type EngineModel } from "@transpera-flow/engine";
-import { LARKSPUR_WORKSPACE_ID, NORTHBEAM_WORKSPACE_ID, loadProcessBySlug, toEngineModel } from "../src";
+import { LARKSPUR_WORKSPACE_ID, NORTHBEAM_WORKSPACE_ID, loadCapacityChanges, loadProcessBySlug, toEngineModel, toEngineStepChange } from "../src";
 import { EXAMPLE_BOTH, fixedRecurrence, loadCapacityExample } from "../src/fixtures/capacity-example";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
@@ -13,6 +13,7 @@ const SLUG = "capacity-example";
 const TODAY = new Date().toISOString().slice(0, 10);
 let ws: string;
 let model: EngineModel;
+let dbAs: ReturnType<TestDb["dbAs"]>;
 
 const q = async (sql: string, params: unknown[] = []) => (await db.client.query(sql, params)).rows as Record<string, unknown>[];
 
@@ -24,7 +25,7 @@ beforeAll(async () => {
   const result = await loadCapacityExample(db.client, ws, TODAY);
   await db.client.query("commit");
   expect(result, JSON.stringify(result)).toMatchObject({ applied: true });
-  const dbAs = db.dbAs({ sub: owner.id, role: "authenticated", app_metadata: { agency_admin: true } });
+  dbAs = db.dbAs({ sub: owner.id, role: "authenticated", app_metadata: { agency_admin: true } });
   const pipeline = (await q("select id from processes where workspace_id = $1 and kind = 'pipeline' and is_company is not true", [ws]))[0]!.id as string;
   const bundle = (await loadProcessBySlug(dbAs, SLUG, { draft: false, processId: pipeline }))!.live;
   // The forecast: people who leave during the run leave (the fixture has the resigning manager leave a month in).
@@ -167,43 +168,6 @@ describe("won clients are split by the prototype's department x tier mix", () =>
   }, 120_000);
 });
 
-/**
- * The step fields P4 maps (the work split, tier multipliers, routing to the client's manager) and the list of changes, copied from the fixture by process and step name, for a model that doesn't have them yet. A no-op once P4's mapping puts them on the model's own steps.
- */
-function withP4StepFields(m: EngineModel, from: EngineModel): { model: EngineModel; patched: boolean } {
-  // Once the mapping puts the step fields on the model's own steps (P4), only the changes (not stored in the database yet) are copied.
-  const hasStepFields = m.steps.some((s) => s.toClientManager);
-  const fx = new Map(from.steps.map((s) => [s.id, s]));
-  const byId = new Map<string, EngineModel["steps"][number]>();
-  const mine = new Map<string, string>();
-  for (const [, p] of Object.entries(m.servicingProcesses ?? {})) {
-    const fixtureProcess = Object.values(from.servicingProcesses ?? {}).find((x) => x.name === p.name);
-    if (!fixtureProcess) continue;
-    // (The model lists a process's steps in id order, so they are matched by name: unique within a process.)
-    for (const id of p.steps) {
-      const name = m.steps.find((x) => x.id === id)!.name;
-      const f = fixtureProcess.steps.map((sid) => fx.get(sid)!).find((x) => x.name === name)!;
-      byId.set(id, f);
-      // The fixture's step id (what a change points at) -> this model's.
-      mine.set(f.id, id);
-    }
-  }
-  return {
-    patched: !hasStepFields || m.changes === undefined,
-    model: {
-      ...m,
-      // The list of changes isn't stored in the database yet either (the fixture has the prototype's 13).
-      ...(m.changes === undefined && from.changes
-        ? { changes: from.changes.map((c) => ({ ...c, effects: c.effects.map((e) => ({ ...e, step: mine.get(e.step) ?? e.step })) })) }
-        : {}),
-      steps: m.steps.map((s) => {
-        const f = hasStepFields ? undefined : byId.get(s.id);
-        return f ? { ...s, ...(f.split ? { split: f.split } : {}), ...(f.tierMultiplier ? { tierMultiplier: f.tierMultiplier } : {}), ...(f.toClientManager ? { toClientManager: true } : {}) } : s;
-      }),
-    },
-  };
-}
-
 describe("the ids the Capacity page relies on", () => {
   it("engine person, role and service ids are the Set up row ids, and a service's tier is the tier key", async () => {
     const ids = async (table: string) => (await q(`select id from ${table} where workspace_id = $1`, [ws])).map((r) => r.id as string).sort();
@@ -231,12 +195,14 @@ describe("busy shares against the engine fixture capacityModel()", () => {
     return Math.max(...[...theirs].map(([name, t]) => Math.abs(ours.get(name)! - t) * 100));
   };
 
-  it("each person's busy share is within 15 percentage points of the fixture's; the differences are reported", () => {
+  it("each person's busy share is within 15 percentage points of the fixture's; the differences are reported", async () => {
     const theirs = share(fixture, fixture);
-    const { model: m, patched } = withP4StepFields(model, fixture);
-    // The model as the database gives it today, then with P4's step fields: the first shows what P4 still has to map.
-    if (patched) table("as the database gives it (without the changes)", share(model, model), theirs);
-    const worst = table(patched ? "with the changes copied from the fixture" : "as the database gives it", share(m, m), theirs);
+    // The model as the database gives it has no changes; the stored ones are swapped in from the first month, as the Sandbox swaps them.
+    const stored = await loadCapacityChanges(dbAs, ws);
+    expect(stored).toHaveLength(13);
+    table("as the database gives it (no change swapped in)", share(model, model), theirs);
+    const m: EngineModel = { ...model, changes: stored.map((c) => toEngineStepChange(c, 1)) };
+    const worst = table("with the stored changes swapped in from month 1", share(m, m), theirs);
     expect(worst).toBeLessThanOrEqual(15);
   }, 300_000);
 });

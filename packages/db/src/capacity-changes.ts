@@ -119,8 +119,8 @@ export function checkCapacityChange(input: CapacityChangeInput, stepIds?: Readon
   if (!input.effects.length) return "Add at least one effect: a step and the part of it the change acts on.";
   if (input.effects.length > MAX_CHANGE_EFFECTS) return `A change has at most ${MAX_CHANGE_EFFECTS} effects.`;
   for (const e of input.effects) {
-    if (typeof e.step !== "string" || !STEP_ID.test(e.step)) return "An effect points at a step that isn't there.";
-    if (stepIds && !stepIds.has(e.step)) return "An effect points at a step that isn't there.";
+    // With the steps that exist given, that set decides; without it, the id must at least be a step id's shape (the table checks the same).
+    if (typeof e.step !== "string" || (stepIds ? !stepIds.has(e.step) : !STEP_ID.test(e.step))) return "An effect points at a step that isn't there.";
     if (e.part === "automatable") {
       if (!isFiniteNumber(e.remove) || e.remove < 0 || e.remove > 1) return "The share an automation removes is from 0% to 100%.";
       if (e.residualHours !== undefined && (!isFiniteNumber(e.residualHours) || e.residualHours < 0 || e.residualHours > 1000)) return "Checking time is 0 or more.";
