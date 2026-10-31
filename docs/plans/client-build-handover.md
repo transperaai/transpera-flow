@@ -98,7 +98,10 @@ P1 alone; then P4, P6, P7, P8 in parallel.
   are in `docs/plans/capacity/`. Engine 1.17.0. Lint, typecheck, every package's tests and the web build passed on the
   final branch.
 - **Preview:** `transpera-flow-next.vercel.app` now follows the handover branch, not
-  `claude/supabase-migration-plan-mzchlf`. Log in to Vercel first, then sign in with Google. Its Neon database (`main`)
+  `claude/supabase-migration-plan-mzchlf`. Log in to Vercel first, then sign in with Google as **Austin's Gmail address**:
+  it is the only Owner on the preview (`ACCESS_ADMIN_EMAILS`), not austin@transpera.ai. The app is read-only at phone
+  width, so creating a workspace needs a computer. To load the made-up example agency into an empty workspace:
+  `packages/db/scripts/neon-preview-example.sh --list`, then `--workspace <slug>`. Its Neon database (`main`)
   has every migration up to `20270125000100`; apply later ones with `packages/db/scripts/neon-preview-migrate.sh`.
 - **Not done, on purpose:** `main` and production. Vercel deploys production from `main`, and production still runs on
   Supabase with no `DATABASE_URL`, so merging to `main` before the Neon cutover would take it down. The cutover runbook
