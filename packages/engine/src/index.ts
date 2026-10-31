@@ -61,6 +61,7 @@ export {
   DEFAULT_HEALTH_RULES,
   churnProbability,
   clientChurnSensitivity,
+  clientTasksPerWeek,
   hasServicing,
   healthRules,
   modelHasServicing,

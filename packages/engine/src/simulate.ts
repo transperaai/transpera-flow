@@ -33,10 +33,12 @@ import {
   type DriverEvents,
 } from "./churn-drivers";
 import { carriersFor, clientChurnMonthly, clientRoleLoads, rolePools, withClientGroups } from "./clients";
+import { effectiveDeliverables } from "./capacity-inputs";
 import {
   AT_RISK_HEALTH,
   clampHealth,
   clientChurnSensitivity,
+  clientTasksPerWeek,
   healthRules,
   poissonMeanGap,
   recurrenceInterval,
@@ -51,6 +53,7 @@ import { eligible } from "./eligibility";
 import { flattenModel } from "./flatten";
 import { detectLoops, type Loop } from "./loops";
 import type {
+  ClientOverrides,
   ClientReplication,
   ClientResult,
   Distribution,
@@ -173,8 +176,10 @@ interface Task {
   /** Not done by then: missed. */
   deadline: number;
   state: "open" | "done" | "missed";
-  /** An ad-hoc request (a Poisson link) rather than scheduled work: it feeds the response-time driver. */
+  /** An ad-hoc request (a Poisson link, or a driver of "adhoc") rather than scheduled work: it feeds the response-time driver. */
   adhoc: boolean;
+  /** × on the drawn hands-on times of its steps (a client's own ad-hoc hours); 1 for nearly every task. */
+  scale: number;
 }
 
 /** One recurring servicing process of one client. */
@@ -187,6 +192,19 @@ interface LinkState {
   interval: number | null;
   gap: number;
   rng: Rng;
+  /** Whether its tasks are ad-hoc requests. */
+  adhoc: boolean;
+  /** × on the drawn hands-on times of its tasks (1 unless the client has its own ad-hoc hours). */
+  scale: number;
+  /**
+   * An ad-hoc driver (docs/adr/0022-capacity-inputs.md): this link's event is the start of a client-month, which draws
+   * whether the client asks (`chance`) and then how many requests (Poisson, mean `requests`), each placed uniformly in the month
+   * as an event of `one`. Null for every other link.
+   */
+  month: { chance: number; requests: number } | null;
+  one: LinkState | null;
+  /** A placed request of an ad-hoc driver: makes its one task and schedules nothing after it. */
+  once: boolean;
 }
 
 type EventType = "arrive" | "week" | "measure" | "back" | "away" | "end" | "leave" | "task" | "staff" | "capacity";
@@ -555,6 +573,14 @@ function pickWithSigning(next: EngineEdge[], kinds: EdgeKind[], u: number, conv:
 function durationSampler(rng: Rng, mean: number, dist: Distribution): () => number {
   if (dist.kind === "lognormal") return lognormalSampler(rng, mean, dist.cv);
   return () => sampleDuration(rng, mean, dist);
+}
+
+/** A Poisson count with the given mean, as the exponential gaps of a rate-`mean` process that fall inside one unit of time (det-math's `log` only). */
+function poissonCount(rng: Rng, mean: number): number {
+  if (!(mean > 0)) return 0;
+  let n = 0;
+  for (let acc = expo(rng, 1 / mean); acc < 1; acc += expo(rng, 1 / mean)) n++;
+  return n;
 }
 
 /** Sample a duration with the given mean. */
@@ -1689,6 +1715,13 @@ export function runOnce(
     const ids = new Set(proc.steps);
     processRoles.set(pid, [...new Set(model.steps.filter((s) => ids.has(s.id) && s.role).map((s) => s.role!))].sort());
   }
+  /** A client's own ad-hoc hours per request, as a × on the drawn times of its ad-hoc process's steps: their mean total becomes `hours`. 1 without. */
+  const adhocScale = (processId: string, hours: number | undefined): number => {
+    if (hours === undefined) return 1;
+    const ids = new Set(processes[processId]?.steps ?? []);
+    const total = model.steps.reduce((sum, s) => (ids.has(s.id) ? sum + s.work : sum), 0);
+    return total > 0 ? hours / total : 1;
+  };
   /** The team that looks after a client (see `Team`). */
   const teamFor = (
     client: { services: string[]; assignments: Record<string, string> },
@@ -1791,7 +1824,7 @@ export function runOnce(
   };
   const addClient = (
     key: string,
-    client: { services: string[]; assignments: Record<string, string>; health?: number; mrr?: number },
+    client: { services: string[]; assignments: Record<string, string>; health?: number; mrr?: number; overrides?: ClientOverrides },
     t: number,
     isRoster: boolean,
     weeklyBill: number,
@@ -1848,14 +1881,41 @@ export function runOnce(
         const svc = serviceIndex.get(sid);
         if (svc === undefined) continue;
         for (const link of linksBySvc[svc]!) {
-          const interval = recurrenceInterval(link.recurrence, hpw);
+          const r = link.recurrence;
+          const entry = targetFor(processes[link.process]!.entry);
+          if ("driver" in r) {
+            // A driver recurrence (docs/adr/0022-capacity-inputs.md): the client's own rate, from its overrides or its tier's deliverables.
+            const eff = effectiveDeliverables(model, client, sid);
+            if (r.driver === "adhoc") {
+              // Each client-month: Bernoulli(chance) that it asks, then Poisson(requests) tasks placed uniformly in the month. Streams of their own.
+              if (!(eff.adhoc.chance > 0 && eff.adhoc.requests > 0)) continue;
+              const scale = adhocScale(link.process, eff.adhocHours);
+              const rng = streams.get(labels.join("adhoc", key, sid, link.process));
+              const base: LinkState = { link, entry, svc, interval: null, gap: 0, rng, adhoc: true, scale, month: null, one: null, once: true };
+              const l: LinkState = { ...base, once: false, month: { chance: eff.adhoc.chance, requests: eff.adhoc.requests }, one: base };
+              scheduleTask(rc, l, t);
+              continue;
+            }
+            const perWeek = clientTasksPerWeek(model, client, sid, r);
+            if (!(perWeek > 0)) continue;
+            const interval = hpw / perWeek;
+            const l: LinkState = { link, entry, svc, interval, gap: interval, rng: streams.get(labels.join("servicing", key, sid, link.process)), adhoc: false, scale: 1, month: null, one: null, once: false };
+            scheduleTask(rc, l, t + l.rng() * interval);
+            continue;
+          }
+          const interval = recurrenceInterval(r, hpw);
           const l: LinkState = {
             link,
-            entry: targetFor(processes[link.process]!.entry),
+            entry,
             svc,
             interval,
-            gap: interval ?? poissonMeanGap(link.recurrence, hpw),
+            gap: interval ?? poissonMeanGap(r, hpw),
             rng: streams.get(labels.join("servicing", key, sid, link.process)),
+            adhoc: interval === null,
+            scale: 1,
+            month: null,
+            one: null,
+            once: false,
           };
           // The first task falls at a random point in the first interval, so clients' tasks don't all land at once.
           scheduleTask(rc, l, t + (interval !== null ? l.rng() * interval : expo(l.rng, l.gap)));
@@ -2404,9 +2464,18 @@ export function runOnce(
   /** A client's servicing task is due: it enters its process, and the next one is scheduled. Churned clients generate none. */
   function createTask(c: RosterClient, l: LinkState, t: number) {
     if (!c.active) return;
-    scheduleTask(c, l, t + (l.interval ?? expo(l.rng, l.gap)));
+    if (l.month) {
+      // An ad-hoc driver's client-month starts: the next month is scheduled, then whether this one has requests, and where they fall.
+      scheduleTask(c, l, t + monthHours);
+      if (l.rng() < l.month.chance) {
+        const n = poissonCount(l.rng, l.month.requests);
+        for (let i = 0; i < n; i++) scheduleTask(c, l.one!, t + l.rng() * monthHours);
+      }
+      return;
+    }
+    if (!l.once) scheduleTask(c, l, t + (l.interval ?? expo(l.rng, l.gap)));
     const sla = l.link.sla;
-    const task: Task = { client: c, due: t + sla, deadline: t + 2 * sla, state: "open", adhoc: l.interval === null };
+    const task: Task = { client: c, due: t + sla, deadline: t + 2 * sla, state: "open", adhoc: l.adhoc, scale: l.scale };
     const e: SimEntity = { id: eid++, t0: t, trace: NO_TRACE, seg: null, svc: l.svc, task, rate: 0, lp: null };
     if (keepTrace) {
       e.trace = [];
@@ -2735,6 +2804,8 @@ export function runOnce(
         const f = st.chWork[chM(t)]!;
         if (f !== 1) handsOn *= f;
       }
+      // A servicing task of a client with its own ad-hoc hours scales the drawn time (after the draw, so no stream moves).
+      if (e.task && e.task.scale !== 1) handsOn *= e.task.scale;
       dur = handsOn / frac;
       st.stat.handsOnSum += handsOn;
       st.stat.handsOnN++;
