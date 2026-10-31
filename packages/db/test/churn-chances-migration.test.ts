@@ -76,9 +76,13 @@ describe("what the migration does to stored rows", () => {
       expect(rest).toEqual(before.drivers[i]);
     }
     for (const [i, s] of services.entries()) {
-      const { price_low, price_high, ...rest } = s;
+      // Later migrations add columns (Set up, 20270119000000): left out here, and the one provenance key they stamp on existing rows.
+      const { price_low, price_high, department_id, tier_id, words, links, tech_hours, meetings, builds, creative_sets, channels, adhoc_chance, adhoc_requests, price_rise_churn, ...rest } = s;
       expect([price_low, price_high], String(s.name)).toEqual([null, null]);
-      expect(rest).toEqual(before.services[i]);
+      expect([department_id, tier_id, words, links, tech_hours, meetings, builds, creative_sets, channels, adhoc_chance, adhoc_requests]).toEqual(Array(11).fill(null));
+      expect(price_rise_churn).toBe(0.5);
+      const { price_rise_churn: _stamped, ...provenance } = rest.provenance as Record<string, unknown>;
+      expect({ ...rest, provenance }).toEqual(before.services[i]);
     }
   });
 

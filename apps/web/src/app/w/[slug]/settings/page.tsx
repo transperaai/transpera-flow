@@ -3,18 +3,13 @@ import { notFound } from "next/navigation";
 import { Page } from "@/components/shell/page";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { buttonVariants } from "@/components/ui/button";
-import { loadLiveProcess, loadWorkspaceClients, loadWorkspaceSettings } from "@/lib/data";
-import { clientSources } from "@/lib/clients";
+import { loadLiveProcess, loadWorkspaceSettings } from "@/lib/data";
 import { loadLatestChecks } from "@/lib/calibration/client-data";
-import { addClient, saveClientAssignment, saveClientField, saveClientServices } from "./client-actions";
-import { ClientsSettings } from "./clients-settings";
 import { ChurnDriversSettings } from "./churn-drivers-settings";
-import { ClientGroupsSettings } from "./client-groups-settings";
 import { DemandSettings } from "./demand-settings";
 import { MarketSettings } from "./market-settings";
-import { PeopleSettings, SimulationSettings } from "./people-settings";
-import { RolesSettings } from "./roles-settings";
-import { ServicesSettings } from "./services-settings";
+import { SimulationSettings } from "./people-settings";
+import { SettingsSection } from "./section";
 import { HealthSettings } from "./servicing-settings";
 import { saveOverheadMonthly } from "./actions";
 import { saveWorkspaceCurrency, saveWorkspaceName } from "./workspace-actions";
@@ -27,7 +22,7 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
   const { slug } = await props.params;
   const [data, bundle] = await Promise.all([loadWorkspaceSettings(slug), loadLiveProcess(slug)]);
   if (!data) notFound();
-  const [roster, history] = await Promise.all([loadWorkspaceClients(data.workspace.id), loadLatestChecks(data.workspace.id)]);
+  const history = await loadLatestChecks(data.workspace.id);
   return (
     <Page
       title="Settings"
@@ -64,26 +59,26 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
         saveOverhead={saveOverheadMonthly}
       />
       <SimulationSettings data={data} />
-      <RolesSettings data={data} />
-      <ServicesSettings data={data} />
-      <ClientGroupsSettings data={data} />
-      <ClientsSettings
-        workspaceId={data.workspace.id}
-        currency={data.workspace.settings.currency}
-        {...roster}
-        services={data.services}
-        roles={data.roles}
-        people={data.people}
-        personRoles={data.personRoles}
-        canEdit={data.canEdit}
-        sources={clientSources(data.processes, data.services, data.clientGroups)}
-        ops={{ add: addClient, saveField: saveClientField, saveServices: saveClientServices, saveAssignment: saveClientAssignment }}
-      />
+      <SettingsSection id="services" title="Services, clients, roles and people" description="These moved to Set up, where the capacity figures' inputs are keyed in.">
+        <ul className="flex flex-col gap-1">
+          <li>
+            <Link href={`/w/${slug}/setup/clients`} className="text-accent underline-offset-4 hover:underline">
+              Tiers &amp; clients
+            </Link>
+            : services (pricing, entry process, servicing steps, path tags), tiers, counted clients, named clients and the client health benchmark.
+          </li>
+          <li>
+            <Link href={`/w/${slug}/setup/people`} className="text-accent underline-offset-4 hover:underline">
+              People &amp; roles
+            </Link>
+            : roles, shared teams, people (hours, leave, skills, dates, per-person times), salaries and portfolios.
+          </li>
+        </ul>
+      </SettingsSection>
       <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} history={history} />
       <HealthSettings data={data} />
       <DemandSettings data={data} />
       <MarketSettings data={data} />
-      <PeopleSettings data={data} />
     </Page>
   );
 }

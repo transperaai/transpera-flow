@@ -27,6 +27,8 @@ export {
   type ModelOptions,
 } from "./model";
 export { loadAnalysisRules, saveAnalysisRules, type AnalysisRules, type SaveAnalysisRulesOutcome } from "./analysis-rules";
+export * from "./capacity-setup";
+export { applyCapacityStarter, STARTER_NUMBERS, STARTER_ROLES, STARTER_TIERS, type Queryable as StarterQueryable, type StarterResult } from "./capacity-starter";
 export { loadLeverSettings, saveLeverSettings, type LeverSettings, type SaveLeverSettingsOutcome } from "./lever-settings";
 export { isRetiredStep, partitionSteps, retiredSteps } from "./retired";
 export {

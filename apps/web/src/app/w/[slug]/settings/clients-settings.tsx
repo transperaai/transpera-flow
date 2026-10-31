@@ -135,15 +135,9 @@ function AddClient({ workspaceId, currency, ops }: ClientsSettingsProps) {
 }
 
 function ClientRowView({ client: c, ...props }: ClientsSettingsProps & { client: ClientRow }) {
-  const { workspaceId, currency, canEdit, ops } = props;
-  const disabled = !canEdit;
+  const { currency } = props;
   const serviceIds = props.clientServices.filter((s) => s.client_id === c.id).map((s) => s.service_id);
   const serviceNames = props.services.filter((s) => serviceIds.includes(s.id)).map((s) => s.name);
-  const field =
-    <T extends Scalar>(f: ClientField): Saver<T> =>
-    (base, next) =>
-      ops.saveField(c.id, f, base, next) as Promise<SaveOutcome<T>>;
-  const roles = props.roles.filter((r) => r.active || props.clientAssignments.some((a) => a.client_id === c.id && a.role_id === r.id));
   return (
     <details className="group py-2" data-client={c.name}>
       <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-1 py-1 hover:bg-panel-2">
@@ -157,6 +151,22 @@ function ClientRowView({ client: c, ...props }: ClientsSettingsProps & { client:
         </span>
         {!c.active && <span className="rounded-lg bg-panel-2 px-1.5 text-xs text-fg-2">Inactive</span>}
       </summary>
+      <ClientMore client={c} {...props} />
+    </details>
+  );
+}
+
+/** Everything else about a named client (the part of a row that opens): Set up shows it under "More". */
+export function ClientMore({ client: c, ...props }: ClientsSettingsProps & { client: ClientRow }) {
+  const { workspaceId, currency, canEdit, ops } = props;
+  const disabled = !canEdit;
+  const serviceIds = props.clientServices.filter((s) => s.client_id === c.id).map((s) => s.service_id);
+  const field =
+    <T extends Scalar>(f: ClientField): Saver<T> =>
+    (base, next) =>
+      ops.saveField(c.id, f, base, next) as Promise<SaveOutcome<T>>;
+  const roles = props.roles.filter((r) => r.active || props.clientAssignments.some((a) => a.client_id === c.id && a.role_id === r.id));
+  return (
       <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2 lg:grid-cols-3">
         <TextField label="Name" value={c.name} save={field("name")} disabled={disabled} help={HELP.name} />
         <ToggleField label="Status" value={c.active} save={field("active")} onLabel="Active" offLabel="Inactive: hidden and left out of simulations" disabled={disabled} help={HELP.status} />
@@ -198,6 +208,5 @@ function ClientRowView({ client: c, ...props }: ClientsSettingsProps & { client:
           </fieldset>
         )}
       </div>
-    </details>
   );
 }

@@ -572,3 +572,14 @@ Verified only against plain Postgres 16 (`packages/db/test/purpose-migration.tes
   structural error on a snapshot with arrays of arrays: the probes in the 20270116000000 header.
 - [ ] After `20270117000000`, the header's overheads probe returns "The snapshot contains costs or margins." and its `steps.x.work_hours` twin returns null.
 - [ ] The header's optional preflight query lists the Financials-off links whose stored copy holds an overheads patch (Update copy each, or revoke).
+
+## Capacity Set up (`20270119000000_capacity_setup.sql`)
+
+Verified only against plain Postgres 16 (`packages/db/test/capacity-setup.test.ts`, `capacity-setup-load.test.ts`, `capacity-starter.test.ts`, and the real-shaped import in `copy-from-supabase.test.ts`). Check on Neon, on a throwaway branch of Preview:
+
+- [ ] Every workspace has two departments and no tier: `select count(*) from public.workspaces w where (select count(*) from public.departments d where d.workspace_id = w.id) <> 2` is 0, and `select count(*) from public.tiers` is 0.
+- [ ] Services and roles keep their `updated_at` (the migration disables `set_updated_at` only while it stamps `price_rise_churn` and `line` as `estimate`): `select max(updated_at) from public.services` is the same before and after.
+- [ ] `services_department_fkey` and `services_tier_fkey` are deferred (`select conname, condeferred from pg_constraint where conname like 'services_%_fkey'`), and deleting a workspace that has tiers still works (the test `workspace-delete.test.ts` covers it on plain Postgres).
+- [ ] As the Owner, `select public.add_tier(<workspace>)` then `select public.remove_tier(<that tier>)` work; as a Viewer, `add_tier` raises "Only Agency admins and the Owner can change tiers."
+- [ ] `public.import_workspace_bundle` is still SECURITY INVOKER with `statement_timeout=40s` and `authenticated` the only grantee.
+

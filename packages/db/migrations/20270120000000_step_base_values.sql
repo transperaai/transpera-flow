@@ -11,7 +11,7 @@
 --   3. `private.is_recurrence` also accepts a driver recurrence, {"perMonth": n, "driver": <a deliverable or "adhoc">, "per": n?}, on
 --      `service_servicing.recurrence`. Every recurrence that was valid still is (the new shape is added; none is removed), so the check
 --      on the existing rows does not need to run again.
---   4. `public.import_workspace_bundle`: a full copy of the 20270118000000 body with only the four new columns added to allow.steps
+--   4. `public.import_workspace_bundle`: a full copy of the 20270119000000 body (capacity P1) with only the four new columns added to allow.steps
 --      (IMPORT_COLUMNS in packages/db/src/workspace-import.ts is its twin). `create or replace` keeps its grants.
 --
 -- Where a step row is copied, and why nothing else changes: `open_draft`, the draft that `publish_draft` makes live, `restore_version`,
@@ -19,7 +19,7 @@
 -- through the keys of the incoming rows, so the new columns come along. `private.revision_changes` diffs whole rows. Only this function
 -- and the TypeScript lists (IMPORT_COLUMNS, the block library's STEP_COLUMNS, the process-file importer) name step columns.
 --
--- Preflight: `select count(*) from public.schema_migrations where version >= '20270120000000';` expect 0, and 20270118000000 applied.
+-- Preflight: `select count(*) from public.schema_migrations where version >= '20270120000000';` expect 0, and 20270119000000 applied.
 --     Record: select count(*), max(updated_at) from public.steps;
 -- Post-apply checks: same count and updated_at, and (expect all 0)
 --     select count(split), count(split_notes), count(tier_multiplier), count(*) filter (where to_client_manager) from public.steps;
@@ -30,7 +30,7 @@
 --   alter table public.steps drop column split, drop column split_notes, drop column tier_multiplier, drop column to_client_manager;
 --   drop function private.is_step_split(jsonb); drop function private.is_step_split_notes(jsonb); drop function private.is_tier_multiplier(jsonb);
 --   -- re-run `private.is_recurrence` from 20261016000000_servicing.sql as `create or replace function`, re-run the
---   -- `public.import_workspace_bundle` body from 20270118000000_capacity_cuts.sql, and delete the row from public.schema_migrations.
+--   -- `public.import_workspace_bundle` body from 20270119000000_capacity_setup.sql, and delete the row from public.schema_migrations.
 
 -- Marks any write as the system's, as the migrations since 20270103000000_three_roles.sql do.
 select set_config('transpera.actor_kind', 'system', true);
@@ -115,7 +115,7 @@ as $$
   end;
 $$;
 
--- 4. Workspace restore: the four columns are restored with the step. The 20270118000000 body, only allow.steps changed.
+-- 4. Workspace restore: the four columns are restored with the step. The 20270119000000 body, only allow.steps changed.
 create or replace function public.import_workspace_bundle(p_workspace uuid, p_plan jsonb, p_label text DEFAULT NULL::text)
  returns jsonb
  language plpgsql
@@ -126,17 +126,17 @@ declare
   -- The columns the restore accepts for each plan section: the same lists as IMPORT_COLUMNS (packages/db/src/workspace-import.ts).
   -- Everything else in a row is ignored; `workspace_id`, `created_by`, `updated_at` and every `*_by` are never read from the plan.
   -- #228: person_capacity_factors is in this list, in ref_cols, in sections and in list_sections.
-  allow constant jsonb := '{"roles":["id","name","color","default_cost_rate","headcount","ongoing_hours_per_client_week","active","provenance","created_at"],"people":["id","name","active","capacity_hours_week","cost_rate","end_date","fte","notes","start_date","provenance","created_at"],"person_roles":["person_id","role_id","created_at"],"person_leave":["id","person_id","start_date","end_date","note","created_at"],"lead_sources":["id","name","conversion_to_qualified","volume_week","provenance","created_at"],"seasonality":["id","month","multiplier","provenance","created_at"],"demand_settings":["growth_monthly","provenance","created_at"],"churn_drivers":["id","name","description","driver","enabled","example","month","value","weight","chance","effect","effect_months","provenance","created_at"],"market_conditions":["id","name","churn","conv","cycle","hire","leads","pay","price","created_at"],"market_schedule":["id","condition_id","from_month","to_month","created_at"],"lever_settings":["hidden","created_at"],"analysis_rules":["settings","created_at"],"clients":["id","name","active","health","mrr","notes","start_date","provenance","created_at"],"sources":["id","kind","title","body","recorded_at","speakers","created_at"],"processes":["id","parent_process_id","name","kind","entity_name","description"],"steps":["id","assumption","child_process_id","conflict","cost_override","current_wip","dropoff_benchmark","expected_wait_hours","entry_step_id","kind","lost_per_day_waiting","name","notes","outcome","parent_step_id","person_id","provenance","purpose","replaced_by","rework_rate","rework_to_step_id","role_id","sla_hours","split","split_notes","target_cycle_hours","tier_multiplier","to_client_manager","tool","wait_dist","wait_hours","wait_params","work_dist","work_hours","work_params","x","y"],"edges":["id","condition_tag","from_step_id","label","probability","to_step_id"],"sandbox_scenarios":["id","parent_id","name","description","changes","horizon_months","start_date","created_at"],"blocks":["id","name","description","type","steps","created_at"],"issues":["id","client_id","created_at","detected_key","evidence","evidence_metrics","evidence_sources","owner_person_id","person_id","process_id","resolution","resolution_note","resolved_how","role_id","scenario_id","severity","source","status","step_id","target_goal","target_measure","target_now","title","type"],"services":["id","name","active","churn_health_sensitivity","churn_monthly_base","entry_process_id","fallback_ongoing_load","margin","mix_share","path_tags","price","price_high","price_low","pricing_model","tenure_months","provenance","created_at"],"service_servicing":["id","process_id","service_id","recurrence","sla_hours","provenance","created_at"],"client_groups":["id","service_id","client_count","churn_monthly","fee","starting_health","stay_months","provenance","created_at"],"client_services":["client_id","service_id","start_date","created_at"],"client_assignments":["client_id","role_id","person_id","created_at"],"person_skills":["person_id","step_id","efficiency","provenance","created_at"],"person_capacity_factors":["person_id","step_id","factor","provenance"],"source_links":["id","insight_key","issue_id","kind","process_id","source_id","step_id"]}'::jsonb;
+  allow constant jsonb := '{"roles":["id","name","color","default_cost_rate","headcount","ongoing_hours_per_client_week","active","provenance","created_at","department_id","kind","line","rule_of_thumb","unit"],"people":["id","name","active","capacity_hours_week","cost_rate","end_date","fte","notes","start_date","provenance","created_at","reserved_share","salary_monthly","label","ramp"],"person_roles":["person_id","role_id","created_at"],"person_leave":["id","person_id","start_date","end_date","note","created_at"],"lead_sources":["id","name","conversion_to_qualified","volume_week","provenance","created_at"],"seasonality":["id","month","multiplier","provenance","created_at"],"demand_settings":["growth_monthly","provenance","created_at"],"churn_drivers":["id","name","description","driver","enabled","example","month","value","weight","chance","effect","effect_months","provenance","created_at"],"market_conditions":["id","name","churn","conv","cycle","hire","leads","pay","price","created_at"],"market_schedule":["id","condition_id","from_month","to_month","created_at"],"lever_settings":["hidden","created_at"],"analysis_rules":["settings","created_at"],"clients":["id","name","active","health","mrr","notes","start_date","provenance","created_at","channels","hand_holding_hours","adhoc_chance","adhoc_requests","adhoc_hours","meetings","words","links","tech_hours","builds","creative_sets","step_factor"],"sources":["id","kind","title","body","recorded_at","speakers","created_at"],"processes":["id","parent_process_id","name","kind","entity_name","description"],"steps":["id","assumption","child_process_id","conflict","cost_override","current_wip","dropoff_benchmark","expected_wait_hours","entry_step_id","kind","lost_per_day_waiting","name","notes","outcome","parent_step_id","person_id","provenance","purpose","replaced_by","rework_rate","rework_to_step_id","role_id","sla_hours","split","split_notes","target_cycle_hours","tier_multiplier","to_client_manager","tool","wait_dist","wait_hours","wait_params","work_dist","work_hours","work_params","x","y"],"edges":["id","condition_tag","from_step_id","label","probability","to_step_id"],"sandbox_scenarios":["id","parent_id","name","description","changes","horizon_months","start_date","created_at"],"blocks":["id","name","description","type","steps","created_at"],"issues":["id","client_id","created_at","detected_key","evidence","evidence_metrics","evidence_sources","owner_person_id","person_id","process_id","resolution","resolution_note","resolved_how","role_id","scenario_id","severity","source","status","step_id","target_goal","target_measure","target_now","title","type"],"services":["id","name","active","churn_health_sensitivity","churn_monthly_base","entry_process_id","fallback_ongoing_load","margin","mix_share","path_tags","price","price_high","price_low","pricing_model","tenure_months","provenance","created_at","department_id","tier_id","words","links","tech_hours","meetings","builds","creative_sets","channels","adhoc_chance","adhoc_requests","price_rise_churn"],"service_servicing":["id","process_id","service_id","recurrence","sla_hours","provenance","created_at"],"client_groups":["id","service_id","client_count","churn_monthly","fee","starting_health","stay_months","provenance","created_at"],"client_services":["client_id","service_id","start_date","created_at"],"client_assignments":["client_id","role_id","person_id","created_at"],"person_skills":["person_id","step_id","efficiency","provenance","created_at"],"person_capacity_factors":["person_id","step_id","factor","provenance"],"departments":["id","name","sort","created_at"],"tiers":["id","key","name","sort","both_count","provenance","created_at"],"person_tiers":["person_id","tier_id","created_at"],"person_portfolio":["person_id","service_id","client_count","provenance","created_at"],"source_links":["id","insight_key","issue_id","kind","process_id","source_id","step_id"]}'::jsonb;
   -- The reference columns of the flat sections (IMPORT_REFS) and of steps (IMPORT_STEP_REFS). Every section that has an `id`
   -- column in `allow` is checked on `id` too.
   -- #228
-  ref_cols constant text[] := array['person_roles.person_id','person_roles.role_id','person_leave.person_id','services.entry_process_id','service_servicing.service_id','service_servicing.process_id','client_groups.service_id','client_services.client_id','client_services.service_id','client_assignments.client_id','client_assignments.role_id','client_assignments.person_id','person_skills.person_id','person_skills.step_id','sandbox_scenarios.parent_id','issues.client_id','issues.owner_person_id','issues.person_id','issues.process_id','issues.role_id','issues.scenario_id','issues.step_id','source_links.source_id','source_links.issue_id','source_links.process_id','source_links.step_id','market_schedule.condition_id','person_capacity_factors.person_id','person_capacity_factors.step_id'];
+  ref_cols constant text[] := array['person_roles.person_id','person_roles.role_id','person_leave.person_id','services.entry_process_id','service_servicing.service_id','service_servicing.process_id','client_groups.service_id','client_services.client_id','client_services.service_id','client_assignments.client_id','client_assignments.role_id','client_assignments.person_id','person_skills.person_id','person_skills.step_id','sandbox_scenarios.parent_id','issues.client_id','issues.owner_person_id','issues.person_id','issues.process_id','issues.role_id','issues.scenario_id','issues.step_id','source_links.source_id','source_links.issue_id','source_links.process_id','source_links.step_id','market_schedule.condition_id','person_capacity_factors.person_id','person_capacity_factors.step_id','person_tiers.person_id','person_tiers.tier_id','person_portfolio.person_id','person_portfolio.service_id','services.department_id','services.tier_id','roles.department_id'];
   step_ref_cols constant text[] := array['parent_step_id','entry_step_id','rework_to_step_id','person_id','role_id','child_process_id'];
   -- The order the sections are written in.
   -- #228
-  sections constant text[] := array['settings','roles','people','person_roles','person_leave','lead_sources','seasonality','demand_settings','churn_drivers','market_conditions','market_schedule','lever_settings','analysis_rules','clients','sources','processes','sandbox_scenarios','blocks','issues','steps','services','service_servicing','client_groups','client_services','client_assignments','person_skills','person_capacity_factors','source_links','archive','log'];
+  sections constant text[] := array['settings','departments','tiers','roles','people','person_roles','person_leave','lead_sources','seasonality','demand_settings','churn_drivers','market_conditions','market_schedule','lever_settings','analysis_rules','clients','sources','processes','sandbox_scenarios','blocks','issues','steps','services','service_servicing','client_groups','client_services','client_assignments','person_skills','person_capacity_factors','person_tiers','person_portfolio','source_links','archive','log'];
   -- #228
-  list_sections constant text[] := array['roles','people','person_roles','person_leave','lead_sources','seasonality','churn_drivers','market_conditions','market_schedule','clients','sources','processes','sandbox_scenarios','blocks','issues','services','service_servicing','client_groups','client_services','client_assignments','person_skills','person_capacity_factors','source_links'];
+  list_sections constant text[] := array['departments','tiers','roles','people','person_roles','person_leave','lead_sources','seasonality','churn_drivers','market_conditions','market_schedule','clients','sources','processes','sandbox_scenarios','blocks','issues','services','service_servicing','client_groups','client_services','client_assignments','person_skills','person_capacity_factors','person_tiers','person_portfolio','source_links'];
   one_sections constant text[] := array['settings','demand_settings','lever_settings','analysis_rules'];
   placeholder constant text := '00000000-0000-4000-8000-';
   placeholder_re constant text := '^00000000-0000-4000-8000-[0-9a-f]{12}$';
@@ -191,6 +191,12 @@ begin
   if not p_plan ? 'person_capacity_factors' then
     p_plan := p_plan || '{"person_capacity_factors": []}'::jsonb;
   end if;
+  -- Capacity Set up (20270119000000): a plan made before departments, tiers, tiers served and portfolios were restored has none.
+  foreach sec in array array['departments','tiers','person_tiers','person_portfolio'] loop
+    if not p_plan ? sec then
+      p_plan := p_plan || jsonb_build_object(sec, '[]'::jsonb);
+    end if;
+  end loop;
   if char_length(p_plan::text) > max_plan_chars then
     raise exception 'import_workspace_bundle: the plan is too big (at most 15 MB)' using errcode = '22023';
   end if;
@@ -229,11 +235,13 @@ begin
     or jsonb_array_length(p_plan -> 'client_services') > 3000 or jsonb_array_length(p_plan -> 'person_leave') > 1500
     -- #228
     or jsonb_array_length(p_plan -> 'person_capacity_factors') > 3000
+    or jsonb_array_length(p_plan -> 'departments') > 50 or jsonb_array_length(p_plan -> 'tiers') > 100
+    or jsonb_array_length(p_plan -> 'person_tiers') > 3000 or jsonb_array_length(p_plan -> 'person_portfolio') > 3000
     or jsonb_array_length(p_plan -> 'lead_sources') + jsonb_array_length(p_plan -> 'seasonality') + jsonb_array_length(p_plan -> 'churn_drivers')
       + jsonb_array_length(p_plan -> 'market_conditions') + jsonb_array_length(p_plan -> 'market_schedule') + jsonb_array_length(p_plan -> 'services')
       + jsonb_array_length(p_plan -> 'service_servicing') + jsonb_array_length(p_plan -> 'client_groups') > 1500 then
     -- #228
-    raise exception 'import_workspace_bundle: the plan is over a limit (150 processes, 1500 steps, 3000 edges, 600 sources of 4,500,000 characters, 900 issues, 1500 people, 3000 clients, 900 scenarios, 900 blocks, 1200 role assignments, 3000 skills, 1200 client assignments, 3000 source links, 3000 client services, 1500 leave entries, 1500 other company settings rows, 3000 per-person times)' using errcode = '22023';
+    raise exception 'import_workspace_bundle: the plan is over a limit (150 processes, 1500 steps, 3000 edges, 600 sources of 4,500,000 characters, 900 issues, 1500 people, 3000 clients, 900 scenarios, 900 blocks, 1200 role assignments, 3000 skills, 1200 client assignments, 3000 source links, 50 departments, 100 tiers, 3000 tiers served, 3000 portfolio counts, 3000 client services, 1500 leave entries, 1500 other company settings rows, 3000 per-person times)' using errcode = '22023';
   end if;
   -- A scenario without an id would make the replacement of a skipped one (below) return null, and the restore would write nothing and say it worked.
   if exists (select 1 from jsonb_array_elements(p_plan -> 'sandbox_scenarios') s where jsonb_typeof(s.value -> 'id') is distinct from 'string') then
@@ -501,6 +509,10 @@ begin
           skipped := skipped || jsonb_build_object('step_links', jsonb_array_length(pl -> sec) - jsonb_array_length(rows));
         end if;
         n := jsonb_array_length(rows);
+        if n > 0 and sec in ('departments', 'tiers') then
+          -- A new workspace starts with its two departments: the backup's replace them (the workspace is empty, checked above).
+          execute format('delete from public.%I where workspace_id = $1', tbl) using p_workspace;
+        end if;
         if n > 0 then
           -- A source link's id can't be given by a signed-in caller (the insert grant on the table is by column, and leaves `id`
           -- and `created_at` out): the database makes it.

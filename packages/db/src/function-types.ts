@@ -7,6 +7,7 @@ import type { Json } from "./db-types";
 
 export interface Functions {
   add_source: { Args: { p_workspace: string; p_source: Json; p_links: Json }; Returns: string };
+  add_tier: { Args: { p_workspace: string }; Returns: string };
   agency_workspace_list: { Args: never; Returns: { id: string; name: string; slug: string; open_risk_issues: number; last_activity: string | null; numbers: Json | null; computed_at: string | null }[] };
   apply_calibration: { Args: { p_calibration: string; p_keys: string[] }; Returns: Json };
   can_edit_workspace: { Args: { ws: string }; Returns: boolean };
@@ -33,6 +34,7 @@ export interface Functions {
   record_calibration_import: { Args: { p_workspace: string; p_process: string; p_kind: string; p_file_name: string; p_column_map: Json; p_row_count: number; p_details: Json; p_results: Json; p_keys: string[] }; Returns: Json };
   record_client_calibration: { Args: { p_workspace: string; p_clients: Json; p_log: Json; p_results: Json; p_keys: string[] }; Returns: Json };
   record_dataset: { Args: { p_workspace: string; p_kind: string; p_file_name: string; p_column_map: Json; p_row_count: number; p_details: Json }; Returns: string };
+  remove_tier: { Args: { p_tier: string }; Returns: null };
   resolve_issue: { Args: { p_workspace: string; p_id: string; p_how: string; p_note?: string; p_status?: string }; Returns: Json }
     | { Args: { p_workspace: string; p_id: string; p_how: string; p_note: string; p_status: string; p_solution: string }; Returns: Json };
   restore_version: { Args: { target_process: string; source_revision: string; replace_draft?: boolean }; Returns: Json };

@@ -157,14 +157,14 @@ describe.each(VARIANTS)("a new client's workspace: %s", (variant) => {
 });
 
 describe("People with nothing published", () => {
-  it("points an editor to Settings, People and shows a reader nothing more than the sentence", async () => {
+  it("points an editor to Set up, People & roles and shows a reader nothing more than the sentence", async () => {
     const people = (await import("@/app/w/[slug]/people/page")).default as Page;
     const editor = await html(people);
-    expect(editor).toContain("Add people in Settings");
-    expect(editor).toContain(`href="/w/${FRESH_SLUG}/settings#people-heading"`);
+    expect(editor).toContain("Add people in Set up");
+    expect(editor).toContain(`href="/w/${FRESH_SLUG}/setup/people#people-heading"`);
     state.canEdit = false;
     const reader = await html(people);
-    expect(reader).not.toContain("Add people in Settings");
+    expect(reader).not.toContain("Add people in Set up");
     expect(reader).toContain("How busy each person is, and how healthy your clients are, come from a simulation of a published process.");
   });
 });

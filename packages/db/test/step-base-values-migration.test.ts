@@ -18,7 +18,7 @@ import { createTestDb, createUser, type TestDb } from "./harness";
 // writes none of them, checks the four new columns, accepts the driver recurrence beside the two old ones, and every path that
 // copies a step row carries the new columns along.
 
-const BASE = "20270118000000";
+const BASE = "20270119000000";
 const ws = NORTHBEAM_WORKSPACE_ID;
 const proc = NORTHBEAM_PROCESS_ID;
 let db: TestDb;

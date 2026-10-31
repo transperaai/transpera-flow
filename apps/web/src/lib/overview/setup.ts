@@ -22,9 +22,9 @@ export function setupChecklist(
   firstDraft: { id: string } | null,
 ): SetupItem[] {
   return [
-    { key: "roles", label: "Add roles", href: `${base}/settings#roles-heading`, done: counts.roles > 0 },
-    { key: "people", label: "Add people", href: `${base}/settings#people-heading`, done: counts.people > 0 },
-    { key: "clients", label: "Add clients or client groups", href: `${base}/settings#clients-heading`, done: counts.clients + counts.clientGroups > 0 },
+    { key: "roles", label: "Add roles", href: `${base}/setup/people#roles-heading`, done: counts.roles > 0 },
+    { key: "people", label: "Add people", href: `${base}/setup/people#people-heading`, done: counts.people > 0 },
+    { key: "clients", label: "Add clients or client groups", href: `${base}/setup/clients#clients-heading`, done: counts.clients + counts.clientGroups > 0 },
     { key: "process", label: "Start the first process", href: `${base}/processes`, done: counts.processes > 0 },
     { key: "publish", label: "Publish it", href: firstDraft ? `${base}/p/${firstDraft.id}/edit` : `${base}/processes`, done: counts.published > 0 },
   ];

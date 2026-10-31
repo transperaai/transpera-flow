@@ -222,3 +222,16 @@ describe("the inspector section", () => {
     expect(html(set, stepOf(set))).toContain("data-tier-multiplier");
   });
 });
+
+describe("the tier setup", () => {
+  it("reads the tier keys in sort order and each tier service's deliverables from Set up; without tiers it reads T1 to T3", async () => {
+    const { tierSetupFrom } = await import("@/lib/tier-setup");
+    expect(tierSetupFrom(null)).toEqual(DEFAULT_TIER_SETUP);
+    const setup = {
+      tiers: [{ id: "b", key: "T2", sort: 2 }, { id: "a", key: "T1", sort: 1 }],
+      services: [{ id: "s1", tier_id: "a", words: 4000, links: null, tech_hours: 2 }, { id: "s2", tier_id: null, words: 1 }],
+    } as never;
+    expect(tierSetupFrom(setup)).toEqual({ keys: ["T1", "T2"], services: { s1: { tier: "T1", deliverables: { words: 4000, techHours: 2 } } } });
+    expect(tierSetupFrom({ tiers: [], services: [] } as never).keys).toEqual(["T1", "T2", "T3"]);
+  });
+});

@@ -42,19 +42,26 @@ const rangeWarning = (sv: { price: number; price_low?: number | null; price_high
 /** "per month", "one-off" or "per hour", for a price. */
 const priceUnit = (model: PricingModel) => (model === "retainer" ? "/month" : model === "hourly" ? "/hour" : " one-off");
 
-export function ServicesSettings({ data }: { data: WorkspaceSettingsData }) {
-  const { services, canEdit } = data;
-  const mix = mixPercentages(services);
+/**
+ * `tierServiceIds`: the services that are a tier of a department. They are edited on Tiers & clients, so this lists the others
+ * ("a service with neither keeps working as today"), with the same mix check over all of them.
+ */
+export function ServicesSettings({ data, tierServiceIds = new Set<string>() }: { data: WorkspaceSettingsData; tierServiceIds?: ReadonlySet<string> }) {
+  const { canEdit } = data;
+  const services = data.services.filter((s) => !tierServiceIds.has(s.id));
+  const mix = mixPercentages(data.services);
   const currency = data.workspace.settings.currency;
   return (
-    <SettingsSection id="services" title="Services" description={<>What you sell. Each new lead is given a service from the mix, follows its path tags, and is priced by it
+    <SettingsSection id="other-services" title={tierServiceIds.size ? "Other services" : "Services"} description={<>{tierServiceIds.size ? "Services that aren't a tier of a department. " : ""}What you sell. Each new lead is given a service from the mix, follows its path tags, and is priced by it
           when won.</>}>
       {canEdit ? (
         <AddService workspaceId={data.workspace.id} />
       ) : (
         <p className="mb-3 text-fg-2">You can view services here; Agency admins can change them.</p>
       )}
-      {services.length === 0 ? (
+      {services.length === 0 && tierServiceIds.size > 0 ? (
+        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">Every service is a tier of a department: edit them on the tier tables above.</p>
+      ) : services.length === 0 ? (
         <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">
           No services yet. Until you add one, every win is priced at the workspace&apos;s retainer of{" "}
           {formatCurrency(data.workspace.settings.retainer, currency)} a month.
@@ -124,14 +131,7 @@ function AddService({ workspaceId }: { workspaceId: string }) {
 }
 
 function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share: number | undefined; data: WorkspaceSettingsData }) {
-  const disabled = !data.canEdit;
   const currency = data.workspace.settings.currency;
-  const pipelines = data.processes.filter((p) => p.kind === "pipeline");
-  const tagHint = data.conditionTags.length
-    ? `Comma-separated. Tags on your connections: ${data.conditionTags.join(", ")}.`
-    : "Comma-separated. No connections are tagged yet; tag a branch on the map to route by service.";
-  const retainer = sv.pricing_model === "retainer";
-
   return (
     <details className="group py-2">
       <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-1 py-1 hover:bg-panel-2">
@@ -149,7 +149,22 @@ function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share:
         </span>
         {!sv.active && <span className="rounded-lg bg-panel-2 px-1.5 text-xs text-fg-2">Inactive</span>}
       </summary>
+      <ServiceMore service={sv} share={share} data={data} />
+    </details>
+  );
+}
 
+/** Everything about one service that can be edited (the part of a row that opens): Set up shows it under "More" for a tier's service. */
+export function ServiceMore({ service: sv, share, data, removable = true }: { service: ServiceRow; share?: number | undefined; data: WorkspaceSettingsData; /** A tier's service goes with its tier (Remove tier), not on its own. */ removable?: boolean }) {
+  const disabled = !data.canEdit;
+  const currency = data.workspace.settings.currency;
+  const pipelines = data.processes.filter((p) => p.kind === "pipeline");
+  const tagHint = data.conditionTags.length
+    ? `Comma-separated. Tags on your connections: ${data.conditionTags.join(", ")}.`
+    : "Comma-separated. No connections are tagged yet; tag a branch on the map to route by service.";
+  const retainer = sv.pricing_model === "retainer";
+
+  return (
       <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2 lg:grid-cols-3">
         <TextField label="Name" value={sv.name} save={serviceSaver(sv.id, "name")} disabled={disabled} help={{ description: "The service as you'd say it to a client.", example: "SEO retainer" }} />
         <SelectField
@@ -271,13 +286,12 @@ function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share:
         </div>
         <ServicingLinks service={sv} data={data} />
         <FallbackLoad service={sv} data={data} />
-        {!disabled && (
+        {!disabled && removable && (
           <div className="sm:col-span-2 lg:col-span-3">
             <RemoveService serviceId={sv.id} name={sv.name} />
           </div>
         )}
       </div>
-    </details>
   );
 }
 
