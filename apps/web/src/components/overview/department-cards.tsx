@@ -228,13 +228,13 @@ function DepartmentCard({
                   {figures.time.parts.map((t) => (
                     <tr key={t.name} className="border-b border-line/60 last:border-0" data-purpose={t.name}>
                       <td className="py-1.5 pr-3">{t.name}</td>
-                      <td className="w-[40%] py-1.5 pr-3">
+                      <td className="w-[30%] py-1.5 pr-3">
                         <div className="h-2 rounded-full bg-panel-2" role="presentation">
                           <i className="block h-full rounded-full bg-accent" style={{ width: `${(t.hours * 100) / figures.time.parts[0]!.hours}%` }} />
                         </div>
                       </td>
-                      <td className="py-1.5 pr-3 text-right tabular-nums">{f0(t.hours)} h</td>
-                      <td className="py-1.5 text-right tabular-nums text-muted-foreground">{formatPercent(t.share)}</td>
+                      <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">{f0(t.hours)} h</td>
+                      <td className="whitespace-nowrap py-1.5 text-right tabular-nums text-muted-foreground">{formatPercent(t.share)}</td>
                     </tr>
                   ))}
                 </tbody>
