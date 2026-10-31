@@ -107,6 +107,7 @@ import { PlaybackBar } from "./playback-bar";
 import { PlaybackLayer } from "./playback-layer";
 import { NodeMenu, type CanvasCommands, type MenuState } from "./node-menu";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
+import { SplitBar } from "./split-bar";
 
 export type { CanvasCommands } from "./node-menu";
 
@@ -441,6 +442,7 @@ function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
               <Was was={data.wasWait}>{formatHours(step.wait_hours)} wait</Was>
             </p>
           )}
+          {step.split && <SplitBar split={step.split} className="mt-1.5" />}
           <div className={footClass} style={{ borderTopColor: colours.divider }}>
             <p data-field={person ? "person_id" : "role_id"} className="min-w-0 truncate">
               {who && <i aria-hidden className="mr-1.5 inline-block size-2 rounded-full align-baseline" style={{ background: role?.color ?? "var(--line-2)" }} />}

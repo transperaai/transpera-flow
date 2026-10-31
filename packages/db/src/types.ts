@@ -327,7 +327,7 @@ export interface ServiceRow {
 export type FallbackLoad = { [roleId: string]: number };
 
 /** Where a parameter's value came from (docs/PRD.md §3 Parameter provenance). */
-export type ProvenanceSource = "estimated" | "entered" | "measured" | "interview" | "calculator" | "estimate";
+export type ProvenanceSource = "estimated" | "entered" | "measured";
 
 /** The source labels a step's base values carry (requirements section 7), in `steps.provenance.{work|split|tier_multiplier}.source`. */
 export type StepSourceLabel = "interview" | "calculator" | "measured" | "estimate";

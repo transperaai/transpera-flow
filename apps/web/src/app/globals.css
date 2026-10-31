@@ -42,6 +42,9 @@
   --color-crit-soft: var(--crit-soft);
   --color-warn-soft: var(--warn-soft);
   --color-good-soft: var(--good-soft);
+  --color-auto: var(--auto);
+  --color-aug: var(--aug);
+  --color-man: var(--man);
   --color-rate-great: var(--rate-great);
   --color-rate-good: var(--rate-good);
   --color-rate-bad: var(--rate-bad);

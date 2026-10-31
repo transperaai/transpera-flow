@@ -2,7 +2,7 @@
 // unit tested. They only reject malformed input early: every write still runs
 // as the signed-in user through RLS and the tables' check constraints.
 
-import { STEP_PURPOSE_KEY, type EdgeRow, type StepRow } from "@transpera-flow/db";
+import { STEP_PURPOSE_KEY, STEP_SOURCE_LABELS, type EdgeRow, type StepRow } from "@transpera-flow/db";
 import type { Patch, Scalar, Table, Value } from "./ops";
 import { PROVENANCE_COLUMNS, isProvenanceField } from "./provenance";
 
@@ -39,10 +39,37 @@ const DIST = oneOf("constant", "triangular", "lognormal");
 const optionalProvenance: Check = (v) =>
   v === null ||
   (isObject(v) &&
-    oneOf("estimated", "entered", "measured")(v.source) &&
+    oneOf("estimated", "entered", "measured", ...STEP_SOURCE_LABELS)(v.source) &&
     (v.at === undefined || (typeof v.at === "string" && !Number.isNaN(Date.parse(v.at)))) &&
     (v.by === undefined || isId(v.by)) &&
     JSON.stringify(v).length <= 20_000);
+
+/** The tolerance the database's `steps_split` check uses. */
+const SPLIT_TOLERANCE = 0.001;
+const SPLIT_PARTS = ["automatable", "augmentable", "manual"] as const;
+
+/** A work split: the three shares from 0 to 1 and no other key, adding up to 1 (as `steps_split` checks). */
+const optionalSplit: Check = (v) =>
+  v === null ||
+  (isObject(v) &&
+    Object.keys(v).length === 3 &&
+    SPLIT_PARTS.every((p) => share(v[p])) &&
+    Math.abs(SPLIT_PARTS.reduce((n, p) => n + (v[p] as number), 0) - 1) <= SPLIT_TOLERANCE);
+
+/** One line of words for each part of the split, up to 300 characters (as `steps_split_notes` checks). */
+const optionalSplitNotes: Check = (v) =>
+  v === null ||
+  (isObject(v) && Object.entries(v).every(([k, line]) => (SPLIT_PARTS as readonly string[]).includes(k) && typeof line === "string" && line.length <= 300 && !/[\r\n]/.test(line)));
+
+/** A number of 0 to 100 for each tier key (as `steps_tier_multiplier` checks). */
+const optionalTierMultiplier: Check = (v) =>
+  v === null ||
+  (isObject(v) &&
+    Object.keys(v).length <= 50 &&
+    Object.entries(v).every(([tier, m]) => tier.trim().length >= 1 && tier.length <= 40 && number(m) && (m as number) >= 0 && (m as number) <= 100));
+
+/** Step values that carry a source label (capacity P4): the editor saves it as `provenance.<value>`. */
+export const SOURCE_LABEL_COLUMNS = ["work", "split", "tier_multiplier"] as const;
 
 /** Step fields the editor saves, and what each accepts. `*_params.key` are keys of the jsonb params. */
 export const STEP_FIELDS = {
@@ -72,6 +99,11 @@ export const STEP_FIELDS = {
   tool: optionalText(200),
   // What the step achieves (sandbox phase 4): null (Automatic) or a category key, as the database's steps_purpose_key allows.
   purpose: (v) => v === null || (typeof v === "string" && STEP_PURPOSE_KEY.test(v)),
+  // Base values for capacity (P4): whole objects, saved as one so the split always adds up to 100%.
+  split: optionalSplit,
+  split_notes: optionalSplitNotes,
+  tier_multiplier: optionalTierMultiplier,
+  to_client_manager: (v) => typeof v === "boolean",
   notes: optionalText(4000),
   sla_hours: optionalAtLeast0,
   // The analysis rules' per-step settings (docs/analysis-rules.md rules 5, 12, 13).
@@ -86,7 +118,7 @@ export const STEP_FIELDS = {
   assumption: (v) => typeof v === "boolean",
   // Citing sources that disagree flags a conflict; settling it clears it (issue #21).
   conflict: (v) => typeof v === "boolean",
-  ...Object.fromEntries(PROVENANCE_COLUMNS.map((col) => [`provenance.${col}`, optionalProvenance])),
+  ...Object.fromEntries([...PROVENANCE_COLUMNS, ...SOURCE_LABEL_COLUMNS].map((col) => [`provenance.${col}`, optionalProvenance])),
 } as const satisfies Record<string, Check>;
 
 export const EDGE_FIELDS = {
@@ -100,6 +132,8 @@ export const EDGE_FIELDS = {
 const FIELDS: Record<Table, Record<string, Check>> = { steps: STEP_FIELDS, edges: EDGE_FIELDS };
 
 const isScalar = (v: unknown): v is Scalar => v === null || ["string", "number", "boolean"].includes(typeof v);
+/** Columns whose value is a whole object: a base for them is an object (or null). */
+const OBJECT_COLUMNS = new Set(["split", "split_notes", "tier_multiplier"]);
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
@@ -117,7 +151,7 @@ export function parseFieldUpdate(table: unknown, base: unknown, changes: unknown
     const check = Object.hasOwn(FIELDS[table], field) ? FIELDS[table][field] : undefined;
     const raw = changes[field];
     const value = typeof raw === "string" ? raw.trim() || (field === "name" ? "" : null) : raw;
-    const baseOk = isProvenanceField(field) ? optionalProvenance(base[field]) : isScalar(base[field]);
+    const baseOk = isProvenanceField(field) ? optionalProvenance(base[field]) : OBJECT_COLUMNS.has(field) ? base[field] === null || isObject(base[field]) : isScalar(base[field]);
     if (!check || !Object.hasOwn(base, field) || !baseOk || !check(value)) return null;
     outBase[field] = base[field] as Value;
     outChanges[field] = value as Value;
@@ -149,7 +183,7 @@ export function parseNewStep(v: unknown): NewStep | null {
   const out: Record<string, unknown> = { id: v.id };
   for (const [field, check] of Object.entries(STEP_FIELDS)) {
     // Params keys come with their column; the flags with the restored columns below.
-    if (field.includes(".") || field === "assumption" || field === "conflict") continue;
+    if (field.includes(".") || field === "assumption" || field === "conflict" || field === "to_client_manager") continue;
     const value = v[field] === undefined ? null : v[field];
     if (!check(value)) return null;
     out[field] = typeof value === "string" && field !== "name" ? value.trim() || null : value;
@@ -177,6 +211,10 @@ function restoredColumns(v: Record<string, unknown>): Record<string, unknown> | 
     if (v[flag] === undefined) continue;
     if (typeof v[flag] !== "boolean") return null;
     out[flag] = v[flag];
+  }
+  if (v.to_client_manager !== undefined) {
+    if (typeof v.to_client_manager !== "boolean") return null;
+    out.to_client_manager = v.to_client_manager;
   }
   if (v.replaced_by !== undefined) {
     if (!Array.isArray(v.replaced_by) || v.replaced_by.length > 100 || !v.replaced_by.every(isId)) return null;

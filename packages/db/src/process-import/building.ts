@@ -283,7 +283,7 @@ export function baseValuesProblem(f: Pick<StepFields, "split" | "split_notes" | 
 }
 
 /** A source label as `provenance` keeps it. */
-const sourceEntry = (stamp: Stamp, source: StepSourceLabel): Provenance => clean({ source, at: stamp.at, ...(stamp.by ? { by: stamp.by } : {}) });
+const sourceEntry = (stamp: Stamp, source: StepSourceLabel): Provenance => clean({ source, at: stamp.at, ...(stamp.by ? { by: stamp.by } : {}) }) as unknown as Provenance;
 
 /** Reject values the editor's validation or the table's checks would. */
 export function checkStepFields(f: StepFields, label: string): void {

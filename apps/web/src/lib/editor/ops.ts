@@ -4,14 +4,17 @@
 // editor applies these to its local copy of the bundle, and a ProcessStore
 // saves them.
 
-import { partitionSteps, type EdgeRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
+import { partitionSteps, type EdgeRow, type ProcessBundle, type StepRow, type StepSplit, type StepSplitNotes, type TierMultiplier } from "@transpera-flow/db";
 import type { Provenance } from "./provenance";
 
 /** A value one field can hold. */
 export type Scalar = string | number | boolean | null;
 
-/** A field's value: a scalar, or a provenance entry (`provenance.<column>`, see ./provenance.ts). */
-export type Value = Scalar | Provenance;
+/** The step columns that hold a whole JSON object as one value (capacity P4): saved and undone as one, so a split never sums to anything but 100%. */
+export type BaseValue = StepSplit | StepSplitNotes | TierMultiplier;
+
+/** A field's value: a scalar, a provenance entry (`provenance.<column>`, see ./provenance.ts), or a whole base-value object. */
+export type Value = Scalar | Provenance | BaseValue;
 
 /**
  * Field values by name. A name is a column, or `column.key` for one key of a
