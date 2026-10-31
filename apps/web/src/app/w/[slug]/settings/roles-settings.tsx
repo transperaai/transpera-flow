@@ -48,7 +48,7 @@ export function RolesSettings({ data }: { data: WorkspaceSettingsData }) {
   );
 }
 
-function AddRole({ workspaceId }: { workspaceId: string }) {
+export function AddRole({ workspaceId }: { workspaceId: string }) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(createRole.bind(null, workspaceId), {});
   return (
     <form action={action} className="mb-4 flex flex-wrap items-end gap-2">
@@ -69,7 +69,6 @@ function AddRole({ workspaceId }: { workspaceId: string }) {
 }
 
 function RoleItem({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" | "color" | "active">; usage: RoleUsage; canEdit: boolean }) {
-  const disabled = !canEdit;
   return (
     <details className="group py-2">
       <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-1 py-1 hover:bg-panel-2">
@@ -79,7 +78,16 @@ function RoleItem({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" 
         <span className={`font-semibold ${role.active ? "" : "text-fg-3 line-through"}`}>{role.name}</span>
         {!role.active && <span className="rounded-lg bg-panel-2 px-1.5 text-xs text-fg-2">Inactive</span>}
       </summary>
-      <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2">
+      <RoleMore role={role} usage={usage} canEdit={canEdit} />
+    </details>
+  );
+}
+
+/** What else a role has (the part of a row that opens): Set up shows it under "More". */
+export function RoleMore({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" | "color" | "active">; usage: RoleUsage; canEdit: boolean }) {
+  const disabled = !canEdit;
+  return (
+    <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2">
         <TextField label="Name" value={role.name} save={roleSaver(role.id, "name")} disabled={disabled} help={{ description: "The kind of work, as your team says it. Steps and people name roles.", example: "Strategist" }} />
         <ToggleField
           label="Status"
@@ -97,8 +105,7 @@ function RoleItem({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" 
             <RemoveRole roleId={role.id} name={role.name} />
           </div>
         )}
-      </div>
-    </details>
+    </div>
   );
 }
 

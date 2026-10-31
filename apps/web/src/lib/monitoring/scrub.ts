@@ -21,7 +21,7 @@ export const ROUTE_WORDS: ReadonlySet<string> = new Set([
   // The app's routes (src/app). "s" is the old share-link path: the page is gone, but an old link in a report still reads /s/[token].
   "access", "api", "auth", "blocks", "branding", "bundle", "calibration", "callback", "changes", "churn-drivers", "edit",
   "export", "forecast", "history", "issues", "library", "login", "logo", "market", "mcp", "monitoring-check",
-  "overview", "p", "people", "privacy", "processes", "purposes", "restore", "s", "settings", "signout", "solutions",
+  "clients", "overview", "p", "people", "privacy", "processes", "purposes", "restore", "s", "settings", "setup", "signout", "solutions",
   "sources", "tokens", "w",
   // Next's build files.
   "_next", "chunks", "css", "media", "static",

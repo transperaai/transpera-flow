@@ -75,6 +75,17 @@ export interface WorkspaceSettings {
   purposes?: { key: string; name: string; description: string }[] | null;
   /** Per-person times (capacity factors, C6): off unless true. Owners and editors switch it; see `person_capacity_factors`. */
   capacity_factor_enabled?: boolean;
+  /**
+   * Capacity Set up (P1): the share of full capacity a new starter has in each month from their start date, e.g. [0.4, 0.6, 0.8]
+   * (then full). Absent or null: that default. A person's own `ramp` replaces it. Stored only; the capacity figures (P2) use it.
+   * Checked by `workspaces_ramp_default`.
+   */
+  ramp_default?: number[] | null;
+  /**
+   * Capacity Set up (P1, D10, D37): whether DLER counts leadership's salary. Absent or null: true. "To confirm with the client."
+   * Stored only. Checked by `workspaces_dler_includes_leadership`.
+   */
+  dler_includes_leadership?: boolean | null;
 }
 
 /** One per-person time as `team_capacity` returns it (`step_id` null is the person's time on every step; `source` is entered or measured). */

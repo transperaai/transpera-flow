@@ -144,16 +144,28 @@ export interface ClientGroups {
 
 export interface Clients {
   active: Generated<boolean>;
+  adhoc_chance: Numeric | null;
+  adhoc_hours: Numeric | null;
+  adhoc_requests: Numeric | null;
+  builds: Numeric | null;
+  channels: Numeric | null;
   created_at: Generated<string>;
   created_by: Generated<string | null>;
+  creative_sets: Numeric | null;
+  hand_holding_hours: Numeric | null;
   health: Numeric | null;
   id: Generated<string>;
+  links: Numeric | null;
+  meetings: Numeric | null;
   mrr: Generated<Numeric>;
   name: string;
   notes: string | null;
   provenance: Generated<Json>;
   start_date: string | null;
+  step_factor: Numeric | null;
+  tech_hours: Numeric | null;
   updated_at: Generated<string>;
+  words: Numeric | null;
   workspace_id: string;
 }
 
@@ -184,6 +196,16 @@ export interface DemandSettings {
   created_by: Generated<string | null>;
   growth_monthly: Generated<Numeric>;
   provenance: Generated<Json>;
+  updated_at: Generated<string>;
+  workspace_id: string;
+}
+
+export interface Departments {
+  created_at: Generated<string>;
+  created_by: Generated<string | null>;
+  id: Generated<string>;
+  name: string;
+  sort: Generated<number>;
   updated_at: Generated<string>;
   workspace_id: string;
 }
@@ -352,9 +374,13 @@ export interface People {
   end_date: string | null;
   fte: Generated<Numeric>;
   id: Generated<string>;
+  label: string | null;
   name: string;
   notes: string | null;
   provenance: Generated<Json>;
+  ramp: Json | null;
+  reserved_share: Generated<Numeric>;
+  salary_monthly: Numeric | null;
   start_date: string | null;
   updated_at: Generated<string>;
   workspace_id: string;
@@ -383,6 +409,16 @@ export interface PersonLeave {
   workspace_id: string;
 }
 
+export interface PersonPortfolio {
+  client_count: Generated<number>;
+  created_at: Generated<string>;
+  person_id: string;
+  provenance: Generated<Json>;
+  service_id: string;
+  updated_at: Generated<string>;
+  workspace_id: string;
+}
+
 export interface PersonRoles {
   created_at: Generated<string>;
   person_id: string;
@@ -396,6 +432,13 @@ export interface PersonSkills {
   person_id: string;
   provenance: Generated<Json>;
   step_id: string;
+  workspace_id: string;
+}
+
+export interface PersonTiers {
+  created_at: Generated<string>;
+  person_id: string;
+  tier_id: string;
   workspace_id: string;
 }
 
@@ -461,11 +504,16 @@ export interface Roles {
   created_at: Generated<string>;
   created_by: Generated<string | null>;
   default_cost_rate: Generated<Numeric>;
+  department_id: string | null;
   headcount: Generated<number>;
   id: Generated<string>;
+  kind: Generated<string>;
+  line: Generated<Numeric>;
   name: string;
   ongoing_hours_per_client_week: Generated<Numeric>;
   provenance: Generated<Json>;
+  rule_of_thumb: number | null;
+  unit: string | null;
   updated_at: Generated<string>;
   workspace_id: string;
 }
@@ -521,24 +569,42 @@ export interface Seasonality {
 
 export interface Services {
   active: Generated<boolean>;
+  adhoc_chance: Numeric | null;
+  adhoc_requests: Numeric | null;
+  builds: Numeric | null;
+  channels: Numeric | null;
   churn_health_sensitivity: Generated<Numeric>;
   churn_monthly_base: Generated<Numeric>;
   created_at: Generated<string>;
   created_by: Generated<string | null>;
+  creative_sets: Numeric | null;
+  /**
+   * With tier_id: this service is that tier of that department (Set up, Tiers & clients).
+   */
+  department_id: string | null;
   entry_process_id: string | null;
   fallback_ongoing_load: Generated<Json>;
   id: Generated<string>;
+  links: Numeric | null;
   margin: Generated<Numeric>;
+  meetings: Numeric | null;
   mix_share: Generated<Numeric>;
   name: string;
   path_tags: Generated<string[]>;
   price: Generated<Numeric>;
   price_high: Numeric | null;
   price_low: Numeric | null;
+  /**
+   * D36: extra churn for each 10% rise for 3 months, as a share (0.5 = churn x 1.5). Stored only until the Sandbox uses it.
+   */
+  price_rise_churn: Generated<Numeric>;
   pricing_model: Generated<string>;
   provenance: Generated<Json>;
+  tech_hours: Numeric | null;
   tenure_months: Generated<Numeric>;
+  tier_id: string | null;
   updated_at: Generated<string>;
+  words: Numeric | null;
   workspace_id: string;
 }
 
@@ -657,6 +723,19 @@ export interface Steps {
   y: Generated<Numeric>;
 }
 
+export interface Tiers {
+  both_count: Generated<number>;
+  created_at: Generated<string>;
+  created_by: Generated<string | null>;
+  id: Generated<string>;
+  key: string;
+  name: string;
+  provenance: Generated<Json>;
+  sort: Generated<number>;
+  updated_at: Generated<string>;
+  workspace_id: string;
+}
+
 export interface UserTours {
   dismissed_at: Generated<string>;
   tour: string;
@@ -708,6 +787,7 @@ export interface DB {
   clients: Clients;
   datasets: Datasets;
   demand_settings: DemandSettings;
+  departments: Departments;
   deployment_access: DeploymentAccess;
   edges: Edges;
   issue_events: IssueEvents;
@@ -723,8 +803,10 @@ export interface DB {
   people: People;
   person_capacity_factors: PersonCapacityFactors;
   person_leave: PersonLeave;
+  person_portfolio: PersonPortfolio;
   person_roles: PersonRoles;
   person_skills: PersonSkills;
+  person_tiers: PersonTiers;
   process_placements: ProcessPlacements;
   process_revisions: ProcessRevisions;
   processes: Processes;
@@ -741,6 +823,7 @@ export interface DB {
   source_links: SourceLinks;
   sources: Sources;
   steps: Steps;
+  tiers: Tiers;
   user_tours: UserTours;
   workspace_headlines: WorkspaceHeadlines;
   workspace_logos: WorkspaceLogos;

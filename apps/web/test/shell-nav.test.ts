@@ -15,12 +15,13 @@ const item = (groups: NavGroup[], key: string) => flatItems(groups).find((i) => 
 const PID = "0d5f6f0e-0000-4000-8000-000000000001";
 
 describe("workspaceNav: groups and order", () => {
-  it("has the prototype's three groups, in order", () => {
+  it("has the prototype's groups, in order (Set up sits between Improve and Company)", () => {
     const g = nav("/w/s");
-    expect(g.map((x) => x.label)).toEqual([null, "Improve", "Company"]);
+    expect(g.map((x) => x.label)).toEqual([null, "Improve", "Set up", "Company"]);
     expect(g.map((x) => x.items.map((i) => i.key))).toEqual([
       ["overview", "processes"],
       ["issues", "solutions", "library"],
+      ["setup-clients", "setup-people"],
       ["people", "sandbox", "settings", "access"],
     ]);
   });
@@ -31,6 +32,8 @@ describe("workspaceNav: groups and order", () => {
       "Issues",
       "Solutions",
       "Block library",
+      "Tiers & clients",
+      "People & roles",
       "People",
       "Sandbox",
       "Settings",
@@ -41,7 +44,7 @@ describe("workspaceNav: groups and order", () => {
   it("has no Reports, Clients, Scenarios or Runs items", () => {
     const keys = flatItems(nav("/w/s")).map((i) => i.key);
     for (const gone of ["report", "clients", "scenarios", "runs", "map"]) expect(keys).not.toContain(gone);
-    expect(flatItems(nav("/w/s")).map((i) => i.href).filter((h) => /\/(reports|clients|runs)\b|panel=scenarios/.test(h))).toEqual([]);
+    expect(flatItems(nav("/w/s")).map((i) => i.href).filter((h) => /^\/w\/s\/(reports|clients|runs)\b|panel=scenarios/.test(h))).toEqual([]);
   });
   it("shows Access only to managers", () => {
     expect(item(nav("/w/s", { canManage: false }), "access")).toBeUndefined();
@@ -87,6 +90,8 @@ describe("workspaceNav: hrefs", () => {
       "/w/s/issues",
       "/w/s/solutions",
       "/w/s/blocks",
+      "/w/s/setup/clients",
+      "/w/s/setup/people",
       "/w/s/people",
       "/w/s/sandbox",
       "/w/s/settings",

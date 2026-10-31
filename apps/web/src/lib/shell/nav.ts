@@ -2,7 +2,7 @@
 // active item is unit-tested; the sidebar component only renders what this returns. Order and grouping follow the
 // prototype's `sidebar()` (apps/web/prototype/app-flow.html).
 
-export type NavIcon = "overview" | "processes" | "issues" | "solutions" | "library" | "people" | "sandbox" | "settings" | "access";
+export type NavIcon = "clients" | "team" | "overview" | "processes" | "issues" | "solutions" | "library" | "people" | "sandbox" | "settings" | "access";
 
 /** How a count badge looks: plain, or a warning. */
 export type CountTone = "plain" | "warn";
@@ -44,7 +44,7 @@ const matches = (rest: string, path: string) => rest === path || rest.startsWith
  * The shared shape: `base` is where the workspace's pages live (`/w/<slug>`), `rest` the path under it.
  * The workspace root is the Overview, the landing page (issue #100); a process's map (`/p/<id>`) belongs to Processes.
  */
-function groups(base: string, rest: string, counts: NavCounts, extra: { settings: boolean; access: boolean; levers?: boolean; share?: boolean }): NavGroup[] {
+function groups(base: string, rest: string, counts: NavCounts, extra: { settings: boolean; access: boolean; levers?: boolean; share?: boolean; setup?: boolean }): NavGroup[] {
   const onMap = rest.startsWith("/p/");
   const item = (i: Omit<NavItem, "href" | "active"> & { path: string; active?: boolean }): NavItem => {
     const { path, active, ...fields } = i;
@@ -75,6 +75,19 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
         item({ key: "library", label: "Block library", path: "/blocks", icon: "library" }),
       ],
     },
+    // Where the capacity figures' inputs are keyed in (capacity build P1): shown to everyone, editable by the Owner and Agency admins.
+    ...(extra.setup
+      ? [
+          {
+            key: "setup",
+            label: "Set up",
+            items: [
+              item({ key: "setup-clients", label: "Tiers & clients", path: "/setup/clients", icon: "clients" as const }),
+              item({ key: "setup-people", label: "People & roles", path: "/setup/people", icon: "team" as const }),
+            ],
+          },
+        ]
+      : []),
     { key: "company", label: "Company", items: company },
   ];
 }
@@ -82,7 +95,7 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
 export function workspaceNav({ slug, pathname, canManage, counts }: { slug: string; pathname: string; canManage: boolean; counts: NavCounts }): NavGroup[] {
   const base = `/w/${slug}`;
   const rest = pathname.startsWith(base) ? pathname.slice(base.length) : "\u0000";
-  return groups(base, rest, counts, { settings: true, access: canManage });
+  return groups(base, rest, counts, { settings: true, access: canManage, setup: true });
 }
 
 export const flatItems = (groups: NavGroup[]): NavItem[] => groups.flatMap((g) => g.items);

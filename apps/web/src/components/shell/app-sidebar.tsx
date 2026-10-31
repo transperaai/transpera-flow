@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Building2,
   ChevronsUpDown,
   CircleAlert,
   KeyRound,
@@ -15,6 +16,7 @@ import {
   ShieldCheck,
   TrendingUp,
   Users,
+  UsersRound,
   type LucideIcon,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -48,6 +50,8 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   sandbox: TrendingUp,
   settings: Settings2,
   access: ShieldCheck,
+  clients: Building2,
+  team: UsersRound,
 };
 
 const BADGE: Record<CountTone, string> = {

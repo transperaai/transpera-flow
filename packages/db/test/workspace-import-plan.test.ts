@@ -843,9 +843,9 @@ describe("per-person times in a backup (#228): restored", () => {
     expect(plan.person_capacity_factors).toEqual([]);
     const { person_capacity_factors: _gone, ...rest } = plan;
     expect(Object.keys(rest)).toEqual([
-      "format", "settings", "roles", "people", "person_roles", "person_leave", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
+      "format", "settings", "departments", "tiers", "roles", "people", "person_roles", "person_leave", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
       "lever_settings", "analysis_rules", "clients", "sources", "processes", "sandbox_scenarios", "blocks", "issues", "services", "service_servicing", "client_groups", "client_services",
-      "client_assignments", "person_skills", "source_links",
+      "client_assignments", "person_skills", "person_tiers", "person_portfolio", "source_links",
     ]);
     // The new key sits right after person_skills.
     const keys = Object.keys(plan);

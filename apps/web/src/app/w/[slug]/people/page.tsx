@@ -29,8 +29,8 @@ export default async function WorkspacePeoplePage(props: PageProps<"/w/[slug]/pe
         />
         {canEdit && (
           <p className="mt-3 text-sm">
-            <Link href={`${base}/settings#people-heading`} className="font-medium text-accent hover:underline">
-              Add people in Settings →
+            <Link href={`${base}/setup/people#people-heading`} className="font-medium text-accent hover:underline">
+              Add people in Set up →
             </Link>
           </p>
         )}
@@ -39,7 +39,7 @@ export default async function WorkspacePeoplePage(props: PageProps<"/w/[slug]/pe
   }
   return (
     <Page title="People" eyebrow="Company" description={description} width="max-w-6xl">
-      <PeoplePage bundle={bundle} settingsHref={`/w/${slug}/settings`} forecast={{ href: `/w/${slug}/sandbox` }} />
+      <PeoplePage bundle={bundle} setupHref={`/w/${slug}/setup`} forecast={{ href: `/w/${slug}/sandbox` }} />
     </Page>
   );
 }

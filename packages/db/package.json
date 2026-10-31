@@ -24,6 +24,7 @@
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "capacity:starter": "node --experimental-strip-types scripts/capacity-starter.ts",
     "gen:seed": "node --experimental-strip-types scripts/gen-seed.ts",
     "gen:import-schema": "node --experimental-strip-types scripts/gen-import-schema.ts",
     "gen:types": "node --experimental-strip-types scripts/gen-types.ts",
