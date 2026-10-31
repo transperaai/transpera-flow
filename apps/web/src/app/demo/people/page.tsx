@@ -12,7 +12,7 @@ export default function DemoPeoplePage() {
       description="How healthy your clients are, and how busy each person is, from a simulation of the live process. Demo mode: Northbeam's sample numbers."
       width="max-w-6xl"
     >
-      <PeoplePage bundle={demoBundle()} settingsHref={null} forecast={{ href: "/demo/sandbox", demo: true, bundle: demoForecastBundle(), startDate: DEMO_FORECAST_START }} />
+      <PeoplePage bundle={demoBundle()} setupHref={null} forecast={{ href: "/demo/sandbox", demo: true, bundle: demoForecastBundle(), startDate: DEMO_FORECAST_START }} />
     </Page>
   );
 }

@@ -27,10 +27,13 @@ export type EditableTable =
   | "clients"
   | "client_assignments"
   | "client_groups"
-  | "service_servicing";
+  | "service_servicing"
+  | "departments"
+  | "tiers"
+  | "person_portfolio";
 
 /** Link tables `save_links` accepts, and their member column. */
-export const LINK_MEMBERS = { person_roles: "role_id", person_skills: "step_id", client_services: "service_id" } as const;
+export const LINK_MEMBERS = { person_roles: "role_id", person_skills: "step_id", client_services: "service_id", person_tiers: "tier_id" } as const;
 export type LinkTable = keyof typeof LINK_MEMBERS;
 
 interface FieldsResult {

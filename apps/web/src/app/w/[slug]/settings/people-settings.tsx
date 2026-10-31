@@ -133,7 +133,7 @@ export function PeopleSettings({ data, saveFactor }: { data: WorkspaceSettingsDa
   );
 }
 
-function AddPerson({ data }: { data: WorkspaceSettingsData }) {
+export function AddPerson({ data }: { data: WorkspaceSettingsData }) {
   const [state, action, pending] = useActionState<ActionResult, FormData>(createPerson.bind(null, data.workspace.id), {});
   return (
     <form action={action} className="mb-4 flex flex-wrap items-end gap-2">
@@ -169,15 +169,10 @@ function AddPerson({ data }: { data: WorkspaceSettingsData }) {
 
 function PersonRow({ person: p, data, saveFactor }: { person: PersonDetail; data: WorkspaceSettingsData; saveFactor?: SaveFactor }) {
   const roleIds = data.personRoles.filter((r) => r.person_id === p.id).map((r) => r.role_id);
-  const skillIds = data.personSkills.filter((s) => s.person_id === p.id).map((s) => s.step_id);
   const leave = data.personLeave.filter((l) => l.person_id === p.id);
   const roleNames = data.roles.filter((r) => roleIds.includes(r.id)).map((r) => r.name);
   const hoursPerWeek = data.workspace.settings.hours_per_week;
   const capacity = p.capacity_hours_week ?? Number(p.fte) * hoursPerWeek;
-  const disabled = !data.canEdit;
-  const roleName = new Map(data.roles.map((r) => [r.id, r.name]));
-  const factorsOn = data.workspace.settings.capacity_factor_enabled === true;
-  const hasStoredFactors = data.personCapacityFactors.some((f) => f.person_id === p.id);
 
   return (
     <details className="group py-2">
@@ -193,7 +188,23 @@ function PersonRow({ person: p, data, saveFactor }: { person: PersonDetail; data
         {leave.length > 0 && <span className="text-fg-3">{leave.length} leave</span>}
         {!p.active && <span className="rounded-lg bg-panel-2 px-1.5 text-xs text-fg-2">Inactive</span>}
       </summary>
+      <PersonMore person={p} data={data} saveFactor={saveFactor} />
+    </details>
+  );
+}
 
+/** Everything else about a person (the part of a row that opens): Set up shows it under "More". */
+export function PersonMore({ person: p, data, saveFactor }: { person: PersonDetail; data: WorkspaceSettingsData; saveFactor?: SaveFactor }) {
+  const roleIds = data.personRoles.filter((r) => r.person_id === p.id).map((r) => r.role_id);
+  const skillIds = data.personSkills.filter((s) => s.person_id === p.id).map((s) => s.step_id);
+  const leave = data.personLeave.filter((l) => l.person_id === p.id);
+  const hoursPerWeek = data.workspace.settings.hours_per_week;
+  const disabled = !data.canEdit;
+  const roleName = new Map(data.roles.map((r) => [r.id, r.name]));
+  const factorsOn = data.workspace.settings.capacity_factor_enabled === true;
+  const hasStoredFactors = data.personCapacityFactors.some((f) => f.person_id === p.id);
+
+  return (
       <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2 lg:grid-cols-3">
         <TextField label="Name" value={p.name} save={personSaver(p.id, "name")} disabled={disabled} help={{ description: "The person's name, as it appears across the app.", example: "Maya Collins" }} />
         <TextField label="Email" type="email" value={p.email} save={personSaver(p.id, "email")} optional disabled={disabled} help={{ description: "Their work email. Optional, and not used by the simulation.", example: "maya@northbeam.example" }} />
@@ -276,7 +287,6 @@ function PersonRow({ person: p, data, saveFactor }: { person: PersonDetail; data
           <Leave personId={p.id} workspaceId={p.workspace_id} leave={leave} disabled={disabled} />
         </div>
       </div>
-    </details>
   );
 }
 

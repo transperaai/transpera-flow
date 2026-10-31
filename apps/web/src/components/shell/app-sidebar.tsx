@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Building2,
   ChevronsUpDown,
   CircleAlert,
   FileText,
@@ -17,6 +18,7 @@ import {
   ShieldCheck,
   TrendingUp,
   Users,
+  UsersRound,
   type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -54,6 +56,8 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   settings: Settings2,
   access: ShieldCheck,
   share: Share2,
+  clients: Building2,
+  team: UsersRound,
 };
 
 const BADGE: Record<CountTone, string> = {
