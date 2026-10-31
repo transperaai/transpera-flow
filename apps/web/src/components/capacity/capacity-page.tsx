@@ -4,9 +4,9 @@
 // off; the next 12 months is the forecast's model with planned hires and leavers) and hands them to the view.
 
 import { useMemo, useState } from "react";
-import { ModelError, toEngineModel, type CapacitySetup, type ProcessBundle } from "@transpera-flow/db";
+import type { CapacitySetup, ProcessBundle } from "@transpera-flow/db";
+import { capacityBaseModel } from "@/lib/capacity/model";
 import { forecastModel, today as todayIso } from "@/lib/forecast/forecast";
-import { horizonWeeks } from "@/lib/horizon";
 import { CapacityView } from "./capacity-view";
 
 /** Step id → the process it sits in, over the live process and every other process the model draws steps from. */
@@ -19,15 +19,7 @@ export function stepProcessMap(bundle: ProcessBundle): Record<string, string> {
 
 export function CapacityPage({ bundle, setup, base }: { bundle: ProcessBundle; setup: CapacitySetup; base: string }) {
   const [start] = useState(() => todayIso());
-  const built = useMemo(() => {
-    try {
-      // A year long, as the Sandbox's month-by-month run is; the measured window is the whole year with nobody arriving or leaving.
-      return { model: { ...toEngineModel(bundle, { purposes: true }), horizonWeeks: horizonWeeks(12) }, error: null };
-    } catch (err) {
-      if (err instanceof ModelError) return { model: null, error: err.message };
-      throw err;
-    }
-  }, [bundle]);
+  const built = useMemo(() => capacityBaseModel(bundle), [bundle]);
   const year = useMemo(() => {
     const f = forecastModel(bundle, 12, start);
     return f.model ? { model: f.model, monthStarts: f.monthStarts } : null;
