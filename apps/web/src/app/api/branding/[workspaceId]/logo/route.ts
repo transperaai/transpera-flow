@@ -2,8 +2,7 @@ import { loadWorkspaceLogo } from "@transpera-flow/db";
 import { authEnv } from "@/lib/auth/env";
 import { getVisitorDb } from "@/lib/auth/session";
 
-// GET /api/branding/<workspace id>/logo: a workspace's logo, stored as bytes in `workspace_logos`. Open to anyone, signed in or not: share-link visitors see the logo too, and the public `branding` bucket it
-// replaces was public. It reads through `public.workspace_logo(uuid)`, a SECURITY DEFINER function that anon may call; nothing
+// GET /api/branding/<workspace id>/logo: a workspace's logo, stored as bytes in `workspace_logos`. It reads through `public.workspace_logo(uuid)`, a SECURITY DEFINER function that anon may call; nothing
 // else about the workspace is reachable here. The ETag is the bytes' SHA-256, so a request that sends it back gets a 304, and
 // the pages ask for `?v=<first 12 of the hash>`, so a new logo is a new address.
 

@@ -20,7 +20,6 @@ import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { InsightsSection } from "@/components/insights";
 import { PageHeader } from "@/components/shell/page";
-import { ShareButton } from "@/components/share/share-dialog";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { deleteSandboxScenario, saveSandboxScenario } from "@/app/w/[slug]/sandbox-actions";
@@ -34,6 +33,7 @@ import { horizonLabel, horizonWeeks } from "@/lib/horizon";
 import { issueFormOptions } from "@/lib/issues/draft";
 import { useIssues } from "@/lib/issues/use-issues";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
+import { SANDBOX_ANALYSIS_SHOWN } from "@/lib/sandbox/analysis-shown";
 import { SPEEDS_NORMALISED_NOTE } from "@/lib/people";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { cn } from "@/lib/utils";
@@ -91,7 +91,6 @@ export interface SandboxViewProps {
 }
 
 /** The workspace slug from the Sandbox's address, /w/<slug>/sandbox. */
-const sharePath = (pathname: string): string => pathname.split("/")[2] ?? "";
 const NO_SOURCES: SourceRow[] = [];
 const NO_SCENARIOS: SandboxScenarioRow[] = [];
 const NO_SOLUTIONS: SolutionRow[] = [];
@@ -722,9 +721,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           onNew={newScenario}
           onAddChange={() => setChangeTarget({ mode: "add" })}
           onSave={onSave}
-          onFindValue={canEdit && built.model && !scenarioError ? () => setGoalOpen(true) : undefined}
-          share={mode === "live" && savedScenario && !dirty && !horizonChanged ? <ShareButton slug={sharePath(pathname)} kind="scenario" targetId={savedScenario.id} what={savedScenario.name} /> : null}
-          shareHint={mode === "live" && savedScenario && (dirty || horizonChanged) ? "Save first to share it." : null}
+          onFindValue={SANDBOX_ANALYSIS_SHOWN && canEdit && built.model && !scenarioError ? () => setGoalOpen(true) : undefined}
           onSaveAsNew={onSaveAsNew}
           onRename={onRename}
           onDuplicate={onDuplicate}
@@ -922,7 +919,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
       {!compare && moneyView ? (
         <ForecastMoney view={moneyView} currency={live.workspace.settings.currency} overheadsHref={mode === "live" && peopleHref ? `${peopleHref}#workspace-heading` : null} span={span} />
       ) : null}
-      {canEdit && !compare && built.model && !scenarioError ? (
+      {SANDBOX_ANALYSIS_SHOWN && canEdit && !compare && built.model && !scenarioError ? (
         <Tornado
           key={`${selected ?? "none"}|${months}|${JSON.stringify(analysisBase.map((e) => e.change))}`}
           run={analysisRun}
@@ -1005,7 +1002,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
           onClose={() => setChangeTarget(null)}
         />
       ) : null}
-      {canEdit && goalOpen && built.model ? (
+      {SANDBOX_ANALYSIS_SHOWN && canEdit && goalOpen && built.model ? (
         <GoalSeekDialog
           run={analysisRun}
           base={analysisBase}

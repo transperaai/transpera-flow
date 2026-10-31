@@ -13,7 +13,6 @@ import {
   loadSolutions,
   loadChurnDrivers,
   loadClientGroups,
-  loadDeleteCandidates,
   loadTeam,
   loadClients,
   loadMarket,
@@ -166,15 +165,6 @@ export async function loadSourceLinking(workspaceId: string): Promise<{ links: S
   const db = await getDb();
   const [links, targets] = await Promise.all([loadSourceLinks(db, workspaceId), loadLinkTargets(db, workspaceId)]);
   return { links, targets };
-}
-
-/**
- * The bundle with the steps its processes' first principles list to delete (`deleteCandidates`, sandbox phase 4), for the revisions it
- * shows: what a step's Automatic purpose ("Could be removed") needs. One read; callers that show or run purposes use it.
- */
-export async function withDeleteCandidates<B extends ProcessBundle>(bundle: B): Promise<B> {
-  const parts = [{ processId: bundle.process.id, revisionId: bundle.revision.id }, ...(bundle.otherProcesses ?? []).map((p) => ({ processId: p.process.id, revisionId: p.revision.id }))];
-  return { ...bundle, deleteCandidates: await loadDeleteCandidates(await getDb(), parts) };
 }
 
 /** The categories stored on the workspace as they are (null while it has none and uses the defaults), the base a save checks against. */

@@ -189,7 +189,6 @@ function Harness({ options }: { options: HarnessOptions }) {
             onFocused={() => undefined}
             sources={[]}
             stamp={() => ({ at: "2026-10-05T00:00:00Z", by: null }) as never}
-            mode="draft"
             draft={null}
             blocks={NO_BLOCKS}
             company

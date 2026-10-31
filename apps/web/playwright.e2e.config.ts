@@ -19,10 +19,10 @@ export default defineConfig({
   },
   webServer: {
     command: "pnpm exec next start -p 3210 -H 127.0.0.1",
-    url: "http://127.0.0.1:3210/demo",
+    url: "http://127.0.0.1:3210/privacy",
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
-    // No database URL or auth secret means demo mode (lib/auth/env.ts treats "" as unset), even where CI sets DATABASE_URL.
+    // No database URL or auth secret (lib/auth/env.ts treats "" as unset), even where CI sets DATABASE_URL: only the pages that need no sign-in open.
     env: { DATABASE_URL: "", BETTER_AUTH_SECRET: "" },
   },
 });

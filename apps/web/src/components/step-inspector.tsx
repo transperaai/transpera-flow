@@ -64,15 +64,13 @@ function PurposeField({ bundle, step, save }: { bundle: ProcessBundle; step: Ste
       ? resolved?.source === "deleted_category"
         ? "Its category was deleted: Automatic is used. Pick another."
         : null
-      : resolved?.source === "first_principles"
-        ? "Listed to delete in First principles"
-        : resolved?.source === "process_kind"
-          ? bundle.process.kind === "servicing"
-            ? "Client work process"
-            : resolved.key === "client_job"
-              ? "After the sale in a sales pipeline"
-              : "Sales pipeline process, up to and including the sale decision"
-          : null;
+      : resolved?.source === "process_kind"
+        ? bundle.process.kind === "servicing"
+          ? "Client work process"
+          : resolved.key === "client_job"
+            ? "After the sale in a sales pipeline"
+            : "Sales pipeline process, up to and including the sale decision"
+        : null;
   return (
     <SelectField
       label="What it achieves"

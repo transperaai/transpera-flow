@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { AppHeader } from "@/components/app-header";
 import { PageHeader } from "@/components/shell/page";
@@ -16,7 +16,7 @@ const date = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en
 
 export default async function ApiTokensPage() {
   await connection();
-  if (!authEnv()) redirect("/demo");
+  if (!authEnv()) notFound();
   const db = await getDb();
   const tokens = await db
     .selectFrom("api_tokens")

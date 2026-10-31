@@ -1,8 +1,6 @@
 "use server";
 
 import { isId } from "@/lib/editor/validate";
-import { firstPrinciplesDraftChanged } from "@/lib/first-principles/data";
-import { mustAskBeforeRestore } from "@/lib/history/restore-check";
 import { rpc } from "@transpera-flow/db/client";
 import { pgCode } from "@/app/action-db";
 import { getDb, getSessionUser } from "@/lib/auth/session";
@@ -34,12 +32,6 @@ export async function restoreVersion(processId: string, revisionId: string, repl
   if (!isId(processId) || !isId(revisionId) || typeof replaceDraft !== "boolean") return invalid;
   const session = await signedIn();
   if (!session.ok) return signedOut;
-  // The database looks at the draft's steps and edges; a draft whose first principles differ from live's has changes too (A54).
-  if (!replaceDraft) {
-    const proc = await session.db.selectFrom("processes").select(["live_revision_id", "draft_revision_id"]).where("id", "=", processId).executeTakeFirst().catch(() => undefined);
-    const differ = proc?.live_revision_id && proc.draft_revision_id ? await firstPrinciplesDraftChanged(processId, proc.live_revision_id, proc.draft_revision_id) : false;
-    if (mustAskBeforeRestore(replaceDraft, Boolean(proc?.draft_revision_id), differ)) return { status: "draft_exists" };
-  }
   let data;
   try {
     data = await rpc(session.db, "restore_version", { target_process: processId, source_revision: revisionId, replace_draft: replaceDraft });

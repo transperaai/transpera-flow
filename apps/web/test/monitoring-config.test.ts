@@ -168,7 +168,7 @@ describe("the browser bundle without a DSN", () => {
   });
 
   it("the error screens report through lib/monitoring/report.ts, which the client config fills in", async () => {
-    for (const file of ["src/app/global-error.tsx", "src/app/w/[slug]/error.tsx", "src/app/demo/error.tsx"]) {
+    for (const file of ["src/app/global-error.tsx", "src/app/w/[slug]/error.tsx"]) {
       expect(read(file), file).toContain('import { reportError } from "@/lib/monitoring/report";');
     }
     expect(read("sentry.client.config.ts")).toMatch(/if \(options\) setErrorReporter\(\(error\) => Sentry\.captureException\(error\)\);/);
