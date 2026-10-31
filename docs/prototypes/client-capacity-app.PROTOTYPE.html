@@ -1,0 +1,1311 @@
+<title>Transpera Flow Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: app shell — fixed left nav (top bar on phones), main column of dense cards; numbers in mono. */
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --sunk:#eef0f4; --fg:#18202b; --muted:#5d6878; --line:#dde1e8;
+  --accent:#1f5f8b; --accent-soft:#e3eef6; --accent-fg:#ffffff;
+  --ok:#2e7d4f; --ok-soft:#e2f2e8; --warn:#a86a00; --warn-soft:#fbf0d9; --bad:#b3362c; --bad-soft:#f9e1de;
+  --auto:#1f5f8b; --aug:#6a9fc6; --man:#c9cfd8; --new:#7a4fb0; --new-soft:#efe7f8;
+  --c1:#1f5f8b; --c2:#d0782a; --c3:#3f9a6b; --c4:#8a5bb8; --c5:#c4475a; --c6:#2a9bb0; --c7:#9a8a2e; --c8:#6b7685;
+  --font:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r:8px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#11161d; --surface:#18202a; --sunk:#1f2833; --fg:#e7ecf2; --muted:#9aa6b5; --line:#2c3644;
+  --accent:#6fb0de; --accent-soft:#1d3346; --accent-fg:#0d1620;
+  --ok:#6cc595; --ok-soft:#173326; --warn:#e2b155; --warn-soft:#3a2d12; --bad:#ef8a7f; --bad-soft:#3d1c19;
+  --auto:#6fb0de; --aug:#3f6f93; --man:#3a4554; --new:#b996e6; --new-soft:#2c2240;
+  --c1:#6fb0de; --c2:#ef9a52; --c3:#6cc595; --c4:#b996e6; --c5:#ef8a9a; --c6:#5cc6d8; --c7:#d4c264; --c8:#9aa6b5; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11161d; --surface:#18202a; --sunk:#1f2833; --fg:#e7ecf2; --muted:#9aa6b5; --line:#2c3644;
+  --accent:#6fb0de; --accent-soft:#1d3346; --accent-fg:#0d1620;
+  --ok:#6cc595; --ok-soft:#173326; --warn:#e2b155; --warn-soft:#3a2d12; --bad:#ef8a7f; --bad-soft:#3d1c19;
+  --auto:#6fb0de; --aug:#3f6f93; --man:#3a4554; --new:#b996e6; --new-soft:#2c2240;
+  --c1:#6fb0de; --c2:#ef9a52; --c3:#6cc595; --c4:#b996e6; --c5:#ef8a9a; --c6:#5cc6d8; --c7:#d4c264; --c8:#9aa6b5; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+h1,h2,h3{margin:0;text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:22px;font-weight:600}
+h2{font-size:16px;font-weight:600}
+h3{font-size:13px;font-weight:600}
+p{margin:0}
+a{color:var(--accent)}
+button,input,select{font:inherit;color:inherit}
+.num,td.n,.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.shell{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100%}
+.nav{position:sticky;top:0;align-self:start;height:100vh;overflow:auto;background:var(--surface);border-right:1px solid var(--line);padding:16px 10px 24px;padding-left:max(10px,env(safe-area-inset-left,0px))}
+.brand{display:flex;gap:8px;align-items:center;padding:4px 8px 14px;font-weight:600}
+.brand i{width:22px;height:22px;border-radius:6px;background:var(--accent);display:block}
+.brand small{display:block;font-weight:400;color:var(--muted);font-size:11px}
+.nav .grp{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:14px 8px 4px}
+.nav a{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;text-decoration:none;color:var(--fg)}
+.nav a:hover{background:var(--sunk)}
+.nav a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.nav a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.tag{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;padding:1px 6px;border-radius:99px;white-space:nowrap}
+.tag.new{background:var(--new-soft);color:var(--new)}
+.tag.chg{background:var(--accent-soft);color:var(--accent)}
+.tag.hid{background:var(--sunk);color:var(--muted)}
+.main{min-width:0;padding-block:20px 80px;padding-left:max(24px,env(safe-area-inset-left,0px));padding-right:max(24px,env(safe-area-inset-right,0px))}
+.banner{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;background:var(--warn-soft);color:var(--fg);border:1px solid var(--line);border-radius:var(--r);padding:8px 12px;font-size:12.5px;margin-bottom:16px}
+.banner b{color:var(--warn)}
+.banner button{margin-left:auto}
+.head{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:flex-end;justify-content:space-between;margin-bottom:16px}
+.head p{color:var(--muted);margin-top:4px;max-width:70ch}
+.answers{display:flex;flex-wrap:wrap;gap:6px}
+.answers span{font-size:11.5px;border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:2px 9px;color:var(--muted)}
+.answers span b{color:var(--fg);font-weight:600}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;min-width:0}
+.kpi .k{font-size:12px;color:var(--muted)}
+.kpi .v{font-family:var(--mono);font-size:22px;font-weight:500;margin-top:2px;font-variant-numeric:tabular-nums}
+.kpi .s{font-size:12px;color:var(--muted);margin-top:2px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;min-width:0}
+.card>h2,.card>.ch{margin-bottom:10px}
+.ch{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline;justify-content:space-between}
+.ch p{color:var(--muted);font-size:12.5px}
+.sec{margin-top:14px}
+.tw{overflow-x:auto;margin-inline:-4px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{font-size:11.5px;font-weight:600;color:var(--muted);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+td.n,th.n{text-align:right;white-space:nowrap}
+tr.sub td{background:var(--sunk);font-weight:600;font-size:12px}
+tr.click{cursor:pointer}
+tr.click:hover td{background:var(--sunk)}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;padding:1px 8px;border-radius:99px;white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok)}
+.pill.warn{background:var(--warn-soft);color:var(--warn)}
+.pill.bad{background:var(--bad-soft);color:var(--bad)}
+.pill.t{background:var(--sunk);color:var(--fg);font-weight:500}
+.busy{display:flex;align-items:center;gap:8px;min-width:150px}
+.busy .bar{position:relative;flex:1;height:9px;background:var(--sunk);border-radius:99px;overflow:visible}
+.busy .bar i{position:absolute;inset:0 auto 0 0;border-radius:99px}
+.busy .bar b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--fg);opacity:.55}
+.busy .num{width:44px;text-align:right;font-size:12.5px}
+.ok-c{background:var(--ok)} .warn-c{background:var(--warn)} .bad-c{background:var(--bad)}
+.split{display:flex;height:8px;border-radius:99px;overflow:hidden;background:var(--sunk)}
+.split i{display:block;height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:var(--muted)}
+.legend span::before{content:"";display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px;background:var(--c)}
+.btn{appearance:none;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:5px 11px;cursor:pointer;font-size:13px;white-space:nowrap}
+.btn:hover{background:var(--sunk)}
+.btn.pri{background:var(--accent);color:var(--accent-fg);border-color:var(--accent)}
+.btn.sm{padding:2px 8px;font-size:12px}
+.btn.x{border:0;background:none;color:var(--muted);padding:2px 6px}
+input[type=number],input[type=text],select{background:var(--surface);border:1px solid var(--line);border-radius:5px;padding:3px 6px;font-size:13px;max-width:100%}
+input[type=number]{width:78px;font-family:var(--mono)}
+input.w{width:140px}
+input[type=range]{width:100%}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+label.f>span{color:var(--muted)}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.note{font-size:12.5px;color:var(--muted);border-left:3px solid var(--line);padding:2px 0 2px 10px;margin-top:10px}
+.note b{color:var(--fg);font-weight:600}
+details.how{margin-top:12px;font-size:12.5px;color:var(--muted)}
+details.how summary{cursor:pointer;color:var(--accent);font-weight:500;width:max-content}
+details.how p{margin-top:6px;max-width:100ch}
+details.how b{color:var(--fg);font-weight:600}
+.big{font-size:16px;line-height:1.45}
+.big b{font-weight:600}
+.gtrack{position:relative;height:14px;background:var(--sunk);border-radius:99px}
+.gfill{position:absolute;inset:0 auto 0 0;border-radius:99px}
+.gmark{position:absolute;top:-5px;bottom:-5px;width:2px;background:var(--muted)}
+.gmark.lim{background:var(--fg);width:3px}
+.gleg{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:8px;font-size:12px;color:var(--muted)}
+.gleg .lim{color:var(--fg);font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12.5px;border-radius:99px;padding:3px 10px;border:1px solid var(--line)}
+.chip.ok{background:var(--ok-soft)} .chip.ok b{color:var(--ok)}
+.chip.bad{background:var(--bad-soft)} .chip.bad b{color:var(--bad)}
+.team{border:1px solid var(--line);border-radius:var(--r);padding:12px;min-width:0}
+.stack{display:flex;height:14px;border-radius:4px;overflow:hidden;background:var(--sunk)}
+.stack i{display:block;height:100%}
+.dumbs{display:grid;gap:8px}
+.drow{display:grid;grid-template-columns:120px minmax(0,1fr);gap:10px;align-items:center;font-size:13px}
+.dumb{display:flex;align-items:center;gap:10px}
+.dtrack{position:relative;flex:1;height:14px}
+.dtrack::before{content:"";position:absolute;left:0;right:0;top:6px;height:2px;background:var(--sunk)}
+.dline{position:absolute;top:0;bottom:0;width:2px;background:var(--muted);opacity:.6}
+.dseg{position:absolute;top:6px;height:2px;opacity:.6}
+.ddot{position:absolute;top:2px;width:10px;height:10px;margin-left:-5px;border-radius:99px}
+.ddot.from{border:2px solid var(--muted);background:var(--surface)}
+.dumb .num{width:96px;text-align:right}
+.mrows{display:grid;gap:6px;margin-top:12px}
+.mrow{display:grid;grid-template-columns:190px minmax(0,1fr) 140px;gap:12px;align-items:center;font-size:13px}
+.mini{position:relative;display:grid;grid-template-columns:repeat(12,1fr);gap:3px;height:34px;align-items:end;background:var(--sunk);border-radius:4px;padding:2px}
+.mini i{display:block;border-radius:2px 2px 0 0;min-height:2px}
+.mline{position:absolute;left:0;right:0;height:0;border-top:1.5px dashed var(--fg);opacity:.5}
+.mlab{display:flex;justify-content:space-between;font-size:11px;color:var(--muted)}
+ul.todo{margin:8px 0 0;padding-left:18px;display:grid;gap:4px}
+.okc{color:var(--ok);font-weight:600}
+.sbx{display:grid;grid-template-columns:340px minmax(0,1fr);gap:14px;align-items:start}
+.levers{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;display:grid;gap:14px}
+.lg{display:grid;gap:8px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+.lg h3{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.lever{display:grid;gap:2px;font-size:12.5px}
+.lever b{color:var(--accent)}
+.row.li{gap:6px;align-items:center;font-size:12.5px}
+.results{min-width:0}
+.verdict{border-left:4px solid var(--accent)}
+.verdict ul{margin:8px 0 0;padding-left:18px;display:grid;gap:6px;font-size:14.5px}
+details.card summary{cursor:pointer}
+.ptabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.ptabs button{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:3px 12px;cursor:pointer;font-size:12.5px}
+.ptabs button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.node.swapped{border-color:var(--new);box-shadow:0 0 0 2px var(--new-soft)}
+.node select{width:100%}
+.tok{display:none}
+#cmap.playing .tok{display:block;position:absolute;left:10px;bottom:6px;width:8px;height:8px;border-radius:99px;background:var(--new);animation:tok 1.6s linear infinite}
+@keyframes tok{from{left:10px}to{left:calc(100% - 18px)}}
+@media (prefers-reduced-motion:reduce){#cmap.playing .tok{animation:none}}
+.hm{border-collapse:separate;border-spacing:2px;font-size:11.5px}
+.hm td{border:0;padding:0;text-align:center;font-family:var(--mono);height:24px;min-width:40px;border-radius:3px}
+.hm th{border:0;padding:2px 4px;font-weight:500}
+.hm td.name{text-align:left;font-family:var(--font);padding-right:8px;white-space:nowrap;min-width:0}
+.hm td.onb{outline:2px solid var(--new);outline-offset:-2px}
+.map{display:flex;gap:10px;overflow-x:auto;padding:4px 2px 10px}
+.node{flex:0 0 200px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px;cursor:pointer;position:relative}
+.node:hover{border-color:var(--accent)}
+.node.on{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+.node h3{font-size:12.5px;margin-bottom:4px}
+.node .who{font-size:11.5px;color:var(--muted)}
+.node .hrs{font-family:var(--mono);font-size:12px;margin:6px 0 4px}
+.node .arrow{position:absolute;right:-10px;top:50%;width:10px;height:2px;background:var(--line)}
+.inspector{border-left:3px solid var(--accent);margin-top:12px}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.chgcard{border:1px solid var(--line);border-radius:6px;padding:8px 10px;display:grid;gap:6px;background:var(--surface)}
+.chgcard .ct{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.chgcard .ct b{font-weight:600;font-size:13px}
+.kind{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.scen{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.scen button{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:4px 12px;cursor:pointer}
+.scen button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.cmpchk{display:inline-flex;gap:4px;align-items:center;font-size:12px;color:var(--muted);margin-left:4px}
+.answer{background:var(--accent-soft);border-radius:var(--r);padding:12px 14px;font-size:14px}
+.answer b{font-weight:600}
+.svgc{width:100%;height:auto;display:block}
+.svgc text{fill:var(--muted);font-family:var(--mono);font-size:15px}
+.cmp td:first-child{min-width:190px}
+.list{display:grid;gap:8px}
+.issue{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center}
+.dot{width:10px;height:10px;border-radius:99px;display:inline-block}
+details.nc summary{cursor:pointer}
+details.nc[open]{background:var(--sunk)}
+.flag{color:var(--bad);font-weight:600}
+@media (max-width:1100px){.sbx{grid-template-columns:1fr}.levers{position:static;max-height:none}}
+@media (max-width:900px){.g2,.g3,.cols{grid-template-columns:1fr}.mrow{grid-template-columns:110px minmax(0,1fr)}.mrow>span:last-child{grid-column:2}.drow{grid-template-columns:90px minmax(0,1fr)}}
+@media (max-width:760px){
+  .shell{grid-template-columns:1fr}
+  .nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:9;height:auto;display:flex;gap:4px;overflow-x:auto;padding:8px max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));border-right:0;border-bottom:1px solid var(--line)}
+  body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+  .nav .grp,.brand{display:none}
+  .nav a{white-space:nowrap;flex:none}
+  .nav a .tag{display:none}
+  .main{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+}
+@media (prefers-reduced-motion:no-preference){.busy .bar i{transition:width .25s}}
+</style>
+
+<div class="shell">
+  <nav class="nav" id="nav" aria-label="Main"></nav>
+  <main class="main" id="main"></main>
+</div>
+
+<script>
+/* ============================================================
+   PROTOTYPE — throwaway. Example data shaped like the client;
+   the calculator is a simple monthly average, not the engine.
+   ============================================================ */
+const WEEKS = 52 / 12;
+let TIERS = ['T1', 'T2', 'T3'];
+const MONTHS = ['Nov 26','Dec 26','Jan 27','Feb 27','Mar 27','Apr 27','May 27','Jun 27','Jul 27','Aug 27','Sep 27','Oct 27'];
+const DEPTS = { org: 'Organic (SEO)', perf: 'Performance' };
+
+function base() {
+  return {
+    leave: 0.08,
+    hiringDelay: 2,
+    tierList: ['T1', 'T2', 'T3'],
+    both: { T1: 1, T2: 5, T3: 8 },
+    tiers: {
+      org:  { T1: { fee: 11000, words: 4000, links: 8, techH: 10, meet: 4, adhocP: 0.9, adhoc: 6.5, churn: 0.010 },
+              T2: { fee: 4500,  words: 1500, links: 5, techH: 5,  meet: 1, adhocP: 0.7, adhoc: 4,   churn: 0.020 },
+              T3: { fee: 3000,  words: 1000, links: 3, techH: 2,  meet: 1, adhocP: 0.5, adhoc: 4,   churn: 0.025 } },
+      perf: { T1: { fee: 8000, channels: 4,   builds: 5,   creatives: 2,   meet: 4, adhocP: 0.95, adhoc: 8.5, churn: 0.010 },
+              T2: { fee: 3500, channels: 1.5, builds: 3,   creatives: 1,   meet: 1, adhocP: 0.7,  adhoc: 4.3, churn: 0.020 },
+              T3: { fee: 2200, channels: 1.2, builds: 1.5, creatives: 0.5, meet: 1, adhocP: 0.5,  adhoc: 4,   churn: 0.025 } },
+    },
+    roles: {
+      dir_org:  { name: 'SEO Director',                     dept: 'org',  kind: 'cf',     thr: 0.85, rule: 10 },
+      mgr_org:  { name: 'SEO Manager / Analyst',            dept: 'org',  kind: 'cf',     thr: 0.85, rule: 10 },
+      content:  { name: 'Content team',                     dept: 'org',  kind: 'shared', thr: 0.85 },
+      links:    { name: 'Link outreach (offshore)',         dept: 'org',  kind: 'shared', thr: 0.85 },
+      tech:     { name: 'Technical SEO',                    dept: 'org',  kind: 'shared', thr: 0.85 },
+      dir_perf: { name: 'Performance Director',             dept: 'perf', kind: 'cf',     thr: 0.80, rule: 6 },
+      pmm:      { name: 'Performance Marketing Manager',    dept: 'perf', kind: 'cf',     thr: 0.85, rule: 15 },
+      impl:     { name: 'Performance implementers',         dept: 'perf', kind: 'shared', thr: 0.85 },
+      track:    { name: 'Conversion tracking',              dept: 'perf', kind: 'shared', thr: 0.85 },
+    },
+    people: [
+      { id: 'laura',   name: 'Laura',    title: 'SEO Director',                  role: 'dir_org', hpw: 38, mgmt: 0.35, speed: 1.5,  salary: 12500, tiers: 'T1 T2 T3', counts: { T1: 0, T2: 2, T3: 7 } },
+      { id: 'karl',    name: 'Karl',     title: 'Senior SEO Manager & Link Lead', role: 'mgr_org', hpw: 38, mgmt: 0.20, speed: 1.4,  salary: 10000, tiers: 'T1 T2 T3', counts: { T1: 0, T2: 5, T3: 5 } },
+      { id: 'nadiya',  name: 'Nadiya',   title: 'SEO Manager',                   role: 'mgr_org', hpw: 38, mgmt: 0,    speed: 1,    salary: 7500,  tiers: 'T2 T3',    counts: { T1: 0, T2: 6, T3: 9 } },
+      { id: 'zach',    name: 'Zach',     title: 'SEO Manager',                   role: 'mgr_org', hpw: 38, mgmt: 0,    speed: 1,    salary: 7500,  tiers: 'T1 T2 T3', counts: { T1: 0, T2: 4, T3: 6 } },
+      { id: 'jc',      name: 'JC',       title: 'Senior SEO Analyst',            role: 'mgr_org', hpw: 38, mgmt: 0,    speed: 0.9,  salary: 6500,  tiers: 'T2 T3',    counts: { T1: 0, T2: 3, T3: 6 } },
+      { id: 'khas',    name: 'Khaselyn', title: 'SEO Analyst',                   role: 'mgr_org', hpw: 38, mgmt: 0,    speed: 0.75, salary: 5500,  tiers: 'T3',       counts: { T1: 0, T2: 0, T3: 5 } },
+      { id: 'resign',  name: 'SEO Manager (resigned)', title: 'Leaves in December', role: 'mgr_org', hpw: 38, mgmt: 0, speed: 1, salary: 7500, tiers: 'T2 T3', counts: { T1: 0, T2: 7, T3: 12 }, end: 1 },
+      { id: 'sarah',   name: 'Sarah',    title: 'Content Manager (writes, edits)', role: 'content', hpw: 38, mgmt: 0.25, speed: 1.2, salary: 8500 },
+      { id: 'jess',    name: 'Jess',     title: 'SEO Copywriter',                role: 'content', hpw: 38, mgmt: 0, speed: 1, salary: 6000 },
+      { id: 'chloe',   name: 'Chloe',    title: 'SEO Copywriter',                role: 'content', hpw: 38, mgmt: 0, speed: 1, salary: 6000 },
+      { id: 'hayley',  name: 'Hayley',   title: 'Content Specialist',            role: 'content', hpw: 38, mgmt: 0, speed: 1, salary: 6500 },
+      { id: 'free',    name: 'Freelancers (4, pooled)', title: 'Contractors · not in DLER', role: 'content', hpw: 40, mgmt: 0, speed: 1, salary: 0, contractor: true },
+      { id: 'tonie',   name: 'Tonie',    title: 'Outreach Specialist · offshore', role: 'links', hpw: 40, mgmt: 0, speed: 1, salary: 3000 },
+      { id: 'jasfer',  name: 'Jasfer',   title: 'Outreach Specialist · offshore', role: 'links', hpw: 40, mgmt: 0, speed: 1, salary: 3000 },
+      { id: 'henry',   name: 'Henry',    title: 'Technical SEO Director',        role: 'tech', hpw: 38, mgmt: 0.30, speed: 1, salary: 11000 },
+      { id: 'everhardt', name: 'Everhardt', title: 'Senior Technical SEO Manager', role: 'tech', hpw: 38, mgmt: 0, speed: 1, salary: 9000 },
+      { id: 'sid',     name: 'Sid',      title: 'Technical SEO Specialist',      role: 'tech', hpw: 38, mgmt: 0, speed: 1, salary: 7000 },
+      { id: 'wendlley', name: 'Wendlley', title: 'Performance Director',         role: 'dir_perf', hpw: 38, mgmt: 0.5, speed: 1.3, salary: 12500, tiers: 'T1 T2 T3', counts: { T1: 0, T2: 0, T3: 0 } },
+      { id: 'sophie',  name: 'Sophie',   title: 'Senior PMM',                    role: 'pmm', hpw: 38, mgmt: 0, speed: 1.15, salary: 9500, tiers: 'T1 T2 T3', counts: { T1: 0, T2: 6, T3: 5 } },
+      { id: 'shrishti', name: 'Shrishti', title: 'Senior PMM',                   role: 'pmm', hpw: 38, mgmt: 0, speed: 1.15, salary: 9500, tiers: 'T1 T2 T3', counts: { T1: 0, T2: 6, T3: 6 } },
+      { id: 'diya',    name: 'Diya',     title: 'PMM',                           role: 'pmm', hpw: 38, mgmt: 0, speed: 1, salary: 7500, tiers: 'T2 T3', counts: { T1: 0, T2: 8, T3: 12 } },
+      { id: 'thomas',  name: 'Thomas',   title: 'PMM',                           role: 'pmm', hpw: 38, mgmt: 0, speed: 1, salary: 7500, tiers: 'T2 T3', counts: { T1: 0, T2: 6, T3: 7 } },
+      { id: 'tanya',   name: 'Tanya',    title: 'PMM',                           role: 'pmm', hpw: 38, mgmt: 0, speed: 1, salary: 7500, tiers: 'T2 T3', counts: { T1: 0, T2: 5, T3: 7 } },
+      { id: 'tatiana', name: 'Tatiana',  title: 'Performance Coordinator',       role: 'impl', hpw: 38, mgmt: 0, speed: 1, salary: 6000 },
+      { id: 'michaela', name: 'Michaela', title: 'Performance Specialist',       role: 'impl', hpw: 38, mgmt: 0, speed: 1, salary: 6500 },
+      { id: 'liam',    name: 'Liam',     title: 'Conversion Tracking Specialist', role: 'track', hpw: 38, mgmt: 0, speed: 1, salary: 7500 },
+    ],
+    named: [
+      { id: 'n1',  name: 'Harbourline Group',  dept: 'org',  owner: 'laura',    fee: 13000, handH: 3, adhocP: 1, adhoc: 8, meet: 4, alsoOther: true },
+      { id: 'n2',  name: 'Meridian Finance',   dept: 'org',  owner: 'laura',    fee: 11000 },
+      { id: 'n3',  name: 'Bluegum Education',  dept: 'org',  owner: 'laura',    fee: 9500 },
+      { id: 'n4',  name: 'Kestrel Motors',     dept: 'org',  owner: 'karl',     fee: 12000, handH: 4, adhocP: 1, adhoc: 10, adhocMin: 60, note: 'Daily contact; same-day turnaround' },
+      { id: 'n5',  name: 'Atlas Legal',        dept: 'org',  owner: 'karl',     fee: 10000 },
+      { id: 'n6',  name: 'Solace Dental',      dept: 'org',  owner: 'zach',     fee: 9000 },
+      { id: 'n7',  name: 'Northwind Retail',   dept: 'perf', owner: 'wendlley', fee: 9000, channels: 6, alsoOther: true },
+      { id: 'n8',  name: 'Coastline Homes',    dept: 'perf', owner: 'wendlley', fee: 8000, channels: 4 },
+      { id: 'n9',  name: 'Pinnacle Mortgage',  dept: 'perf', owner: 'wendlley', fee: 7500, channels: 4 },
+      { id: 'n10', name: 'Granite Super',      dept: 'perf', owner: 'wendlley', fee: 8500, channels: 4 },
+      { id: 'n11', name: 'Larch & Co',         dept: 'perf', owner: 'sophie',   fee: 7000, channels: 3 },
+      { id: 'n12', name: 'Riverbend Health',   dept: 'perf', owner: 'shrishti', fee: 8000, channels: 5, handH: 3, adhocP: 1, adhoc: 10, note: 'Own dashboards; budgets change monthly' },
+      { id: 'n13', name: 'Summit Auto',        dept: 'perf', owner: 'shrishti', fee: 7500, channels: 4 },
+    ],
+    demand: {
+      sources: [ { name: 'Partner referrals', leads: 6 }, { name: 'Meta ads', leads: 14 }, { name: 'Inbound', leads: 10 } ],
+      winRate: 0.10, cycle: 2,
+      deptMix: { org: 0.5, perf: 0.5 },
+      tierMix: { T1: 0.1, T2: 0.4, T3: 0.5 },
+      season: [1.2, 0.8, 0.9, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+      market: 'Stable',
+    },
+    churnDrivers: [
+      { name: 'Cash flow and the economy', weight: 35, on: true },
+      { name: 'Results (rankings, CPL)', weight: 25, on: true },
+      { name: 'Slow responses / going through the motions', weight: 15, on: true },
+      { name: 'New marketing contact at the client', weight: 10, on: true },
+      { name: 'Reseller brings work in-house', weight: 10, on: true },
+      { name: 'Overload (late work)', weight: 5, on: true },
+    ],
+  };
+}
+
+const MARKET = { Boom: { leads: 1.3, churn: 0.8 }, Stable: { leads: 1, churn: 1 }, Soft: { leads: 0.85, churn: 1.15 }, Downturn: { leads: 0.65, churn: 1.4 } };
+
+/* Steps. who: 'owner' = the client's own manager; a role key = that shared team; '@id' = one named person.
+   freq: number, per-tier object, or a tier field name. split: automatable / augmentable / manual %. */
+const PROCS = [
+  { id: 'org-serv', dept: 'org', name: 'Organic monthly servicing', kind: 'Servicing, per client a month', steps: [
+    { id: 'o1',  name: 'Meeting prep & notes',          who: 'owner',   min: 30,  freq: 'meet',     mult: { T1: 1.5 }, split: [50, 30, 20], purpose: 'Client meetings', src: 'Interview', parts: ['Pull GA4 / GSC / rankings into one view', 'Talking points', 'The "so what"'] },
+    { id: 'o2',  name: 'Client meeting (WIP)',          who: 'owner',   min: 40,  freq: 'meet',     split: [0, 10, 90], purpose: 'Client meetings', src: 'Interview', parts: ['—', 'Live notes', 'The conversation'] },
+    { id: 'o3',  name: 'Content briefs',                who: 'owner',   min: 20,  freq: 'words1k', split: [60, 30, 10], purpose: 'Content', src: 'Interview', parts: ['Split the plan into briefs, hand off to writers', 'Research bank (stats, compliance)', 'Angle and priorities'] },
+    { id: 'o4',  name: 'Writing (per 1,000 words)',                       who: 'content', min: 240, freq: 'words1k', split: [0, 15, 85], purpose: 'Content', src: 'Estimate', parts: ['—', 'Research', 'All writing stays human'] },
+    { id: 'o5',  name: 'Editing & QA (per 1,000 words)',                  who: 'content', min: 45,  freq: 'words1k', split: [20, 30, 50], purpose: 'Content', src: 'Estimate', parts: ['Intake, filing, notify editor', 'Style checks', 'Editing'] },
+    { id: 'o6',  name: 'Content upload & coordination', who: 'owner',   min: 30,  freq: 'words1k', split: [40, 30, 30], purpose: 'Content', src: 'Estimate', parts: ['Upload, metadata', 'Page draft', 'Client approval chasing'] },
+    { id: 'o7',  name: 'Link outreach',                 who: 'links',   min: 30,  freq: 'links',    split: [30, 30, 40], purpose: 'Links', src: 'Estimate', parts: ['Find candidate domains', 'Outreach drafts', 'Negotiation with publishers'] },
+    { id: 'o8',  name: 'Domain vetting',                who: '@karl',   min: 4,   freq: 'links',    split: [60, 20, 20], purpose: 'Links', src: 'Interview', parts: ['Metrics pull + AI spam pre-screen', '—', 'Final look'] },
+    { id: 'o9',  name: 'Link admin & live checks',      who: 'links',   min: 10,  freq: 'links',    split: [70, 10, 20], purpose: 'Links', src: 'Interview', parts: ['Record, invoice, check it is live', '—', 'Disputes'] },
+    { id: 'o10', name: 'Technical tickets',             who: 'tech',    min: 60,  freq: 'techH',    split: [10, 30, 60], purpose: 'Technical', src: 'Calculator', parts: ['Crawls and checks', 'Fix drafts', 'Implementation'] },
+    { id: 'o11', name: 'Project plan & approvals',      who: 'owner',   min: 120, freq: 1, mult: { T1: 1.5, T3: 0.7 }, split: [40, 30, 30], purpose: 'Account management', src: 'Estimate', parts: ['Plan updates, reminders', 'Status summaries', 'Client follow-up'] },
+    { id: 'o12', name: 'Monthly report',                who: 'owner',   min: 60,  freq: 1, mult: { T1: 1.5, T3: 0.7 }, split: [50, 30, 20], purpose: 'Reporting', src: 'Interview', parts: ['Data and "work completed / planned" page', 'Commentary draft', 'Narrative'] },
+    { id: 'o13', name: 'Strategy review',               who: 'owner',   min: 480, freq: { T1: 1/3, T2: 1/6, T3: 1/6 }, split: [20, 40, 40], purpose: 'Strategy', src: 'Interview', parts: ['Data pull', 'Deck draft', 'Strategy'] },
+    { id: 'o14', name: 'Ad-hoc requests & email',       who: 'owner',   min: 45,  freq: 'adhoc',    split: [0, 30, 70], purpose: 'Ad hoc', src: 'Estimate', parts: ['—', 'Reply drafts', 'The answer'] },
+    { id: 'o15', name: 'Tracking troubleshooting',      who: 'track',   min: 60,  freq: 0.15,       split: [40, 20, 40], purpose: 'Technical', src: 'Estimate', parts: ['Change monitor', 'Diagnosis', 'Fix'] },
+  ]},
+  { id: 'org-onb', dept: 'org', name: 'Organic onboarding', kind: 'Once per new client, month one', onb: true, steps: [
+    { id: 'ob1', name: 'Kickoff & access',             who: 'owner', min: 120, freq: 1, mult: { T1: 1.5, T3: 0.7 }, split: [20, 20, 60], purpose: 'Onboarding', src: 'Interview', parts: ['Access checklist', 'Agenda', 'Call'] },
+    { id: 'ob2', name: 'Keyword research & mapping',   who: 'owner', min: 600, freq: 1, mult: { T1: 1.5, T3: 0.7 }, split: [40, 40, 20], purpose: 'Onboarding', src: 'Interview', parts: ['Prefilled research and metadata', 'Mapping with AI', 'Checks'] },
+    { id: 'ob3', name: 'Technical audit',              who: 'tech',  min: 720, freq: 1, mult: { T1: 1.5, T3: 0.7 }, split: [40, 30, 30], purpose: 'Onboarding', src: 'Estimate', parts: ['Crawl and checks', 'Write-up', 'Priorities'] },
+    { id: 'ob4', name: 'Content & link plans',         who: 'owner', min: 360, freq: 1, mult: { T1: 1.5, T3: 0.7 }, split: [30, 40, 30], purpose: 'Onboarding', src: 'Interview', parts: ['Topic lists', 'Plan drafts', 'Choices'] },
+    { id: 'ob5', name: 'Strategy deck & roadmap',      who: 'owner', min: 360, freq: 1, mult: { T1: 1.5, T3: 0.7 }, split: [40, 30, 30], purpose: 'Onboarding', src: 'Interview', parts: ['First draft', 'Story', 'Judgement'] },
+    { id: 'ob6', name: 'Strategy presentation',        who: 'owner', min: 90,  freq: 1, split: [0, 10, 90], purpose: 'Onboarding', src: 'Interview', parts: ['—', 'Notes', 'The call'] },
+  ]},
+  { id: 'perf-serv', dept: 'perf', name: 'Performance monthly servicing', kind: 'Servicing, per client a month', steps: [
+    { id: 'p1',  name: 'Pacing checks',                    who: 'owner', min: 25,  freq: 1, perChannel: true, split: [70, 20, 10], purpose: 'Pacing', src: 'Interview', parts: ['Pull spend vs budget, flag under/over', 'Work out new budgets', 'The budget decision'] },
+    { id: 'p2',  name: 'Performance review & optimisation', who: 'owner', min: 45,  freq: 1, perChannel: true, split: [30, 40, 30], purpose: 'Optimisation', src: 'Interview', parts: ['Anomaly alerts', 'Diagnosis help', 'Decisions'] },
+    { id: 'p3',  name: 'Implementation briefs',            who: 'owner', min: 20,  freq: 'builds', split: [50, 30, 20], purpose: 'Implementation', src: 'Interview', parts: ['Brief from the decision', 'Draft copy', 'Review'] },
+    { id: 'p4',  name: 'Campaign builds & changes',        who: 'impl',  min: 45,  freq: 'builds', split: [10, 40, 50], purpose: 'Implementation', src: 'Interview', parts: ['Bulk edits', 'Copy and assets', 'Build'] },
+    { id: 'p5',  name: 'Ad QA',                            who: 'owner', min: 20,  freq: 'builds', split: [60, 10, 30], purpose: 'Implementation', src: 'Interview', parts: ['Format and spelling checks', '—', 'Final check'] },
+    { id: 'p6',  name: 'Meeting prep & notes',             who: 'owner', min: 40,  freq: 'meet', mult: { T1: 1.5 }, split: [60, 25, 15], purpose: 'Client meetings', src: 'Interview', parts: ['Collate data across platforms', 'Talking points', 'The "so what"'] },
+    { id: 'p7',  name: 'Client meeting (WIP)',             who: 'owner', min: 40,  freq: 'meet', split: [0, 10, 90], purpose: 'Client meetings', src: 'Interview', parts: ['—', 'Notes', 'The conversation'] },
+    { id: 'p8',  name: 'Monthly report commentary',        who: 'owner', min: 30,  freq: 1, mult: { T1: 1.5, T3: 0.7 }, split: [40, 40, 20], purpose: 'Reporting', src: 'Interview', parts: ['Date checks, metric pull', 'Commentary draft', 'Narrative'] },
+    { id: 'p9',  name: 'Quarterly review deck',            who: 'owner', min: 300, freq: { T1: 1/3, T2: 1/3, T3: 1/6 }, split: [50, 30, 20], purpose: 'Strategy', src: 'Interview', parts: ['Deck draft', 'Story', 'Review'] },
+    { id: 'p10', name: 'Ad-hoc requests & email',          who: 'owner', min: 25,  freq: 'adhoc', split: [0, 30, 70], purpose: 'Ad hoc', src: 'Estimate', parts: ['—', 'Reply drafts', 'The answer'] },
+    { id: 'p12', name: 'Creative sets',                    who: 'impl',  min: 60,  freq: 'creatives', split: [20, 40, 40], purpose: 'Creative', src: 'Interview', parts: ['Resizing, format checks', 'Copy and image drafts', 'Design choices'] },
+    { id: 'p13', name: 'PPC hygiene tasks',                who: 'impl',  min: 10,  freq: 1, perChannel: true, split: [40, 30, 30], purpose: 'Optimisation', src: 'Interview', parts: ['Search-term pulls, negative lists', 'Suggestions', 'Applying changes'] },
+    { id: 'p11', name: 'Tracking troubleshooting',         who: 'track', min: 60,  freq: 0.3, split: [40, 20, 40], purpose: 'Technical', src: 'Interview', parts: ['Site-change monitor', 'Diagnosis', 'Fix'] },
+  ]},
+  { id: 'perf-onb', dept: 'perf', name: 'Performance onboarding', kind: 'Once per new client, month one', onb: true, steps: [
+    { id: 'pb1', name: 'Discovery & access',       who: 'owner', min: 180, freq: 1, split: [20, 20, 60], purpose: 'Onboarding', src: 'Interview', parts: ['Access requests', 'Questionnaire', 'Calls'] },
+    { id: 'pb2', name: 'Account audit',            who: 'owner', min: 600, freq: 1, mult: { T1: 1.5, T3: 0.7 }, split: [40, 40, 20], purpose: 'Onboarding', src: 'Interview', parts: ['Audit template, data pull', 'Findings draft', 'Review'] },
+    { id: 'pb3', name: 'Strategy & KPIs',          who: 'owner', min: 420, freq: 1, mult: { T1: 1.5, T3: 0.7 }, split: [20, 50, 30], purpose: 'Onboarding', src: 'Interview', parts: ['Benchmarks', 'Keyword research, copy drafts', 'Strategy'] },
+    { id: 'pb4', name: 'Conversion tracking set-up', who: 'track', min: 360, freq: 1, split: [30, 30, 40], purpose: 'Onboarding', src: 'Interview', parts: ['Tag checks', 'Set-up', 'Testing'] },
+    { id: 'pb5', name: 'Campaign build',           who: 'impl',  min: 720, freq: 1, mult: { T1: 1.5, T3: 0.7 }, split: [10, 40, 50], purpose: 'Onboarding', src: 'Interview', parts: ['Bulk build', 'Copy', 'Build'] },
+    { id: 'pb6', name: 'Launch checklist & QA',    who: 'owner', min: 120, freq: 1, split: [50, 10, 40], purpose: 'Onboarding', src: 'Interview', parts: ['Automated checks', '—', 'Sign-off'] },
+  ]},
+];
+const STEP = {}; PROCS.forEach(p => p.steps.forEach(s => { STEP[s.id] = s; s.proc = p.id; }));
+const SALES = ['Lead arrives (HubSpot)', 'Call within 5 min', 'Discovery', 'Pitch or strategy', 'Contract', 'Handover to delivery'];
+
+/* The client's change list (requirements section 8). effects act on parts of steps. */
+const LIB = [
+  { id: 'pacing',   dept: 'perf', kind: 'Automation',   name: 'Unified pacing with alerts', adoption: 90, effects: [{ step: 'p1', part: 'auto', remove: 0.85, residual: 2 }, { step: 'p1', part: 'aug', factor: 1.5 }], cost: 300 },
+  { id: 'anomaly',  dept: 'perf', kind: 'Automation',   name: 'Anomaly and threshold alerts', adoption: 80, effects: [{ step: 'p2', part: 'auto', remove: 0.7, residual: 2 }] , cost: 200 },
+  { id: 'briefs-p', dept: 'perf', kind: 'Augmentation', name: 'Auto-generated implementation briefs', adoption: 80, effects: [{ step: 'p3', part: 'auto', remove: 0.6 }, { step: 'p3', part: 'aug', factor: 1.8 }] },
+  { id: 'prep-p',   dept: 'perf', kind: 'Augmentation', name: 'Pre-call data collation and talking points', adoption: 80, effects: [{ step: 'p6', part: 'auto', remove: 0.8, residual: 3 }, { step: 'p6', part: 'aug', factor: 1.5 }] },
+  { id: 'comment',  dept: 'perf', kind: 'Augmentation', name: 'Report commentary drafts', adoption: 70, effects: [{ step: 'p8', part: 'auto', remove: 0.7 }, { step: 'p8', part: 'aug', factor: 2 }] },
+  { id: 'deck',     dept: 'perf', kind: 'Automation',   name: 'Quarterly review deck generation', adoption: 80, effects: [{ step: 'p9', part: 'auto', remove: 0.8, residual: 20 }] },
+  { id: 'adqa',     dept: 'perf', kind: 'Automation',   name: 'Meta ad QA checker', adoption: 90, effects: [{ step: 'p5', part: 'auto', remove: 0.75, residual: 2 }] },
+  { id: 'onb-o',    dept: 'org',  kind: 'Automation',   name: 'SEO onboarding to about a third', adoption: 80, effects: ['ob1', 'ob2', 'ob4', 'ob5'].flatMap(s => [{ step: s, part: 'auto', remove: 0.9 }, { step: s, part: 'aug', factor: 2 }]) },
+  { id: 'briefs-o', dept: 'org',  kind: 'Automation',   name: 'Content brief automation and freelancer handoff', adoption: 85, effects: [{ step: 'o3', part: 'auto', remove: 0.85, residual: 2 }, { step: 'o5', part: 'auto', remove: 0.6 }] },
+  { id: 'vet',      dept: 'org',  kind: 'Automation',   name: 'AI link-domain pre-vetting', adoption: 90, effects: [{ step: 'o8', part: 'auto', remove: 0.8 }, { step: 'o7', part: 'auto', remove: 0.3 }] },
+  { id: 'linkops',  dept: 'org',  kind: 'Automation',   name: 'Link health monitor, publisher CRM, invoice chasing', adoption: 85, effects: [{ step: 'o9', part: 'auto', remove: 0.8, residual: 1 }] },
+  { id: 'report-o', dept: 'org',  kind: 'Automation',   name: 'Report "work completed / planned" page', adoption: 90, effects: [{ step: 'o12', part: 'auto', remove: 0.7 }] },
+  { id: 'prep-o',   dept: 'org',  kind: 'Augmentation', name: 'Pre-call data collation (Organic)', adoption: 80, effects: [{ step: 'o1', part: 'auto', remove: 0.8, residual: 3 }, { step: 'o1', part: 'aug', factor: 1.5 }] },
+  { id: 'slides',   dept: 'org',  kind: 'Automation',   name: 'Review slides for small clients', adoption: 70, tiers: ['T3'], effects: [{ step: 'o13', part: 'auto', remove: 0.8 }, { step: 'o13', part: 'aug', factor: 1.5 }] },
+];
+const LIBI = Object.fromEntries(LIB.map(l => [l.id, l]));
+
+/* ---------- state ---------- */
+let S = base();
+TIERS = S.tierList;
+const UI = {
+  scen: [
+    { id: 'base', name: 'Today (baseline)', changes: [], fixed: true },
+    { id: 's1', name: 'Add 5 clients in January', changes: [{ type: 'add', dept: 'org', tier: 'T2', n: 3, start: 2, spread: 1 }, { type: 'add', dept: 'perf', tier: 'T3', n: 2, start: 2, spread: 1 }] },
+    { id: 's2', name: 'Performance automation pack', changes: [{ type: 'lib', lib: 'pacing', start: 1 }, { type: 'lib', lib: 'anomaly', start: 1 }, { type: 'lib', lib: 'prep-p', start: 2 }] },
+    { id: 's3', name: 'Organic automation + link hire', changes: [{ type: 'lib', lib: 'vet', start: 1 }, { type: 'lib', lib: 'linkops', start: 1 }, { type: 'lib', lib: 'briefs-o', start: 2 }, { type: 'hire', role: 'links', start: 3 }] },
+  ],
+  sel: 's1', cmp: { base: true, s1: true, s2: true, s3: false },
+  step: null, procView: 'base', leaver: 'diya', gsDept: 'org', gsTier: 'T2', capMonth: null, timelineRole: 'pmm',
+};
+
+/* ---------- calculator ---------- */
+function role(p) { return S.roles[p.role]; }
+function isCF(p) { return role(p).kind === 'cf'; }
+function canServe(p, tier) { return (p.tiers || '').split(' ').includes(tier); }
+function availH(p, m) {
+  if (p.gone) return 0;
+  if (m != null && p.end != null && m >= p.end) return 0;
+  if (m != null && p.start != null && m < p.start) return 0;
+  let ramp = 1;
+  if (m != null && p.start > 0) { const k = m - p.start; ramp = k < 1 ? 0.4 : k < 2 ? 0.6 : k < 3 ? 0.8 : 1; }
+  return p.hpw * WEEKS * (1 - S.leave) * (1 - (p.mgmt || 0)) * ramp;
+}
+function activeChanges(changes, m) {
+  const out = [];
+  for (const c of changes) {
+    if (c.type !== 'lib' && c.type !== 'steptime') continue;
+    if (m != null && m < (c.start || 0)) continue;
+    let ramp = 1;
+    if (m != null && c.ramp) ramp = Math.min(1, (m - (c.start || 0) + 1) / (c.ramp + 1));
+    out.push({ ...c, ramp });
+  }
+  return out;
+}
+function parts(step, tier, chg) {
+  const b = step.min * ((step.mult && step.mult[tier]) || 1);
+  let a = b * step.split[0] / 100, g = b * step.split[1] / 100, n = b * step.split[2] / 100;
+  for (const c of chg) {
+    if (c.type === 'steptime') { if (c.step === step.id) { a *= c.factor; g *= c.factor; n *= c.factor; } continue; }
+    const d = LIBI[c.lib]; if (!d) continue;
+    if (d.tiers && !d.tiers.includes(tier)) continue;
+    const ad = ((c.adoption != null ? c.adoption : d.adoption) / 100) * (c.ramp == null ? 1 : c.ramp);
+    for (const e of d.effects) {
+      if (e.step !== step.id) continue;
+      if (e.part === 'auto' && a > 0) a = a * (1 - e.remove * ad) + (e.residual || 0) * ad;
+      if (e.part === 'aug' && g > 0) g = g / (1 + (e.factor - 1) * ad);
+    }
+  }
+  return { a, g, n, t: a + g + n, base: b };
+}
+function freqOf(step, dept, tier, nc) {
+  const T = S.tiers[dept][tier] || S.tiers[dept][TIERS[TIERS.length - 1]];
+  const v = k => (nc && nc[k] != null) ? +nc[k] : T[k];
+  let f = step.freq;
+  if (f === 'words1k') f = v('words') / 1000;
+  else if (f === 'adhoc') f = v('adhocP') * v('adhoc');
+  else if (f === 'meet') f = v('meet');
+  else if (typeof f === 'string') f = T[f];
+  else if (typeof f === 'object') f = f[tier] != null ? f[tier] : f[Object.keys(f).pop()];
+  if (step.perChannel) f *= v('channels');
+  return f || 0;
+}
+function clientLoad(dept, tier, nc, chg, onb) {
+  const proc = PROCS.find(p => p.dept === dept && !!p.onb === !!onb);
+  const out = [];
+  for (const st of proc.steps) {
+    const f = freqOf(st, dept, tier, onb ? null : nc);
+    if (!f) continue;
+    let mins = parts(st, tier, chg).t;
+    if (!onb && nc && st.freq === 'adhoc' && nc.adhocMin) mins *= nc.adhocMin / st.min;
+    out.push({ who: st.who, step: st.id, h: mins * f / 60 });
+  }
+  if (!onb && nc && nc.handH) out.push({ who: 'owner', step: 'hand', h: +nc.handH });
+  return out;
+}
+function cacheFor(chg) {
+  const c = {};
+  for (const d in DEPTS) for (const t of TIERS) c[d + t] = clientLoad(d, t, null, chg, false);
+  return c;
+}
+/* Loads for one moment. people carry counts; named carry owners; onb = [{dept,tier,owner}]. */
+function loads(people, named, chg, m, onb, cache) {
+  cache = cache || cacheFor(chg);
+  const byId = Object.fromEntries(people.map(p => [p.id, p]));
+  const L = {};
+  for (const p of people) L[p.id] = { p, steps: {}, own: 0, avail: availH(p, m), clients: 0, ch: 0, t: Object.fromEntries(TIERS.map(x => [x, 0])) };
+  const pool = {};
+  const add = (who, owner, step, h) => {
+    let id = null;
+    if (who === 'owner') id = owner; else if (who[0] === '@') id = who.slice(1);
+    if (id && L[id]) { L[id].steps[step] = (L[id].steps[step] || 0) + h; return; }
+    if (!pool[who]) pool[who] = { steps: {}, total: 0 };
+    pool[who].steps[step] = (pool[who].steps[step] || 0) + h; pool[who].total += h;
+  };
+  for (const p of people) {
+    if (!isCF(p) || !p.counts) continue;
+    const d = role(p).dept;
+    for (const t of TIERS) {
+      const n = p.counts[t] || 0; if (n <= 0) continue;
+      L[p.id].clients += n; L[p.id].t[t] += n;
+      if (d === 'perf') L[p.id].ch += n * S.tiers.perf[t].channels;
+      for (const it of cache[d + t]) add(it.who, p.id, it.step, it.h * n);
+    }
+  }
+  for (const nc of named) {
+    if (!byId[nc.owner]) continue;
+    L[nc.owner].clients += 1; L[nc.owner].t.T1 += 1;
+    if (nc.dept === 'perf') L[nc.owner].ch += nc.channels != null ? +nc.channels : S.tiers.perf.T1.channels;
+    for (const it of clientLoad(nc.dept, 'T1', nc, chg, false)) add(it.who, nc.owner, it.step, it.h);
+  }
+  for (const o of (onb || [])) for (const it of clientLoad(o.dept, o.tier, null, chg, true)) add(it.who, o.owner, it.step, it.h);
+  for (const id in L) {
+    const x = L[id], p = x.p;
+    if (role(p).kind === 'shared') continue;
+    x.need = Object.values(x.steps).reduce((s, v) => s + v, 0) / p.speed;
+    x.busy = x.avail > 0 ? x.need / x.avail : (x.need > 0 ? 9 : 0);
+  }
+  for (const r in S.roles) {
+    if (S.roles[r].kind !== 'shared') continue;
+    const mem = people.filter(p => p.role === r && availH(p, m) > 0);
+    const cap = mem.reduce((s, p) => s + availH(p, m) * p.speed, 0);
+    const pl = pool[r] || { steps: {}, total: 0 };
+    const busy = cap > 0 ? pl.total / cap : (pl.total > 0 ? 9 : 0);
+    for (const p of people.filter(q => q.role === r)) {
+      const x = L[p.id]; x.busy = x.avail > 0 ? busy : 0; x.need = x.avail * p.speed * busy / p.speed;
+      const share = cap > 0 ? (availH(p, m) * p.speed) / cap : 0;
+      for (const s in pl.steps) x.steps[s] = pl.steps[s] * share;
+    }
+    pool[r].busy = busy; pool[r].cap = cap;
+  }
+  return { L, pool };
+}
+function thr(p) { return role(p).thr; }
+function state(p) { return (x) => x; }
+function cls(busy, t) { return busy >= t ? 'bad' : busy >= t - 0.1 ? 'warn' : 'ok'; }
+
+function applyPeopleChanges(people, named, changes) {
+  for (const c of changes) {
+    if (c.type === 'hire') {
+      const r = S.roles[c.role];
+      const like = people.find(p => p.role === c.role) || {};
+      people.push({ id: 'hire' + people.length, name: 'New hire · ' + r.name, title: 'Starts ' + MONTHS[c.start], role: c.role, hpw: 38, mgmt: 0, speed: 1, salary: like.salary || 7500, tiers: r.kind === 'cf' ? 'T2 T3' : undefined, counts: r.kind === 'cf' ? Object.fromEntries(TIERS.map(x => [x, 0])) : undefined, start: c.start, hired: true });
+    }
+    if (c.type === 'leave') { const p = people.find(q => q.id === c.person); if (p) p.end = c.start; }
+    if (c.type === 'mgmt') { const p = people.find(q => q.id === c.person); if (p) p.mgmt = c.value / 100; }
+  }
+}
+function pickLeastBusy(people, named, chg, m, dept, tier, onb, cache, extra) {
+  const { L } = loads(people, named, chg, m, onb, cache);
+  let best = null, bb = 1e9;
+  for (const p of people) {
+    if (!isCF(p) || role(p).dept !== dept || !canServe(p, tier) || availH(p, m) <= 0) continue;
+    const b = L[p.id].busy + (extra[p.id] || 0);
+    if (b < bb) { bb = b; best = p; }
+  }
+  return best;
+}
+function reassign(people, named, chg, m, leaver, cache) {
+  const d = role(leaver).dept;
+  leaver.gone = true;
+  const moved = [];
+  for (const t of TIERS) {
+    let n = Math.round(leaver.counts ? leaver.counts[t] || 0 : 0);
+    if (leaver.counts) leaver.counts[t] = 0;
+    for (let i = 0; i < n; i++) {
+      const to = pickLeastBusy(people, named, chg, m, d, t, [], cache, {});
+      if (to) { to.counts[t] = (to.counts[t] || 0) + 1; moved.push({ to: to.id, tier: t }); }
+    }
+  }
+  for (const nc of named.filter(x => x.owner === leaver.id)) {
+    const to = pickLeastBusy(people, named.filter(x => x !== nc), chg, m, d, 'T1', [], cache, {});
+    if (to) { nc.owner = to.id; moved.push({ to: to.id, tier: 'T1', name: nc.name }); }
+  }
+  return moved;
+}
+function salaries(people, m, dept) { return people.filter(p => role(p).dept === dept && availH(p, m) > 0 && !p.contractor).reduce((s, p) => s + p.salary, 0); }
+function revenue(people, named, dept, feeX) {
+  let r = 0;
+  for (const p of people) if (isCF(p) && p.counts && role(p).dept === dept) for (const t of TIERS) r += (p.counts[t] || 0) * S.tiers[dept][t].fee * (feeX[dept + t] || 1);
+  for (const nc of named) if (nc.dept === dept) r += +nc.fee * (feeX[dept + 'T1'] || 1);
+  return r;
+}
+function effAt(changes, m) {
+  let mk = MARKET[S.demand.market], leadX = 1, winX = 1, churnX = 1;
+  for (const c of changes) {
+    if (c.start != null && m != null && m < +c.start) continue;
+    if (c.type === 'leads') leadX *= c.x; if (c.type === 'win') winX *= c.x; if (c.type === 'market') mk = MARKET[c.preset]; if (c.type === 'churn') churnX *= c.x;
+    if (c.type === 'fee' && c.pct > 0 && c.sens && m != null && m < +c.start + 3) churnX *= 1 + c.pct / 100 * c.sens;
+  }
+  return { mk, leadX, winX, churnX, feeX: feeMult(changes, m) };
+}
+function feeMult(changes, m) { const f = {}; for (const c of changes) if (c.type === 'fee' && !(m != null && c.start != null && m < +c.start)) for (const d of (c.dept === 'all' ? ['org', 'perf'] : [c.dept])) for (const t of (c.tier === 'all' ? TIERS : [c.tier])) f[d + t] = (f[d + t] || 1) * (1 + c.pct / 100); return f; }
+
+/* Twelve months: existing clients, expected wins and churn, scenario changes. */
+function simulate(changes) {
+  const people = structuredClone(S.people), named = structuredClone(S.named);
+  applyPeopleChanges(people, named, changes);
+  const dem = S.demand;
+  const acc = {}; const months = []; const onbLog = [];
+  let pending = [];
+  for (let m = 0; m < 12; m++) {
+    const chg = activeChanges(changes, m), cache = cacheFor(chg);
+    const E = effAt(changes, m), mk = E.mk, leadX = E.leadX, winX = E.winX, churnX = E.churnX, feeX = E.feeX;
+    for (const c of changes) if (c.type === 'loseNamed' && +c.start === m) { const i = named.findIndex(n => n.id === c.id); if (i >= 0) named.splice(i, 1); }
+    for (const p of people) if (p.end === m) reassign(people, named, chg, m, p, cache);
+    for (const p of people) if (isCF(p) && p.counts) for (const t of TIERS) p.counts[t] *= 1 - S.tiers[role(p).dept][t].churn * mk.churn * churnX;
+    for (const x of pending) { const p = people.find(q => q.id === x.owner); p.counts[x.tier] += 1; }
+    pending = [];
+    const arrivals = [];
+    if (m >= dem.cycle) {
+      const leads = dem.sources.reduce((s, x) => s + x.leads, 0) * dem.season[m] * mk.leads * leadX;
+      const wins = leads * dem.winRate * winX;
+      for (const d in DEPTS) for (const t of TIERS) {
+        const k = d + t; acc[k] = (acc[k] || 0) + wins * dem.deptMix[d] * dem.tierMix[t];
+        while (acc[k] >= 1) { acc[k] -= 1; arrivals.push({ dept: d, tier: t, from: 'leads' }); }
+      }
+    }
+    for (const c of changes) if (c.type === 'add') {
+      const sp = Math.max(1, c.spread || 1);
+      if (m >= c.start && m < c.start + sp) {
+        const per = c.n / sp, before = Math.round(per * (m - c.start)), now = Math.round(per * (m - c.start + 1));
+        for (let i = before; i < now; i++) arrivals.push({ dept: c.dept, tier: c.tier, from: 'added' });
+      }
+    }
+    const onb = [], extra = {};
+    for (const a of arrivals) {
+      const to = pickLeastBusy(people, named, chg, m, a.dept, a.tier, onb, cache, extra);
+      if (!to) continue;
+      onb.push({ dept: a.dept, tier: a.tier, owner: to.id });
+      onbLog.push({ m, dept: a.dept, tier: a.tier, owner: to.id, from: a.from });
+      extra[to.id] = (extra[to.id] || 0) + 0.12;
+      pending.push({ owner: to.id, tier: a.tier });
+    }
+    const { L, pool } = loads(people, named, chg, m, onb, cache);
+    const rec = { m, L, pool, people: structuredClone(people.map(p => ({ id: p.id, name: p.name, role: p.role, end: p.end, start: p.start }))), onb };
+    rec.rev = {}; rec.sal = {}; rec.dler = {}; rec.clients = {}; rec.cf = {};
+    for (const d in DEPTS) {
+      rec.rev[d] = revenue(people, named, d, feeX); rec.sal[d] = salaries(people, m, d);
+      rec.dler[d] = rec.sal[d] ? rec.rev[d] / rec.sal[d] : 0;
+      rec.clients[d] = people.filter(p => isCF(p) && role(p).dept === d).reduce((s, p) => s + TIERS.reduce((q, t) => q + (p.counts[t] || 0), 0), 0) + named.filter(n => n.dept === d).length;
+      rec.cf[d] = people.filter(p => isCF(p) && role(p).dept === d && availH(p, m) > 0).length;
+    }
+    rec.hours = Object.values(L).reduce((s, x) => s + Object.values(x.steps).reduce((a, b) => a + b, 0), 0);
+    months.push(rec);
+  }
+  return { months, onbLog, people, named };
+}
+
+/* Steady state ("today", no onboarding) for a scenario: changes at full effect, people changes applied. */
+function steady(changes, opts) {
+  opts = opts || {};
+  const people = structuredClone(S.people), named = structuredClone(S.named);
+  applyPeopleChanges(people, named, changes);
+  for (const p of people) if (p.start) p.start = 0;
+  const chg = activeChanges(changes, null);
+  for (const p of people) if (p.end != null) { reassign(people, named, chg, null, p, null); p.gone = true; }
+  for (const c of changes) if (c.type === 'add' && opts.withAdds) for (let i = 0; i < c.n; i++) {
+    const to = pickLeastBusy(people, named, chg, null, c.dept, c.tier, [], null, {}); if (to) to.counts[c.tier] += 1;
+  }
+  return { people, named, chg };
+}
+/* Headroom: add clients (one tier, or the win mix) to the least-busy person until someone under their line goes over. */
+function headroom(st, dept, tier) {
+  const people = structuredClone(st.people), named = structuredClone(st.named), chg = st.chg, cache = cacheFor(chg);
+  const first = loads(people, named, chg, null, [], cache).L;
+  const over0 = new Set(Object.keys(first).filter(id => first[id].busy >= thr(first[id].p) && availH(first[id].p, null) > 0));
+  const mix = []; if (tier === 'mix') { const tm = S.demand.tierMix; for (let i = 0; i < 20; i++) { let best = 'T3', gap = -1; for (const t of TIERS) { const want = tm[t] * (i + 1) - mix.filter(x => x === t).length; if (want > gap) { gap = want; best = t; } } mix.push(best); } }
+  for (let k = 1; k <= 150; k++) {
+    const t = tier === 'mix' ? mix[(k - 1) % 20] : tier;
+    let best = null, bb = 1e9;
+    const { L } = loads(people, named, chg, null, [], cache);
+    for (const p of people) { if (!isCF(p) || role(p).dept !== dept || !canServe(p, t) || over0.has(p.id) || availH(p, null) <= 0) continue; if (L[p.id].busy < bb) { bb = L[p.id].busy; best = p; } }
+    if (!best) return { k: k - 1, breaker: null, why: 'Nobody who serves ' + t + ' is under their line' };
+    best.counts[t] += 1;
+    const after = loads(people, named, chg, null, [], cache).L;
+    for (const id in after) {
+      const x = after[id];
+      if (over0.has(id) || availH(x.p, null) <= 0) continue;
+      if (x.busy >= thr(x.p)) { const b0 = L[id].busy, fr = x.busy > b0 ? Math.max(0, Math.min(1, (thr(x.p) - b0) / (x.busy - b0))) : 0; return { k: k - 1 + fr, breaker: x.p, over0: [...over0] }; }
+    }
+  }
+  return { k: 150, breaker: null, over0: [...over0] };
+}
+
+/* How many clients a department can hold: each client-facing person's own maximum at their line
+   (their clients × line ÷ busy), added up, capped by any shared team's capacity at its line. */
+function personMax(x) { return x.busy > 0 ? x.clients * thr(x.p) / x.busy : 0; }
+function capDept(st, d) {
+  const cache = cacheFor(st.chg), mix = S.demand.tierMix;
+  const L = loads(st.people, st.named, st.chg, null, [], cache);
+  const cf = st.people.filter(p => isCF(p) && role(p).dept === d && availH(p, null) > 0);
+  const pr = {};
+  for (const t of TIERS) for (const it of cache[d + t]) if (it.who !== 'owner' && it.who[0] !== '@') pr[it.who] = (pr[it.who] || 0) + (mix[t] || 0) * it.h;
+  const clients = cf.reduce((s, p) => s + L.L[p.id].clients, 0);
+  const per = Object.fromEntries(cf.map(p => [p.id, personMax(L.L[p.id])]));
+  const lim = [{ name: 'Client-facing people', max: Object.values(per).reduce((a, b) => a + b, 0) }];
+  for (const r in pr) {
+    const pl = L.pool[r]; if (!pl || !pl.cap || !pr[r]) continue;
+    let mine = 0; for (const x of Object.values(L.L)) if (x.p.role === r) for (const sId in x.steps) if (STEP[sId] && STEP[sId].proc.startsWith(d)) mine += x.steps[sId];
+    const room = pl.cap * S.roles[r].thr - (pl.total - mine);
+    lim.push({ name: S.roles[r].name, max: Math.max(0, clients + (room - mine) / pr[r]) });
+  }
+  lim.sort((a, b) => a.max - b.max);
+  return { clients, max: lim[0].max, limit: lim[0].name, lims: lim, per };
+}
+function deptEmployees(st, d) { return st.people.filter(p => role(p).dept === d && availH(p, null) > 0 && !p.contractor); }
+function lines(st, L) {
+  const c = d => st.people.filter(p => isCF(p) && role(p).dept === d).reduce((s, p) => s + L[p.id].clients, 0);
+  const org = c('org'), perf = c('perf');
+  const both = TIERS.reduce((s, t) => s + (S.both[t] || 0), 0) + st.named.filter(n => n.alsoOther).length;
+  return { org, perf, both, unique: org + perf - both };
+}
+
+/* ---------- formatting ---------- */
+const f0 = v => Math.round(v).toLocaleString('en-AU');
+const f1 = v => (Math.round(v * 10) / 10).toLocaleString('en-AU', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const pc = v => Math.round(v * 100) + '%';
+const money = v => '$' + (v >= 1e6 ? f1(v / 1e6) + 'M' : v >= 1000 ? f1(v / 1000) + 'k' : f0(v));
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function busyBar(b, t) {
+  const c = cls(b, t), w = Math.min(100, b * 100 / 1.3);
+  return `<div class="busy"><div class="bar"><i class="${c}-c" style="width:${w}%"></i><b style="left:${t * 100 / 1.3}%" title="Line ${pc(t)}"></b></div><span class="num">${pc(b)}</span></div>`;
+}
+function tierChips(t) { return TIERS.filter(x => t[x] > 0.05).map(x => `<span class="pill t">${x} ${f0(t[x])}</span>`).join(' '); }
+function splitBar(a, g, n) { const t = a + g + n || 1; return `<div class="split" title="Automatable ${f0(a * 100 / t)}% · Augmentable ${f0(g * 100 / t)}% · Manual ${f0(n * 100 / t)}%"><i style="width:${a * 100 / t}%;background:var(--auto)"></i><i style="width:${g * 100 / t}%;background:var(--aug)"></i><i style="width:${n * 100 / t}%;background:var(--man)"></i></div>`; }
+const LEG = `<div class="legend"><span style="--c:var(--auto)">Automatable</span><span style="--c:var(--aug)">Augmentable</span><span style="--c:var(--man)">Stays manual</span></div>`;
+function heat(b, t) { const c = cls(b, t); return `background:var(--${c}-soft);color:var(--${c})`; }
+function answers(list) { return `<div class="answers">${list.map(a => `<span><b>${a[0]}</b> ${a[1]}</span>`).join('')}</div>`; }
+function head(title, sub, ans) { return `<div class="head"><div><h1>${title}</h1><p>${sub}</p></div>${ans ? answers(ans) : ''}</div>`; }
+
+/* ---------- shared results ---------- */
+function computeToday() {
+  const st = steady([]);
+  const { L, pool } = loads(st.people, st.named, st.chg, null, [], null);
+  return { st, L, pool };
+}
+function deptStats(st, L, d) {
+  const cf = st.people.filter(p => isCF(p) && role(p).dept === d && !p.gone);
+  const clients = cf.reduce((s, p) => s + L[p.id].clients, 0);
+  const rev = revenue(st.people, st.named, d, {}), sal = salaries(st.people, null, d);
+  return { cf, clients, perEmp: clients / cf.length, rev, sal, dler: rev / sal };
+}
+
+/* ---------- pages ---------- */
+const NAV = [
+  ['', [['overview', 'Overview', 'chg'], ['capacity', 'Capacity', 'new'], ['processes', 'Processes', '']]],
+  ['Plan', [['sandbox', 'Sandbox', 'chg'], ['issues', 'Issues', ''], ['solutions', 'Solutions', ''], ['blocks', 'Block library', '']]],
+  ['Set up (Owner + admins)', [['setup-clients', 'Tiers & clients', 'chg'], ['setup-people', 'People & roles', 'chg'], ['setup-demand', 'Lead flow & market', ''], ['setup-churn', 'Churn', ''], ['setup-other', 'Other settings', '']]],
+  ['', [['about', 'About this prototype', '']]],
+];
+function renderNav(r) {
+  const base = r.split('-')[0] === 'process' ? 'processes' : r.split('-')[0] === 'issue' ? 'issues' : r;
+  let h = `<div class="brand"><i></i><div>Transpera Flow<small>Prototype · example data</small></div></div>`;
+  for (const [g, items] of NAV) {
+    if (g) h += `<div class="grp">${g}</div>`;
+    for (const [id, name, tag] of items) h += `<a href="#${id}" class="${base === id ? 'on' : ''}">${name}${tag === 'new' ? '<span class="tag new">New</span>' : tag === 'chg' ? '<span class="tag chg">Changed</span>' : ''}</a>`;
+  }
+  document.getElementById('nav').innerHTML = h;
+}
+
+let mapTimer = null;
+function companyMap(L) {
+  const procH = {}; for (const x of Object.values(L)) for (const s in x.steps) if (s !== 'hand') procH[STEP[s].proc] = (procH[STEP[s].proc] || 0) + x.steps[s];
+  return `<div class="card sec"><div class="ch"><h2>Company map</h2><span class="tag hid">Existing component, unchanged</span></div>
+    <div class="row mapbar" style="margin-bottom:10px"><button class="btn sm pri" data-act="mapPlay" id="mapPlay">▶ Play</button><label class="f"><span>Speed</span><select id="mapSpeed"><option>1×</option><option>2×</option><option>4×</option></select></label><label class="f" style="flex:1;min-width:160px"><span>Month <b id="mapMonth">${MONTHS[0]}</b></span><input type="range" id="mapScrub" min="0" max="11" value="0"></label><label class="f"><span>Horizon</span><select><option>1 month</option><option>3 months</option><option>6 months</option><option selected>12 months</option><option>24 months</option></select></label></div>
+    <div class="map" id="cmap"><div class="node" onclick="location.hash='processes'"><h3>Sales</h3><div class="who">Lead flow levers</div><div class="hrs">${f0(S.demand.sources.reduce((s, x) => s + x.leads, 0))} leads/mo · ${pc(S.demand.winRate)} win</div><i class="tok"></i><span class="arrow"></span></div>
+    ${PROCS.map(pr => `<div class="node" onclick="location.hash='process-${pr.id}'"><h3>${pr.name}</h3><div class="who">${pr.kind}</div><div class="hrs">${f0(procH[pr.id] || 0)} h a month</div><i class="tok"></i></div>`).join('')}</div>
+    <p class="note">In the app this is today's company map with all its controls: play the simulation, speed, scrub through months, pick the horizon, click a process to open it.</p></div>`;
+}
+function pageOverview() {
+  const { st, L, pool } = computeToday();
+  const ln = lines(st, L);
+  let h = head('Overview', 'The capacity headline for each department. Every figure opens the page with the detail.', [['A2', 'At capacity?'], ['A3', 'Bottlenecks'], ['A4', 'Where time goes'], ['A6', 'DLER']]);
+  let revT = 0, salT = 0, empT = 0;
+  for (const d in DEPTS) {
+    const emp = deptEmployees(st, d), rev = revenue(st.people, st.named, d, {}), sal = salaries(st.people, null, d);
+    revT += rev; salT += sal; empT += emp.length;
+    const cl = ln[d], cap = capDept(st, d);
+    const ppl = Object.values(L).filter(x => role(x.p).dept === d && availH(x.p, null) > 0).sort((a, b) => b.busy - a.busy);
+    const over = ppl.filter(x => x.busy >= thr(x.p));
+    const purpose = {}; for (const x of ppl) for (const sId in x.steps) { const k = sId === 'hand' ? 'Hand-holding' : STEP[sId].purpose; purpose[k] = (purpose[k] || 0) + x.steps[sId]; }
+    const pt = Object.entries(purpose).sort((a, b) => b[1] - a[1]); const tot = pt.reduce((s, x) => s + x[1], 0);
+    h += `<div class="card sec"><div class="ch"><h2>${DEPTS[d]}</h2><a href="#capacity" class="small">Capacity →</a></div>
+      <div class="kpis">
+        <div class="kpi"><div class="k">Clients</div><div class="v">${f0(cl)}</div><div class="s">${ln.both} also take ${d === 'org' ? 'Performance' : 'Organic'}</div></div>
+        <div class="kpi"><div class="k">Clients per employee</div><div class="v">${f1(cl / emp.length)}</div><div class="s">${f0(cl)} clients ÷ ${emp.length} people in the department</div></div>
+        <div class="kpi"><div class="k">Revenue per employee</div><div class="v">${money(rev / emp.length)}</div><div class="s">a month, retainers ÷ ${emp.length} people</div></div>
+        <div class="kpi"><div class="k">DLER</div><div class="v">${f1(rev / sal)}</div><div class="s">${money(rev)} ÷ ${money(sal)} salaries · goal 4.5</div></div>
+        <div class="kpi"><div class="k">At or over their line</div><div class="v">${over.length}</div><div class="s">${over.slice(0, 3).map(x => esc(x.p.name.split(' ')[0])).join(', ') || 'Nobody'}${over.length > 3 ? '…' : ''}</div></div>
+        <div class="kpi"><div class="k">Room for more clients</div><div class="v">${f0(Math.max(0, cap.max - cl))}</div><div class="s">Limit: ${cap.limit.toLowerCase()}</div></div>
+      </div>
+      <div class="grid g2"><div><h3 style="margin-bottom:6px">Busiest people</h3><table><tbody>${ppl.slice(0, 6).map(x => `<tr><td>${esc(x.p.name)}<div class="small muted">${esc(x.p.title)}</div></td><td style="width:50%">${busyBar(x.busy, thr(x.p))}</td></tr>`).join('')}</tbody></table></div>
+      <div><h3 style="margin-bottom:6px">Where the time goes <span class="muted small num">${f0(tot)} h a month</span></h3><table><tbody>${pt.map(([k, v]) => `<tr><td>${k}</td><td style="width:45%"><div class="split"><i style="width:${v * 100 / pt[0][1]}%;background:var(--accent)"></i></div></td><td class="n">${f0(v)} h</td><td class="n muted">${pc(v / tot)}</td></tr>`).join('')}</tbody></table></div></div></div>`;
+  }
+  h += `<div class="card sec"><div class="ch"><h2>Whole business</h2></div><div class="kpis" style="margin:0">
+    <div class="kpi"><div class="k">Clients</div><div class="v">${f0(ln.unique)}</div><div class="s">${f0(ln.org)} Organic + ${f0(ln.perf)} Performance − ${ln.both} taking both</div></div>
+    <div class="kpi"><div class="k">Revenue per employee</div><div class="v">${money(revT / empT)}</div><div class="s">a month, ${empT} people</div></div>
+    <div class="kpi"><div class="k">DLER</div><div class="v">${f1(revT / salT)}</div><div class="s">all retainers ÷ all salaries · goal 4.5</div></div></div></div>`;
+  return h + companyMap(L);
+}
+
+function how(works, tells) { return `<details class="how"><summary>How this works</summary><p>${works}</p><p><b>What it tells you:</b> ${tells}</p></details>`; }
+function roleBusy(rec, r) {
+  const xs = rec.people.filter(p => p.role === r).map(p => rec.L[p.id]).filter(x => x && x.avail > 0);
+  if (!xs.length) return 0;
+  return xs.reduce((s, x) => s + x.busy * x.avail, 0) / xs.reduce((s, x) => s + x.avail, 0);
+}
+function roleLabel(r) { const x = S.roles[r]; return x.kind === 'cf' ? (x.dept === 'org' ? 'Organic ' : 'Performance ') + (r.startsWith('dir') ? 'Director' : 'managers') : x.name; }
+function stackBar(parts) {
+  const tot = parts.reduce((s, p) => s + p.v, 0) || 1;
+  return `<div class="stack">${parts.map((p, i) => `<i style="width:${p.v * 100 / tot}%;background:var(--c${(i % 8) + 1})" title="${esc(p.k)} ${f1(p.v)} h"></i>`).join('')}</div><div class="legend" style="margin-top:6px">${parts.map((p, i) => `<span style="--c:var(--c${(i % 8) + 1})">${esc(p.k)} <b class="num">${f1(p.v)}</b></span>`).join('')}</div>`;
+}
+function dumbbell(a, b, t) {
+  const sc = v => Math.min(100, v * 100 / 1.3), c = cls(b, t);
+  const lo = Math.min(sc(a), sc(b)), hi = Math.max(sc(a), sc(b));
+  return `<div class="dumb"><div class="dtrack"><b class="dline" style="left:${t * 100 / 1.3}%"></b><i class="dseg ${c}-c" style="left:${lo}%;width:${hi - lo}%"></i><i class="ddot from" style="left:${sc(a)}%"></i><i class="ddot to ${c}-c" style="left:${sc(b)}%"></i></div><span class="num small">${pc(a)} → <b class="${c === 'bad' ? 'flag' : ''}">${pc(b)}</b></span></div>`;
+}
+function miniBars(vals, t) {
+  return `<div class="mini">${vals.map((b, i) => `<i class="${cls(b, t)}-c" style="height:${Math.min(100, b * 100 / 1.3)}%" title="${MONTHS[i]}: ${pc(b)}"></i>`).join('')}<b class="mline" style="bottom:${t * 100 / 1.3}%"></b></div>`;
+}
+
+function pageCapacity() {
+  const { st, L, pool } = computeToday();
+  const sim = simulate([]);
+  let h = head('Capacity', 'Are we at capacity, who has room, and how many more clients fit. "Today" is a normal month with no onboarding, after the December resignation is handed over.', [['A1', 'Add clients (Sandbox)'], ['A2', 'At capacity?'], ['A3', 'Bottlenecks'], ['A4', 'Time per client'], ['A6', 'DLER'], ['A8', 'When to hire'], ['A9', 'If someone leaves']]);
+  const ln = lines(st, L);
+  const rv = d => revenue(st.people, st.named, d, {}), sl = d => salaries(st.people, null, d);
+  h += `<div class="kpis">
+    <div class="kpi"><div class="k">Clients with Organic services</div><div class="v">${f0(ln.org)}</div><div class="s">named and counted</div></div>
+    <div class="kpi"><div class="k">Clients with Performance services</div><div class="v">${f0(ln.perf)}</div><div class="s">named and counted</div></div>
+    <div class="kpi"><div class="k">Clients taking both</div><div class="v">${f0(ln.both)}</div><div class="s">${f0(ln.unique)} clients in all</div></div>
+    <div class="kpi"><div class="k">DLER Organic</div><div class="v">${f1(rv('org') / sl('org'))}</div><div class="s">${money(rv('org'))} ÷ ${money(sl('org'))} · goal 4.5</div></div>
+    <div class="kpi"><div class="k">DLER Performance</div><div class="v">${f1(rv('perf') / sl('perf'))}</div><div class="s">${money(rv('perf'))} ÷ ${money(sl('perf'))} · goal 4.5</div></div>
+    <div class="kpi"><div class="k">DLER whole business</div><div class="v">${f1((rv('org') + rv('perf')) / (sl('org') + sl('perf')))}</div><div class="s">all retainers ÷ all salaries</div></div></div>`;
+
+  // 1. Room for more clients, per department
+  const cp = { org: capDept(st, 'org'), perf: capDept(st, 'perf') };
+  h += `<div class="grid g2 sec">` + Object.keys(DEPTS).map(d => {
+    const c = cp[d], room = Math.max(0, Math.floor(c.max - c.clients)), lims = c.lims.filter(l => l.max < c.clients * 3);
+    const top = Math.max(c.clients, ...lims.map(l => l.max)) * 1.08;
+    const x = v => Math.min(100, v * 100 / top);
+    const who = c.limit === 'Client-facing people' ? 'its client managers' : 'the ' + c.limit.toLowerCase();
+    const cf = st.people.filter(p => isCF(p) && role(p).dept === d && !p.gone).map(p => ({ p, room: personMax(L[p.id]) - L[p.id].clients })).sort((a, b) => b.room - a.room);
+    return `<div class="card"><div class="ch"><h2>${DEPTS[d]}: room for more clients</h2></div>
+      <div class="big">${room < 1 ? `<span class="flag">Full.</span> ${DEPTS[d]} can't take another client without someone going over their line.` : `${DEPTS[d]} can take about <b>${room} more clients</b>.`}</div>
+      <p class="small muted" style="margin:4px 0 12px">${f0(c.clients)} clients today. The ceiling is ${f0(c.max)}, set by ${who}.</p>
+      <div class="gtrack"><i class="gfill ${room < 1 ? 'bad' : room < 5 ? 'warn' : 'ok'}-c" style="width:${x(c.clients)}%"></i>${lims.map((l, i) => `<b class="gmark ${i === 0 ? 'lim' : ''}" style="left:${x(l.max)}%" title="${esc(l.name)}: ${f0(l.max)}"></b>`).join('')}</div>
+      <div class="gleg">${lims.map((l, i) => `<span class="${i === 0 ? 'lim' : ''}">${i === 0 ? '▲ ' : ''}${esc(l.name)} <b class="num">${f0(l.max)}</b></span>`).join('')}</div>
+      <h3 style="margin:16px 0 8px">Who can take the next client</h3>
+      <div class="chips">${cf.map(x => `<span class="chip ${x.room >= 1 ? 'ok' : 'bad'}">${esc(x.p.name)} <b>${x.room >= 1 ? '+' + Math.floor(x.room) + ' more' : Math.abs(x.room) < 0.5 ? 'at the line' : Math.ceil(-x.room) + ' over'}</b></span>`).join('')}</div>
+      ${how('Each manager\'s ceiling is how many clients of their current mix they could hold before reaching their line. The department ceiling adds those up, then checks each shared team (content, links, tech, implementers): how many clients could it serve at its own line? The lowest figure is the ceiling. The marks on the bar are each of those limits.', 'whether the department can take on work, which team stops it, and who should get the next client.')}
+    </div>`;
+  }).join('') + `</div>`;
+
+  // 2. People tables
+  for (const d in DEPTS) {
+    const cf = st.people.filter(p => isCF(p) && role(p).dept === d && !p.gone);
+    h += `<div class="card sec"><div class="ch"><h2>${DEPTS[d]}: client-facing people</h2></div><div class="tw"><table><thead><tr><th>Person</th><th>Clients</th><th class="n">Can take</th><th class="n">Rule</th>${d === 'perf' ? '<th class="n">Channels</th>' : ''}<th class="n">Hours needed</th><th class="n">Available</th><th style="min-width:180px">Busy against line</th></tr></thead><tbody>` +
+      cf.map(p => { const x = L[p.id]; const rl = role(p).rule; const rm = personMax(x) - x.clients; return `<tr><td>${esc(p.name)}<div class="small muted">${esc(p.title)}${p.mgmt ? ' · ' + pc(p.mgmt) + ' team time' : ''}</div></td><td>${f0(x.clients)} <span class="small">${tierChips(x.t)}</span></td><td class="n ${rm < -0.5 ? 'flag' : ''}">${rm >= 1 ? '+' + Math.floor(rm) : Math.abs(rm) < 0.5 ? '0' : Math.ceil(-rm) + ' over'}</td><td class="n ${rl && x.clients > rl ? 'flag' : 'muted'}">${rl || '—'}</td>${d === 'perf' ? `<td class="n">${f0(x.ch)}${x.ch > 10 && p.role === 'dir_perf' ? ' <span class="flag">cap 10</span>' : ''}</td>` : ''}<td class="n">${f0(x.need)} h</td><td class="n">${f0(x.avail)} h</td><td>${busyBar(x.busy, thr(p))}</td></tr>`; }).join('') + `</tbody></table></div>${how('Hours needed adds up every process step for each of the person\'s clients, at their tier\'s frequencies. Available is their week less leave and team time. Busy = needed ÷ available; the tick is the role\'s line. Can take = clients they could add before the line. Rule = the role\'s own rule of thumb, red when exceeded.', 'who is full, who has room, and whose patch is the wrong size.')}</div>`;
+  }
+
+  // 3. Shared teams
+  const vol = (stepId) => { const s0 = STEP[stepId]; let v = 0; for (const p of st.people) if (isCF(p) && p.counts) { const d = role(p).dept; if (!s0.proc.startsWith(d)) continue; for (const t of TIERS) v += (p.counts[t] || 0) * freqOf(s0, d, t, null); } for (const nc of st.named) if (s0.proc.startsWith(nc.dept)) v += freqOf(s0, nc.dept, 'T1', nc); return v; };
+  const capUnits = (r, mins) => pool[r] ? pool[r].cap * S.roles[r].thr / (mins / 60) : 0;
+  const unit = {
+    content: [vol('o4') * 1000, capUnits('content', STEP.o4.min + STEP.o5.min) * 1000, 'words'],
+    links: [vol('o7'), capUnits('links', STEP.o7.min + STEP.o9.min), 'links'],
+    tech: [vol('o10'), pool.tech ? pool.tech.cap * S.roles.tech.thr : 0, 'ticket hours'],
+  };
+  h += `<div class="card sec"><div class="ch"><h2>Shared teams</h2><p>They serve every client and own none.</p></div><div class="grid g3">` +
+    Object.keys(S.roles).filter(r => S.roles[r].kind === 'shared').map(r => { const pl = pool[r] || { total: 0, cap: 0, busy: 0 }; const u = unit[r]; return `<div class="team"><div class="ch"><h3>${S.roles[r].name}</h3><span class="pill ${cls(pl.busy || 0, S.roles[r].thr)}">${pc(pl.busy || 0)}</span></div><p class="small muted">${st.people.filter(p => p.role === r).map(p => esc(p.name)).join(', ')}</p>${u ? `<p class="small" style="margin-top:6px"><b class="num">${u[0] >= 1000 ? f0(u[0] / 1000) + 'k' : f0(u[0])}</b> of <span class="num">${u[1] >= 1000 ? f0(u[1] / 1000) + 'k' : f0(u[1])}</span> ${u[2]} a month at the line</p>` : ''}<div style="margin-top:6px">${busyBar(pl.busy || 0, S.roles[r].thr)}</div></div>`; }).join('') + `</div></div>`;
+
+  // 4. Bottleneck
+  const rank = Object.values(L).filter(x => availH(x.p, null) > 0).sort((a, b) => (b.busy - thr(b.p)) - (a.busy - thr(a.p)));
+  const top = rank[0]; const topSteps = Object.entries(top.steps).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([s, v]) => ({ k: s === 'hand' ? 'Hand-holding' : STEP[s].name, v: v / top.p.speed }));
+  h += `<div class="card sec"><div class="ch"><h2>Bottleneck</h2></div><div class="big"><b>${esc(top.p.name)}</b> (${esc(top.p.title)}) is the most stretched, at <b class="${top.busy >= thr(top.p) ? 'flag' : ''}">${pc(top.busy)}</b> against a line of ${pc(thr(top.p))}.</div><h3 style="margin:12px 0 6px">What fills their month</h3>${stackBar(topSteps)}<p class="small" style="margin-top:8px">These come from process steps assigned to them: ${Object.entries(top.steps).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([sid]) => sid === 'hand' ? 'hand-holding on their named clients' : `<a href="#process-${STEP[sid].proc}" data-act="openStep" data-step="${sid}">${esc(STEP[sid].name)}</a>`).join(', ')}.</p><p class="small muted" style="margin-top:10px">Next most stretched: ${rank.slice(1, 5).map(x => `${esc(x.p.name)} ${pc(x.busy)}`).join(' · ')}</p></div>`;
+
+  // 5. If someone leaves
+  const lv = st.people.find(p => p.id === UI.leaver && !p.gone) || st.people.find(p => p.id === 'diya');
+  const after = (() => { const P = structuredClone(st.people), N = structuredClone(st.named); const l = P.find(p => p.id === lv.id); const moved = isCF(l) ? reassign(P, N, [], null, l, null) : []; l.gone = true; return { L2: loads(P, N, [], null, [], null).L, moved }; })();
+  const changed = st.people.filter(p => !p.gone && p.id !== lv.id && Math.abs((after.L2[p.id].busy || 0) - L[p.id].busy) > 0.005).sort((a, b) => after.L2[b.id].busy - after.L2[a.id].busy);
+  const goOver = changed.filter(p => after.L2[p.id].busy >= thr(p) && L[p.id].busy < thr(p));
+  const recv = Object.entries(after.moved.reduce((a, x) => (a[x.to] = (a[x.to] || 0) + 1, a), {})).sort((a, b) => b[1] - a[1]);
+  h += `<div class="card sec"><div class="ch"><h2>What if someone leaves?</h2><label class="f" style="flex-direction:row;align-items:center;gap:8px"><span>Person</span><select data-ui="leaver">${st.people.filter(p => !p.gone).map(p => `<option value="${p.id}" ${p.id === lv.id ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label></div>
+    <div class="big">${isCF(lv) ? `If <b>${esc(lv.name)}</b> leaves, their ${f0(L[lv.id].clients)} clients go to ${recv.map(([id, n]) => `${esc(st.people.find(p => p.id === id).name)} (${n})`).join(', ') || 'nobody: no one else serves those tiers'}.` : `If <b>${esc(lv.name)}</b> leaves, the ${S.roles[lv.role].name.toLowerCase()} shares their work.`} ${goOver.length ? `<span class="flag">${goOver.map(p => esc(p.name)).join(', ')} go${goOver.length === 1 ? 'es' : ''} over their line.</span>` : 'Nobody new goes over their line.'}</div>
+    <div class="dumbs" style="margin-top:12px">${changed.map(p => `<div class="drow"><span>${esc(p.name)}</span>${dumbbell(L[p.id].busy, after.L2[p.id].busy, thr(p))}</div>`).join('')}</div>
+    <p class="small muted" style="margin-top:8px">A replacement takes about 3 months to reach full speed.</p>
+    ${how('Takes the person out, then hands each of their clients to whichever colleague is least busy and serves that tier. Each row shows a colleague\'s busy share before (hollow dot) and after (solid dot); the grey line is their line.', 'key-person risk: who absorbs the loss, and whether you need a replacement or a rebalance.')}</div>`;
+
+  // 6. Time to serve a client
+  const cache = cacheFor([]);
+  h += `<div class="card sec"><div class="ch"><h2>Time to serve one client, per month</h2></div>` + Object.keys(DEPTS).map(d => `<h3 style="margin:6px 0 8px">${DEPTS[d]}</h3><div class="grid g3" style="margin-bottom:14px">${TIERS.map(t => {
+    const pur = {}; for (const it of cache[d + t]) { const k = STEP[it.step].purpose; pur[k] = (pur[k] || 0) + it.h; }
+    const parts = Object.entries(pur).map(([k, v]) => ({ k, v })).sort((a, b) => b.v - a.v); const tot = parts.reduce((s, x) => s + x.v, 0);
+    return `<div class="team"><div class="ch"><h3>${t} client</h3><span class="small muted">${money(S.tiers[d][t].fee)} a month</span></div><div class="big"><b class="num">${f0(tot)} hours</b> a month</div><p class="small muted" style="margin-bottom:8px">Earns ${money(S.tiers[d][t].fee / tot)} per hour of work</p>${stackBar(parts)}</div>`;
+  }).join('')}</div>`).join('') +
+    `<h3 style="margin:6px 0 8px">Named Tier 1 clients</h3><div class="tw"><table><thead><tr><th>Client</th><th>Looked after by</th><th class="n">Hours a month</th><th class="n">Earns per hour</th></tr></thead><tbody>${st.named.map(nc => { const hh = clientLoad(nc.dept, 'T1', nc, [], false).reduce((s, x) => s + x.h, 0); const o = st.people.find(p => p.id === nc.owner); return `<tr><td>${esc(nc.name)}${nc.note ? `<div class="small muted">${esc(nc.note)}</div>` : ''}</td><td>${esc(o ? o.name : '—')}</td><td class="n">${f1(hh)}</td><td class="n">${money(nc.fee / hh)}</td></tr>`; }).join('')}</tbody></table></div>
+    ${how('Adds up every step of the monthly servicing process for one client of the tier, all roles together, using the tier\'s meetings, words, links, ad-hoc chance and so on. Named Tier 1 clients use their own values.', 'what takes the time, and which clients earn the most per hour of effort.')}</div>`;
+
+  // 7. Next 12 months
+  const roles = Object.keys(S.roles);
+  const rows = roles.map(r => { const vals = sim.months.map(rec => roleBusy(rec, r)); const mi = vals.findIndex(v => v >= S.roles[r].thr); return { r, vals, mi }; });
+  const todo = rows.filter(x => x.mi >= 0).sort((a, b) => a.mi - b.mi);
+  h += `<div class="card sec"><div class="ch"><h2>The next 12 months</h2></div>
+    <div class="big">${todo.length ? 'What to do:' : 'No team goes over its line in the next 12 months.'}</div>
+    ${todo.length ? `<ul class="todo">${todo.map(x => { const by = x.mi - S.hiringDelay; return `<li><b>${roleLabel(x.r)}:</b> ${x.mi === 0 ? 'over the line now' : `over the line from <b>${MONTHS[x.mi]}</b>`}. ${by <= 0 ? '<span class="flag">Start hiring now.</span>' : `Start hiring by ${MONTHS[by]}.`}</li>`; }).join('')}</ul>` : ''}
+    ${rows.filter(x => x.mi < 0).length ? `<p class="small muted" style="margin-top:8px">Stay under their line all year: ${rows.filter(x => x.mi < 0).map(x => roleLabel(x.r)).join(', ')}.</p>` : ''}
+    ${how(`Runs the year month by month: today's clients, expected wins from lead flow (from ${MONTHS[S.demand.cycle]}), churn, the December resignation and onboarding work for each new client. A team goes over when its average busy share passes its line. Hiring advice allows ${S.hiringDelay} months to hire.`, 'when each team runs out of room, and when to start hiring so the new person arrives in time.')}</div>`;
+  return h;
+}
+
+function pageProcesses() {
+  const { L } = computeToday();
+  const procH = {}; for (const x of Object.values(L)) for (const s in x.steps) if (s !== 'hand') procH[STEP[s].proc] = (procH[STEP[s].proc] || 0) + x.steps[s];
+  return head('Processes', 'The maps that drive the hours. Each step carries its base values: time, how often by tier, the tier multiplier, the automatable / augmentable / manual split, and where the number came from.') +
+    `<div class="card"><table><thead><tr><th>Process</th><th>Kind</th><th class="n">Steps</th><th class="n">Hours a month today</th><th style="min-width:160px">Split of its time</th></tr></thead><tbody>` +
+    PROCS.map(pr => { let a = 0, g = 0, n = 0; for (const s of pr.steps) { const q = parts(s, 'T2', []); a += q.a; g += q.g; n += q.n; } return `<tr class="click" onclick="location.hash='process-${pr.id}'"><td><a href="#process-${pr.id}">${pr.name}</a></td><td class="muted">${pr.kind}</td><td class="n">${pr.steps.length}</td><td class="n">${pr.onb ? '<span class="muted">per new client</span>' : f0(procH[pr.id] || 0) + ' h'}</td><td>${splitBar(a, g, n)}</td></tr>`; }).join('') +
+    `<tr><td>Sales (lead to win)</td><td class="muted">Modelled by lead-flow levers</td><td class="n">${SALES.length}</td><td class="n muted">—</td><td></td></tr></tbody></table><div style="margin-top:10px">${LEG}</div></div>
+    <p class="note">Upload process (a <span class="mono">transpera-process/2</span> file) and New process stay as today. The file format gains the work split and tier multipliers.</p>`;
+}
+
+function pageProcess(id) {
+  const pr = PROCS.find(p => p.id === id); if (!pr) return pageProcesses();
+  const scn = UI.scen.find(s => s.id === UI.procView) || UI.scen[0];
+  const chg = activeChanges(scn.changes, null);
+  const { L } = computeToday();
+  const stepH = {}; for (const x of Object.values(L)) for (const s in x.steps) stepH[s] = (stepH[s] || 0) + x.steps[s];
+  const withS = loads(steady(scn.changes).people, steady(scn.changes).named, chg, null, [], null).L;
+  const stepH2 = {}; for (const x of Object.values(withS)) for (const s in x.steps) stepH2[s] = (stepH2[s] || 0) + x.steps[s];
+  const who = s => s.who === 'owner' ? 'The client\'s manager' : s.who[0] === '@' ? S.people.find(p => p.id === s.who.slice(1)).name + ' (pinned)' : S.roles[s.who].name;
+  let h = head(pr.name, pr.kind + '. Click a step to see and edit its base values. Edits flow into every page.', [['§7', 'Base values'], ['A4', 'What takes the time']]);
+  h += `<div class="row" style="margin-bottom:10px"><label class="f"><span>Show future state with</span><select data-ui="procView">${UI.scen.map(s => `<option value="${s.id}" ${s.id === scn.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>${LEG}</div>`;
+  h += `<div class="map">${pr.steps.map((s, i) => { const p0 = parts(s, 'T2', []), p1 = parts(s, 'T2', chg); const ch = Math.abs(p1.t - p0.t) > 0.01; return `<div class="node ${UI.step === s.id ? 'on' : ''}" data-step="${s.id}"><h3>${esc(s.name)}</h3><div class="who">${who(s)}</div><div class="hrs">${pr.onb ? f0(p0.t) + ' min (T2)' : f0(stepH[s.id] || 0) + ' h a month'}</div>${splitBar(p0.a, p0.g, p0.n)}${ch ? `<div class="hrs" style="color:var(--new)">→ ${pr.onb ? f0(p1.t) + ' min' : f0(stepH2[s.id] || 0) + ' h'}</div>${splitBar(p1.a, p1.g, p1.n)}` : ''}${i < pr.steps.length - 1 ? '<span class="arrow"></span>' : ''}</div>`; }).join('')}</div>`;
+  const s = STEP[UI.step] && STEP[UI.step].proc === pr.id ? STEP[UI.step] : null;
+  if (s) {
+    const fq = typeof s.freq === 'string' ? `From the tier (${s.freq})` : typeof s.freq === 'object' ? '' : '';
+    h += `<div class="card inspector"><div class="ch"><h2>${esc(s.name)}</h2><button class="btn x" data-act="closeStep">Close</button></div><div class="cols"><div>
+      <h3 style="margin-bottom:6px">Time per occurrence (minutes)</h3><div class="row"><label class="f"><span>Likely</span><input type="number" step="1" data-bind="step.${s.id}.min" value="${s.min}"></label><label class="f"><span>Low</span><input type="number" value="${Math.round(s.min * 0.7)}" disabled></label><label class="f"><span>High</span><input type="number" value="${Math.round(s.min * 1.5)}" disabled></label></div>
+      <h3 style="margin:12px 0 6px">How often</h3>${typeof s.freq === 'string' ? `<p class="small">Per client a month, from each tier's <b>${s.freq}</b> value (Set up → Tiers & clients)${s.perChannel ? ', times channels' : ''}: ${TIERS.map(t => `${t} ${f1(S.tiers[pr.dept][t][s.freq])}`).join(' · ')}</p>` : typeof s.freq === 'object' ? `<div class="row">${TIERS.map(t => `<label class="f"><span>${t} a month</span><input type="number" step="0.05" data-bind="stepf.${s.id}.${t}" value="${f1(s.freq[t])}"></label>`).join('')}</div>` : `<div class="row"><label class="f"><span>A month, every tier${s.perChannel ? ' (× channels)' : ''}</span><input type="number" step="0.05" data-bind="step.${s.id}.freq" value="${s.freq}"></label></div>`}
+      <h3 style="margin:12px 0 6px">Tier multiplier on time</h3><div class="row">${TIERS.map(t => `<label class="f"><span>${t}</span><input type="number" step="0.1" data-bind="stepm.${s.id}.${t}" value="${(s.mult && s.mult[t]) || 1}"></label>`).join('')}</div>
+      <h3 style="margin:12px 0 6px">Who</h3><p class="small">${who(s)}</p>
+      <h3 style="margin:12px 0 6px">Source and confidence</h3><div class="row"><select data-bind="step.${s.id}.src">${['Interview', 'Calculator', 'Measured', 'Estimate'].map(x => `<option ${x === s.src ? 'selected' : ''}>${x}</option>`).join('')}</select><span class="pill ${s.src === 'Measured' ? 'ok' : s.src === 'Estimate' ? 'warn' : 't'}">${s.src === 'Estimate' ? 'Low confidence' : s.src === 'Measured' ? 'High confidence' : 'Medium confidence'}</span></div>
+    </div><div>
+      <h3 style="margin-bottom:6px">Work split (sums to 100%)</h3>${['Automatable', 'Augmentable', 'Stays manual'].map((n, i) => `<label class="f" style="margin-bottom:8px"><span>${n}: <b class="num">${s.split[i]}%</b> · ${esc(s.parts[i])}</span><input type="range" min="0" max="100" step="5" data-split="${s.id}.${i}" value="${s.split[i]}"></label>`).join('')}
+      ${splitBar(s.split[0], s.split[1], s.split[2])}
+      <h3 style="margin:12px 0 6px">Changes that act on this step</h3>${LIB.filter(l => l.effects.some(e => e.step === s.id)).map(l => { const p0 = parts(s, 'T2', []), p1 = parts(s, 'T2', [{ type: 'lib', lib: l.id }]); return `<div class="small" style="margin-bottom:4px"><b>${esc(l.name)}</b> <span class="kind">${l.kind}</span><br>${l.effects.filter(e => e.step === s.id).map(e => e.part === 'auto' ? `removes ${pc(e.remove)} of the automatable part${e.residual ? `, leaves a ${e.residual}-min check` : ''}` : `augmentable part ×${e.factor} faster`).join('; ')}, ${l.adoption}% adoption → <span class="num">${f1(p0.t)} → ${f1(p1.t)} min</span></div>`; }).join('') || '<p class="small muted">None in the library yet.</p>'}
+      <p class="note">The future time is worked out from these parts, never typed in. Change the likely time and every future state moves with it.</p>
+    </div></div></div>`;
+  }
+  return h;
+}
+
+function scenarioResults(scn) {
+  const sim = simulate(scn.changes);
+  const st = steady(scn.changes, { withAdds: true });
+  const L = loads(st.people, st.named, st.chg, null, [], null).L;
+  const per = {}, hr = {}, cap = {};
+  for (const d in DEPTS) { cap[d] = capDept(st, d); const cf = st.people.filter(p => isCF(p) && role(p).dept === d && availH(p, null) > 0); const cl = cf.reduce((s, p) => s + L[p.id].clients, 0); per[d] = cl / cf.length; const h = headroom(st, d, 'mix'); hr[d] = { k: h.k, max: (cl + h.k) / cf.length, breaker: h.breaker }; }
+  const hours = Object.values(L).reduce((s, x) => s + Object.values(x.steps).reduce((a, b) => a + b, 0), 0);
+  const overMonths = sim.months.reduce((s, rec) => s + Object.values(rec.L).filter(x => x.avail > 0 && x.busy >= thr(x.p)).length, 0);
+  const busiest = Object.values(L).filter(x => x.avail > 0).sort((a, b) => b.busy - a.busy)[0];
+  const last = sim.months[11];
+  return { sim, st, L, per, hr, cap, hours, overMonths, busiest, last, dler: { org: revenue(st.people, st.named, 'org', feeMult(scn.changes)) / salaries(st.people, null, 'org'), perf: revenue(st.people, st.named, 'perf', feeMult(scn.changes)) / salaries(st.people, null, 'perf') } };
+}
+
+function changeEditor(c, i) {
+  const del = `<button class="btn x" data-act="delChange" data-i="${i}" aria-label="Remove">✕</button>`;
+  const month = (k) => `<label class="f"><span>From</span><select data-cbind="${i}.${k}">${MONTHS.map((m, j) => `<option value="${j}" ${+c[k] === j ? 'selected' : ''}>${m}</option>`).join('')}</select></label>`;
+  const sel = (k, opts) => `<select data-cbind="${i}.${k}">${opts.map(([v, n]) => `<option value="${v}" ${String(c[k]) === String(v) ? 'selected' : ''}>${n}</option>`).join('')}</select>`;
+  const num = (k, step, w) => `<input type="number" step="${step}" data-cbind="${i}.${k}" value="${c[k]}" ${w ? `style="width:${w}px"` : ''}>`;
+  if (c.type === 'add') return `<div class="chgcard"><div class="ct"><span><span class="kind">Clients</span> <b>Add clients</b></span>${del}</div><div class="row"><label class="f"><span>How many</span>${num('n', 1, 60)}</label><label class="f"><span>Tier</span>${sel('tier', TIERS.map(t => [t, t]))}</label><label class="f"><span>Department</span>${sel('dept', Object.entries(DEPTS))}</label>${month('start')}<label class="f"><span>Spread over</span>${sel('spread', [[1, 'All at once'], [2, '2 months'], [3, '3 months']])}</label></div></div>`;
+  if (c.type === 'lib') { const d = LIBI[c.lib]; return `<div class="chgcard"><div class="ct"><span><span class="kind">${d.kind}</span> <b>${esc(d.name)}</b></span>${del}</div><div class="row">${month('start')}<label class="f"><span>Adoption %</span><input type="number" step="5" data-cbind="${i}.adoption" value="${c.adoption != null ? c.adoption : d.adoption}" style="width:64px"></label><label class="f"><span>Ramp (months)</span>${num('ramp', 1, 56)}</label></div><p class="small muted">${d.effects.map(e => `${STEP[e.step].name}: ${e.part === 'auto' ? '−' + pc(e.remove) + ' automatable' : '×' + e.factor + ' augmentable'}`).join(' · ')}${d.tiers ? ' · ' + d.tiers.join(', ') + ' only' : ''}</p></div>`; }
+  if (c.type === 'hire') return `<div class="chgcard"><div class="ct"><span><span class="kind">People</span> <b>Hire</b></span>${del}</div><div class="row"><label class="f"><span>Role</span>${sel('role', Object.entries(S.roles).map(([k, r]) => [k, r.name]))}</label>${month('start')}</div><p class="small muted">Ramps up over 90 days.</p></div>`;
+  if (c.type === 'leave') return `<div class="chgcard"><div class="ct"><span><span class="kind">People</span> <b>Someone leaves</b></span>${del}</div><div class="row"><label class="f"><span>Person</span>${sel('person', S.people.map(p => [p.id, p.name]))}</label>${month('start')}</div></div>`;
+  if (c.type === 'mgmt') return `<div class="chgcard"><div class="ct"><span><span class="kind">People</span> <b>Team time</b></span>${del}</div><div class="row"><label class="f"><span>Person</span>${sel('person', S.people.map(p => [p.id, p.name]))}</label><label class="f"><span>Team time %</span>${num('value', 5, 64)}</label></div></div>`;
+  if (c.type === 'fee') return `<div class="chgcard"><div class="ct"><span><span class="kind">Clients</span> <b>Fee change</b></span>${del}</div><div class="row"><label class="f"><span>Department</span>${sel('dept', [['all', 'Both'], ...Object.entries(DEPTS)])}</label><label class="f"><span>Tier</span>${sel('tier', [['all', 'All'], ...TIERS.map(t => [t, t])])}</label><label class="f"><span>Change %</span>${num('pct', 1, 64)}</label></div></div>`;
+  if (c.type === 'leads') return `<div class="chgcard"><div class="ct"><span><span class="kind">Lead flow</span> <b>Leads ×</b></span>${del}</div><div class="row"><label class="f"><span>Multiplier</span>${num('x', 0.1, 64)}</label></div></div>`;
+  if (c.type === 'win') return `<div class="chgcard"><div class="ct"><span><span class="kind">Lead flow</span> <b>Win rate ×</b></span>${del}</div><div class="row"><label class="f"><span>Multiplier</span>${num('x', 0.1, 64)}</label></div></div>`;
+  if (c.type === 'market') return `<div class="chgcard"><div class="ct"><span><span class="kind">Market</span> <b>Market conditions</b></span>${del}</div><div class="row"><label class="f"><span>Preset</span>${sel('preset', Object.keys(MARKET).map(k => [k, k]))}</label></div></div>`;
+  if (c.type === 'steptime') return `<div class="chgcard"><div class="ct"><span><span class="kind">Process</span> <b>Step time ×</b></span>${del}</div><div class="row"><label class="f"><span>Step</span>${sel('step', Object.values(STEP).map(s => [s.id, s.name + ' (' + s.proc.split('-')[0] + ')']))}</label><label class="f"><span>×</span>${num('factor', 0.1, 64)}</label></div></div>`;
+  return '';
+}
+
+/* ---------- Sandbox: free play ---------- */
+function defaultPlay() { return { market: 'Stable', marketFrom: 0, leads: 0, win: 0, churn: 0, addOrg: 0, addPerf: 0, addFrom: 2, addMonths: 3, addTier: 'mix', price: 0, priceFrom: 3, priceTier: 'all', priceSens: 5, leavers: [], hires: [], lose: [], autos: {} }; }
+UI.play = defaultPlay();
+UI.saved = [
+  { name: 'Downturn from March', play: { ...defaultPlay(), market: 'Downturn', marketFrom: 4 } },
+  { name: 'Win 3 clients a month for 6 months', play: { ...defaultPlay(), addOrg: 2, addPerf: 1, addFrom: 1, addMonths: 6 } },
+  { name: 'Diya leaves in February', play: { ...defaultPlay(), leavers: [{ person: 'diya', month: 3 }] } },
+];
+UI.simCache = {};
+function playToChanges(P) {
+  const c = [];
+  if (P.market !== S.demand.market) c.push({ type: 'market', preset: P.market, start: +P.marketFrom });
+  if (+P.leads) c.push({ type: 'leads', x: 1 + P.leads / 100, start: +P.marketFrom });
+  if (+P.win) c.push({ type: 'win', x: 1 + P.win / 100, start: +P.marketFrom });
+  if (+P.churn) c.push({ type: 'churn', x: 1 + P.churn / 100 });
+  for (const [d, n] of [['org', +P.addOrg], ['perf', +P.addPerf]]) {
+    if (!n) continue;
+    const total = n * Math.max(1, +P.addMonths);
+    if (P.addTier !== 'mix') { c.push({ type: 'add', dept: d, tier: P.addTier, n: total, start: +P.addFrom, spread: +P.addMonths }); continue; }
+    let left = total; const parts = TIERS.map(t => ({ t, x: total * (S.demand.tierMix[t] || 0) })); parts.forEach(p => { p.n = Math.floor(p.x); left -= p.n; });
+    parts.sort((a, b) => (b.x - b.n) - (a.x - a.n)); for (let i = 0; i < left; i++) parts[i % parts.length].n++;
+    for (const p of parts) if (p.n) c.push({ type: 'add', dept: d, tier: p.t, n: p.n, start: +P.addFrom, spread: +P.addMonths });
+  }
+  if (+P.price) c.push({ type: 'fee', dept: 'all', tier: P.priceTier, pct: +P.price, start: +P.priceFrom, sens: +P.priceSens });
+  for (const l of P.leavers) c.push({ type: 'leave', person: l.person, start: +l.month });
+  for (const x of P.hires) c.push({ type: 'hire', role: x.role, start: +x.month });
+  for (const x of P.lose) c.push({ type: 'loseNamed', id: x.id, start: +x.month });
+  for (const id in P.autos) c.push({ type: 'lib', lib: id, start: +P.autos[id], ramp: 1 });
+  return c;
+}
+function simCached(changes) { const k = JSON.stringify(changes) + JSON.stringify(S) + JSON.stringify(Object.values(STEP).map(s => [s.min, s.split, s.freq, s.mult])); if (!UI.simCache[k]) { if (Object.keys(UI.simCache).length > 30) UI.simCache = {}; UI.simCache[k] = simulate(changes); } return UI.simCache[k]; }
+function series(sim, fn) { return sim.months.map(fn); }
+const tot = (rec, k) => rec[k].org + rec[k].perf;
+function lineChart(sers, o) {
+  const W = 520, H = 230, P = { l: 70, r: 14, t: 16, b: 30 };
+  const all = sers.flatMap(s => s.vals).concat(o.goal != null ? [o.goal] : []);
+  let lo = o.min != null ? o.min : Math.min(...all), hi = Math.max(...all);
+  if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
+  const pad = (hi - lo) * 0.12; if (o.min == null) lo -= pad; hi += pad;
+  const x = i => P.l + i * (W - P.l - P.r) / 11, y = v => P.t + (hi - v) * (H - P.t - P.b) / (hi - lo);
+  const ticks = [lo, (lo + hi) / 2, hi];
+  let g = `<svg class="svgc" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.label)}">`;
+  g += ticks.map(v => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${P.l - 6}" y="${y(v) + 3}" text-anchor="end">${o.fmt(v)}</text>`).join('');
+  if (o.goal != null) g += `<line x1="${P.l}" x2="${W - P.r}" y1="${y(o.goal)}" y2="${y(o.goal)}" stroke="var(--bad)" stroke-dasharray="4 4"/><text x="${W - P.r}" y="${y(o.goal) - 4}" text-anchor="end" style="fill:var(--bad)">${esc(o.goalLabel || '')}</text>`;
+  g += [0, 4, 8, 11].map(i => `<text x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === 11 ? 'end' : 'middle'}">${MONTHS[i]}</text>`).join('');
+  for (const s of sers) g += `<polyline fill="none" stroke="${s.color}" stroke-width="${s.dash ? 1.5 : 2.5}" ${s.dash ? 'stroke-dasharray="5 4" opacity=".7"' : ''} points="${s.vals.map((v, i) => `${x(i)},${y(v)}`).join(' ')}"/>` + (s.dash ? '' : `<circle cx="${x(11)}" cy="${y(s.vals[11])}" r="3.5" fill="${s.color}"/>`);
+  g += `</svg><div class="legend">${sers.filter(s => s.name).map(s => `<span style="--c:${s.color}">${esc(s.name)}</span>`).join('')}</div>`;
+  return g;
+}
+function verdict(b, r) {
+  const L = 11, rb = b.months[L], rr = r.months[L];
+  const cl = rec => rec.clients.org + rec.clients.perf, rev = rec => rec.rev.org + rec.rev.perf, dl = rec => rev(rec) / (rec.sal.org + rec.sal.perf);
+  const sgn = v => (v >= 0 ? '+' : '−') + Math.abs(v);
+  const out = [];
+  out.push(`By <b>${MONTHS[L]}</b>: <b>${f0(cl(rr))} clients</b> (${sgn(Math.round(cl(rr) - cl(rb)))} against today's path), retainers <b>${money(rev(rr))}</b> a month (${rev(rr) >= rev(rb) ? '+' : '−'}${money(Math.abs(rev(rr) - rev(rb)))}), DLER <b>${f1(dl(rr))}</b> (${f1(dl(rb))} on today's path).`);
+  const first = sim => Object.keys(S.roles).map(rl => ({ rl, mi: sim.months.findIndex(rec => roleBusy(rec, rl) >= S.roles[rl].thr) })).filter(x => x.mi >= 0);
+  const fb = Object.fromEntries(first(b).map(x => [x.rl, x.mi]));
+  const fr = first(r).sort((a, c) => a.mi - c.mi);
+  const news = fr.filter(x => fb[x.rl] == null || x.mi < fb[x.rl]);
+  const fixed = Object.keys(fb).filter(rl => !fr.some(x => x.rl === rl));
+  for (const x of news.slice(0, 3)) { const by = x.mi - S.hiringDelay; out.push(`<span class="flag">${roleLabel(x.rl)}: over the line ${x.mi === 0 ? 'straight away' : 'from ' + MONTHS[x.mi]}</span>${fb[x.rl] != null ? ` (${MONTHS[fb[x.rl]]} on today's path)` : ''}. ${by <= 0 ? 'Start hiring now.' : 'Start hiring by ' + MONTHS[by] + '.'}`); }
+  if (fixed.length) out.push(`<span class="okc">${fixed.map(roleLabel).join(', ')}: no longer over the line</span> (over from ${fixed.map(rl => MONTHS[fb[rl]]).join(', ')} on today's path).`);
+  const overSet = sim => { const o = {}; sim.months.forEach(rec => Object.values(rec.L).forEach(x => { if (x.avail > 0 && x.busy >= thr(x.p) && o[x.p.id] == null) o[x.p.id] = rec.m; })); return o; };
+  const ob = overSet(b), orr = overSet(r);
+  const newOver = Object.keys(orr).filter(id => ob[id] == null || orr[id] < ob[id]);
+  const relieved = Object.keys(ob).filter(id => orr[id] == null);
+  const nm = id => esc((r.people.find(p => p.id === id) || S.people.find(p => p.id === id)).name);
+  if (newOver.length) out.push(`<span class="flag">${newOver.slice(0, 5).map(id => `${nm(id)} (${MONTHS[orr[id]]})`).join(', ')}${newOver.length > 5 ? ` and ${newOver.length - 5} more` : ''}</span> go over their line sooner than on today's path.`);
+  if (relieved.length) out.push(`<span class="okc">${relieved.slice(0, 5).map(nm).join(', ')}</span> no longer go over their line.`);
+  const peak = sim => Math.max(...sim.months.map(rec => Object.values(rec.L).filter(x => x.avail > 0 && x.busy >= thr(x.p)).length));
+  out.push(`At the worst month, <b>${peak(r)}</b> ${peak(r) === 1 ? 'person is' : 'people are'} over their line (${peak(b)} on today's path).`);
+  return out;
+}
+function pageSandbox() {
+  const P = UI.play, chg = playToChanges(P);
+  const b = simCached([]), r = simCached(chg);
+  const mo = (k, v) => `<select data-play="${k}">${MONTHS.map((m, i) => `<option value="${i}" ${+v === i ? 'selected' : ''}>${m}</option>`).join('')}</select>`;
+  const slider = (k, min, max, step, label, unit) => `<label class="lever"><span>${label} <b class="num">${+P[k] > 0 && min < 0 ? '+' : ''}${P[k]}${unit}</b></span><input type="range" min="${min}" max="${max}" step="${step}" data-play="${k}" value="${P[k]}"></label>`;
+  const people = S.people.concat(r.people.filter(p => p.hired));
+  let h = head('Sandbox', 'Swap process blocks and pull the levers, then watch the next 12 months change. Nothing here touches live data.', [['A1', 'Add clients'], ['A5', 'Automation'], ['A6', 'DLER'], ['A8', 'When to hire'], ['A9', 'Someone leaves']]);
+  const pid = UI.sbProc || 'perf-serv', pr = PROCS.find(x => x.id === pid);
+  const libOnly = chg.filter(c => c.type === 'lib');
+  const st0 = steady([]), st1 = steady(libOnly);
+  const sh = st => { const o = {}; for (const x of Object.values(loads(st.people, st.named, st.chg, null, [], null).L)) for (const k in x.steps) o[k] = (o[k] || 0) + x.steps[k]; return o; };
+  const H0 = sh(st0), H1 = sh(st1);
+  const actAll = activeChanges(libOnly, null);
+  const swapped = Object.keys(P.autos).length;
+  h += `<div class="card"><div class="ch"><h2>Company processes</h2><span class="small muted">${swapped ? swapped + ' block' + (swapped > 1 ? 's' : '') + ' swapped' : 'As today'}</span></div>
+    <div class="row mapbar" style="margin-bottom:10px"><button class="btn sm pri" data-act="mapPlay" id="mapPlay">▶ Play</button><label class="f"><span>Speed</span><select id="mapSpeed"><option>1×</option><option>2×</option><option>4×</option></select></label><label class="f" style="flex:1;min-width:160px"><span>Month <b id="mapMonth">${MONTHS[0]}</b></span><input type="range" id="mapScrub" min="0" max="11" value="0"></label></div>
+    <div class="ptabs">${PROCS.map(x => `<button data-act="sbProc" data-id="${x.id}" class="${x.id === pid ? 'on' : ''}">${x.name}</button>`).join('')}</div>
+    <div class="map" id="cmap">${pr.steps.map((s0, i) => {
+      const blocks = LIB.filter(l => l.effects.some(e => e.step === s0.id)); const cur = blocks.find(l => P.autos[l.id] != null);
+      const p0 = parts(s0, 'T2', []), p1 = parts(s0, 'T2', actAll); const ch = Math.abs(p1.t - p0.t) > 0.01;
+      const who = s0.who === 'owner' ? 'Client\'s manager' : s0.who[0] === '@' ? S.people.find(x => x.id === s0.who.slice(1)).name : S.roles[s0.who].name;
+      return `<div class="node ${cur ? 'swapped' : ''}"><h3>${esc(s0.name)}</h3><div class="who">${who}</div><div class="hrs">${pr.onb ? f0(p0.t) + ' min (T2)' : f0(H0[s0.id] || 0) + ' h a month'}${ch ? ` → <b style="color:var(--new)">${pr.onb ? f0(p1.t) + ' min' : f0(H1[s0.id] || 0) + ' h'}</b>` : ''}</div>${splitBar(ch ? p1.a : p0.a, ch ? p1.g : p0.g, ch ? p1.n : p0.n)}
+        ${blocks.length ? `<label class="f" style="margin-top:8px"><span>Block</span><select data-swap="${s0.id}"><option value="">As today</option>${blocks.map(l => `<option value="${l.id}" ${cur === l ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></label>${cur ? `<label class="f" style="margin-top:4px"><span>From</span><select data-automo="${cur.id}">${MONTHS.map((m, j) => `<option value="${j}" ${+P.autos[cur.id] === j ? 'selected' : ''}>${m}</option>`).join('')}</select></label>` : ''}` : '<p class="small muted" style="margin-top:8px">No blocks yet</p>'}
+        <i class="tok"></i>${i < pr.steps.length - 1 ? '<span class="arrow"></span>' : ''}</div>`; }).join('')}</div>
+    ${LEG}<p class="note">In the app this is the company map with all its controls. A block swapped in acts on the step's automatable and augmentable parts, so it follows the baseline. Blocks that change the flow (steps added, removed or rewired) come from the block library, as solutions do today.</p></div>`;
+  h += `<div class="sbx sec"><aside class="levers">
+    <div class="lg"><h3>Market</h3><div class="row"><label class="f"><span>Conditions</span><select data-play="market">${Object.keys(MARKET).map(k => `<option ${k === P.market ? 'selected' : ''}>${k}</option>`).join('')}</select></label><label class="f"><span>From</span>${mo('marketFrom', P.marketFrom)}</label></div>
+      ${slider('leads', -50, 50, 5, 'Leads', '%')}${slider('win', -50, 50, 5, 'Win rate', '%')}</div>
+    <div class="lg"><h3>Win new clients</h3><div class="row"><label class="f"><span>Organic a month</span><input type="number" min="0" data-play="addOrg" value="${P.addOrg}"></label><label class="f"><span>Performance a month</span><input type="number" min="0" data-play="addPerf" value="${P.addPerf}"></label></div>
+      <div class="row"><label class="f"><span>Starting</span>${mo('addFrom', P.addFrom)}</label><label class="f"><span>For</span><select data-play="addMonths">${[1, 2, 3, 6, 9, 12].map(n => `<option value="${n}" ${+P.addMonths === n ? 'selected' : ''}>${n} month${n > 1 ? 's' : ''}</option>`).join('')}</select></label><label class="f"><span>Tier</span><select data-play="addTier">${[['mix', 'Usual mix'], ...TIERS.map(t => [t, t])].map(([k, v]) => `<option value="${k}" ${k === P.addTier ? 'selected' : ''}>${v}</option>`).join('')}</select></label></div>
+      <p class="small muted">On top of the ${f1(S.demand.sources.reduce((s, x) => s + x.leads, 0) * S.demand.winRate)} a month expected from lead flow.</p></div>
+    <div class="lg"><h3>Lose clients</h3>${slider('churn', -50, 100, 5, 'Churn', '%')}
+      ${P.lose.map((x, i) => `<div class="row li"><select data-playl="lose.${i}.id">${S.named.map(n => `<option value="${n.id}" ${n.id === x.id ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select><span class="small">leaves in</span>${`<select data-playl="lose.${i}.month">${MONTHS.map((m, j) => `<option value="${j}" ${+x.month === j ? 'selected' : ''}>${m}</option>`).join('')}</select>`}<button class="btn x" data-act="playDel" data-l="lose" data-i="${i}">✕</button></div>`).join('')}
+      <button class="btn sm" data-act="playAdd" data-l="lose">+ A named client leaves</button></div>
+    <div class="lg"><h3>Prices</h3>${slider('price', -20, 30, 1, 'Price change', '%')}<div class="row"><label class="f"><span>Tiers</span><select data-play="priceTier">${[['all', 'All'], ...TIERS.map(t => [t, t])].map(([k, v]) => `<option value="${k}" ${k === P.priceTier ? 'selected' : ''}>${v}</option>`).join('')}</select></label><label class="f"><span>From</span>${mo('priceFrom', P.priceFrom)}</label><label class="f"><span>Clients react</span><select data-play="priceSens">${[[2, 'Barely'], [5, 'Normally'], [10, 'Strongly']].map(([k, v]) => `<option value="${k}" ${+P.priceSens === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label></div><p class="small muted">A rise lifts churn for 3 months; how much depends on the reaction.</p></div>
+    <div class="lg"><h3>People</h3>
+      ${P.leavers.map((x, i) => `<div class="row li"><select data-playl="leavers.${i}.person">${S.people.filter(p => !p.end).map(p => `<option value="${p.id}" ${p.id === x.person ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select><span class="small">leaves in</span><select data-playl="leavers.${i}.month">${MONTHS.map((m, j) => `<option value="${j}" ${+x.month === j ? 'selected' : ''}>${m}</option>`).join('')}</select><button class="btn x" data-act="playDel" data-l="leavers" data-i="${i}">✕</button></div>`).join('')}
+      ${P.hires.map((x, i) => `<div class="row li"><span class="small">Hire</span><select data-playl="hires.${i}.role">${Object.entries(S.roles).map(([k, v]) => `<option value="${k}" ${k === x.role ? 'selected' : ''}>${v.name}</option>`).join('')}</select><span class="small">from</span><select data-playl="hires.${i}.month">${MONTHS.map((m, j) => `<option value="${j}" ${+x.month === j ? 'selected' : ''}>${m}</option>`).join('')}</select><button class="btn x" data-act="playDel" data-l="hires" data-i="${i}">✕</button></div>`).join('')}
+      <div class="row"><button class="btn sm" data-act="playAdd" data-l="leavers">+ Someone leaves</button><button class="btn sm" data-act="playAdd" data-l="hires">+ Hire</button></div><p class="small muted">New hires take about 3 months to reach full speed.</p></div>
+    <div class="lg"><h3>Automation and augmentation</h3><p class="small muted">Swap blocks on the process map above. ${swapped ? swapped + ' swapped.' : 'None swapped yet.'}</p></div>
+    <div class="row"><button class="btn sm" data-act="playReset">Reset levers</button></div>
+  </aside><div class="results">`;
+  h += `<div class="card verdict"><h2>What happens</h2><ul>${verdict(b, r).map(x => `<li>${x}</li>`).join('')}</ul>
+    <div class="row" style="margin-top:10px"><input type="text" id="playName" placeholder="Name this scenario" class="w" style="width:220px"><button class="btn sm pri" data-act="playSave">Save</button></div></div>`;
+  const C = { org: 'var(--c1)', perf: 'var(--c2)', all: 'var(--accent)' };
+  h += `<div class="grid g2 sec">
+    <div class="card"><h3 style="margin-bottom:6px">Clients</h3>${lineChart([{ name: 'Organic', vals: series(r, x => x.clients.org), color: C.org }, { name: 'Performance', vals: series(r, x => x.clients.perf), color: C.perf }, { name: 'Today\'s path', vals: series(b, x => x.clients.org), color: C.org, dash: 1 }, { name: '', vals: series(b, x => x.clients.perf), color: C.perf, dash: 1 }].filter(s => s.name !== '' || true), { label: 'Clients by month', fmt: f0 })}</div>
+    <div class="card"><h3 style="margin-bottom:6px">Retainers a month</h3>${lineChart([{ name: 'This scenario', vals: series(r, x => tot(x, 'rev')), color: C.all }, { name: 'Today\'s path', vals: series(b, x => tot(x, 'rev')), color: C.all, dash: 1 }], { label: 'Retainers by month', fmt: money })}</div>
+    <div class="card"><h3 style="margin-bottom:6px">DLER</h3>${lineChart([{ name: 'Organic', vals: series(r, x => x.dler.org), color: C.org }, { name: 'Performance', vals: series(r, x => x.dler.perf), color: C.perf }, { name: 'Today\'s path', vals: series(b, x => x.dler.org), color: C.org, dash: 1 }, { name: '', vals: series(b, x => x.dler.perf), color: C.perf, dash: 1 }], { label: 'DLER by month', fmt: f1, goal: 4.5, goalLabel: 'Goal 4.5' })}</div>
+    <div class="card"><h3 style="margin-bottom:6px">How busy each team is</h3>${(() => { const rs = Object.keys(S.roles).map(rl => ({ rl, vals: series(r, rec => roleBusy(rec, rl)) })).sort((a, c) => Math.max(...c.vals) - Math.max(...a.vals)).slice(0, 5); return lineChart(rs.map((x, i) => ({ name: roleLabel(x.rl), vals: x.vals, color: `var(--c${i + 1})` })), { label: 'Busy share by team', fmt: v => pc(v), goal: 0.85, goalLabel: 'Line 85%', min: 0 }); })()}</div>
+  </div>`;
+  if (UI.saved.length) h += `<div class="card sec"><div class="ch"><h2>Saved scenarios</h2><p>The app will show these differently; for now, click one to load its levers.</p></div><div class="chips">${UI.saved.map((sv, i) => `<span class="chip"><button class="btn x" data-act="playLoad" data-i="${i}" style="color:var(--accent);font-weight:600;padding:0">${esc(sv.name)}</button> <button class="btn x" data-act="playUnsave" data-i="${i}" aria-label="Delete" style="padding:0 2px">✕</button></span>`).join('')}</div></div>`;
+  h += `</div></div>`;
+  return h;
+}
+
+const ISSUES = [
+  { id: 1, title: 'Pacing lives in three places', step: 'p1', sev: 'bad', note: 'Budgets are typed into the recommendations sheet, the pacing sheet and the platforms. A stale sheet caused a $10K overspend.', changes: ['pacing', 'anomaly'] },
+  { id: 2, title: 'Link team runs near its line', step: 'o7', sev: 'warn', note: 'About 300 links a month with two outreach specialists; vetting runs through one person.', changes: ['vet', 'linkops'] },
+  { id: 3, title: 'Onboarding crowds out monthly work', step: 'ob2', sev: 'warn', note: 'Five site onboardings in one month forced out-of-hours work.', changes: ['onb-o'] },
+  { id: 4, title: 'Content briefs are re-typed for freelancers', step: 'o3', sev: 'ok', note: 'Briefs are copied by hand into four freelancer sheets.', changes: ['briefs-o'] },
+  { id: 5, title: 'Meeting prep is data hunting', step: 'p6', sev: 'warn', note: 'Up to 1h15 per call collating data across platforms.', changes: ['prep-p'] },
+];
+function libEffect(libId) {
+  const st0 = steady([]), d = LIBI[libId].dept;
+  const H = st => Object.values(loads(st.people, st.named, st.chg, null, [], null).L).reduce((s, x) => s + Object.values(x.steps).reduce((a, q) => a + q, 0), 0);
+  const s1 = steady([{ type: 'lib', lib: libId }]);
+  return { freed: H(st0) - H(s1), k: capDept(s1, d).max - capDept(st0, d).max };
+}
+function pageIssues() {
+  return head('Issues', 'Problems logged on the map. Solutions and Sandbox changes anchor to them, so each issue shows what fixing it would free.') + `<div class="card"><div class="list">${ISSUES.map(i => `<a href="#issue-${i.id}" class="issue" style="text-decoration:none;color:inherit"><span class="dot ${i.sev}-c"></span><div><b>#${i.id} ${esc(i.title)}</b><div class="small muted">${STEP[i.step].name} · ${PROCS.find(p => p.id === STEP[i.step].proc).name}</div></div><span class="small muted">${i.changes.length} change${i.changes.length > 1 ? 's' : ''} →</span></a>`).join('')}</div></div>`;
+}
+function pageIssue(id) {
+  const i = ISSUES.find(x => x.id === +id); if (!i) return pageIssues();
+  return head(`#${i.id} ${esc(i.title)}`, esc(i.note)) + `<div class="card"><h2>Where</h2><p style="margin:6px 0 12px"><a href="#process-${STEP[i.step].proc}" data-act="openStep" data-step="${i.step}">${STEP[i.step].name}</a> in ${PROCS.find(p => p.id === STEP[i.step].proc).name}</p>
+    <h2>Changes anchored to this issue</h2><div class="tw"><table><thead><tr><th>Change</th><th class="n">Hours freed a month</th><th class="n">More clients the department can hold</th></tr></thead><tbody>${i.changes.map(c => { const e = libEffect(c); return `<tr><td>${esc(LIBI[c].name)}<div class="small muted">${LIBI[c].kind}</div></td><td class="n">${f0(e.freed)}</td><td class="n">${e.k >= 0 ? '+' : '−'}${f0(Math.abs(e.k))}</td></tr>`; }).join('')}</tbody></table></div>
+    <p class="note">New: a Sandbox automation or augmentation can name the issue it fixes, the way solutions already do. Status, owners, targets and history stay as today.</p></div>`;
+}
+function pageSolutions() { return head('Solutions', 'Kept for routing changes: a copy of a map with steps removed, added or rewired. Time savings now come from changes acting on step parts (Sandbox).') + `<div class="card"><div class="list"><div class="issue"><span class="dot ok-c"></span><div><b>One budget entry instead of three</b><div class="small muted">Performance monthly servicing · removes two copy steps · linked to #1</div></div><span class="pill t">Unchanged page</span></div></div></div>`; }
+function pageBlocks() { return head('Block library', 'Reusable groups of steps, unchanged. Blocks carry their base values, including the work split.') + `<div class="card"><p class="muted">Unchanged from today.</p></div>`; }
+
+function pageSetupClients() {
+  const { st, L } = computeToday();
+  let h = head('Tiers & clients', 'Where Joe keys in tiers, tier counts and named Tier 1 clients. A named client starts from its tier\'s values; anything filled in replaces them.', [['D3', 'Tier counts'], ['D5', 'Named Tier 1'], ['D13', 'Channels']]);
+  h += `<div class="row" style="margin-bottom:6px"><button class="btn sm pri" data-act="addTier">+ Add a tier</button>${TIERS.length > 3 ? `<button class="btn sm" data-act="delTier">Remove ${TIERS[TIERS.length - 1]}</button>` : ''}<span class="small muted">A new tier starts as a copy of the last one. Tiers are shared by both departments.</span></div>`;
+  for (const d in DEPTS) {
+    const keys = d === 'org'
+      ? [['fee', 'Fee a month', 100], ['words', 'Words', 250], ['links', 'Links', 1], ['techH', 'Tech hours', 1], ['meet', 'Meetings', 0.5], ['adhocP', 'Chance of ad hoc', 5, 1], ['adhoc', 'Requests if they ask', 0.5], ['churn', 'Churn a month', 0.5, 1]]
+      : [['fee', 'Fee a month', 100], ['channels', 'Channels', 0.1], ['builds', 'Builds', 0.5], ['creatives', 'Creative sets', 0.5], ['meet', 'Meetings', 0.5], ['adhocP', 'Chance of ad hoc', 5, 1], ['adhoc', 'Requests if they ask', 0.5], ['churn', 'Churn a month', 0.5, 1]];
+    const count = t => st.people.filter(p => isCF(p) && role(p).dept === d).reduce((s, p) => s + (p.counts[t] || 0), 0) + (t === 'T1' ? st.named.filter(n => n.dept === d).length : 0);
+    h += `<div class="card sec"><div class="ch"><h2>${DEPTS[d]} tiers</h2><p>Per client, a month. The defaults every client of the tier uses.</p></div><div class="tw"><table><thead><tr><th>Tier</th><th class="n">Clients</th>${keys.map(k => `<th class="n">${k[1]}${k[3] ? ' %' : ''}</th>`).join('')}<th class="n">Hours a month</th></tr></thead><tbody>${TIERS.map(t => { const hrs = clientLoad(d, t, null, [], false).reduce((a, x) => a + x.h, 0); return `<tr><td><b>${t}</b><div class="small muted">${t === 'T1' ? 'Most effort' : t === TIERS[TIERS.length - 1] ? 'Least effort' : ''}</div></td><td class="n">${f0(count(t))}${t === 'T1' ? `<div class="small muted">${st.named.filter(n => n.dept === d).length} named</div>` : ''}</td>${keys.map(k => `<td class="n"><input type="number" step="${k[2]}" data-bind="${k[3] ? 'tierp' : 'tier'}.${d}.${t}.${k[0]}" value="${k[3] ? +(S.tiers[d][t][k[0]] * 100).toFixed(1) : S.tiers[d][t][k[0]]}"></td>`).join('')}<td class="n">${f1(hrs)}</td></tr>`; }).join('')}</tbody></table></div>
+      <p class="note">Ad hoc: <b>chance of ad hoc</b> is the share of the tier's clients who send any requests in a month; <b>requests if they ask</b> is how many those clients send. The size of each request is the step's time (Processes). Clients counts are the sum of everyone's portfolio (People & roles).</p></div>`;
+  }
+  h += `<div class="card sec"><div class="ch"><h2>Clients taking both services</h2><p>Counted clients who appear in both an Organic and a Performance portfolio. Named clients use the "Also takes" box below.</p></div><div class="row">${TIERS.map(t => `<label class="f"><span>${t}</span><input type="number" step="1" data-both="${t}" value="${S.both[t] || 0}"></label>`).join('')}</div></div>`;
+  h += `<div class="card sec"><div class="ch"><h2>Named Tier 1 clients</h2><button class="btn sm pri" data-act="addNamed">+ Add a client</button></div><p class="small muted" style="margin-bottom:8px">Blank = use the tier's value. Hand-holding is unplanned time each month: reassurance, extra calls, same-day turnarounds.</p><div class="tw"><table><thead><tr><th>Client</th><th>Dept</th><th>Also takes</th><th>Looked after by</th><th class="n">Fee</th><th class="n">Channels</th><th class="n">Hand-holding h</th><th class="n">Chance of ad hoc %</th><th class="n">Requests if they ask</th><th class="n">Request size (min)</th><th class="n">Meetings a month</th><th class="n">Hours a month</th><th></th></tr></thead><tbody>${S.named.map((n, i) => { const hh = clientLoad(n.dept, 'T1', n, [], false).reduce((s, x) => s + x.h, 0); const o = S.people.filter(p => isCF(p) && role(p).dept === n.dept && canServe(p, 'T1')); const T1 = S.tiers[n.dept].T1; const opt = (k, ph) => `<input type="number" data-nbind="${i}.${k}" value="${n[k] != null ? n[k] : ''}" placeholder="${ph}">`; return `<tr><td><input type="text" class="w" data-nbind="${i}.name" value="${esc(n.name)}"></td><td><select data-nbind="${i}.dept">${Object.entries(DEPTS).map(([k, v]) => `<option value="${k}" ${k === n.dept ? 'selected' : ''}>${v.split(' ')[0]}</option>`).join('')}</select></td><td><label class="cmpchk"><input type="checkbox" data-also="${i}" ${n.alsoOther ? 'checked' : ''}>${n.dept === 'org' ? 'Performance' : 'Organic'}</label></td><td><select data-nbind="${i}.owner">${o.map(p => `<option value="${p.id}" ${p.id === n.owner ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></td><td class="n">${opt('fee', T1.fee)}</td><td class="n">${n.dept === 'perf' ? opt('channels', T1.channels) : '<span class="muted">—</span>'}</td><td class="n">${opt('handH', 0)}</td><td class="n"><input type="number" step="5" data-nbind="${i}.adhocPp" value="${n.adhocP != null ? Math.round(n.adhocP * 100) : ''}" placeholder="${Math.round(T1.adhocP * 100)}"></td><td class="n">${opt('adhoc', T1.adhoc)}</td><td class="n">${opt('adhocMin', n.dept === 'org' ? STEP.o14.min : STEP.p10.min)}</td><td class="n">${opt('meet', T1.meet)}</td><td class="n">${f1(hh)}</td><td><button class="btn x" data-act="delNamed" data-i="${i}" aria-label="Remove">✕</button></td></tr>`; }).join('')}</tbody></table></div>
+    <p class="note">"Also takes" counts the client in both service lines; give them a portfolio entry in the other department too. Later (not v1): bespoke recurring tasks per client, such as weekly localisation work.</p></div>`;
+  return h;
+}
+function pageSetupPeople() {
+  const { st, L } = computeToday();
+  let h = head('People & roles', 'Who works here, their hours, their team time, and their portfolio. Portfolios are named clients plus a count per tier.', [['D4', 'Portfolios'], ['D16', 'Client-facing vs shared'], ['D17', 'Line per role']]);
+  h += `<div class="card"><h2>Roles</h2><div class="tw" style="margin-top:8px"><table><thead><tr><th>Role</th><th>Department</th><th>Kind</th><th class="n">Line (busy %)</th><th class="n">Max-clients rule</th></tr></thead><tbody>${Object.entries(S.roles).map(([k, r]) => `<tr><td>${r.name}</td><td>${DEPTS[r.dept]}</td><td>${r.kind === 'cf' ? '<span class="pill t">Client-facing</span>' : '<span class="pill t">Shared team</span>'}</td><td class="n"><input type="number" step="5" data-bind="role.${k}.thrp" value="${Math.round(r.thr * 100)}"></td><td class="n">${r.kind === 'cf' ? `<input type="number" step="1" data-bind="role.${k}.rule" value="${r.rule || ''}">` : '<span class="muted">—</span>'}</td></tr>`).join('')}</tbody></table></div></div>`;
+  const rate = (id, label, unit) => `<label class="f"><span>${label}</span><span class="row" style="gap:4px;align-items:center"><input type="number" step="1" data-bind="step.${id}.min" value="${STEP[id].min}"><span class="small muted">${unit}</span></span></label>`;
+  const wph = (id, label) => `<label class="f"><span>${label}</span><span class="row" style="gap:4px;align-items:center"><input type="number" step="50" data-wph="${id}" value="${Math.round(60000 / STEP[id].min)}"><span class="small muted">words an hour</span></span></label>`;
+  h += `<div class="card sec"><div class="ch"><h2>How the shared teams work</h2><p>They own no clients. Each works in its own unit, and these rates turn client demand into hours.</p></div><div class="tw"><table><thead><tr><th>Team</th><th>Unit of work</th><th>Rates</th><th>Demand comes from</th></tr></thead><tbody>
+    <tr><td>Content team</td><td>Words</td><td><div class="row">${wph('o4', 'Writing')}${wph('o5', 'Editing')}</div></td><td class="small muted">Words a month per tier (Tiers & clients). Writers' KPI is 20,000 words a month.</td></tr>
+    <tr><td>Link outreach</td><td>Links</td><td><div class="row">${rate('o7', 'Outreach', 'min a link')}${rate('o9', 'Admin and live checks', 'min a link')}</div></td><td class="small muted">Links a month per tier. Vetting (${STEP.o8.min} min a link) is pinned to Karl.</td></tr>
+    <tr><td>Technical SEO</td><td>Ticket hours</td><td>${rate('o10', 'Per ticket hour', 'min')}</td><td class="small muted">Tech hours per tier, plus the technical audit at onboarding.</td></tr>
+    <tr><td>Performance implementers</td><td>Tasks</td><td><div class="row">${rate('p4', 'Campaign build or change', 'min')}${rate('p12', 'Creative set', 'min')}${rate('p13', 'PPC hygiene task', 'min')}</div></td><td class="small muted">Builds and creative sets per tier; hygiene tasks per channel (search terms, negatives, extensions). Campaign build at onboarding.</td></tr>
+    <tr><td>Conversion tracking</td><td>Set-ups and incidents</td><td><div class="row">${rate('p11', 'Incident', 'min')}${rate('pb4', 'Set-up', 'min')}</div></td><td class="small muted">Incidents per client a month; a set-up for each new Performance client.</td></tr>
+  </tbody></table></div><p class="note">To discuss: the full list of shared roles and their units (writers, editors, outreach, tech, specialists, tracking, anyone else).</p></div>`;
+  h += `<div class="card sec"><div class="ch"><h2>People</h2><p>Salary counts toward DLER, directors and managers included. Contractors don't.</p></div><div class="tw"><table><thead><tr><th>Person</th><th>Role</th><th class="n">Hours a week</th><th class="n">Team time %</th><th class="n">Speed ×</th><th class="n">Salary a month</th><th>Serves tiers</th>${TIERS.slice(1).map(t => `<th class="n">${t}</th>`).join('')}<th>Named</th><th style="min-width:150px">Busy</th></tr></thead><tbody>` +
+    S.people.map((p, i) => { const x = L[p.id]; const cf = isCF(p); return `<tr><td>${esc(p.name)}<div class="small muted">${esc(p.title)}</div></td><td class="small">${S.roles[p.role].name}</td><td class="n"><input type="number" data-pbind="${i}.hpw" value="${p.hpw}"></td><td class="n"><input type="number" step="5" data-pbind="${i}.mgmtp" value="${Math.round((p.mgmt || 0) * 100)}"></td><td class="n"><input type="number" step="0.05" data-pbind="${i}.speed" value="${p.speed}"></td><td class="n"><input type="number" step="100" data-pbind="${i}.salary" value="${p.salary}"></td><td>${cf ? TIERS.map(t => `<label class="cmpchk"><input type="checkbox" data-tiers="${i}.${t}" ${canServe(p, t) ? 'checked' : ''}>${t}</label>`).join('') : '<span class="muted small">—</span>'}</td>${TIERS.slice(1).map(t => `<td class="n">${cf ? `<input type="number" style="width:56px" data-pbind="${i}.c.${t}" value="${f0(p.counts[t] || 0)}">` : ''}</td>`).join('')}<td class="small">${S.named.filter(n => n.owner === p.id).map(n => esc(n.name)).join(', ')}</td><td>${busyBar(x.busy, thr(p))}</td></tr>`; }).join('') + `</tbody></table></div>
+    <p class="note">Also on each person, as today: email, start and end dates, leave, skills (steps they can do), per-step speed, overtime cap. New: ramp-up for new starters (90 days to full speed), offshore/contractor label. Leadership (Founder, Head of Client Services, Growth Strategy Lead) isn't in the capacity figures.</p></div>`;
+  return h;
+}
+function pageSetupDemand() {
+  const dm = S.demand;
+  const leads = dm.sources.reduce((s, x) => s + x.leads, 0);
+  return head('Lead flow & market', 'Where new clients come from, and how the market moves. Unchanged from today apart from the tier and department mix of wins.', [['A8', 'When to hire']]) +
+  `<div class="grid g2"><div class="card"><h2>Lead sources</h2><table style="margin-top:8px"><thead><tr><th>Source</th><th class="n">Leads a month</th></tr></thead><tbody>${dm.sources.map((s, i) => `<tr><td>${esc(s.name)}</td><td class="n"><input type="number" data-dbind="src.${i}" value="${s.leads}"></td></tr>`).join('')}</tbody></table>
+    <div class="row" style="margin-top:10px"><label class="f"><span>Win rate %</span><input type="number" data-dbind="winRate" value="${dm.winRate * 100}"></label><label class="f"><span>Sales cycle (months)</span><input type="number" data-dbind="cycle" value="${dm.cycle}"></label></div>
+    <div class="answer" style="margin-top:10px">About <b>${f1(leads * dm.winRate)}</b> new clients a month.</div></div>
+  <div class="card"><h2>Who the wins are</h2><div class="row" style="margin-top:8px">${Object.entries(DEPTS).map(([k, v]) => `<label class="f"><span>${v} %</span><input type="number" data-dbind="dept.${k}" value="${Math.round(dm.deptMix[k] * 100)}"></label>`).join('')}</div><div class="row" style="margin-top:8px">${TIERS.map(t => `<label class="f"><span>${t} %</span><input type="number" data-dbind="tier.${t}" value="${Math.round(dm.tierMix[t] * 100)}"></label>`).join('')}</div>
+    <h3 style="margin:14px 0 6px">Market</h3><div class="row"><select data-dbind="market">${Object.keys(MARKET).map(k => `<option ${k === dm.market ? 'selected' : ''}>${k}</option>`).join('')}</select><span class="small muted">Leads ×${MARKET[dm.market].leads} · churn ×${MARKET[dm.market].churn}. The real app schedules this by month over 2 years.</span></div>
+    <h3 style="margin:14px 0 6px">Seasonality</h3><div class="row">${MONTHS.map((m, i) => `<label class="f"><span>${m.split(' ')[0]}</span><input type="number" step="0.1" style="width:52px" data-dbind="season.${i}" value="${dm.season[i]}"></label>`).join('')}</div>
+    <div class="row" style="margin-top:10px"><label class="f"><span>Hiring delay (months)</span><input type="number" data-sbind="hiringDelay" value="${S.hiringDelay}"></label></div></div></div>`;
+}
+function pageSetupChurn() {
+  return head('Churn', 'Base churn sits on each tier (Tiers & clients). Drivers explain why clients leave. Unchanged from today.') + `<div class="card"><table><thead><tr><th>Driver</th><th class="n">Weight</th><th>On</th></tr></thead><tbody>${S.churnDrivers.map((c, i) => `<tr><td>${esc(c.name)}</td><td class="n"><input type="number" data-chbind="${i}.weight" value="${c.weight}"></td><td><input type="checkbox" ${c.on ? 'checked' : ''} data-chon="${i}"></td></tr>`).join('')}</tbody></table><p class="note">From the interviews: cash flow and the economy, results, feeling we're "going through the motions", a new marketing contact, resellers taking work in-house. About 5 churn warnings a week.</p></div>`;
+}
+function pageSetupOther() {
+  const rows = [['Workspace', 'Name, currency, overheads', 'Keep'], ['Simulation', 'Per-person times, availability floor', 'Keep'], ['Access', 'Who can sign in: Owner, Agency admin, Viewer', 'Keep'], ['Branding', 'Logo and accent colour', 'Keep'], ['Historical data', 'CSV imports to calibrate step times, churn, leads', 'Keep (later: Monday.com ticket times)'], ['Change log', 'Audit of company-model edits', 'Keep'], ['What it achieves', 'Purpose categories for "where the time goes"', 'Keep'], ['Levers', 'Process-level lever visibility', 'Cut'], ['Share links', 'Links for people outside the deployment', 'Cut'], ['Sources', 'Transcript and evidence library', 'Hidden'], ['First principles', 'Per-process questionnaire', 'Cut'], ['Demo', 'Sample workspaces', 'Cut, rebuild later']];
+  return head('Other settings', 'What stays, what goes.') + `<div class="card"><table><thead><tr><th>Setting</th><th>What it is</th><th>Verdict</th></tr></thead><tbody>${rows.map(r => `<tr><td>${r[0]}</td><td class="muted">${r[1]}</td><td><span class="pill ${r[2].startsWith('Keep') ? 'ok' : r[2].startsWith('Hidden') ? 'warn' : 'bad'}">${r[2]}</span></td></tr>`).join('')}</tbody></table></div>`;
+}
+function pageAbout() {
+  const Q = [['A1', 'If I add 5 new clients, what will that do?', 'Sandbox → Win new clients; What happens; charts'], ['A2', 'Are we at capacity, or can we still fit new clients? How many?', 'Capacity → client-facing tables, "How many more fit"'], ['A3', 'Where are the bottlenecks?', 'Capacity → Bottleneck; shared teams'], ['A4', 'What takes the most time?', 'Overview → Where the time goes; Capacity → Time to serve a client'], ['A5', 'With automation X, how many more clients can we hold?', 'Sandbox → Automation levers; What would help most'], ['A6', 'What does that do to DLER? Can we reach 4.5?', 'Capacity headline; Sandbox → DLER chart'], ['A7', 'Which change frees the most time?', 'Sandbox → What would help most; Issues'], ['A8', 'When do I need to hire, and whom?', 'Capacity → The next 12 months; Sandbox → What happens'], ['A9', 'What if someone leaves?', 'Capacity → What if someone leaves; Sandbox → People']];
+  return head('About this prototype', 'A clickable mock-up of the refocused app, to agree the stats and levers before building.') + `<div class="card"><h2>Read this first</h2><ul class="small" style="margin:8px 0 0;padding-left:18px;display:grid;gap:4px"><li><b>Example data.</b> Roles and team shape follow the client's org chart; client names, portfolios, fees, salaries and times are made up or rough interview ranges. Not the client's figures.</li><li><b>Simple calculator.</b> Monthly averages, not the simulation engine: no queues, waits or 10–90% ranges. The real app runs the engine.</li><li><b>Everything is editable</b> in Set up and on each process step, and flows through every page. Nothing is saved; reload to reset.</li><li>Tags in the menu: <span class="tag new">New</span> page, <span class="tag chg">Changed</span> page.</li></ul></div>
+    <div class="card sec"><h2>Where each question is answered</h2><div class="tw"><table style="margin-top:8px"><tbody>${Q.map(q => `<tr><td class="mono">${q[0]}</td><td>${q[1]}</td><td class="muted">${q[2]}</td></tr>`).join('')}</tbody></table></div></div>`;
+}
+
+/* ---------- router and events ---------- */
+function route() {
+  const r = (location.hash || '#overview').slice(1) || 'overview';
+  renderNav(r);
+  let html;
+  try {
+    if (r === 'overview') html = pageOverview();
+    else if (r === 'capacity') html = pageCapacity();
+    else if (r === 'processes') html = pageProcesses();
+    else if (r.startsWith('process-')) html = pageProcess(r.slice(8));
+    else if (r === 'sandbox') html = pageSandbox();
+    else if (r === 'issues') html = pageIssues();
+    else if (r.startsWith('issue-')) html = pageIssue(r.slice(6));
+    else if (r === 'solutions') html = pageSolutions();
+    else if (r === 'blocks') html = pageBlocks();
+    else if (r === 'setup-clients') html = pageSetupClients();
+    else if (r === 'setup-people') html = pageSetupPeople();
+    else if (r === 'setup-demand') html = pageSetupDemand();
+    else if (r === 'setup-churn') html = pageSetupChurn();
+    else if (r === 'setup-other') html = pageSetupOther();
+    else if (r === 'about') html = pageAbout();
+    else html = pageOverview();
+  } catch (e) { html = `<div class="card"><b>Something broke in the prototype:</b> ${esc(e.message)}</div>`; console.error(e); }
+  const y = window.scrollY;
+  document.getElementById('main').innerHTML = `<div class="banner"><b>Prototype</b><span>Example data shaped like the client, not their figures. Edits aren't saved.</span><button class="btn sm" data-act="reset">Reset example data</button></div>` + html;
+  window.scrollTo(0, y);
+}
+const num = v => v === '' ? null : +v;
+document.addEventListener('change', e => {
+  const t = e.target, d = t.dataset;
+  if (d.bind) {
+    const [k, a, b, c] = d.bind.split('.');
+    if (k === 'step') STEP[a][b] = b === 'src' ? t.value : +t.value;
+    if (k === 'stepf') STEP[a].freq[b] = +t.value;
+    if (k === 'stepm') { STEP[a].mult = STEP[a].mult || {}; STEP[a].mult[b] = +t.value; }
+    if (k === 'tier') S.tiers[a][b][c] = +t.value;
+    if (k === 'tierp') S.tiers[a][b][c] = +t.value / 100;
+    if (k === 'role') { if (b === 'thrp') S.roles[a].thr = +t.value / 100; else S.roles[a][b] = num(t.value); }
+  } else if (d.play) { UI.play[d.play] = t.tagName === 'SELECT' && isNaN(+t.value) ? t.value : +t.value;
+  } else if (d.playl) { const [l, i, k] = d.playl.split('.'); UI.play[l][+i][k] = k === 'month' ? +t.value : t.value;
+  } else if (d.auto) { if (t.checked) UI.play.autos[d.auto] = 1; else delete UI.play.autos[d.auto];
+  } else if (d.swap) { for (const l of LIB) if (l.effects.some(e => e.step === d.swap)) delete UI.play.autos[l.id]; if (t.value) UI.play.autos[t.value] = 1;
+  } else if (d.automo) { UI.play.autos[d.automo] = +t.value;
+  } else if (d.wph) { STEP[d.wph].min = 60000 / Math.max(1, +t.value);
+  } else if (d.both) { S.both[d.both] = +t.value;
+  } else if (d.also) { S.named[+d.also].alsoOther = t.checked;
+  } else if (d.split) {
+    const [id, i] = d.split.split('.'); const s = STEP[id]; const v = +t.value; const others = [0, 1, 2].filter(j => j !== +i); const rest = 100 - v; const sum = s.split[others[0]] + s.split[others[1]] || 1;
+    s.split[+i] = v; s.split[others[0]] = Math.round(rest * (s.split[others[0]] / sum || 0.5) / 5) * 5; s.split[others[1]] = 100 - v - s.split[others[0]];
+  } else if (d.pbind) {
+    const [i, k, t2] = d.pbind.split('.'); const p = S.people[+i];
+    if (k === 'c') p.counts[t2] = +t.value; else if (k === 'mgmtp') p.mgmt = +t.value / 100; else p[k] = +t.value;
+  } else if (d.tiers) {
+    const [i, tr] = d.tiers.split('.'); const p = S.people[+i]; const set = new Set((p.tiers || '').split(' ').filter(Boolean)); t.checked ? set.add(tr) : set.delete(tr); p.tiers = [...set].sort().join(' ');
+  } else if (d.nbind) {
+    const [i, k] = d.nbind.split('.'); const n = S.named[+i];
+    if (k === 'name' || k === 'owner') n[k] = t.value;
+    else if (k === 'dept') { n.dept = t.value; const o = S.people.find(p => isCF(p) && role(p).dept === n.dept && canServe(p, 'T1')); n.owner = o ? o.id : null; }
+    else if (k === 'adhocPp') { const v = num(t.value); if (v == null) delete n.adhocP; else n.adhocP = v / 100; }
+    else { const v = num(t.value); if (v == null) delete n[k]; else n[k] = v; }
+  } else if (d.dbind) {
+    const [k, a] = d.dbind.split('.'); const dm = S.demand;
+    if (k === 'src') dm.sources[+a].leads = +t.value; else if (k === 'winRate') dm.winRate = +t.value / 100; else if (k === 'cycle') dm.cycle = +t.value; else if (k === 'dept') dm.deptMix[a] = +t.value / 100; else if (k === 'tier') dm.tierMix[a] = +t.value / 100; else if (k === 'market') dm.market = t.value; else if (k === 'season') dm.season[+a] = +t.value;
+  } else if (d.sbind) { S[d.sbind] = +t.value; }
+  else if (d.chbind) { const [i, k] = d.chbind.split('.'); S.churnDrivers[+i][k] = +t.value; }
+  else if (d.chon) { S.churnDrivers[+d.chon].on = t.checked; }
+  else if (d.cbind) {
+    const [i, k] = d.cbind.split('.'); const c = UI.scen.find(s => s.id === UI.sel).changes[+i];
+    c[k] = ['dept', 'tier', 'role', 'person', 'preset', 'step'].includes(k) ? t.value : +t.value;
+  } else if (d.ui) { UI[d.ui] = t.value; }
+  else if (d.uiName) { UI.scen.find(s => s.id === d.uiName).name = t.value; }
+  else if (d.cmp) { UI.cmp[d.cmp] = t.checked; }
+  else return;
+  route();
+});
+document.addEventListener('click', e => {
+  const n = e.target.closest('[data-step]');
+  if (n && n.classList.contains('node')) { UI.step = n.dataset.step; route(); return; }
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const a = b.dataset.act, scn = UI.scen.find(s => s.id === UI.sel);
+  if (a === 'closeStep') UI.step = null;
+  if (a === 'openStep') { UI.step = b.dataset.step; }
+  if (a === 'selScen') UI.sel = b.dataset.id;
+  if (a === 'newScen') { const id = 's' + Date.now(); UI.scen.push({ id, name: 'New scenario', changes: [] }); UI.sel = id; UI.cmp[id] = true; }
+  if (a === 'delScen') { UI.scen = UI.scen.filter(s => s.id !== UI.sel); delete UI.cmp[UI.sel]; UI.sel = 'base'; }
+  if (a === 'delChange') scn.changes.splice(+b.dataset.i, 1);
+  if (a === 'addChange') { const t = b.dataset.t; scn.changes.push({ add: { type: 'add', dept: 'org', tier: 'T2', n: 5, start: 2, spread: 1 }, hire: { type: 'hire', role: 'pmm', start: 2 }, leave: { type: 'leave', person: 'diya', start: 3 }, mgmt: { type: 'mgmt', person: 'laura', value: 20 }, fee: { type: 'fee', dept: 'all', tier: 'all', pct: 5 }, leads: { type: 'leads', x: 1.2 }, win: { type: 'win', x: 1.2 }, market: { type: 'market', preset: 'Soft' }, steptime: { type: 'steptime', step: 'o4', factor: 0.9 } }[t]); }
+  if (a === 'addLib') scn.changes.push({ type: 'lib', lib: document.getElementById('libpick').value, start: 1 });
+  if (a === 'useHire') { if (!scn.fixed) scn.changes.push({ type: 'hire', role: b.dataset.role, start: 2 }); }
+  if (a === 'useLib') { if (!scn.fixed) scn.changes.push({ type: 'lib', lib: b.dataset.lib, start: 1 }); }
+  if (a === 'sbProc') UI.sbProc = b.dataset.id;
+  if (a === 'playAdd') { const l = b.dataset.l; UI.play[l].push(l === 'leavers' ? { person: 'diya', month: 3 } : l === 'hires' ? { role: 'pmm', month: 2 } : { id: S.named[0].id, month: 3 }); }
+  if (a === 'playDel') UI.play[b.dataset.l].splice(+b.dataset.i, 1);
+  if (a === 'playReset') UI.play = defaultPlay();
+  if (a === 'playSave') { const n = (document.getElementById('playName').value || '').trim() || 'Scenario ' + (UI.saved.length + 1); UI.saved.push({ name: n, play: structuredClone(UI.play) }); }
+  if (a === 'playLoad') UI.play = structuredClone(UI.saved[+b.dataset.i].play);
+  if (a === 'playUnsave') UI.saved.splice(+b.dataset.i, 1);
+  if (a === 'playHire') UI.play.hires.push({ role: b.dataset.role, month: 2 });
+  if (a === 'playAuto') UI.play.autos[b.dataset.lib] = 1;
+  if (a === 'addTier') { const id = 'T' + (TIERS.length + 1), last = TIERS[TIERS.length - 1]; for (const dd in DEPTS) S.tiers[dd][id] = { ...S.tiers[dd][last] }; S.demand.tierMix[id] = 0; S.both[id] = 0; for (const p of S.people) if (p.counts) p.counts[id] = 0; S.tierList.push(id); TIERS = S.tierList; }
+  if (a === 'delTier' && TIERS.length > 3) { const id = TIERS[TIERS.length - 1]; for (const dd in DEPTS) delete S.tiers[dd][id]; delete S.demand.tierMix[id]; delete S.both[id]; for (const p of S.people) if (p.counts) delete p.counts[id]; S.tierList.pop(); TIERS = S.tierList; }
+  if (a === 'mapPlay') { const m = document.getElementById('cmap'), btn = document.getElementById('mapPlay'), sc = document.getElementById('mapScrub'), lab = document.getElementById('mapMonth'); if (mapTimer) { clearInterval(mapTimer); mapTimer = null; m.classList.remove('playing'); btn.textContent = '▶ Play'; } else { m.classList.add('playing'); btn.textContent = '❚❚ Pause'; const sp = parseInt(document.getElementById('mapSpeed').value) || 1; mapTimer = setInterval(() => { sc.value = (+sc.value + 1) % 12; lab.textContent = MONTHS[+sc.value]; }, 1200 / sp); } return; }
+  if (a === 'addNamed') S.named.push({ id: 'n' + Date.now(), name: 'New client', dept: 'org', owner: 'zach', fee: 10000 });
+  if (a === 'delNamed') S.named.splice(+b.dataset.i, 1);
+  if (a === 'reset') { S = base(); TIERS = S.tierList; const fresh = PROCS_ORIG(); for (const id in fresh) Object.assign(STEP[id], fresh[id]); }
+  if (a === 'openStep') return;
+  route();
+});
+const PROCS_SNAPSHOT = JSON.stringify(Object.fromEntries(Object.values(STEP).map(s => [s.id, { min: s.min, freq: s.freq, mult: s.mult || null, split: s.split, src: s.src }])));
+function PROCS_ORIG() { const o = JSON.parse(PROCS_SNAPSHOT); for (const id in o) if (o[id].mult === null) o[id].mult = undefined; return o; }
+window.addEventListener('hashchange', () => { if (mapTimer) { clearInterval(mapTimer); mapTimer = null; } window.scrollTo(0, 0); route(); });
+document.addEventListener('input', e => { if (e.target.id === 'mapScrub') document.getElementById('mapMonth').textContent = MONTHS[+e.target.value]; });
+if (typeof document !== 'undefined' && document.getElementById('main')) route();
+</script>
