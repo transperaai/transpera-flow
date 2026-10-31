@@ -143,6 +143,7 @@ export {
   LEAD_SOURCE_COLUMNS,
   listProcesses,
   loadChurnDrivers,
+  loadCapacityInputs,
   loadClientGroups,
   loadClients,
   loadTeam,
