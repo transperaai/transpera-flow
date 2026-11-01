@@ -25,4 +25,6 @@ if [ "$mode" = list ]; then
       } finally { await close(); }
     });'
 fi
-DATABASE_URL="$uri" exec node --experimental-strip-types scripts/capacity-example.ts --workspace "$2" --driver neon-ws
+# The loader's sources import each other without extensions (as vitest resolves them), so run it through jiti.
+jiti=$(ls -d ../../node_modules/.pnpm/jiti@*/node_modules/jiti/lib/jiti-cli.mjs | tail -1)
+DATABASE_URL="$uri" exec node "$jiti" scripts/capacity-example.ts --workspace "$2" --driver neon-ws
