@@ -941,6 +941,11 @@ interface CanvasProps {
   stepBaseValues?: (step: StepRow) => ReactNode;
   /** The first run is still computing: shows FirstRunStatus over the map. */
   computing?: boolean;
+  /**
+   * Frame the map again, animated, when this changes after it was first framed (the Overview passes its open cards: opening one changes
+   * the map's size). Unlike a `key` on the canvas it keeps the map mounted, so playback goes on.
+   */
+  refitOn?: string;
   /** What to do about a read-only map with no steps (the process page offers the Editor); shown under the sentence. */
   emptyAction?: ReactNode;
 }
@@ -996,6 +1001,7 @@ function Canvas({
   initialStepId = null,
   stepBaseValues,
   computing = false,
+  refitOn,
   emptyAction,
 }: CanvasProps) {
   const editable = editor !== null;
@@ -1563,11 +1569,13 @@ function Canvas({
     setOverflow((o) => (o.left === left && o.right === right ? o : { left, right }));
   }, [flow]);
   const fit = useCallback(
-    (animate: boolean) => {
+    (animate: boolean, everything = false) => {
       const all = flow.getNodes();
       const panel = sizeRef.current;
       if (!all.length || !panel.width) return;
-      const wanted = focus?.length ? all.filter((n) => focus.includes(n.id)) : [];
+      // The Fit button frames every node, however small that makes them; the first framing keeps the focus and the 70% floor.
+      const wanted = !everything && focus?.length ? all.filter((n) => focus.includes(n.id)) : [];
+      const minZoom = everything ? MIN_ZOOM : undefined;
       let bounds = flow.getNodesBounds(wanted.length ? wanted : all);
       // Room around what is framed, so a step or two is seen in its surroundings and not blown up to fill the panel.
       if (wanted.length) bounds = { x: bounds.x - 260, y: bounds.y - 140, width: bounds.width + 520, height: bounds.height + 280 };
@@ -1575,11 +1583,11 @@ function Canvas({
       const pad = fitPadding(lanes, editable, showPlayback && !playbackAbove);
       let panelHeight = panel.height;
       if (heightMode === "auto") {
-        panelHeight = autoPanelHeight(bounds, panel.width, pad);
+        panelHeight = autoPanelHeight(bounds, panel.width, pad, minZoom);
         setAutoHeight(panelHeight);
       }
       if (!panelHeight) return;
-      void flow.setViewport(fitViewport(bounds, { width: panel.width, height: panelHeight }, pad), animate ? { duration: 200 } : undefined);
+      void flow.setViewport(fitViewport(bounds, { width: panel.width, height: panelHeight }, pad, minZoom), animate ? { duration: 200 } : undefined);
       setTimeout(measureOverflow, animate ? 260 : 20);
     },
     [flow, lanes, editable, showPlayback, playbackAbove, heightMode, measureOverflow, focus],
@@ -1609,6 +1617,12 @@ function Canvas({
     const timer = setTimeout(() => fitRef.current(true), 60);
     return () => clearTimeout(timer);
   }, [fitTick]);
+  const refitSeen = useRef(refitOn);
+  useEffect(() => {
+    if (refitOn === refitSeen.current) return;
+    refitSeen.current = refitOn;
+    if (framed.current) requestFit();
+  }, [refitOn]);
   // A read-only map follows its panel's width (and height, when that is fixed), unless it was moved by hand.
   const refitKey = editable ? "" : heightMode === "auto" ? `${width}` : `${width}x${height}`;
   useEffect(() => {
@@ -1622,7 +1636,7 @@ function Canvas({
   };
   const fitByHand = () => {
     handZoomed.current = false;
-    fit(true);
+    fit(true, true);
   };
 
   // Highlighted steps scroll into view when they are off screen.

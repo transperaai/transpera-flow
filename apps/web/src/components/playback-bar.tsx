@@ -1,12 +1,13 @@
 "use client";
 
 // Playback controls (issue #14): play/pause, speed, a scrubber over the
-// measured horizon, the simulated time, and leaving playback. The time and the
+// measured horizon, the simulated time, and Stop (back to the normal map). The time and the
 // scrubber follow the clock imperatively, so playing doesn't re-render React.
 // Keys, with focus anywhere in the bar: Space plays or pauses; on the
 // scrubber, arrows move an hour (Shift: a day), Page Up/Down a week, Home/End
 // the ends.
 
+import { Square } from "lucide-react";
 import { useEffect, useRef, useSyncExternalStore, type KeyboardEvent } from "react";
 import { SPEEDS, formatSimTime, type PlaybackClock } from "@/lib/playback/clock";
 
@@ -114,6 +115,17 @@ export function PlaybackBar({ clock, H, hoursPerWeek, reps, describe }: BarProps
       >
         <span aria-hidden>{state.playing ? "❚❚" : "▶"}</span> {playLabel}
       </button>
+      <button
+        type="button"
+        onClick={() => clock.stop()}
+        disabled={!ready || !state.active}
+        aria-label="Stop"
+        data-playback-stop
+        title="Stop playback and go back to the map"
+        className={`${button} inline-flex items-center gap-1 font-semibold`}
+      >
+        <Square aria-hidden className="size-3 fill-current" /> Stop
+      </button>
       <label className="sr-only" htmlFor="playback-speed">
         Playback speed
       </label>
@@ -149,11 +161,6 @@ export function PlaybackBar({ clock, H, hoursPerWeek, reps, describe }: BarProps
         className="h-6 min-w-40 flex-1 accent-accent"
       />
       <span ref={time} className="min-w-44 font-mono text-fg tabular-nums" aria-hidden />
-      {state.active && (
-        <button type="button" onClick={() => clock.stop()} className={button} title="Stop playback and clear the map">
-          Exit playback
-        </button>
-      )}
       <span
         className="text-fg-3"
         title={`Playback shows one simulated run of ${Math.round((H ?? 0) / hoursPerWeek)} weeks; the figures above average all ${reps ?? 1}.`}

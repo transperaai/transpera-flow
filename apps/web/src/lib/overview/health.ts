@@ -102,45 +102,5 @@ export function openIssues(issues: readonly IssueRow[], now: Date, timeZone?: st
   };
 }
 
-const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-export interface MonthCount {
-  /** "2026-10". */
-  month: string;
-  /** "Oct", with the year on January and on the first month shown: "Oct 26". */
-  label: string;
-  opened: number;
-  resolved: number;
-}
-
-/**
- * Issues opened and resolved in each of the last `months` calendar months, up to and including the month of `now`. An
- * issue counts as opened when it was logged or acknowledged, and as resolved in the month it was resolved (Won't fix and
- * dismissed insights don't count as resolved; a dismissed insight was never an issue).
- */
-export function openedVersusResolved(issues: readonly IssueRow[], now: Date, months = 6, timeZone?: string): MonthCount[] {
-  const [y, m] = monthKey(now, timeZone).split("-").map(Number) as [number, number];
-  const out: MonthCount[] = [];
-  for (let k = months - 1; k >= 0; k--) {
-    // Month arithmetic on the calendar's numbers, so no time zone can shift a month.
-    const index = y * 12 + (m - 1) - k;
-    const year = Math.floor(index / 12);
-    const mo = index % 12;
-    const short = MONTH_SHORT[mo]!;
-    out.push({ month: `${year}-${String(mo + 1).padStart(2, "0")}`, label: k === months - 1 || mo === 0 ? `${short} ${String(year % 100).padStart(2, "0")}` : short, opened: 0, resolved: 0 });
-  }
-  const at = new Map(out.map((c) => [c.month, c]));
-  for (const i of issues) {
-    if (!isVisibleIssue(i)) continue;
-    const opened = at.get(monthOf(i.created_at, timeZone));
-    if (opened) opened.opened++;
-    if (i.status === "resolved" && i.resolved_at) {
-      const resolved = at.get(monthOf(i.resolved_at, timeZone));
-      if (resolved) resolved.resolved++;
-    }
-  }
-  return out;
-}
-
 /** The worse of two ratings, either of which may be missing. */
 export const worseOf = (a: Rating | null, b: Rating | null): Rating | null => (a === null ? b : b === null ? a : worseRating(a, b));

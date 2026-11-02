@@ -9,13 +9,14 @@ import { useMemo, useState } from "react";
 import {
   bottleneck,
   busyShares,
-  DLER_GOAL,
   departmentCeiling,
   dler,
   hiringAdvice,
   hiringDelayAt,
   leaver,
+  limitedBy,
   missingForCapacity,
+  roomPulse,
   serviceLines,
   timeToServe,
   todayModel,
@@ -155,13 +156,12 @@ function Attention({ base, problems, missing }: { base: string; problems: Return
 function Headline({ setup }: { setup: CapacitySetup }) {
   const lines = useMemo(() => serviceLines(setup), [setup]);
   const d = useMemo(() => dler(setup), [setup]);
-  const money = (v: number) => formatWholeCurrency(v, setup.currency);
   const dlerKpi = (label: string, row: (typeof d)["whole"]) => (
     <Kpi
       key={label}
       label={label}
-      value={row.ratio === null ? "Hidden" : f1(row.ratio)}
-      sub={row.salaries === null ? "Pay is hidden for your role" : `${money(row.retainers)} ÷ ${money(row.salaries)} · goal ${DLER_GOAL}`}
+      value={row.hidden ? "Hidden" : row.ratio === null ? "—" : f1(row.ratio)}
+      sub={row.hidden ? "Pay is hidden for your role" : row.ratio === null ? "No salaries entered" : `Average of ${row.people} ${row.people === 1 ? "person's" : "people's"} DLER`}
     />
   );
   return (
@@ -205,24 +205,26 @@ function Room({ name, ceiling, people }: { name: string; ceiling: DepartmentCeil
   const chips = people
     .map((p) => ({ p, room: ceiling.perPerson[p.id]?.canTake ?? 0 }))
     .sort((a, b) => b.room - a.room);
-  const full = ceiling.room < 1;
-  const who = ceiling.limit === "Client-facing people" ? "its client managers" : `the ${ceiling.limit.toLowerCase()}`;
+  const pulse = roomPulse(ceiling.room, ceiling.clients);
   return (
     <section className="flex min-w-0 flex-col gap-1 rounded-token border border-line bg-panel p-4" data-room={name}>
       <h2 className="font-heading text-base font-semibold tracking-tight">{name}: room for more clients</h2>
       <p className="text-base leading-snug" data-room-sentence>
-        {full ? (
+        <span className={cn("font-semibold", TONE_TEXT[pulse.tone])} data-room-status>
+          {pulse.status}.
+        </span>{" "}
+        {pulse.words ? (
           <>
-            <span className="font-semibold text-crit">Full.</span> {name} can&apos;t take another client without someone going over their line.
+            {name} can take <b>{pulse.words}</b>. Limited by {limitedBy(ceiling.limit)}.
           </>
         ) : (
           <>
-            {name} can take about <b>{ceiling.room} more clients</b>.
+            {name} can&apos;t take another client without someone going over their line. Limited by {limitedBy(ceiling.limit)}.
           </>
         )}
       </p>
       <p className="mb-3 text-xs text-muted-foreground">
-        {f0(ceiling.clients)} clients today. The ceiling is {f0(ceiling.max)}, set by {who}.
+        {f0(ceiling.clients)} clients today. A rough guide from the simulation, not a promise.
       </p>
       <RoomGauge clients={ceiling.clients} limits={ceiling.limits} room={ceiling.room} />
       <h3 className="mt-4 mb-2 text-sm font-semibold">Who can take the next client</h3>

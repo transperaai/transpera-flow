@@ -77,10 +77,12 @@ export function usePlayback(
     if (run) clock.configure({ H: run.H, hoursPerWeek });
   }, [clock, run, hoursPerWeek]);
 
-  // An edit pauses playback (it keeps its time).
+  // An edit pauses playback (it keeps its time). The company map is read only: its bundle changes when a card is opened or closed, which
+  // is not an edit, so playback goes on.
+  const rolledUp = rollUp !== null;
   useEffect(() => {
-    clock.pause();
-  }, [clock, bundle]);
+    if (!rolledUp) clock.pause();
+  }, [clock, bundle, rolledUp]);
 
   const open = rollUp?.open ?? null;
   const steps = useMemo(
