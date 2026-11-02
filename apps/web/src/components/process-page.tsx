@@ -12,6 +12,8 @@ import { usePathname, useSearchParams } from "next/navigation";
 import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
 import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { AboutProcess } from "@/components/about-process";
+import { ProcessDepartmentField } from "@/components/process-department-field";
+import type { DepartmentFieldData } from "@/lib/process-page/department";
 import { Help } from "@/components/help";
 import { IssueTrackView } from "@/components/issue-track";
 import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
@@ -80,7 +82,10 @@ export function ProcessPage({
   processPicker,
   notice,
   tierSetup,
+  department,
 }: {
+  /** The Department field of "About this process" (Q4): omitted where there is no workspace to read departments from. */
+  department?: DepartmentFieldData;
   /** The tiers and what each service's tier gets, for the step base values (a driver recurrence is read from them). */
   tierSetup?: TierSetup;
   /** The process at the version on screen: live, or an earlier one when `viewingVersion` is set. */
@@ -274,7 +279,9 @@ export function ProcessPage({
           </div>
         )}
 
-        <AboutProcess about={about} />
+        <AboutProcess about={about}>
+          {department && <ProcessDepartmentField processId={bundle.process.id} data={department} canEdit={mode === "live"} />}
+        </AboutProcess>
 
         <Section
           id="map"

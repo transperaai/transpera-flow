@@ -3,9 +3,10 @@
 // "About this process" (issue #174): the process's plain attributes in one line under its header. Worked out in
 // lib/process-page/about.ts. Links to nothing and has no (i): each label says what it is.
 
+import type { ReactNode } from "react";
 import { aboutLine, type About } from "@/lib/process-page/about";
 
-export function AboutProcess({ about }: { about: About }) {
+export function AboutProcess({ about, children }: { about: About; children?: ReactNode }) {
   return (
     <section aria-labelledby="about-heading" className="min-w-0" data-testid="about-process">
       <h2 id="about-heading" className="sr-only">
@@ -21,6 +22,7 @@ export function AboutProcess({ about }: { about: About }) {
             <dd>{a.value}</dd>
           </div>
         ))}
+        {children}
       </dl>
     </section>
   );
