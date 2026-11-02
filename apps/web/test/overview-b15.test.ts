@@ -2,8 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { northbeamBundle, northbeamIssues, partOf, toEngineModel, type IssueRow, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
-import { RATING_LABELS, ratingOfStored, ratingRank, simulate, type DetectedIssue, type EngineModel, type Rating, type SimulationResult } from "@transpera-flow/engine";
-import { ProcessGroups, countsLine } from "@/components/overview/process-groups";
+import { ratingOfStored, ratingRank, simulate, type EngineModel, type Rating, type SimulationResult } from "@transpera-flow/engine";
 import { IssuesDonut, TimeSplitChart } from "@/components/overview/trend-charts";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { ratingOfRank } from "@/lib/map/rating";
@@ -208,13 +207,6 @@ describe("groups by process", () => {
     expect(row.rating).toBe(card);
     const health = processHealth(groups.slice(1).map((g) => g.rating));
     expect(health.byRating.find((c) => c.rating === card)!.count).toBeGreaterThanOrEqual(1);
-    const out = html(createElement(ProcessGroups, { groups, renderItems: () => null }));
-    const at = out.indexOf(`data-process-group="${nb.process.id}"`);
-    expect(out.slice(at, out.indexOf("data-top-issue", at))).toContain(RATING_LABELS[card!]);
-  });
-  it("says a group's counts in words, leaving out zeros", () => {
-    expect(countsLine({ openIssues: 2, solutionsInProgress: 1 })).toBe("2 open issues · 1 solution in progress");
-    expect(countsLine({ openIssues: 0, solutionsInProgress: 0 })).toBe("Nothing open");
   });
 });
 
@@ -351,34 +343,6 @@ describe("the trend charts", () => {
     expect(out).toContain("Waiting on others");
     expect(out).toContain("working");
     expect(html(createElement(TimeSplitChart, { rows: [], months: 3 }))).toContain("No work went through");
-  });
-});
-
-describe("the by-process tier", () => {
-  it("draws a collapsed row per group, Across the company first", () => {
-    const detected: DetectedIssue[] = rerate(model, result, {}, live.process.id);
-    const groups = groupByProcess({ parts, pipelineId: live.process.id, facts: detected, issues: [], solutions: [] });
-    const out = html(createElement(ProcessGroups, { groups, renderItems: () => "ITEMS" }));
-    expect(out.indexOf("Across the company")).toBeLessThan(out.indexOf(parts[0]!.process.name));
-    expect(out).toContain('aria-expanded="false"');
-    expect(out).not.toContain("ITEMS");
-    // A collapsed row points at no panel; an open one points at its panel.
-    expect(out).not.toContain("aria-controls");
-    const open = html(createElement(ProcessGroups, { groups, renderItems: () => "ITEMS", initiallyOpen: [live.process.id] }));
-    expect(open).toContain("ITEMS");
-    expect(open).toContain(`aria-controls="group-${live.process.id}"`);
-    expect(open).toContain(`id="group-${live.process.id}"`);
-  });
-  it("gives the worst open issue its rating in words, and an open row with nothing open a short line", () => {
-    const groups = groupByProcess({ parts, pipelineId: live.process.id, facts: [], issues: northbeamIssues(), solutions: [] });
-    const withTop = groups.find((g) => g.top)!;
-    const out = html(createElement(ProcessGroups, { groups: [withTop], renderItems: () => "ITEMS" }));
-    const top = out.slice(out.indexOf("data-top-issue"));
-    expect(top.slice(0, top.indexOf(withTop.top!.title))).toContain(RATING_LABELS[withTop.top!.rating]);
-    const empty = { ...withTop, facts: [], issues: [], top: null, openIssues: 0 };
-    const openEmpty = html(createElement(ProcessGroups, { groups: [empty], renderItems: () => "ITEMS", initiallyOpen: [empty.id] }));
-    expect(openEmpty).toContain("Nothing open.");
-    expect(openEmpty).not.toContain("ITEMS");
   });
 });
 

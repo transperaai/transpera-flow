@@ -156,26 +156,3 @@ describe("the Overview's company map", () => {
     await page.close();
   }, 90_000);
 });
-
-describe("the Overview's groups by process", () => {
-  it("opens a row to show its facts, and closes it again", async () => {
-    const { page, errors } = await mount();
-    const rows = page.locator("[data-process-group]");
-    await expect.poll(() => rows.count()).toBe(parts.length + 1);
-    expect(await rows.first().getAttribute("data-process-group")).toBe("company");
-    expect(await page.locator("[data-group-panel]").count()).toBe(0);
-    const lead = page.locator(`[data-process-group="${parts[0]!.process.id}"]`);
-    const toggle = lead.locator("button[aria-expanded]");
-    await toggle.click();
-    await lead.locator("[data-group-panel]").waitFor();
-    expect(await toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(await lead.locator("[data-rendered] li").count()).toBeGreaterThan(0);
-    // Only that row opened.
-    expect(await page.locator("[data-group-panel]").count()).toBe(1);
-    await toggle.click();
-    await lead.locator("[data-group-panel]").waitFor({ state: "detached" });
-    expect(await toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(errors).toEqual([]);
-    await page.close();
-  }, 60_000);
-});

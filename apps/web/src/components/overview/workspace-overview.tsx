@@ -73,7 +73,6 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       companyEditHref={view.canEdit && company ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
       companyHistoryHref={company ? `${base}/p/${company.process.id}/history` : undefined}
       bundleHref={canEdit ? `${base}/export/bundle` : undefined}
-      issuesHref={`${base}/issues`}
       forecastHref={`${base}/sandbox`}
       capacity={capacitySetup ? { setup: capacitySetup, base } : null}
     />

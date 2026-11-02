@@ -6,8 +6,7 @@
 // 1. Capacity by department: the whole business first, then a card each for Organic and Performance (department-cards.tsx). It reads the
 //    Capacity page's "Today" run, from the same cache.
 // 2. The company map, with Play and the horizon (1, 3 or 6 months; the Sandbox goes further). The charts follow the horizon.
-// 3. By process: "Across the company", then one row per process, each with the run's facts (D40) and its open issues.
-// 4. Trends: open issues, time split by process, what the time achieves, team load by role.
+// 3. Trends: open issues, time split by process, what the time achieves, team load by role.
 //
 // (The issues-based health strip that used to sit between the map and By process went with P6.)
 //
@@ -29,7 +28,7 @@ import { ArrowRight } from "lucide-react";
 import { ExportMenu } from "@/components/export/export-menu";
 import { ratingOfRank } from "@/lib/map/rating";
 import { ModelError, toEngineModel, workspacePurposes, type CapacitySetup, type IssueRow, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
-import { ratingOfStored, resolveMoney, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
+import { resolveMoney, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
 import { PageHeader } from "@/components/shell/page";
@@ -41,10 +40,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { OVERVIEW_HORIZONS, horizonLabel, horizonWeeks, isOverviewHorizon, nearestOverviewHorizon } from "@/lib/horizon";
 import { perceptionGapDetections } from "@/lib/issues/perception";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
-import { litIds } from "@/lib/map/highlight";
 import { companyMap } from "@/lib/overview/company-map";
 import { sortFindings } from "@/lib/overview/findings";
-import { COMPANY_GROUP, groupByProcess, type ProcessGroup } from "@/lib/overview/by-process";
+import { COMPANY_GROUP, groupByProcess } from "@/lib/overview/by-process";
 import { openIssues, timeSplitByProcess } from "@/lib/overview/health";
 import { forecastInsights, forecastModel, today } from "@/lib/forecast/forecast";
 import { timelineData } from "@/lib/forecast/timeline";
@@ -57,12 +55,9 @@ import { useDemoSolutions } from "@/lib/solutions/demo";
 import { NO_SOLUTIONS_DATA, type SolutionsData } from "@/lib/solutions/cards";
 import { recordHeadline } from "@/app/w/[slug]/headline-actions";
 import { headlineNumbers } from "@/lib/overview/headline";
-import { FactsList } from "@/components/facts-list";
 import { useIssues } from "@/lib/issues/use-issues";
-import { ProcessGroups } from "./process-groups";
 import { capacityBaseModel } from "@/lib/capacity/model";
 import { DepartmentCards } from "./department-cards";
-import { RatingPill } from "./rating-pill";
 import { EDIT_ONLY } from "@/lib/phone";
 
 // The trend charts and the team load timeline load after the map and the cards.
@@ -99,7 +94,6 @@ export interface OverviewProps {
   bundleHref?: string;
   /** The earlier version of the company map being shown (`?version=N`, read only), or null for live. Only the map changes. */
   viewingMapVersion?: number | null;
-  issuesHref: string;
   /** The Forecast page, linked from the team load chart. */
   forecastHref?: string;
   /** Set up's data for the department cards (P6), with `/w/<slug>`. Absent (the demo): no cards. */
@@ -171,7 +165,6 @@ export function Overview({
   companyHistoryHref,
   bundleHref,
   viewingMapVersion = null,
-  issuesHref,
   forecastHref,
   capacity = null,
 }: OverviewProps) {
@@ -256,9 +249,7 @@ export function Overview({
 
   // The company map: open groups in place; opening one moves its neighbours.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const [lit, setLit] = useState<string[] | null>(null);
   const map = useMemo(() => companyMap(live, parts, expanded, company), [live, parts, expanded, company]);
-  const stepNames = useMemo(() => new Map(map.bundle.steps.map((s) => [s.id, s.name])), [map]);
   const openProcess = (stepId: string) => {
     const process = map.processOfStep.get(stepId);
     const href = process ? hrefs[process] : undefined;
@@ -296,36 +287,6 @@ export function Overview({
 
   // "Last updated": the numbers are simulated each time the page opens, so this is when it opened.
   const updated = useMemo(() => now.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }), [now]);
-
-  const renderItems = (g: ProcessGroup) => {
-    const open = g.issues.filter((i) => i.status === "open" || i.status === "testing");
-    return (
-      <div className="flex flex-col gap-3">
-        {g.facts.length > 0 && (
-          <div className="flex flex-col gap-1.5" data-group-facts>
-            <p className="text-xs font-medium text-muted-foreground">Facts from the run</p>
-            <FactsList facts={g.facts} currency={live.workspace.settings.currency} stepName={(id) => stepNames.get(id) ?? null} onLight={setLit} initialLimit={4} />
-          </div>
-        )}
-        {open.length > 0 && (
-          <div className="flex flex-col gap-1.5" data-open-issues>
-            <p className="text-xs font-medium text-muted-foreground">Open issues</p>
-            <ul className="flex flex-col gap-1 text-sm">
-              {open.map((i) => (
-                <li key={i.id} className="flex flex-wrap items-center gap-2">
-                  <RatingPill rating={ratingOfStored(i.severity)} />
-                  <Link href={`${issuesHref}/${i.number ?? i.id}`} className="hover:underline">
-                    {i.number ? `#${i.number} ` : ""}
-                    {i.title}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-    );
-  };
 
   return (
     <div>
@@ -426,7 +387,6 @@ export function Overview({
                 rating={rating}
                 expanded={expanded}
                 onExpandedChange={setExpanded}
-                highlight={lit ? [...litIds(map.bundle.steps, expanded, lit)] : null}
                 playbackRollUp
                 playbackAbove
                 showLanes={false}
@@ -440,20 +400,6 @@ export function Overview({
               <p className="p-6 text-sm text-muted-foreground">No process has been published yet.</p>
             )}
           </Card>
-        </Section>
-
-        <Section
-          id="by-process"
-          title="By process"
-          description="What the latest run measured, and the open issues, process by process."
-          action={
-            <Link href={issuesHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
-              See all issues
-              <ArrowRight aria-hidden />
-            </Link>
-          }
-        >
-          <ProcessGroups groups={groups} renderItems={renderItems} />
         </Section>
 
         <Section id="trends" title="Trends" description={`Simulated over the next ${span} where a chart looks ahead; the issues are as recorded.`}>
