@@ -6,6 +6,7 @@
 // so both themes work, and no meaning rests on colour alone: values are written next to the marks.
 
 import { useEffect, useRef, useState } from "react";
+import { FloatingTip } from "@/components/ui/floating-tip";
 import { formatCurrency } from "@/lib/format";
 import { labelIndexes, monthLabel, niceTicks } from "@/lib/overview/axis";
 import type { MrrPoint } from "@/lib/overview/projection";
@@ -44,6 +45,7 @@ export function MrrChart({
 }) {
   const [ref, measured] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
+  const [tipAt, setTipAt] = useState<{ x: number; y: number } | null>(null);
   // No months to draw (the series is indexed below): say so, after the hooks.
   if (points.length === 0) return <p className="text-sm text-muted-foreground" data-empty>No months to show yet.</p>;
   const width = measured || 560;
@@ -81,7 +83,10 @@ export function MrrChart({
         role="img"
         aria-label={`Monthly recurring revenue, from ${money(points[0]!.mean)} now to ${money(last.mean)} after ${monthLabel(last.month, horizonMonths).toLowerCase()}, with a range of ${money(last.lo)} to ${money(last.hi)}.${last2 ? ` ${compareName}: ${money(last2.mean)} after the same time.` : ""}`}
         className="block overflow-visible"
-        onPointerMove={(e) => pointerMove(e.clientX, e.currentTarget.getBoundingClientRect().left)}
+        onPointerMove={(e) => {
+          pointerMove(e.clientX, e.currentTarget.getBoundingClientRect().left);
+          setTipAt({ x: e.clientX, y: e.clientY });
+        }}
         onPointerLeave={() => setHover(null)}
       >
         {ticks.map((t) => (
@@ -122,21 +127,19 @@ export function MrrChart({
           </g>
         )}
       </svg>
-      {shown && hover !== null && (
-        <div
-          role="presentation"
-          className="pointer-events-none absolute top-1 z-10 w-max max-w-48 rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md"
-          style={{ left: Math.min(Math.max(x(hover) - 70, 0), Math.max(0, width - 150)) }}
-        >
-          <p className="font-medium">{monthLabel(shown.month, horizonMonths)}</p>
-          <p className="tabular-nums">{money(shown.mean)} on average</p>
-          {shown.month > 0 && (
-            <p className="text-muted-foreground tabular-nums">
-              {money(shown.lo)} to {money(shown.hi)}
-            </p>
-          )}
-        </div>
-      )}
+      <FloatingTip at={shown ? tipAt : null} placement="side">
+        {shown && (
+          <>
+            <p className="font-medium">{monthLabel(shown.month, horizonMonths)}</p>
+            <p className="tabular-nums">{money(shown.mean)} on average</p>
+            {shown.month > 0 && (
+              <p className="text-muted-foreground tabular-nums">
+                {money(shown.lo)} to {money(shown.hi)}
+              </p>
+            )}
+          </>
+        )}
+      </FloatingTip>
       <table className="sr-only">
         <caption>Monthly recurring revenue, average and 10 to 90 percent range</caption>
         <thead>
