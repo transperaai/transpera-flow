@@ -421,8 +421,7 @@ export function Overview({
             </div>
             {map.bundle.steps.length ? (
               <ProcessCanvas
-                // Opening a card changes the map's size: start again so it is framed whole.
-                key={[...expanded].sort().join("|")}
+                refitOn={[...expanded].sort().join("|")}
                 bundle={map.bundle}
                 result={horizonResult}
                 selection={NO_SELECTION}

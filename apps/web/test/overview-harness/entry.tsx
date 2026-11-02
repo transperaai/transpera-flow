@@ -52,7 +52,7 @@ function Harness() {
       </div>
       <div style={{ display: "flex", flexDirection: "column", height: 520 }}>
         <ProcessCanvas
-          key={[...expanded].sort().join("|")}
+          refitOn={[...expanded].sort().join("|")}
           bundle={map.bundle}
           result={result.result}
           selection={NO_SELECTION}

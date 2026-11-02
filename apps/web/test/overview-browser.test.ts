@@ -114,6 +114,47 @@ describe("the Overview's company map", () => {
     expect(errors).toEqual([]);
     await page.close();
   }, 90_000);
+  it("expanding and collapsing a card while playing keeps playing, from the same time (Q1 item 10)", async () => {
+    const { page, errors } = await mount();
+    const time = () => page.locator('input[type="range"]').inputValue().then(Number);
+    await page.getByRole("button", { name: "Play", exact: true }).click();
+    await page.waitForFunction(() => Number((document.querySelector('input[type="range"]') as HTMLInputElement).value) > 20, null, { timeout: 30_000 });
+    const before = await time();
+    await page.getByRole("button", { name: "Expand" }).first().click();
+    await page.waitForFunction((n) => document.querySelectorAll(".react-flow__node").length > n, parts.length, { timeout: 30_000 });
+    // Still playing (the button offers Pause), and the clock did not go back to the start.
+    expect(await page.getByRole("button", { name: "Pause", exact: true }).count()).toBe(1);
+    expect(await time()).toBeGreaterThanOrEqual(before);
+    const opened = await time();
+    await page.getByRole("button", { name: /^Collapse/ }).first().click();
+    await page.waitForFunction((n) => document.querySelectorAll(".react-flow__node").length === n, parts.length, { timeout: 30_000 });
+    expect(await page.getByRole("button", { name: "Pause", exact: true }).count()).toBe(1);
+    expect(await time()).toBeGreaterThanOrEqual(opened);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 90_000);
+  it("has a Stop button left of the speed (no Exit playback) that returns the map to its normal view, and four speeds (Q1 items 12, 13)", async () => {
+    const { page, errors } = await mount();
+    expect(await page.getByRole("button", { name: "Exit playback" }).count()).toBe(0);
+    const stop = page.getByRole("button", { name: "Stop", exact: true });
+    expect(await stop.innerText()).toContain("Stop");
+    expect(await stop.locator("svg").count()).toBe(1);
+    // Left of the speed select, after Play.
+    const order = await page.locator('[role="group"][aria-label="Playback"] > *').evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? e.id));
+    expect(order.slice(0, 2)).toEqual(["Play", "Stop"]);
+    expect(order.indexOf("playback-speed")).toBeGreaterThan(1);
+    expect(await page.locator("#playback-speed option").allInnerTexts()).toEqual(["1 hour per second", "1 day per second", "1 week per second", "1 month per second"]);
+    expect(await page.locator("#playback-speed").inputValue()).toBe("1");
+    await page.getByRole("button", { name: "Play", exact: true }).click();
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLElement>(".playback-badge")].some((b) => b.style.display !== "none" && b.textContent), null, { timeout: 30_000 });
+    await stop.click();
+    await expect.poll(() => page.getByRole("button", { name: "Play", exact: true }).count()).toBe(1);
+    expect(Number(await page.locator('input[type="range"]').inputValue())).toBe(0);
+    expect(await page.locator(".playback-badge:visible").count()).toBe(0);
+    expect(await stop.isDisabled()).toBe(true);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 90_000);
 });
 
 describe("the Overview's groups by process", () => {

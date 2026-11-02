@@ -212,11 +212,11 @@ describe("playback trace index", () => {
     expect(index.frame(200, 3)).toEqual(direct);
     // A clock played to 200 and a clock sought to 200 land on the same frame.
     const played = new PlaybackClock({ H: run.H, hoursPerWeek: 40 });
-    played.setSpeed(0);
+    played.setSpeed(1);
     played.play();
     for (let i = 0; i < 25; i++) played.advance(1);
     const sought = new PlaybackClock({ H: run.H, hoursPerWeek: 40 });
-    sought.setSpeed(0);
+    sought.setSpeed(1);
     sought.seek(200);
     expect(played.t).toBeCloseTo(200, 9);
     expect(index.frame(played.t, played.hop)).toEqual(index.frame(sought.t, sought.hop));
@@ -277,15 +277,30 @@ describe("playback trace index", () => {
 });
 
 describe("playback clock", () => {
+  it("offers 1 hour, 1 day, 1 week and 1 month per second, in working time (Q1 item 13)", () => {
+    expect(SPEEDS.map((s) => s.label)).toEqual(["1 hour per second", "1 day per second", "1 week per second", "1 month per second"]);
+    const c = new PlaybackClock({ H: 10_000, hoursPerWeek: 37.5 });
+    expect(c.getState().speed).toBe(1);
+    const per = SPEEDS.map((_, i) => (c.setSpeed(i), c.hoursPerSecond));
+    expect(per[0]).toBe(1);
+    expect(per[1]).toBeCloseTo(7.5, 9);
+    expect(per[2]).toBeCloseTo(37.5, 9);
+    expect(per[3]).toBeCloseTo((37.5 * 52) / 12, 9);
+    // A workspace with longer weeks plays faster at the same setting.
+    const long = new PlaybackClock({ H: 10_000, hoursPerWeek: 50 });
+    long.setSpeed(2);
+    expect(long.hoursPerSecond).toBe(50);
+  });
+
   it("plays at the chosen speed and stops at the horizon", () => {
     const c = new PlaybackClock({ H: 100, hoursPerWeek: 40 });
-    c.setSpeed(0);
+    c.setSpeed(1);
     expect(c.hoursPerSecond).toBe(8);
     // A hop takes a fixed wall-clock time, capped at half a working day.
     expect(c.hop).toBe(4);
     c.setSpeed(3);
     expect(c.hop).toBe(4);
-    c.setSpeed(0);
+    c.setSpeed(1);
     c.advance(1);
     expect(c.t).toBe(0);
     c.play();
@@ -311,7 +326,7 @@ describe("playback clock", () => {
     c.advance(0.5);
     c.advance(0.5);
     expect(coarse).toBe(1);
-    expect(times).toEqual([8, 16]);
+    expect(times).toEqual([4, 8]);
     c.stop();
     expect(c.getState()).toMatchObject({ playing: false, active: false });
     expect(c.t).toBe(0);

@@ -941,6 +941,11 @@ interface CanvasProps {
   stepBaseValues?: (step: StepRow) => ReactNode;
   /** The first run is still computing: shows FirstRunStatus over the map. */
   computing?: boolean;
+  /**
+   * Frame the map again, animated, when this changes after it was first framed (the Overview passes its open cards: opening one changes
+   * the map's size). Unlike a `key` on the canvas it keeps the map mounted, so playback goes on.
+   */
+  refitOn?: string;
   /** What to do about a read-only map with no steps (the process page offers the Editor); shown under the sentence. */
   emptyAction?: ReactNode;
 }
@@ -996,6 +1001,7 @@ function Canvas({
   initialStepId = null,
   stepBaseValues,
   computing = false,
+  refitOn,
   emptyAction,
 }: CanvasProps) {
   const editable = editor !== null;
@@ -1609,6 +1615,13 @@ function Canvas({
     const timer = setTimeout(() => fitRef.current(true), 60);
     return () => clearTimeout(timer);
   }, [fitTick]);
+  const refitSeen = useRef(refitOn);
+  useEffect(() => {
+    if (refitOn === refitSeen.current) return;
+    refitSeen.current = refitOn;
+    if (framed.current) requestFit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- requestFit only sets state
+  }, [refitOn]);
   // A read-only map follows its panel's width (and height, when that is fixed), unless it was moved by hand.
   const refitKey = editable ? "" : heightMode === "auto" ? `${width}` : `${width}x${height}`;
   useEffect(() => {
