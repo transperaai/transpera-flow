@@ -5,7 +5,7 @@
 
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { partOf, toEngineModel } from "@transpera-flow/db";
+import { partOf } from "@transpera-flow/db";
 import { simulate } from "@transpera-flow/engine";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
