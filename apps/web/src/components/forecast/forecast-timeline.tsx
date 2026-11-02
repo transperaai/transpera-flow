@@ -9,6 +9,7 @@
 // It takes `TimelineData` (lib/forecast/timeline.ts), so any month-by-month run can draw it: the Overview's team load
 // chart (B15) included.
 
+import { FloatingTip } from "@/components/ui/floating-tip";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { RATING_RULES, bandOf, isTooBusy, type MonthBusy, type Stat } from "@transpera-flow/engine";
 import { formatNumber, formatPercent } from "@/lib/format";
@@ -154,6 +155,7 @@ export function ForecastTimeline({
   const busyLine = cutoffs[1];
   const [ref, measured] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
+  const [tipAt, setTipAt] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   /** A marker being dragged: where its anchor is in the chart (px), and whether the pointer has moved far enough to be a drag. */
   const [drag, setDragState] = useState<{ id: string; x: number; moved: boolean } | null>(null);
@@ -380,7 +382,10 @@ export function ForecastTimeline({
         role="img"
         aria-label={label}
         className="block overflow-visible"
-        onPointerMove={(e) => pointerMove(e.clientX, e.currentTarget.getBoundingClientRect().left)}
+        onPointerMove={(e) => {
+          pointerMove(e.clientX, e.currentTarget.getBoundingClientRect().left);
+          setTipAt({ x: e.clientX, y: e.clientY });
+        }}
         onPointerLeave={() => setHover(null)}
       >
         <defs>
@@ -554,12 +559,9 @@ export function ForecastTimeline({
           <line x1={x(hover)} x2={x(hover)} y1={TOP - 4} y2={height - AXIS} stroke="var(--fg-3)" strokeDasharray="3 3" pointerEvents="none" />
         )}
       </svg>
-      {shown && hover !== null && (
-        <div
-          role="presentation"
-          className="pointer-events-none absolute top-0 z-10 w-max max-w-64 rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md"
-          style={{ left: x(hover) + 12 + 240 > width ? Math.max(0, x(hover) - 252) : x(hover) + 12 }}
-        >
+      <FloatingTip at={shown && hover !== null ? tipAt : null} placement="side">
+        {shown && hover !== null && (
+        <>
           <p className="font-medium">{shown.label}</p>
           {shown.partial ? <p className="text-muted-foreground">Part month</p> : null}
           {data.market.filter((b) => hover >= b.from && hover <= b.to).map((b) => (
@@ -602,8 +604,9 @@ export function ForecastTimeline({
               {mk.label}, {mk.when}
             </p>
           ))}
-        </div>
-      )}
+        </>
+        )}
+      </FloatingTip>
       {plan ? (
         <div aria-live="polite" className="sr-only" data-plan-announce>
           {announce}

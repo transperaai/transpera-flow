@@ -631,7 +631,7 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         const svg = (await page.locator(`${TIMELINE} > svg`).boundingBox())!;
         const compact = svg.width < 520;
         await page.mouse.move(svg.x + (compact ? 2 : 176) + 8, svg.y + 40);
-        await page.waitForFunction(() => document.querySelector("[data-forecast-timeline] [role=presentation]")?.textContent?.includes("Part month"));
+        await page.waitForFunction(() => document.querySelector("[data-chart-tip]")?.textContent?.includes("Part month"));
         expect(await page.locator("[data-forecast-timeline] [role=presentation]").innerText()).toContain(first);
         await page.waitForSelector("[data-forecast-money]", { timeout: 90_000 });
         const heads = await page.locator("[data-money-table] thead th").allInnerTexts();
@@ -651,7 +651,7 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await chart.locator("svg").scrollIntoViewIfNeeded();
         const box = (await chart.locator("svg").boundingBox())!;
         await page.mouse.move(box.x + (box.width < 480 ? 50 : 60) + 2, box.y + 60);
-        await page.waitForFunction(() => document.querySelector('[data-compare-row="revenue"] [role=presentation]')?.textContent?.includes("Part month"));
+        await page.waitForFunction(() => document.querySelector("[data-chart-tip]")?.textContent?.includes("Part month"));
         expect(await chart.locator("[role=presentation]").innerText()).toContain(first);
         expect(errors).toEqual([]);
         await page.close();
