@@ -389,6 +389,40 @@ describe("adding from the Editor's palette", () => {
   }, 60_000);
 });
 
+describe("department lanes on the company map in the Editor (Q4)", () => {
+  const laneOf = (page: Page, name: string) =>
+    page.evaluate((n) => {
+      const node = [...document.querySelectorAll<HTMLElement>(".react-flow__node")].find((e) => e.textContent?.includes(n))!.getBoundingClientRect();
+      const mid = node.top + node.height / 2;
+      return [...document.querySelectorAll<HTMLElement>("[data-lane]")].find((l) => mid >= l.getBoundingClientRect().top && mid <= l.getBoundingClientRect().bottom)?.dataset.lane ?? null;
+    }, name);
+
+  it("shows the lanes by default, a toggle hides them, and dragging a card to another lane leaves it in its own", async () => {
+    const page = await mount({ editable: true, company: true, bands: true });
+    await page.waitForSelector("[data-lane]");
+    expect(await page.locator("[data-lane]").evaluateAll((els) => els.map((e) => e.getAttribute("data-lane")))).toEqual(["Sales and whole business", "Organic (SEO)", "Performance"]);
+    const toggle = page.getByRole("button", { name: "Department lanes" });
+    expect(await toggle.getAttribute("aria-pressed")).toBe("true");
+
+    // Drag the second lane's card down into the third lane's band: it is still in its own lane afterwards.
+    const names = await page.evaluate(() => window.mapApi.getSteps());
+    const second = names[1]!;
+    expect(await laneOf(page, second)).toBe("Organic (SEO)");
+    const box = (await page.locator(".react-flow__node", { hasText: second }).first().boundingBox())!;
+    const lanes = await page.locator("[data-lane]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2));
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 20, lanes[2]!, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+    expect(await laneOf(page, second)).toBe("Organic (SEO)");
+
+    await toggle.click();
+    expect(await page.locator("[data-lane]").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+});
+
 describe("the company map in the Editor (B11)", () => {
   /** Drag from a card's right-hand handle to another card's left-hand handle. */
   async function connect(page: Page, from: string, to: string) {

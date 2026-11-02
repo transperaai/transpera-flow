@@ -30,6 +30,7 @@ export { loadAnalysisRules, saveAnalysisRules, type AnalysisRules, type SaveAnal
 export * from "./process-category";
 export * from "./capacity-setup";
 export * from "./capacity-figures";
+export * from "./process-department";
 export * from "./capacity-changes";
 export * from "./issue-changes";
 export * from "./sandbox-play";

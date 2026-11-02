@@ -503,6 +503,8 @@ describe("rollback", () => {
   it("the rollback in the migration's header runs, and removes everything it added", async () => {
     const own = await createTestDb();
     try {
+      // A later migration that points at the departments (a process's department, 20270127000000) is rolled back first, as its own header says.
+      await own.client.query(headerRollback("20270127000000_process_department.sql"));
       await own.client.query(headerRollback("20270119000000_capacity_setup.sql"));
       // Everything the migration added is gone ...
       const left = await own.client.query(

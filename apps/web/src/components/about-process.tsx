@@ -4,14 +4,14 @@
 // lib/process-page/about.ts. Links to nothing and has no (i): each label says what it is. Type is the process's category (Q3);
 // the Owner and Agency admins change it here with a select.
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS, isProcessCategory, type ProcessCategory } from "@transpera-flow/db";
 import { NativeSelect } from "@/components/ui/native-select";
 import type { ProcessAdminResult } from "@/lib/processes/admin";
 import { aboutLine, type About } from "@/lib/process-page/about";
 import { EDIT_ONLY } from "@/lib/phone";
 
-export function AboutProcess({ about, editCategory }: { about: About; /** Saves a new category (a server action); absent for people who may not edit. */ editCategory?: (category: ProcessCategory) => Promise<ProcessAdminResult> }) {
+export function AboutProcess({ about, editCategory, children }: { about: About; children?: ReactNode; /** Saves a new category (a server action); absent for people who may not edit. */ editCategory?: (category: ProcessCategory) => Promise<ProcessAdminResult> }) {
   const [category, setCategory] = useState<ProcessCategory>(about.category);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -63,6 +63,7 @@ export function AboutProcess({ about, editCategory }: { about: About; /** Saves 
             </dd>
           </div>
         ))}
+        {children}
       </dl>
       {error && (
         <p role="alert" className="mt-1 text-xs text-destructive">

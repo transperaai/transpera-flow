@@ -40,7 +40,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { OVERVIEW_HORIZONS, horizonLabel, horizonWeeks, isOverviewHorizon, nearestOverviewHorizon } from "@/lib/horizon";
 import { perceptionGapDetections } from "@/lib/issues/perception";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
+import { PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { companyMap } from "@/lib/overview/company-map";
+import { laneOfProcesses, laneSpecs, type DepartmentLaneInput } from "@/lib/overview/department-lanes";
 import { sortFindings } from "@/lib/overview/findings";
 import { COMPANY_GROUP, groupByProcess } from "@/lib/overview/by-process";
 import { openIssues, timeSplitByProcess } from "@/lib/overview/health";
@@ -77,6 +79,8 @@ export interface OverviewProps {
   parts: ProcessPart[];
   /** The company map process at its live revision: where each process sits and the handoff lines (B11). Absent: the default layout. */
   company?: ProcessPart | null;
+  /** The departments, tier services and servicing links the map's lanes come from (Q4). Absent: no lanes. */
+  laneInput?: DepartmentLaneInput;
   /** Tracked issues: the confirmed ones colour and badge the map. */
   issues: IssueRow[];
   mode: ScreenMode;
@@ -155,6 +159,7 @@ export function Overview({
   live,
   parts,
   company,
+  laneInput,
   issues,
   mode,
   solutions,
@@ -252,6 +257,13 @@ export function Overview({
   // The company map: open groups in place; opening one moves its neighbours.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const map = useMemo(() => companyMap(live, parts, expanded, company), [live, parts, expanded, company]);
+  // Department lanes (Q4): Sales and whole business first, then each department; always on here.
+  const departmentLanes = useMemo(
+    () => (laneInput ? { spec: { lanes: laneSpecs(laneInput), laneOf: laneOfProcesses(parts.map((p) => p.process), laneInput) }, always: true } : undefined),
+    [laneInput, parts],
+  );
+  // A pill with each process's category on its card (Q4, with Q3's labels).
+  const cardTags = useMemo(() => new Map(parts.map((p) => [p.process.id, PROCESS_CATEGORY_LABELS[p.process.category]] as const)), [parts]);
   const openProcess = (stepId: string) => {
     const process = map.processOfStep.get(stepId);
     const href = process ? hrefs[process] : undefined;
@@ -398,6 +410,8 @@ export function Overview({
                 playbackRollUp
                 playbackAbove
                 showLanes={false}
+                departmentLanes={departmentLanes}
+                cardTags={cardTags}
                 handoffs
                 height="auto"
                 stepDetail={false}

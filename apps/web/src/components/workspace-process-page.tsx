@@ -7,6 +7,8 @@ import { ProcessNav } from "@/components/process-nav";
 import { ProcessPage } from "@/components/process-page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentUserId } from "@/lib/access-data";
+import { loadDepartmentLaneInput } from "@/lib/overview/lanes-data";
+import { departmentField } from "@/lib/process-page/department";
 import { loadCompanyId, loadMemberNames, loadProcessForEditing, loadProcessVersion, loadTierSetup, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /**
@@ -26,7 +28,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const archivedAt = live.process.archived_at ?? null;
   // `?version=N` shows an earlier version, read only; a number that isn't an earlier version shows live.
   const earlier = version ? await loadProcessVersion(live, version) : null;
-  const [canEdit, scenarios, issues, sources, liveRevisions, solutions, viewerId, memberNames, tierSetup] = await Promise.all([
+  const [canEdit, scenarios, issues, sources, liveRevisions, solutions, viewerId, memberNames, tierSetup, laneInput] = await Promise.all([
     canEditWorkspace(live.workspace.id),
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceIssues(live.workspace.id),
@@ -37,6 +39,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     currentUserId(),
     loadMemberNames(live.workspace.id),
     loadTierSetup(live.workspace.id),
+    loadDepartmentLaneInput(live.workspace.id),
   ]);
   const shown = earlier ?? (isUnpublished(live) && draft ? draft : live);
   const base = `/w/${slug}`;
@@ -59,6 +62,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       registerHref={`${base}/issues`}
       settingsHref={`${base}/settings`}
       tierSetup={tierSetup}
+      department={departmentField(live.process, laneInput)}
       editCategory={canEdit && !earlier && !archivedAt ? changeProcessCategory.bind(null, live.process.id) : undefined}
       editHref={canEdit && !archivedAt ? `${base}/p/${live.process.id}/edit` : undefined}
       historyHref={`${base}/p/${live.process.id}/history`}

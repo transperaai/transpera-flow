@@ -37,7 +37,9 @@ import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/sav
 import type { TargetVerdict } from "@/lib/solutions/verdict";
 import { verdictInWorker } from "@/lib/solutions/verdict-client";
 import { Button } from "@/components/ui/button";
+import { PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
+import { laneOfProcesses, laneSpecs, type DepartmentLaneInput } from "@/lib/overview/department-lanes";
 import { SaveProblems } from "@/components/save-problems";
 import { useEngineModel, type EditMode } from "@/lib/sim/use-engine-model";
 import { EditorBar, type BlockForm, type SolutionForm } from "./editor-bar";
@@ -78,7 +80,10 @@ export function EditorView({
   library,
   tierSetup,
   changesOnSteps,
+  laneInput,
 }: {
+  /** The departments, tier services and servicing links the company map's lanes come from (Q4). Absent: no lanes. */
+  laneInput?: DepartmentLaneInput;
   /** The workspace's tiers and their deliverables, for the step base values (capacity P4). */
   tierSetup?: TierSetup;
   /** The workspace's stored changes, for the list on a step (capacity P7). */
@@ -141,6 +146,19 @@ export function EditorView({
 
   const diff = useMemo(() => (marksChanges ? diffBundles(live, working) : EMPTY_DIFF), [marksChanges, live, working]);
   const names = useMemo(() => namesOf(working, live), [working, live]);
+  // The company map's department lanes (Q4): each holder card goes in the lane of the process it holds.
+  // A pill with the category of the process each holder card holds (Q4, with Q3's labels).
+  const cardTags = useMemo(() => {
+    if (!company) return undefined;
+    const label = new Map((working.otherProcesses ?? []).map((p) => [p.process.id, PROCESS_CATEGORY_LABELS[p.process.category]] as const));
+    return new Map(working.steps.flatMap((s) => (s.child_process_id && label.has(s.child_process_id) ? [[s.id, label.get(s.child_process_id)!] as const] : [])));
+  }, [company, working.otherProcesses, working.steps]);
+  const departmentLanes = useMemo(() => {
+    if (!company || !laneInput) return undefined;
+    const lane = laneOfProcesses((working.otherProcesses ?? []).map((p) => p.process), laneInput);
+    const laneOf = new Map(working.steps.flatMap((s) => (s.child_process_id && lane.has(s.child_process_id) ? [[s.id, lane.get(s.child_process_id)!] as const] : [])));
+    return { spec: { lanes: laneSpecs(laneInput), laneOf } };
+  }, [company, laneInput, working.otherProcesses, working.steps]);
   const weeks = editorHorizonWeeks(editorMode, horizonMonths);
   const workingModel = useEngineModel(working, weeks);
   const liveModel = useEngineModel(live, weeks);
@@ -397,6 +415,8 @@ export function EditorView({
               // The company map's cards can't be copied or split (removing one is Delete or the inspector's Remove from this map), so the card menu has nothing to offer.
               commands={company ? null : commands}
               handoffs={company}
+              departmentLanes={departmentLanes}
+              cardTags={cardTags}
               diff={marksChanges ? diff : null}
               highlight={outlined}
               onRestore={restore}

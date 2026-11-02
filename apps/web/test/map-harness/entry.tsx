@@ -28,6 +28,8 @@ export interface HarnessOptions {
   highlight: string[] | null;
   /** The company map (B11) of Northbeam, as the Editor draws it: process cards joined by handoff lines. */
   company?: boolean;
+  /** The company map's department lanes (Q4): the pipeline's card under Sales and whole business, the others under two departments. */
+  bands?: boolean;
   /** The Editor's palette beside the map (as the Editor lays it out), whose buttons add steps where the map is looking. */
   palette?: boolean;
   /** A read-only map in a flex column as wide as the page, as the Overview's card holds it (the default is a plain 1300px block). */
@@ -139,6 +141,21 @@ function Harness({ options }: { options: HarnessOptions }) {
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   const viewRef = useRef<(() => ViewHint | null) | null>(null);
   const library = useMemo(() => (options.library ? libraryOf(base) : undefined), [base, options.library]);
+  const departmentLanes = useMemo(() => {
+    if (!options.bands) return undefined;
+    const holders = [...base.steps].sort((a, b) => Number(a.x) - Number(b.x) || Number(a.y) - Number(b.y));
+    const keys = ["whole", "seo", "ppc"];
+    return {
+      spec: {
+        lanes: [
+          { key: "whole", label: "Sales and whole business" },
+          { key: "seo", label: "Organic (SEO)" },
+          { key: "ppc", label: "Performance" },
+        ],
+        laneOf: new Map(holders.map((h, i) => [h.id, keys[Math.min(i, 2)]!])),
+      },
+    };
+  }, [base, options.bands]);
   const [highlight, setHighlight] = useState(options.highlight);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
@@ -180,6 +197,7 @@ function Harness({ options }: { options: HarnessOptions }) {
         result={result}
         showPlayback={false}
         handoffs={options.company}
+        departmentLanes={departmentLanes}
         hideAdd={options.palette}
         viewRef={viewRef}
         stepExtras={() => ({ insights: ["An insight"], issues: ["An issue"] })}
