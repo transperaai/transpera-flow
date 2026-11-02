@@ -273,6 +273,35 @@ export interface DepartmentCeiling {
   perPerson: Record<string, { max: number; canTake: number; clients: number }>;
 }
 
+export type RoomStatus = "Plenty of room" | "Some room" | "Tight" | "Full";
+
+export interface RoomPulse {
+  status: RoomStatus;
+  tone: "ok" | "warn" | "bad";
+  /** Room rounded for talking about: the nearest 5 from 10 up, else the nearest whole client. */
+  approx: number;
+  /** "about 15 more clients"; empty when full. */
+  words: string;
+}
+
+/**
+ * Room for more clients as a pulse check (Q1 item 15), not a fact: a status word from the room as a share of today's clients (plenty from
+ * 20%, some from 5%, tight above 0, full at 0), with the figure rounded to the nearest 5 once it is 10 or more.
+ */
+export function roomPulse(room: number, clients: number): RoomPulse {
+  const whole = Math.max(0, Math.floor(room));
+  const approx = whole >= 10 ? Math.round(whole / 5) * 5 : whole;
+  if (whole < 1) return { status: "Full", tone: "bad", approx: 0, words: "" };
+  const share = clients > 0 ? whole / clients : 1;
+  const status: RoomStatus = share >= 0.2 ? "Plenty of room" : share >= 0.05 ? "Some room" : "Tight";
+  return { status, tone: status === "Tight" ? "warn" : "ok", approx, words: `about ${approx} more ${approx === 1 ? "client" : "clients"}` };
+}
+
+/** What stops a department taking more clients, in words: "its client managers", or the team's name. */
+export function limitedBy(limit: string): string {
+  return limit === "Client-facing people" ? "client managers" : limit;
+}
+
 /** The share of a department's wins that go to each of its tier services (the services' `mixShare`, normalised; equal when none is set). */
 export function winMix(setup: CapacitySetup, model: EngineModel, departmentId: string): Record<string, number> {
   const ids = setup.services.filter((s) => s.active && s.department_id === departmentId && s.tier_id && model.services?.[s.id]).map((s) => s.id);

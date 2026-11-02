@@ -81,7 +81,7 @@ describe("Capacity page", { timeout: 180_000 }, () => {
 
       // Room for more clients: a sentence, the gauge with its limits, and chips.
       expect(await page.locator("[data-room]").count()).toBe(2);
-      for (const s of await page.locator("[data-room-sentence]").allInnerTexts()) expect(s).toMatch(/can take about \d+ more clients|Full\./);
+      for (const s of await page.locator("[data-room-sentence]").allInnerTexts()) expect(s).toMatch(/^(Plenty of room|Some room|Tight)\. .* can take about \d+ more clients?\. Limited by .+\.|^Full\. .*Limited by /);
       expect(await page.locator("[data-gauge]").count()).toBe(2);
       expect(await page.locator("[data-chips] span").count()).toBeGreaterThan(5);
 

@@ -11,6 +11,8 @@ import { useMemo, useState } from "react";
 import {
   busyShares,
   departmentCeiling,
+  limitedBy,
+  roomPulse,
   departmentTime,
   modelProcessOfStep,
   dler,
@@ -22,7 +24,7 @@ import {
   type DlerRow,
 } from "@transpera-flow/db";
 import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
-import { BusyBar, Kpi, Section } from "@/components/capacity/widgets";
+import { BusyBar, Kpi, Section, TONE_TEXT } from "@/components/capacity/widgets";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
 import { useCapacityRuns } from "@/lib/sim/use-capacity-runs";
@@ -170,11 +172,13 @@ function DepartmentCard({
     if (!model || !result) return null;
     const people = busyShares(setup, model, result).people.filter((p) => p.departmentId === departmentId);
     const ordered = [...people].sort((a, b) => b.busy - a.busy);
+    const ceiling = departmentCeiling(setup, model, result, departmentId);
     return {
       busiest: ordered,
       over: ordered.filter((p) => p.over),
       lineNote: busyLineNote(ordered.map((p) => p.line)),
-      ceiling: departmentCeiling(setup, model, result, departmentId),
+      ceiling,
+      pulse: roomPulse(ceiling.room, ceiling.clients),
       time: departmentTime(setup, model, result, departmentId, purposeNames, timeBy === "process" ? { processOfStep: processOfStep ?? modelProcessOfStep(model) } : undefined),
     };
   }, [setup, model, result, departmentId, purposeNames, processOfStep, timeBy]);
@@ -197,8 +201,16 @@ function DepartmentCard({
         <Kpi label="Past their busy line" value={figures ? f0(figures.over.length) : pending("Past their busy line")} sub={figures?.lineNote} />
         <Kpi
           label="Room for more clients"
-          value={figures ? f0(figures.ceiling.room) : pending("Room for more clients")}
-          sub={figures ? `Limit: ${figures.ceiling.limit.toLowerCase()}` : undefined}
+          value={figures ? <span className={`text-lg ${TONE_TEXT[figures.pulse.tone]}`} data-room-status>{figures.pulse.status}</span> : pending("Room for more clients")}
+          sub={
+            figures ? (
+              <>
+                {figures.pulse.words && <span className="block">{figures.pulse.words}</span>}
+                <span className="block">Limited by {limitedBy(figures.ceiling.limit)}</span>
+                <span className="mt-0.5 block italic">A rough guide from the simulation, not a promise</span>
+              </>
+            ) : undefined
+          }
         />
       </div>
       {figures ? (

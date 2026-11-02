@@ -10,6 +10,8 @@ import {
   dlerSalariesMissing,
   modelProcessOfStep,
   personFees,
+  roomPulse,
+  limitedBy,
   hiringAdvice,
   hiringDelayAt,
   leaver,
@@ -482,5 +484,33 @@ describe("the Overview's figures (P6)", () => {
     // A map of the app's own process names (steps by id) is used as given, and a step it doesn't know is "Other".
     expect(departmentTime(setup, model, result, "org", {}, { processOfStep: new Map([["r2", "Monthly reporting"]]) }).parts[0]!.name).toBe("Monthly reporting");
     expect(departmentTime(setup, model, result, "org", {}, { processOfStep: new Map() }).parts[0]!.name).toBe("Other");
+  });
+});
+
+describe("room for more clients as a pulse check (Q1 item 15)", () => {
+  test("a status word from the room as a share of today's clients, with the edges as written", () => {
+    // 100 clients: 20 is exactly 20% (plenty), 19 is some room, 5 is exactly 5% (some room), 4 is tight, 0 is full.
+    expect(roomPulse(20, 100).status).toBe("Plenty of room");
+    expect(roomPulse(19, 100).status).toBe("Some room");
+    expect(roomPulse(5, 100).status).toBe("Some room");
+    expect(roomPulse(4, 100).status).toBe("Tight");
+    expect(roomPulse(0, 100).status).toBe("Full");
+    expect(roomPulse(0.4, 100).status).toBe("Full");
+    expect(roomPulse(3, 0).status).toBe("Plenty of room");
+  });
+  test("colours: green until tight, amber when tight, red when full", () => {
+    expect([roomPulse(30, 100).tone, roomPulse(10, 100).tone, roomPulse(2, 100).tone, roomPulse(0, 100).tone]).toEqual(["ok", "ok", "warn", "bad"]);
+  });
+  test("the figure is rounded to the nearest 5 from 10 up, else to the nearest whole client", () => {
+    expect(roomPulse(12, 60).words).toBe("about 10 more clients");
+    expect(roomPulse(13, 60).words).toBe("about 15 more clients");
+    expect(roomPulse(10, 40).approx).toBe(10);
+    expect(roomPulse(9, 40).words).toBe("about 9 more clients");
+    expect(roomPulse(1, 40).words).toBe("about 1 more client");
+    expect(roomPulse(0, 40).words).toBe("");
+  });
+  test("says what limits it", () => {
+    expect(limitedBy("Client-facing people")).toBe("client managers");
+    expect(limitedBy("Content team")).toBe("Content team");
   });
 });

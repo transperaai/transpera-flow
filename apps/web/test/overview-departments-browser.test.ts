@@ -91,7 +91,10 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
         expect(d).not.toMatch(/[£÷]/);
         expect(d).not.toMatch(/goal/);
         expect(d).not.toContain(":1");
-        expect(await kpi(page, name, "Room for more clients")).toMatch(/Limit: .+/);
+        const room = await kpi(page, name, "Room for more clients");
+        expect(room).toMatch(/Plenty of room|Some room|Tight|Full/);
+        expect(room).toMatch(/Limited by .+/);
+        expect(room).toContain("A rough guide from the simulation, not a promise");
         // The count, and what the line is; no names (the busy list names them).
         const past = await kpi(page, name, "Past their busy line");
         expect(past).toMatch(/\d/);
