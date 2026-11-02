@@ -37,20 +37,18 @@ import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
 import { PageHeader } from "@/components/shell/page";
 import { ShellHeader } from "@/components/shell/shell-header";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
-import { horizonLabel, horizonWeeks, isHorizonMonths, monthsForWeeks } from "@/lib/horizon";
+import { OVERVIEW_HORIZONS, horizonLabel, horizonWeeks, isOverviewHorizon, nearestOverviewHorizon } from "@/lib/horizon";
 import { perceptionGapDetections } from "@/lib/issues/perception";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { litIds } from "@/lib/map/highlight";
 import { companyMap } from "@/lib/overview/company-map";
 import { sortFindings } from "@/lib/overview/findings";
 import { COMPANY_GROUP, groupByProcess, type ProcessGroup } from "@/lib/overview/by-process";
-import { openIssues, openedVersusResolved, timeSplitByProcess } from "@/lib/overview/health";
-import { impactPairs, solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
-import { useImpacts } from "@/lib/overview/use-impacts";
+import { openIssues, timeSplitByProcess } from "@/lib/overview/health";
 import { forecastInsights, forecastModel, today } from "@/lib/forecast/forecast";
 import { timelineData } from "@/lib/forecast/timeline";
 import { calendarMonthStarts } from "@transpera-flow/db/sandbox";
@@ -75,8 +73,6 @@ const chartLoading = () => <Skeleton className="h-[180px] w-full" aria-busy="tru
 const IssuesDonut = dynamic(() => import("./trend-charts").then((m) => m.IssuesDonut), { ssr: false, loading: chartLoading });
 const TimeSplitChart = dynamic(() => import("./trend-charts").then((m) => m.TimeSplitChart), { ssr: false, loading: chartLoading });
 const TimeAchieves = dynamic(() => import("./time-achieves").then((m) => m.TimeAchieves), { ssr: false, loading: chartLoading });
-const OpenedResolvedChart = dynamic(() => import("./trend-charts").then((m) => m.OpenedResolvedChart), { ssr: false, loading: chartLoading });
-const BeforeAfterChart = dynamic(() => import("./trend-charts").then((m) => m.BeforeAfterChart), { ssr: false, loading: chartLoading });
 const ForecastTimeline = dynamic(() => import("@/components/forecast/forecast-timeline").then((m) => m.ForecastTimeline), { ssr: false, loading: chartLoading });
 const TimelineLegend = dynamic(() => import("@/components/forecast/forecast-timeline").then((m) => m.TimelineLegend), { ssr: false });
 
@@ -94,8 +90,6 @@ export interface OverviewProps {
   mode: ScreenMode;
   /** The workspace's solutions and their verdicts (the demo reads the ones built in this tab instead). */
   solutions?: SolutionsData;
-  /** For solutions compared whose process has been published since: the version they were copied from. */
-  solutionBases?: SolutionBases;
   /** The ISO date the horizon run starts on (its months are calendar months); today when omitted. Fixed on the demo. */
   startDate?: string;
   /** Where each process's page is, by process id. */
@@ -114,8 +108,6 @@ export interface OverviewProps {
   /** Set up's data for the department cards (P6), with `/w/<slug>`. Absent (the demo): no cards. */
   capacity?: { setup: CapacitySetup; base: string } | null;
 }
-
-const NO_BASES: SolutionBases = {};
 
 /** The company's engine model, the same object while it is unchanged. */
 function useCompanyModel(bundle: ProcessBundle): { model: EngineModel | null; error: string | null } {
@@ -136,25 +128,11 @@ function useCompanyModel(bundle: ProcessBundle): { model: EngineModel | null; er
 const current = (result: SimulationResult | null, model: EngineModel | null): SimulationResult | null =>
   result && model && Math.abs(result.H - model.horizonWeeks * model.hoursPerWeek) < 1e-6 ? result : null;
 
-/** True once the element has come within a screen of view (and stays true). */
-function useNear<T extends Element>(): [React.RefObject<T | null>, boolean] {
-  const ref = useRef<T>(null);
-  const [near, setNear] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el || near) return;
-    const observer = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true), { rootMargin: "600px" });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [near]);
-  return [ref, near];
-}
-
 const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
 
-function Section({ id, title, description, action, children, sectionRef }: { id: string; title: string; description?: ReactNode; action?: ReactNode; children: ReactNode; sectionRef?: React.Ref<HTMLElement> }) {
+function Section({ id, title, description, action, children }: { id: string; title: string; description?: ReactNode; action?: ReactNode; children: ReactNode }) {
   return (
-    <section ref={sectionRef} className="flex min-w-0 flex-col gap-3" data-tier={id} aria-labelledby={`tier-${id}`}>
+    <section className="flex min-w-0 flex-col gap-3" data-tier={id} aria-labelledby={`tier-${id}`}>
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h2 id={`tier-${id}`} className={SECTION_TITLE}>
@@ -189,7 +167,6 @@ export function Overview({
   issues,
   mode,
   solutions,
-  solutionBases = NO_BASES,
   startDate,
   hrefs,
   processesHref,
@@ -211,9 +188,10 @@ export function Overview({
   const capacityModel = useMemo(() => (capacity ? capacityBaseModel(live) : { model: null, error: null }), [capacity, live]);
   const purposeNames = useMemo(() => Object.fromEntries(purposeCategories.map((c) => [c.key, c.name])), [purposeCategories]);
 
-  // The horizon: the workspace's own length until one is picked (or ?horizon= says), as on the process pages.
+  // The horizon: 1, 3 or 6 months (the Sandbox goes further). Until one is picked (or ?horizon= says) it is the nearest of those to the
+  // workspace's own length: 3 months for the usual 13 weeks.
   const horizonParam = Number(searchParams.get("horizon"));
-  const [picked, setPicked] = useState<number | null>(isHorizonMonths(horizonParam) ? horizonParam : null);
+  const [picked, setPicked] = useState<number | null>(isOverviewHorizon(horizonParam) ? horizonParam : null);
   const pickHorizon = (months: number) => {
     setPicked(months);
     const next = new URLSearchParams(searchParams.toString());
@@ -227,8 +205,8 @@ export function Overview({
     const q = next.toString();
     return q ? `${pathname}?${q}` : pathname;
   })();
-  const weeks = picked === null ? (base?.horizonWeeks ?? live.workspace.settings.horizon_weeks) : horizonWeeks(picked);
-  const months = picked ?? monthsForWeeks(weeks) ?? Math.max(1, Math.round(weeks / (52 / 12)));
+  const months = picked ?? nearestOverviewHorizon(base?.horizonWeeks ?? live.workspace.settings.horizon_weeks);
+  const weeks = horizonWeeks(months);
   const span = horizonLabel(months);
 
   // The run at the horizon: the forecast's model (planned hires, end dates and leave), month by month in calendar months.
@@ -310,29 +288,17 @@ export function Overview({
   // Months in the browser's time zone (workspaces have none of their own yet), for this card and the chart alike.
   const open = useMemo(() => openIssues(state.issues, now), [state.issues, now]);
 
-  // Before and after per solution, once the main runs are in, and only when the card or the chart needs them.
-  const [trendsRef, trendsNear] = useNear<HTMLElement>();
-  const chosen = useMemo(() => solutionsToCompare(solutionsData, state.issues), [solutionsData, state.issues]);
-  const pairs = useMemo(() => (base ? impactPairs(live, chosen, solutionBases, base.horizonWeeks) : []), [base, live, chosen, solutionBases]);
-  const anyImplemented = chosen.some((c) => c.implemented);
-  // Once wanted, the runs stay wanted: a horizon change empties the horizon run for a moment, which mustn't stop them.
-  const wanted = !!baseResult && !!horizonResult && (anyImplemented || trendsNear);
-  const [impactsWanted, setImpactsWanted] = useState(false);
-  if (wanted && !impactsWanted) setImpactsWanted(true);
-  const impacts = useImpacts(pairs, impactsWanted);
-
   // The trends.
   const timeSplit = useMemo(() => (horizonModel && horizonResult ? timeSplitByProcess(horizonModel, horizonResult, parts) : null), [horizonModel, horizonResult, parts]);
   const issuesByProcess = useMemo(
     () => (groups ? groups.filter((g) => g.id !== COMPANY_GROUP || g.openIssues > 0).map((g) => ({ id: g.id, name: g.name, count: g.openIssues })) : null),
     [groups],
   );
-  const monthsOfIssues = useMemo(() => openedVersusResolved(state.issues, now, 6), [state.issues, now]);
   const cutoffs = useMemo(() => toRatingConfig(rules, hoursPerWeek).rules.busy.cutoffs, [rules, hoursPerWeek]);
   const teamLoad = useMemo(() => (horizonModel && horizonResult ? timelineData(horizonModel, horizonResult, live, start) : null), [horizonModel, horizonResult, live, start]);
 
-  // "Updated" is when the run came in: the numbers are simulated each time the page opens.
-  const updated = useMemo(() => (baseResult ? new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : null), [baseResult]);
+  // "Last updated": the numbers are simulated each time the page opens, so this is when it opened.
+  const updated = useMemo(() => now.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }), [now]);
 
   const renderItems = (g: ProcessGroup) => {
     const open = g.issues.filter((i) => i.status === "open" || i.status === "testing");
@@ -364,8 +330,6 @@ export function Overview({
     );
   };
 
-  const simulating = !error && (!baseResult || !horizonResult);
-
   return (
     <div>
       <ShellHeader title="Overview" />
@@ -373,12 +337,7 @@ export function Overview({
         <PageHeader
           eyebrow="Overview"
           title={workspaceName}
-          description={
-            <span className="inline-flex items-center gap-2">
-              <i aria-hidden className={`size-2 rounded-full ${simulating ? "animate-pulse bg-warn" : "bg-good"}`} />
-              {error ? "Can't be simulated yet" : baseResult ? `Live model · 30 simulated runs · updated ${updated ?? ""}`.trim() : "Live model · simulating 30 runs…"}
-            </span>
-          }
+          description={`Last updated ${updated} · ${parts.length} ${parts.length === 1 ? "process" : "processes"}`}
         />
 
         {error ? (
@@ -423,14 +382,18 @@ export function Overview({
                 })}
               />
               {companyHistoryHref && (
-                <Link href={companyHistoryHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
-                  History
-                </Link>
+                <Button asChild variant="outline" size="sm">
+                  <Link href={companyHistoryHref} data-company-history>
+                    History
+                  </Link>
+                </Button>
               )}
-              <Link href={processesHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
-                All processes
-                <ArrowRight aria-hidden />
-              </Link>
+              <Button asChild variant="outline" size="sm">
+                <Link href={processesHref}>
+                  All processes
+                  <ArrowRight aria-hidden />
+                </Link>
+              </Button>
             </div>
           }
         >
@@ -444,7 +407,14 @@ export function Overview({
           )}
           <Card className="gap-0 overflow-hidden p-0" data-company-map>
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-3 py-2" data-map-controls>
-              <HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} />
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} options={OVERVIEW_HORIZONS} />
+                {forecastHref && (
+                  <Link href={forecastHref} data-sandbox-link className={buttonVariants({ variant: "link", size: "sm" })}>
+                    Simulate further in the Sandbox
+                  </Link>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground" data-horizon-note>
                 {horizonResult ? `Playing ${span} of work, with planned hires and leave.` : error ? "Nothing to play until the company can be simulated." : `Simulating ${span}…`}
               </p>
@@ -490,7 +460,7 @@ export function Overview({
           <ProcessGroups groups={groups} renderItems={renderItems} />
         </Section>
 
-        <Section id="trends" title="Trends" description={`Simulated over the next ${span} where a chart looks ahead; the issues are as recorded.`} sectionRef={trendsRef}>
+        <Section id="trends" title="Trends" description={`Simulated over the next ${span} where a chart looks ahead; the issues are as recorded.`}>
           <div className="grid gap-4 lg:grid-cols-2">
             <ChartCard id="issues" title="Open issues" note="By rating, and by the process they are in.">
               <IssuesDonut byRating={open.byRating} byProcess={issuesByProcess ?? []} />
@@ -535,18 +505,6 @@ export function Overview({
                 <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p>
               ) : (
                 <Skeleton className="h-[260px] w-full" aria-busy="true" />
-              )}
-            </ChartCard>
-            <ChartCard id="opened-resolved" title="Issues opened and resolved" note="Per month, over the last six months.">
-              <OpenedResolvedChart months={monthsOfIssues} />
-            </ChartCard>
-            <ChartCard id="before-after" title="Before and after, per solution" note="Each solution against the version it was copied from, over the same 30 simulated runs.">
-              {impacts.status === "done" ? (
-                <BeforeAfterChart impacts={impacts.impacts} hoursPerWeek={hoursPerWeek} />
-              ) : impacts.status === "error" ? (
-                <p className="text-sm text-muted-foreground">The before and after couldn&apos;t be worked out: {impacts.error}</p>
-              ) : (
-                chartLoading()
               )}
             </ChartCard>
           </div>

@@ -71,8 +71,6 @@ const CHARTS: [string, string][] = [
   ["overview/charts", "MrrChart"],
   ["overview/trend-charts", "IssuesDonut"],
   ["overview/trend-charts", "TimeSplitChart"],
-  ["overview/trend-charts", "OpenedResolvedChart"],
-  ["overview/trend-charts", "BeforeAfterChart"],
   ["sandbox/time-chart", "TimeChart"],
   ["sandbox/time-chart", "TimeBar"],
   ["sandbox/time-chart", "TimeLegend"],
