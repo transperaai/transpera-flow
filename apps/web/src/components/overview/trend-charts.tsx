@@ -11,7 +11,8 @@
 //
 // This module is loaded on its own (next/dynamic), after the map and the cards.
 
-import { useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { FloatingTip } from "@/components/ui/floating-tip";
 import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { totalOf, type ProcessTimeSplit } from "@/lib/overview/health";
@@ -24,34 +25,21 @@ interface TipState {
 }
 
 /**
- * A tooltip that follows the pointer inside a `relative` box: `show` from a mark's pointer move (it measures the box then),
- * `hide` on leave, and `<Tip>` draws it.
+ * A tooltip that follows the pointer: `show` from a mark's pointer move, `hide` on leave, and `<Tip>` draws it in a portal
+ * on the page (FloatingTip), so no card or scrolling box around the chart can cut it off.
  */
-function useTip(): [React.RefObject<HTMLDivElement | null>, TipState | null, (e: React.PointerEvent, body: ReactNode) => void, () => void] {
-  const box = useRef<HTMLDivElement>(null);
+function useTip(): [TipState | null, (e: React.PointerEvent, body: ReactNode) => void, () => void] {
   const [tip, setTip] = useState<TipState | null>(null);
-  const show = (e: React.PointerEvent, body: ReactNode) => {
-    const rect = box.current?.getBoundingClientRect();
-    if (!rect) return;
-    // Kept inside the box: a tooltip near an edge doesn't hang off it.
-    const x = Math.min(Math.max(e.clientX - rect.left, 70), Math.max(70, rect.width - 70));
-    setTip({ x, y: e.clientY - rect.top, body });
-  };
+  const show = (e: React.PointerEvent, body: ReactNode) => setTip({ x: e.clientX, y: e.clientY, body });
   const hide = () => setTip(null);
-  return [box, tip, show, hide];
+  return [tip, show, hide];
 }
 
 function Tip({ tip }: { tip: TipState | null }) {
-  if (!tip) return null;
   return (
-    <div
-      role="presentation"
-      data-chart-tip
-      className="pointer-events-none absolute z-10 w-max max-w-56 -translate-x-1/2 -translate-y-[calc(100%+10px)] rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md"
-      style={{ left: tip.x, top: tip.y }}
-    >
-      {tip.body}
-    </div>
+    <FloatingTip at={tip} className="max-w-56">
+      {tip?.body}
+    </FloatingTip>
   );
 }
 
@@ -87,7 +75,7 @@ function arc(a0: number, a1: number, r: number, c: number): string {
 }
 
 export function IssuesDonut({ byRating, byProcess }: { byRating: { rating: Rating; count: number }[]; byProcess: { id: string; name: string; count: number }[] }) {
-  const [tipBox, tip, showTip, hideTip] = useTip();
+  const [tip, showTip, hideTip] = useTip();
   const total = byRating.reduce((a, c) => a + c.count, 0);
   if (total === 0) return <p className="text-sm text-muted-foreground" data-empty>No open issues. Acknowledged insights and issues logged by hand show here while they are open.</p>;
   const shown = byRating.filter((c) => c.count > 0);
@@ -103,7 +91,7 @@ export function IssuesDonut({ byRating, byProcess }: { byRating: { rating: Ratin
   });
   const top = Math.max(1, ...byProcess.map((p) => p.count));
   return (
-    <div ref={tipBox} className="relative flex flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <div className="flex items-center gap-4">
         <svg width={DONUT} height={DONUT} role="img" aria-label={`${total} open issues: ${shown.map((s) => `${s.count} ${RATING_LABELS[s.rating]}`).join(", ")}.`} className="shrink-0" data-donut>
           {arcs.map((a) =>
@@ -195,11 +183,11 @@ export const TIME_SPLIT_LEGEND = [
 ];
 
 export function TimeSplitChart({ rows, months }: { rows: ProcessTimeSplit[]; /** The run's length in months, for hours a month in the tooltip. */ months: number }) {
-  const [tipBox, tip, showTip, hideTip] = useTip();
+  const [tip, showTip, hideTip] = useTip();
   if (!rows.length) return <p className="text-sm text-muted-foreground" data-empty>No work went through any process in this run.</p>;
   const perMonth = (h: number) => `${formatNumber(h / Math.max(months, 1e-9), h / months < 10 ? 1 : 0)} h`;
   return (
-    <div ref={tipBox} className="relative flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
       <Legend items={TIME_SPLIT_LEGEND} />
       <ul className="flex flex-col gap-2" data-time-split>
         {rows.map((r) => {

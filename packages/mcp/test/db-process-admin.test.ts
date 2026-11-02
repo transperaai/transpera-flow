@@ -25,7 +25,7 @@ let anon: Db;
 
 /** Make a process as the app does (an insert as the editor), and publish a first version, linking `children` in it. */
 async function made(name: string, kind: "pipeline" | "servicing", children: string[] = []): Promise<string> {
-  const data = await editor.insertInto("processes").values({ workspace_id: ids.ws, name, kind }).returning("id").executeTakeFirstOrThrow();
+  const data = await editor.insertInto("processes").values({ workspace_id: ids.ws, name, kind, category: kind === "servicing" ? "routine_client_work" : "sales" }).returning("id").executeTakeFirstOrThrow();
   await publishWith(data.id as string, children);
   return data.id as string;
 }
@@ -135,7 +135,7 @@ describe("process admin and source files", () => {
 
   it("a viewer and anon can't make, rename, re-kind, archive or restore a process", async () => {
     const target = await made("Audit", "pipeline");
-    const ins = await errorOf(() => viewer.insertInto("processes").values({ workspace_id: ids.ws, name: "Viewer made", kind: "pipeline" }).returning("id").execute());
+    const ins = await errorOf(() => viewer.insertInto("processes").values({ workspace_id: ids.ws, name: "Viewer made", kind: "pipeline", category: "sales" }).returning("id").execute());
     expect(ins?.code).toBe("42501");
     for (const change of [{ name: "Viewer" }, { kind: "servicing" }, { archived_at: new Date().toISOString() }]) {
       // The update goes through without an error and changes no row: RLS hides the process from a viewer's writes.

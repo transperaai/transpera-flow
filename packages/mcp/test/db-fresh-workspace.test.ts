@@ -61,7 +61,7 @@ describe("a new client's workspace", () => {
     expect(await counts()).toEqual({ ...ZERO, roles: 1, people: 1, clients: 1, companyId: fresh.companyId });
 
     // A process as createProcess makes it: the row, a draft, a start and an end, and the edge between them.
-    const proc = await editor.insertInto("processes").values({ workspace_id: ws, name: "Sales pipeline", kind: "pipeline", entity_name: "lead", source: "manual" }).returning("id").executeTakeFirstOrThrow();
+    const proc = await editor.insertInto("processes").values({ workspace_id: ws, name: "Sales pipeline", kind: "pipeline", category: "sales", entity_name: "lead", source: "manual" }).returning("id").executeTakeFirstOrThrow();
     const processId = proc.id;
     const opened = (await rpc(editor, "open_draft", { target_process: processId })) as { status: string; revision_id: string };
     expect(opened.status).toBe("ok");

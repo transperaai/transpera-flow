@@ -48,6 +48,7 @@ async function rowsFor(
       id: p.id,
       name: p.name,
       kind: p.kind,
+      category: p.category,
       description: p.description,
       parentId: p.parent_process_id,
       live: Boolean(p.live_revision_id),

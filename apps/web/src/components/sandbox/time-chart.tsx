@@ -5,6 +5,7 @@
 // a phone. The same chart serves the Sandbox, its compare and the Overview.
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { FloatingTip } from "@/components/ui/floating-tip";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { niceTicks } from "@/lib/overview/axis";
 import { IDLE, NOT_SET, UNCOVERED, type TimeRow, type TimeView } from "@/lib/sandbox/time";
@@ -146,8 +147,7 @@ export function TimeChart({ view, label }: { view: TimeView; label: string }) {
               data-month={mo.index}
               data-over={view.over[i] ? "true" : undefined}
               onPointerMove={(e) => {
-                const rect = ref.current?.getBoundingClientRect();
-                if (rect) setTip({ x: Math.min(Math.max(e.clientX - rect.left, 90), Math.max(90, rect.width - 90)), y: e.clientY - rect.top, m: i });
+                setTip({ x: e.clientX, y: e.clientY, m: i });
               }}
               onPointerLeave={() => setTip(null)}
             >
@@ -177,11 +177,9 @@ export function TimeChart({ view, label }: { view: TimeView; label: string }) {
           </li>
         ))}
       </ul>
-      {tip ? (
-        <div role="presentation" data-chart-tip className="pointer-events-none absolute z-10 w-max max-w-64 -translate-x-1/2 -translate-y-[calc(100%+10px)] rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md" style={{ left: tip.x, top: tip.y }}>
-          {monthBody(view, tip.m)}
-        </div>
-      ) : null}
+      <FloatingTip at={tip} className="max-w-64">
+        {tip ? monthBody(view, tip.m) : null}
+      </FloatingTip>
     </div>
   );
 }

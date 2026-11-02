@@ -40,17 +40,23 @@ Migration range `20270126000000`–`20270126009999`.
    - Remove the extra badges, sub-figures and long explanations from each row. Keep hover lighting the step on the map.
    - If a fact's rule text is long, write a short sentence for each rule kind in one place, the fact formatter, rather
      than per row.
-5. **Supporting data, capacity-shaped.** The panels, in this order:
-   - **Hours a month this process takes, by role and by person:** who carries it. Use `personTime.stepHours` over this
-     process's steps, from a run with `personTime` on. Show a bar per role, expandable to people. Include the total
-     ("612 h a month").
-   - **Heaviest steps:** steps ranked by hours a month, each with its work split bar (automatable / augmentable /
-     manual) and its hours. At most 10, with "Show all".
-   - **Time split per step:** keep as is (hands-on against waiting).
-   - **Waiting:** keep the existing wait-by-step view, titled "Waiting on people and on others". If it overlaps the time
-     split, keep both but make sure each says what it shows in one line.
+5. **Supporting data, capacity-shaped.** The panels, in this order (decided by Austin, 2 Nov):
+   - **Headline** (answer first), one line at the top: "This process takes 612 h a month, 37% of Organic's time; about 40% of it
+     is automatable."
+     - The hours are `personTime.stepHours` over this process's steps, from a run with `personTime` on.
+     - The share is of the department's hours from the same run, or, for a process with no single department, of the whole
+       business's.
+     - The automatable share is the sum of each step's automatable part (from its split) over the total, and is left out when no
+       step has a split.
+   - **Hours a month, by role and person:** who carries it. A bar per role, expandable to people, with the total ("612 h a month").
+   - **Heaviest steps:** steps ranked by hours a month, each with its work split bar (automatable / augmentable / manual) and its
+     hours. At most 10, with "Show all".
+   - **Time split per step:** keep as is (hands-on against waiting; its line says it covers waiting for a person and on others).
    - **Key-person risk per step:** keep as is.
-   - **Remove** the Cycle time spread and Rework loops panels, and their code and tests if nothing else uses them.
+   - **Remove** the separate "Waiting" panel (`wait-by-step`: the time split already shows waiting), "How busy each role is"
+     (replaced by the hours by role and person), Cycle time spread and Rework loops, with their code and tests (nothing else used
+     them).
+   - **Do not add** hours per client by tier.
 
 ## Done when
 

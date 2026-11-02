@@ -237,6 +237,7 @@ export function larkspurBundle(): ProcessBundle {
       kind: "pipeline",
       entity_name: "enquiry",
       description: "From an enquiry to a launched social, content or website project.",
+      category: "sales",
       live_revision_id: LARKSPUR_REVISION_ID,
       parent_process_id: null,
     },
@@ -253,6 +254,8 @@ export function larkspurBundle(): ProcessBundle {
         kind: "servicing",
         entity_name: p.entityName,
         description: p.description,
+        // The process the services reach by a Poisson recurrence is requests at random; the rest run to a schedule.
+        category: p.key === "adhoc" ? "ad_hoc" : "routine_client_work",
         live_revision_id: id("d", i + 2),
         parent_process_id: null,
       },

@@ -3,6 +3,7 @@
 // narrow its check-constrained text and jsonb columns, and the checks at the
 // bottom fail the typecheck if they drift from it.
 
+import type { ProcessCategory } from "./process-category";
 import type { IssueType, ScenarioPatch, StoredSeverity } from "@transpera-flow/engine";
 import type { Selectable } from "kysely";
 import type { DB } from "./db-types";
@@ -165,6 +166,8 @@ export interface ProcessRow {
   kind: "pipeline" | "servicing";
   entity_name: string;
   description: string | null;
+  /** What the process is for, in words people use (Q3, D41). The engine `kind` stays underneath. */
+  category: ProcessCategory;
   live_revision_id: string | null;
   /**
    * The process this one sits inside (a child process, held by one of the
@@ -1050,7 +1053,7 @@ export type _SchemaDriftChecks = [
   Assert<Matches<PersonSkillRow, "person_skills">>,
   Assert<Matches<PersonLeaveRow, "person_leave">>,
   // is_company and archived_at are optional here (absent on fixtures).
-  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "department_id" | "whole_business">, "processes">>,
+  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "category" | "department_id" | "whole_business">, "processes">>,
   Assert<Matches<Required<Pick<ProcessRow, "archived_at" | "department_id" | "whole_business">>, "processes">>,
   Assert<Matches<ProcessRevisionRow, "process_revisions">>,
   // replaced_by defaults to '{}' in the table; the app leaves it out of new steps.

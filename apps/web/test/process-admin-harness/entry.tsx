@@ -25,10 +25,10 @@ declare global {
 const id = (n: number) => `50000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 const START: ProcessFacts[] = [
-  { id: id(1), name: "Sales", kind: "pipeline", description: "Win new retainers.", parentId: null, live: true, draft: false },
-  { id: id(2), name: "Onboarding", kind: "pipeline", description: null, parentId: id(1), live: true, draft: false },
-  { id: id(3), name: "Monthly reporting", kind: "servicing", description: null, parentId: null, live: true, draft: false },
-  { id: id(4), name: "Ad-hoc requests", kind: "servicing", description: null, parentId: null, live: false, draft: true },
+  { id: id(1), name: "Sales", kind: "pipeline", category: "sales", description: "Win new retainers.", parentId: null, live: true, draft: false },
+  { id: id(2), name: "Onboarding", kind: "pipeline", category: "onboarding", description: null, parentId: id(1), live: true, draft: false },
+  { id: id(3), name: "Monthly reporting", kind: "servicing", category: "routine_client_work", description: null, parentId: null, live: true, draft: false },
+  { id: id(4), name: "Ad-hoc requests", kind: "servicing", category: "ad_hoc", description: null, parentId: null, live: false, draft: true },
 ];
 
 function Harness({ canEdit, refuseArchive }: { canEdit: boolean; refuseArchive?: string }) {
@@ -61,7 +61,7 @@ function Harness({ canEdit, refuseArchive }: { canEdit: boolean; refuseArchive?:
       log("restore", pid);
       const p = archived.find((x) => x.id === pid)!;
       setArchived((list) => list.filter((x) => x.id !== pid));
-      setFacts((list) => [...list, { id: p.id, name: p.name, kind: p.kind, description: null, parentId: null, live: true, draft: false }]);
+      setFacts((list) => [...list, { id: p.id, name: p.name, kind: p.kind, category: p.kind === "pipeline" ? "sales" : "routine_client_work", description: null, parentId: null, live: true, draft: false }]);
       return { status: "ok" };
     },
   };

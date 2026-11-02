@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./issue-status": "./src/issue-status.ts",
+    "./process-category": "./src/process-category.ts",
     "./source-links": "./src/source-links.ts",
     "./process-import": "./src/process-import/index.ts",
     "./sandbox": "./src/sandbox/index.ts",

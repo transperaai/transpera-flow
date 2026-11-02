@@ -111,6 +111,20 @@ describe("uploading a transpera-process/2 file ", () => {
     expect(await count("select count(*) n from issues where workspace_id = $1", [workspaceId])).toBe(issues);
   });
 
+  it("the file's category lands on the process; a file without one gets it from the kind (Q3)", async () => {
+    const chosen = v2((f) => (f.category = "onboarding"));
+    expect(chosen.kind).toBe("pipeline");
+    await importProcessFile(editorCtx, chosen, { workspaceId, source: "cat.json" });
+    const plain = v2();
+    await importProcessFile(editorCtx, plain, { workspaceId, source: "plain.json" });
+    const servicing = v2((f) => (f.kind = "servicing"));
+    await importProcessFile(editorCtx, servicing, { workspaceId, source: "servicing.json" });
+    const of = async (name: string) => (await q("select category from processes where workspace_id = $1 and name = $2", [workspaceId, name]))[0].category;
+    expect(await of(chosen.name)).toBe("onboarding");
+    expect(await of(plain.name)).toBe("sales");
+    expect(await of(servicing.name)).toBe("routine_client_work");
+  });
+
   it("a step's work split, split notes, tier multipliers, manager routing and source labels land in the draft; a file without them leaves the columns empty", async () => {
     const file = v2((f) => {
       const proposal = f.steps.find((s: { id: string }) => s.id === "proposal");

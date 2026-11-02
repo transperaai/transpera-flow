@@ -3,6 +3,7 @@
 // A workspace with no tiers reads as the prototype's T1, T2, T3. Pure: the loader in data.ts reads, this maps.
 
 import type { CapacitySetup } from "@transpera-flow/db";
+import type { DepartmentMap } from "@/lib/process-page/hours";
 
 export const DEFAULT_TIER_KEYS = ["T1", "T2", "T3"] as const;
 export const DELIVERABLE_COLUMNS = { words: "words", links: "links", techHours: "tech_hours", meetings: "meetings", builds: "builds", creativeSets: "creative_sets", channels: "channels" } as const;
@@ -13,9 +14,11 @@ export interface TierSetup {
   keys: string[];
   /** A service's tier key and deliverables, by service id; null when the setup couldn't be read. */
   services: Record<string, { tier: string; deliverables: Partial<Record<DeliverableName, number>> }> | null;
+  /** The departments and which role sits in which, for the process page's headline share; null when the setup couldn't be read. */
+  departments: DepartmentMap | null;
 }
 
-export const DEFAULT_TIER_SETUP: TierSetup = { keys: [...DEFAULT_TIER_KEYS], services: null };
+export const DEFAULT_TIER_SETUP: TierSetup = { keys: [...DEFAULT_TIER_KEYS], services: null, departments: null };
 
 /** The tier setup for the inspector from P1's Set up data. */
 export function tierSetupFrom(setup: CapacitySetup | null): TierSetup {
@@ -33,5 +36,9 @@ export function tierSetupFrom(setup: CapacitySetup | null): TierSetup {
     }
     services[s.id] = { tier, deliverables };
   }
-  return { keys: tiers.length ? tiers.map((t) => t.key) : [...DEFAULT_TIER_KEYS], services };
+  const departments: DepartmentMap = {
+    names: Object.fromEntries((setup.departments ?? []).map((d) => [d.id, d.name])),
+    ofRole: Object.fromEntries((setup.roles ?? []).map((r) => [r.id, r.department_id ?? null])),
+  };
+  return { keys: tiers.length ? tiers.map((t) => t.key) : [...DEFAULT_TIER_KEYS], services, departments };
 }

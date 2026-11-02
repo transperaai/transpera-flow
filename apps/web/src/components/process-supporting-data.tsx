@@ -1,16 +1,17 @@
 "use client";
 
-// The panels the process page's Supporting data adds (issue #174), beside "Wait before each step" and "How busy each role
-// is": the time split per step, the cycle time spread, key-person risk and the rework loops. Each reads the latest run. No
-// (i)s: the headings and a line under each say what it is.
+// The process page's Supporting data (issue #174; capacity-shaped in Q3), each panel reading the latest run: the headline (what this
+// process takes, in hours a month), the hours by role and by person, the heaviest steps, the time split per step, and key-person
+// risk. No (i)s: the headings and a line under each say what it is.
 
-import Link from "next/link";
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
+import type { Viewer } from "@transpera-flow/db";
 import type { SimulationResult } from "@transpera-flow/engine";
-import { formatDays, formatHours, formatNumber, formatPercent } from "@/lib/format";
-import { issueHref } from "@/lib/issues/pages";
-import type { CycleSpread, KeyPersonRow, LoopRow, TimeSplitRow } from "@/lib/process-page/supporting";
-import { solutionHref } from "@/lib/solutions/cards";
+import { SplitBar, SplitLegend } from "@/components/split-bar";
+import { formatHours, formatPercent } from "@/lib/format";
+import { headlineText, type ProcessHeadline, type ProcessHours } from "@/lib/process-page/hours";
+import type { KeyPersonRow, TimeSplitRow } from "@/lib/process-page/supporting";
+import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
 const card = "min-w-0 rounded-token border border-line bg-panel p-3 shadow-token";
 
@@ -28,11 +29,114 @@ function Panel({ id, title, note, children }: { id: string; title: string; note:
 
 const Waiting = ({ result }: { result: SimulationResult | null }) => <p className="text-sm text-fg-2">{result ? "Nothing to show for this run." : "Simulating…"}</p>;
 
+/** Whole hours a month, with one decimal under 10. */
+const hoursMonth = (h: number) => `${h < 10 ? h.toLocaleString("en-GB", { maximumFractionDigits: 1 }) : Math.round(h).toLocaleString("en-GB")} h`;
+
+/** The answer first: what this process takes, how much of its department's time that is, and how much of it could be automated. */
+export function SupportingHeadline({ headline, result }: { headline: ProcessHeadline | null; result: SimulationResult | null }) {
+  return (
+    <p className="text-base font-semibold" data-supporting-headline>
+      {headline ? headlineText(headline) : <span className="text-sm font-normal text-fg-2">{result ? "No work reached a step in this run." : "Simulating…"}</span>}
+    </p>
+  );
+}
+
+/** Hours a month by role, each opening to the people who carry them. */
+export function HoursByRole({ hours, result, viewer }: { hours: ProcessHours | null; result: SimulationResult | null; viewer?: Viewer }) {
+  const seen = viewerOf({ viewer });
+  const max = Math.max(1e-9, ...(hours?.roles.map((r) => r.hours) ?? []));
+  return (
+    <Panel id="hours-by-role" title="Hours a month, by role and person" note="Who carries this process's hands-on work. Open a role to see its people.">
+      {!hours || hours.roles.length === 0 ? (
+        <Waiting result={result} />
+      ) : (
+        <>
+          <p className="mb-2 text-sm font-semibold tabular-nums" data-hours-total>
+            {hoursMonth(hours.total)} a month
+          </p>
+          <ul className="flex flex-col gap-1.5">
+            {hours.roles.map((r) => (
+              <li key={r.id ?? "none"} data-role-hours={r.id ?? "none"}>
+                <details className="group">
+                  <summary
+                    className="grid cursor-pointer list-none grid-cols-[7rem_1fr_4rem] items-center gap-2 sm:grid-cols-[9.5rem_1fr_4rem] [&::-webkit-details-marker]:hidden"
+                    aria-label={`${r.label}: ${hoursMonth(r.hours)} a month, ${r.people.length} ${r.people.length === 1 ? "person" : "people"}`}
+                  >
+                    <span className="truncate">{r.label}</span>
+                    <span aria-hidden className="h-3 overflow-hidden rounded-sm bg-panel-2">
+                      <span className="block h-full bg-accent" style={{ width: `${Math.max(1, (r.hours / max) * 100)}%` }} />
+                    </span>
+                    <span className="text-right text-xs tabular-nums">{hoursMonth(r.hours)}</span>
+                  </summary>
+                  <ul className="mt-1 mb-1.5 flex flex-col gap-1 pl-3">
+                    {ownRowsOnly(seen, r.people, (p) => p.id).map((p) => (
+                      <li key={p.id} className="grid grid-cols-[6rem_1fr_4rem] items-center gap-2 text-xs sm:grid-cols-[8.5rem_1fr_4rem]">
+                        <span className="truncate">{p.name}</span>
+                        <span aria-hidden className="h-2 overflow-hidden rounded-sm bg-panel-2">
+                          <span className="block h-full bg-fg-3/70" style={{ width: `${Math.max(1, (p.hours / r.hours) * 100)}%` }} />
+                        </span>
+                        <span className="text-right tabular-nums">{hoursMonth(p.hours)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Panel>
+  );
+}
+
+/** How many steps the heaviest-steps panel shows before "Show all". */
+export const HEAVIEST_SHOWN = 10;
+
+/** Steps ranked by hours a month, each with its work split. */
+export function HeaviestSteps({ hours, result, limit = HEAVIEST_SHOWN }: { hours: ProcessHours | null; result: SimulationResult | null; limit?: number }) {
+  const [all, setAll] = useState(false);
+  const rows = hours?.steps ?? [];
+  const shown = all ? rows : rows.slice(0, limit);
+  const max = Math.max(1e-9, ...rows.map((r) => r.hours));
+  return (
+    <Panel id="heaviest-steps" title="Heaviest steps" note="Steps ranked by hours a month, with how much of each could be automated, helped or stays manual.">
+      {rows.length === 0 ? (
+        <Waiting result={result} />
+      ) : (
+        <>
+          <ul className="flex flex-col gap-2">
+            {shown.map((r) => (
+              <li key={r.id} data-heavy-step={r.id} className="grid grid-cols-[7rem_1fr_4rem] items-center gap-2 sm:grid-cols-[9.5rem_1fr_4rem]">
+                <span className="truncate" title={r.label}>
+                  {r.label}
+                </span>
+                <span className="flex min-w-0 flex-col gap-1">
+                  <span aria-hidden className="h-2 overflow-hidden rounded-sm bg-panel-2">
+                    <span className="block h-full bg-accent" style={{ width: `${Math.max(1, (r.hours / max) * 100)}%` }} />
+                  </span>
+                  {r.split ? <SplitBar split={r.split} /> : <span className="text-xs text-fg-3">No work split yet</span>}
+                </span>
+                <span className="text-right text-xs tabular-nums">{hoursMonth(r.hours)}</span>
+              </li>
+            ))}
+          </ul>
+          <SplitLegend className="mt-2" />
+          {rows.length > limit && (
+            <button type="button" aria-expanded={all} onClick={() => setAll((v) => !v)} className="mt-1 text-xs font-medium text-accent hover:underline">
+              {all ? "Show fewer" : `Show all ${rows.length}`}
+            </button>
+          )}
+        </>
+      )}
+    </Panel>
+  );
+}
+
 /** Hands-on time against waiting, per step: one bar a step, hands-on in the brand colour and the waits in greys. */
 export function TimeSplit({ rows, result }: { rows: TimeSplitRow[]; result: SimulationResult | null }) {
   const max = Math.max(1e-9, ...rows.map((r) => r.total));
   return (
-    <Panel id="time-split" title="Time split per step" note="Hands-on work against waiting, for one visit to the step.">
+    <Panel id="time-split" title="Time split per step" note="Hands-on work against waiting (for a person, or on others), for one visit to the step.">
       {rows.length === 0 ? (
         <Waiting result={result} />
       ) : (
@@ -84,43 +188,6 @@ const Key = ({ className, label, style }: { className: string; label: string; st
   </span>
 );
 
-/** The typical (median) and slow (90th percentile) time from start to finish. */
-export function CycleSpreadPanel({ spread, hoursPerWeek, result }: { spread: CycleSpread | null; hoursPerWeek: number; result: SimulationResult | null }) {
-  return (
-    <Panel id="cycle-spread" title="Cycle time spread" note="How long an item takes from start to finish.">
-      {!spread ? (
-        <Waiting result={result} />
-      ) : (
-        <>
-          <ul className="flex flex-col gap-2">
-            {(
-              [
-                ["Typical (median)", spread.p50, "bg-accent"],
-                ["Slow (90th percentile)", spread.p90, "bg-fg-3/60"],
-              ] as const
-            ).map(([label, h, bg]) => (
-              <li key={label} className="grid grid-cols-[10.5rem_1fr_3.5rem] items-center gap-2" aria-label={`${label}: ${formatDays(h, hoursPerWeek)}`}>
-                <span className="truncate">{label}</span>
-                <span aria-hidden className="h-3 overflow-hidden rounded-sm bg-panel-2">
-                  <span className={`block h-full rounded-sm ${bg}`} style={{ width: `${Math.max(1, (h / spread.p90) * 100)}%` }} />
-                </span>
-                <span className="text-right tabular-nums">{formatDays(h, hoursPerWeek)}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-xs text-fg-3">
-            {spread.p50 <= 0
-              ? `Most items finish straight away; the slowest tenth take ${formatDays(spread.p90, hoursPerWeek)} or more.`
-              : spread.ratio >= 1.05
-                ? `A slow item takes ${formatNumber(spread.ratio, 1)} times as long as a typical one.`
-                : "Slow items take about as long as typical ones."}
-          </p>
-        </>
-      )}
-    </Panel>
-  );
-}
-
 /** Steps only one person can do. */
 export function KeyPersonPanel({ rows, result }: { rows: KeyPersonRow[]; result: SimulationResult | null }) {
   return (
@@ -149,65 +216,3 @@ export function KeyPersonPanel({ rows, result }: { rows: KeyPersonRow[]; result:
     </Panel>
   );
 }
-
-/** One row per loop: where work goes round, how often, and what it costs. */
-export function ReworkLoopsPanel({
-  rows,
-  result,
-  hoursPerWeek,
-  base,
-}: {
-  rows: LoopRow[];
-  result: SimulationResult | null;
-  hoursPerWeek: number;
-  /** `/w/<slug>` or `/demo`, for the links to issues and solutions. */
-  base: string;
-}) {
-  return (
-    <Panel id="rework-loops" title="Rework loops" note="Places where work goes back to a step it has already been through, and what that costs.">
-      {!result ? (
-        <Waiting result={result} />
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-fg-2">Nothing goes back to an earlier step.</p>
-      ) : (
-        <ul className="flex flex-col gap-2" data-testid="rework-loops">
-          {rows.map((r) => (
-            <li key={r.id} data-loop={r.id} className="rounded-lg border border-line p-2.5">
-              <p className="text-sm font-semibold">{r.title}</p>
-              {r.steps.length > 1 && <p className="text-xs text-fg-3">Steps in the loop: {r.steps.join(" › ")}</p>}
-              <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1 text-sm sm:grid-cols-3">
-                <Fact label="Goes round" value={r.share.mean > 0 ? formatPercent(r.share.mean) : "Never in this run"} sub={r.meanRounds.mean > 0 ? `${formatNumber(r.meanRounds.mean, 1)} times each` : undefined} />
-                <Fact label="Extra work" value={`${formatNumber(r.hoursPerMonth.mean, r.hoursPerMonth.mean < 10 ? 1 : 0)} h a month`} />
-                <Fact label="Adds to cycle" value={formatDays(r.extraCycleHours.mean, hoursPerWeek)} sub="per item" />
-              </dl>
-              {(r.issues.length > 0 || r.solutions.length > 0) && (
-                <p className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-fg-2">
-                  {r.issues.map((i) => (
-                    <Link key={i.id} href={issueHref(base, i)} className="hover:underline">
-                      Issue: {i.label}
-                    </Link>
-                  ))}
-                  {r.solutions.map((s) => (
-                    <Link key={s.id} href={solutionHref(base, s.id)} className="hover:underline">
-                      Solution: {s.name}
-                    </Link>
-                  ))}
-                </p>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </Panel>
-  );
-}
-
-const Fact = ({ label, value, sub }: { label: string; value: string; sub?: string }) => (
-  <div className="min-w-0">
-    <dt className="text-xs text-fg-3">{label}</dt>
-    <dd className="tabular-nums">
-      {value}
-      {sub && <span className="block text-xs text-fg-3">{sub}</span>}
-    </dd>
-  </div>
-);

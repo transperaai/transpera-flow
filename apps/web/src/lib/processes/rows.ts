@@ -1,13 +1,14 @@
 // The Processes page's rows (issue #101): every process in the company map's order (each followed by the processes
 // inside it), with the numbers beside it. Pure: the page loads the facts, this works out the rows.
 
-import { companyMap, flattenCompanyMap, type IssueLinkRef, type IssueRow, type StepRow } from "@transpera-flow/db";
-import { compareRatingsDesc, ratingOfStored, type Rating } from "@transpera-flow/engine";
+import { companyMap, flattenCompanyMap, type IssueLinkRef, type IssueRow, type ProcessCategory, type StepRow } from "@transpera-flow/db";
 
 export interface ProcessFacts {
   id: string;
   name: string;
   kind: "pipeline" | "servicing";
+  /** What the process is for, in people's words (Q3): shown in the Type column. The kind stays underneath. */
+  category: ProcessCategory;
   /** What the process is for, shown as its goal line. */
   description: string | null;
   parentId: string | null;
@@ -32,15 +33,13 @@ export interface ProcessRowData extends ProcessFacts {
   steps: number;
   /** Open tracked issues on it and the processes inside it. */
   openIssues: number;
-  /** The worst rating among those issues (a Great one is not a problem), or null when there is none. */
-  rating: Rating | null;
   version: LiveVersion | null;
 }
 
 type StepFact = Pick<StepRow, "process_id" | "kind" | "child_process_id"> & { id?: string };
 /** An issue as these tallies need it: where it sits (the compatibility columns, and every link when it has them), and how bad and open it is. */
 type IssueFact = Pick<IssueRow, "process_id" | "step_id" | "severity" | "status"> & { links?: readonly IssueLinkRef[] };
-type Tally = { steps: number; issues: number; rating: Rating | null };
+type Tally = { steps: number; issues: number };
 
 /**
  * An issue belongs to a process when it names it, or (a manual issue with no process) names one of its steps, or
@@ -52,8 +51,6 @@ export function isOnProcess(i: Pick<IssueRow, "process_id" | "step_id"> & { link
 }
 
 const isWorking = (s: StepFact) => (s.kind === "task" || s.kind === "wait" || s.kind === "decision" || s.kind === "subprocess") && !s.child_process_id;
-
-const worse = (a: Rating | null, b: Rating | null): Rating | null => (a === null ? b : b === null ? a : compareRatingsDesc(b, a) < 0 ? b : a);
 
 export function processRows(input: {
   processes: readonly ProcessFacts[];
@@ -68,7 +65,7 @@ export function processRows(input: {
   const own = new Map<string, Tally>();
   const mine = (id: string): Tally => {
     let o = own.get(id);
-    if (!o) own.set(id, (o = { steps: 0, issues: 0, rating: null }));
+    if (!o) own.set(id, (o = { steps: 0, issues: 0 }));
     return o;
   };
   const stepProcess = new Map<string, string>();
@@ -86,23 +83,17 @@ export function processRows(input: {
     };
     add(i.process_id, i.step_id);
     for (const l of i.links ?? []) add(l.process_id, l.step_id);
-    const r = ratingOfStored(i.severity);
-    for (const pid of where) {
-      const o = mine(pid);
-      o.issues++;
-      if (r !== "great") o.rating = worse(o.rating, r);
-    }
+    for (const pid of where) mine(pid).issues++;
   }
 
   // Each process's numbers include those of the processes inside it.
   const total = new Map<string, Tally>();
   const sum = (n: (typeof nodes)[number]): Tally => {
-    const t = { ...(own.get(n.process.id) ?? { steps: 0, issues: 0, rating: null }) };
+    const t = { ...(own.get(n.process.id) ?? { steps: 0, issues: 0 }) };
     for (const c of n.children) {
       const x = sum(c);
       t.steps += x.steps;
       t.issues += x.issues;
-      t.rating = worse(t.rating, x.rating);
     }
     total.set(n.process.id, t);
     return t;
@@ -111,14 +102,13 @@ export function processRows(input: {
 
   const byId = new Map(flat.map((f) => [f.process.id, f.process]));
   return flat.map(({ process: p, depth }) => {
-    const t = total.get(p.id) ?? { steps: 0, issues: 0, rating: null };
+    const t = total.get(p.id) ?? { steps: 0, issues: 0 };
     return {
       ...p,
       depth,
       trail: trailOf(p, byId),
       steps: t.steps,
       openIssues: t.issues,
-      rating: t.rating,
       version: input.versions.get(p.id) ?? null,
     };
   });
@@ -133,22 +123,6 @@ export function trailOf(p: { id: string; parentId: string | null }, byId: Readon
     seen.add(q.id);
   }
   return out;
-}
-
-/** Each process's rating (the worst of its open issues, and of the processes inside it), by id: the process switcher's dots. */
-export function processRatings(
-  processes: readonly { id: string; name: string; kind: "pipeline" | "servicing"; parentId?: string | null }[],
-  issues: readonly IssueFact[],
-  /** The live steps of every process, so an issue that names only a step still counts toward its process. */
-  steps: readonly StepFact[] = [],
-): Record<string, Rating | null> {
-  const rows = processRows({
-    processes: processes.map((p) => ({ ...p, description: null, parentId: p.parentId ?? null, live: true, draft: false })),
-    steps,
-    issues,
-    versions: new Map(),
-  });
-  return Object.fromEntries(rows.map((r) => [r.id, r.rating]));
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

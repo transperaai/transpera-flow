@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { Stat } from "@transpera-flow/engine";
+import { FloatingTip } from "@/components/ui/floating-tip";
 import { labelIndexes, niceTicks } from "@/lib/overview/axis";
 import type { TimelineMonth } from "@/lib/forecast/timeline";
 
@@ -59,6 +60,7 @@ export interface CompareChartProps {
 export function CompareChart({ title, months, series, format, formatDiff = (v) => format(v), reference, minTop = 0, fixedWidth }: CompareChartProps) {
   const [ref, measured] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
+  const [tipAt, setTipAt] = useState<{ x: number; y: number } | null>(null);
   const width = fixedWidth ?? (measured || 560);
   const compact = width < 480;
   const m = { l: compact ? 50 : 60, r: compact ? 12 : 16, t: 12, b: 28 };
@@ -122,7 +124,10 @@ export function CompareChart({ title, months, series, format, formatDiff = (v) =
         role="img"
         aria-label={summary}
         className="block overflow-visible"
-        onPointerMove={(e) => pointerMove(e.clientX, e.currentTarget.getBoundingClientRect().left)}
+        onPointerMove={(e) => {
+          pointerMove(e.clientX, e.currentTarget.getBoundingClientRect().left);
+          setTipAt({ x: e.clientX, y: e.clientY });
+        }}
         onPointerLeave={() => setHover(null)}
       >
         {ticks.map((t) => (
@@ -160,22 +165,20 @@ export function CompareChart({ title, months, series, format, formatDiff = (v) =
           </g>
         ) : null}
       </svg>
-      {shown && hover !== null ? (
-        <div
-          role="presentation"
-          className="pointer-events-none absolute top-1 z-10 w-max max-w-64 rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md"
-          style={{ left: Math.min(Math.max(x(hover) - 80, 0), Math.max(0, width - 220)) }}
-        >
+      <FloatingTip at={shown ? tipAt : null} placement="side">
+        {shown && hover !== null ? (
+          <>
           <p className="font-medium">{shown.label}</p>
-          {shown.partial ? <p className="text-muted-foreground">Part month</p> : null}
-          {series.map((s, k) => (
-            <p key={k} className="tabular-nums">
-              {s.name}: {s.values[hover] ? format(s.values[hover]!.mean) : "—"}
-              {k > 0 && base && s.values[hover] ? <span className="text-muted-foreground"> ({formatDiff(s.values[hover]!.mean - base.mean)})</span> : null}
-            </p>
-          ))}
-        </div>
-      ) : null}
+        {shown.partial ? <p className="text-muted-foreground">Part month</p> : null}
+        {series.map((s, k) => (
+          <p key={k} className="tabular-nums">
+            {s.name}: {s.values[hover] ? format(s.values[hover]!.mean) : "—"}
+            {k > 0 && base && s.values[hover] ? <span className="text-muted-foreground"> ({formatDiff(s.values[hover]!.mean - base.mean)})</span> : null}
+          </p>
+        ))}
+          </>
+        ) : null}
+      </FloatingTip>
       <table className="sr-only">
         <caption>{title}, average and 10 to 90 percent range, for each column</caption>
         <thead>

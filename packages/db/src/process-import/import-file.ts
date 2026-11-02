@@ -257,6 +257,7 @@ export function fileToProcessJson(
     name: opts.name,
     kind: file.kind,
     ...(file.entity_name ? { entity_name: file.entity_name } : {}),
+    ...(file.category ? { category: file.category } : {}),
     ...(file.description ? { description: file.description } : {}),
     steps,
     edges,

@@ -17,6 +17,7 @@ import type { Selectable } from "kysely";
 import type { DB } from "./db-types";
 import { payFreeIssueFields } from "./issue-pay";
 import { planSandboxScenarios } from "./sandbox-import";
+import { isProcessCategory, type ProcessCategory } from "./process-category";
 import type { WorkspaceSettings } from "./types";
 import { WORKSPACE_BUNDLE_FORMAT, type Row, type WorkspaceBundle } from "./workspace-bundle";
 
@@ -101,7 +102,7 @@ export const IMPORT_COLUMNS = {
     "channels", "hand_holding_hours", "adhoc_chance", "adhoc_requests", "adhoc_hours", "meetings", "words", "links", "tech_hours", "builds", "creative_sets", "step_factor",
   ),
   sources: cols("sources", "id", "kind", "title", "body", "recorded_at", "speakers", "created_at"),
-  processes: cols("processes", "id", "parent_process_id", "name", "kind", "entity_name", "description", "department_id", "whole_business"),
+  processes: cols("processes", "id", "parent_process_id", "name", "kind", "entity_name", "description", "category", "department_id", "whole_business"),
   steps: cols(
     "steps", "id", "assumption", "child_process_id", "conflict", "cost_override", "current_wip", "dropoff_benchmark", "expected_wait_hours", "entry_step_id",
     "kind", "lost_per_day_waiting", "name", "notes", "outcome", "parent_step_id", "person_id", "provenance", "purpose", "replaced_by", "rework_rate", "rework_to_step_id",
@@ -195,6 +196,8 @@ export interface PlanProcess {
   kind: unknown;
   entity_name: unknown;
   description: unknown;
+  /** What the process is for (Q3). Absent from a backup made before categories: the restore gives it one from its kind. */
+  category?: ProcessCategory;
   archived: boolean;
   layout: unknown;
   steps: Row[];
@@ -710,6 +713,8 @@ export function planWorkspaceImport(
     if (department !== null && !sets.departments!.has(department)) note("processes", "cleared");
     return {
       ...pick(process, IMPORT_COLUMNS.processes),
+      // A category the restore doesn't know is left out, so the database gives the process one from its kind.
+      category: isProcessCategory(process.category) ? process.category : undefined,
       parent_process_id: parent !== null && sets.processes!.has(parent) ? process.parent_process_id : null,
       department_id: department !== null && sets.departments!.has(department) ? process.department_id : null,
       archived: process.archived_at != null,

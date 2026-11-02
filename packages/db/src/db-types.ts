@@ -458,6 +458,7 @@ export interface Processes {
    */
   archived_at: string | null;
   archived_by: string | null;
+  category: string;
   created_at: Generated<string>;
   created_by: Generated<string | null>;
   /**

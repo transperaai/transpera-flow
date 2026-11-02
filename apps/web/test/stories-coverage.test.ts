@@ -38,8 +38,6 @@ const SHARED: [string, string][] = [
   ["sandbox/goal-seek-dialog", "GoalSeekDialog"],
   ["purposes/purposes-settings", "PurposesSettings"],
   ["overview/rating-pill", "RatingPill"],
-  ["processes/rating", "RatingDot"],
-  ["processes/rating", "RatingPill"],
   ["pay-hidden", "PayHidden"],
   ["simulation-gaps", "GapList"],
   ["simulation-gaps", "MissingForSimulation"],
@@ -77,8 +75,6 @@ const CHARTS: [string, string][] = [
   ["sandbox/tornado", "TornadoBars"],
   ["forecast/forecast-timeline", "ForecastTimeline"],
   ["forecast/forecast-timeline", "TimelineLegend"],
-  ["utilisation-bars", "UtilisationBars"],
-  ["wait-by-step", "WaitByStep"],
   ["kpi-strip", "KpiStrip"],
 ];
 

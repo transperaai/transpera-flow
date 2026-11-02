@@ -64,3 +64,4 @@ brief has a default: use it.
 | `p7-sandbox-brief.md` | `claude/cap-p7-sandbox` | `20270123000000`–`20270123009999` |
 | `p8-issues-brief.md` | `claude/cap-p8-issues` | `20270124000000`–`20270124009999` |
 | `p9-cleanup-brief.md` | `claude/cap-p9-cleanup` | `20270125000000`–`20270125009999` |
+| `q3-process-content-brief.md` | `claude/cap-q3-process-content` | `20270126000000`–`20270126009999` |
