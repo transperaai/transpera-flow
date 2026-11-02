@@ -3,12 +3,11 @@
 // The Overview (issue #173, B15; before it #100, A35; the department cards are capacity build P6): the landing page of a workspace, in
 // tiers. Top to bottom:
 //
-// 1. Capacity by department: a card each for Organic and Performance, then the whole business (department-cards.tsx). It reads the
+// 1. Capacity by department: the whole business first, then a card each for Organic and Performance (department-cards.tsx). It reads the
 //    Capacity page's "Today" run, from the same cache.
-// 2. The company map, with Play and the horizon (1, 3, 6, 12 or 24 months). The charts follow the horizon.
+// 2. The company map, with Play and the horizon (1, 3 or 6 months; the Sandbox goes further). The charts follow the horizon.
 // 3. By process: "Across the company", then one row per process, each with the run's facts (D40) and its open issues.
-// 4. Trends: open issues, time split by process, team load by role, issues opened versus resolved, before and after per
-//    solution.
+// 4. Trends: open issues, time split by process, what the time achieves, team load by role.
 //
 // (The issues-based health strip that used to sit between the map and By process went with P6.)
 //
@@ -19,9 +18,7 @@
 //   the map plays and the flow efficiency, time split, team load and the forecast's "too busy" alerts read.
 // When the two models are the same (the horizon is the workspace's length and nobody joins, leaves or is away), the one
 // run serves both.
-// Solutions' before and after (Improvement delivered, and its chart) add two runs per solution compared, in their own
-// worker, only once the two runs above are first in and only when something needs them; they don't depend on the horizon
-// and are kept for the session, so changing the horizon doesn't run them again. The trend charts load on their own.
+// The trend charts load on their own.
 
 import type { ScreenMode } from "@/lib/mode";
 import dynamic from "next/dynamic";

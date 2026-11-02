@@ -1622,7 +1622,6 @@ function Canvas({
     if (refitOn === refitSeen.current) return;
     refitSeen.current = refitOn;
     if (framed.current) requestFit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- requestFit only sets state
   }, [refitOn]);
   // A read-only map follows its panel's width (and height, when that is fixed), unless it was moved by hand.
   const refitKey = editable ? "" : heightMode === "auto" ? `${width}` : `${width}x${height}`;
