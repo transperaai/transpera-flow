@@ -731,11 +731,27 @@ export interface DepartmentTimePart {
   share: number;
 }
 
+/** The process each step of the model is in, by step id: a servicing process's own name; steps outside any (the sales pipeline) are "Sales". */
+export function modelProcessOfStep(model: EngineModel): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const p of Object.values(model.servicingProcesses ?? {})) for (const id of p.steps) out.set(id, p.name);
+  for (const s of model.steps) if (!out.has(s.id)) out.set(s.id, "Sales");
+  return out;
+}
+
 /**
- * Where a department's time goes (hours a month, from the run): every step hour its people spend, grouped by the step's purpose.
- * `names` turns a purpose key into the words the workspace uses; hand-holding is its own part.
+ * Where a department's time goes (hours a month, from the run): every step hour its people spend, grouped by the step's purpose
+ * (default) or by the process the step is in (`by: { processOfStep }`, using the process names). `names` turns a purpose key into the words
+ * the workspace uses; hand-holding is its own part either way.
  */
-export function departmentTime(setup: CapacitySetup, model: EngineModel, result: SimulationResult, departmentId: string, names: Record<string, string> = {}): { total: number; parts: DepartmentTimePart[] } {
+export function departmentTime(
+  setup: CapacitySetup,
+  model: EngineModel,
+  result: SimulationResult,
+  departmentId: string,
+  names: Record<string, string> = {},
+  by?: { processOfStep: ReadonlyMap<string, string> },
+): { total: number; parts: DepartmentTimePart[] } {
   const { deptOf } = lookups(setup);
   const purposeOf = new Map(model.steps.map((s) => [s.id, s.purpose?.trim() || "Other"]));
   const hours: Record<string, number> = {};
@@ -744,8 +760,7 @@ export function departmentTime(setup: CapacitySetup, model: EngineModel, result:
     if (deptOf(p) !== departmentId) continue;
     for (const [stepId, h] of Object.entries(result.personTime?.stepHours[p.id] ?? {})) {
       if (!(h > 0)) continue;
-      const key = stepId === "hand" ? "Hand-holding" : (purposeOf.get(stepId) ?? "Other");
-      const name = names[key] ?? key;
+      const name = stepId === "hand" ? "Hand-holding" : by ? (by.processOfStep.get(stepId) ?? "Other") : (names[purposeOf.get(stepId) ?? "Other"] ?? purposeOf.get(stepId) ?? "Other");
       hours[name] = (hours[name] ?? 0) + h;
       total += h;
     }

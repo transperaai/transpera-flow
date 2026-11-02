@@ -176,6 +176,8 @@ export function Overview({
   const purposeCategories = useMemo(() => workspacePurposes(live.workspace.settings), [live.workspace.settings]);
   // The department cards' model: the Capacity page's own (a year long), so its "Today" run is shared through the cache.
   const capacityModel = useMemo(() => (capacity ? capacityBaseModel(live) : { model: null, error: null }), [capacity, live]);
+  // Step id → its process's name, for the cards' "Where the time goes" by process.
+  const processOfStep = useMemo(() => new Map(parts.flatMap((p) => p.steps.map((st) => [st.id, p.process.name] as const))), [parts]);
   const purposeNames = useMemo(() => Object.fromEntries(purposeCategories.map((c) => [c.key, c.name])), [purposeCategories]);
 
   // The horizon: 1, 3 or 6 months (the Sandbox goes further). Until one is picked (or ?horizon= says) it is the nearest of those to the
@@ -308,7 +310,7 @@ export function Overview({
           </Card>
         ) : null}
 
-        {capacity && <DepartmentCards setup={capacity.setup} model={capacityModel.model} modelError={capacityModel.error} purposeNames={purposeNames} base={capacity.base} />}
+        {capacity && <DepartmentCards setup={capacity.setup} model={capacityModel.model} modelError={capacityModel.error} purposeNames={purposeNames} processOfStep={processOfStep} base={capacity.base} />}
 
         <Section
           id="map"

@@ -8,6 +8,7 @@ import {
   departmentTime,
   dler,
   dlerSalariesMissing,
+  modelProcessOfStep,
   personFees,
   hiringAdvice,
   hiringDelayAt,
@@ -469,5 +470,17 @@ describe("the Overview's figures (P6)", () => {
     const u = departmentTime(setup, model, result, "org");
     expect(u.parts.map((x) => x.name)).toEqual(["Content", "Hand-holding"]);
     expect(u.parts[1]!.share).toBeCloseTo(10 / 50, 10);
+  });
+  test("where the time goes by process: the same hours, grouped by the process of each step (Q1 item 16)", () => {
+    const model = tinyModel();
+    const setup = capacitySetupFromModel(model);
+    const result = fakeResult({ a: 0.5, b: 0.4 }, {}, { a: 30, b: 10 }, {}, model);
+    // Step r2 is in the "report" servicing process, named "Report".
+    const byProcess = departmentTime(setup, model, result, "org", {}, { processOfStep: modelProcessOfStep(model) });
+    expect(byProcess.total).toBe(40);
+    expect(byProcess.parts).toEqual([{ name: "Report", hours: 40, share: 1 }]);
+    // A map of the app's own process names (steps by id) is used as given, and a step it doesn't know is "Other".
+    expect(departmentTime(setup, model, result, "org", {}, { processOfStep: new Map([["r2", "Monthly reporting"]]) }).parts[0]!.name).toBe("Monthly reporting");
+    expect(departmentTime(setup, model, result, "org", {}, { processOfStep: new Map() }).parts[0]!.name).toBe("Other");
   });
 });

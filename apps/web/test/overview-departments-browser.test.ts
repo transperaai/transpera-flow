@@ -104,7 +104,19 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
         const busy = (await c.locator("[data-busiest] [data-busy]").evaluateAll((els) => els.map((e) => Number(e.getAttribute("data-busy")))));
         expect(busy).toEqual([...busy].sort((a, b) => b - a));
         expect(await c.locator("[data-busiest]").evaluate((e) => getComputedStyle(e).overflowY)).toBe("visible");
-        expect(await c.locator("[data-time] [data-purpose]").count()).toBeGreaterThan(0);
+        // By process is the default (Q1 item 16): the process names; By purpose groups the same hours by what the steps achieve.
+        expect(await c.locator("[data-time-by] [aria-pressed=true]").innerText()).toBe("By process");
+        const byProcess = await c.locator("[data-time] [data-purpose]").evaluateAll((rows) => rows.map((r) => [r.getAttribute("data-purpose"), r.textContent]));
+        expect(byProcess.length).toBeGreaterThan(0);
+        const total = await c.locator("[data-time] h3").innerText();
+        await c.getByRole("button", { name: "By purpose" }).click();
+        expect(await c.locator("[data-time-by] [aria-pressed=true]").innerText()).toBe("By purpose");
+        const byPurpose = await c.locator("[data-time] [data-purpose]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-purpose")));
+        expect(byPurpose.length).toBeGreaterThan(0);
+        expect(byPurpose).not.toEqual(byProcess.map((r) => r[0]));
+        // The same hours either way.
+        expect(await c.locator("[data-time] h3").innerText()).toBe(total);
+        await c.getByRole("button", { name: "By process" }).click();
         expect(await c.locator("[data-time]").innerText()).toMatch(/h a month/);
       }
       // The whole business comes first, above the department cards: unique clients, revenue per employee, DLER.

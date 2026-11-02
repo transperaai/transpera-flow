@@ -7,11 +7,12 @@
 // Capacity costs nothing. Never run on the server.
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   busyShares,
   departmentCeiling,
   departmentTime,
+  modelProcessOfStep,
   dler,
   perEmployee,
   serviceLines,
@@ -45,11 +46,13 @@ export interface DepartmentCardsProps {
   modelError?: string | null;
   /** Purpose key → the words the workspace uses. */
   purposeNames?: Record<string, string>;
+  /** Step id → the name of the process it is in, for "Where the time goes" by process. Left out: worked out from the model. */
+  processOfStep?: ReadonlyMap<string, string>;
   /** `/w/<slug>`. */
   base: string;
 }
 
-export function DepartmentCards({ setup, model, modelError = null, purposeNames = {}, base }: DepartmentCardsProps) {
+export function DepartmentCards({ setup, model, modelError = null, purposeNames = {}, processOfStep, base }: DepartmentCardsProps) {
   const departments = useMemo(() => setup.departments.filter((d) => setup.services.some((s) => s.active && s.department_id === d.id && s.tier_id)), [setup]);
   const today = useMemo(() => (model && departments.length ? todayModel(model) : null), [model, departments.length]);
   const runs = useCapacityRuns(today, null, null);
@@ -77,7 +80,7 @@ export function DepartmentCards({ setup, model, modelError = null, purposeNames 
       )}
       <WholeBusinessRow setup={setup} base={base} />
       {departments.map((d) => (
-        <DepartmentCard key={d.id} setup={setup} departmentId={d.id} name={d.name} base={base} model={model} result={result} failed={!!modelError || runs.today.status === "error"} purposeNames={purposeNames} />
+        <DepartmentCard key={d.id} setup={setup} departmentId={d.id} name={d.name} base={base} model={model} result={result} failed={!!modelError || runs.today.status === "error"} purposeNames={purposeNames} processOfStep={processOfStep} />
       ))}
     </section>
   );
@@ -144,6 +147,7 @@ function DepartmentCard({
   result,
   failed,
   purposeNames,
+  processOfStep,
 }: {
   setup: CapacitySetup;
   departmentId: string;
@@ -153,7 +157,9 @@ function DepartmentCard({
   result: SimulationResult | null;
   failed: boolean;
   purposeNames: Record<string, string>;
+  processOfStep?: ReadonlyMap<string, string>;
 }) {
+  const [timeBy, setTimeBy] = useState<"process" | "purpose">("process");
   const per = useMemo(() => perEmployee(setup, departmentId), [setup, departmentId]);
   const lines = useMemo(() => serviceLines(setup), [setup]);
   const row = useMemo(() => dler(setup).departments.find((x) => x.departmentId === departmentId)!, [setup, departmentId]);
@@ -169,9 +175,9 @@ function DepartmentCard({
       over: ordered.filter((p) => p.over),
       lineNote: busyLineNote(ordered.map((p) => p.line)),
       ceiling: departmentCeiling(setup, model, result, departmentId),
-      time: departmentTime(setup, model, result, departmentId, purposeNames),
+      time: departmentTime(setup, model, result, departmentId, purposeNames, timeBy === "process" ? { processOfStep: processOfStep ?? modelProcessOfStep(model) } : undefined),
     };
-  }, [setup, model, result, departmentId, purposeNames]);
+  }, [setup, model, result, departmentId, purposeNames, processOfStep, timeBy]);
 
   const pending = (value: string) => (failed ? "—" : <Skeleton className="mt-1 h-6 w-12" aria-busy="true" aria-label={`${value} is being worked out`} />);
   return (
@@ -220,9 +226,24 @@ function DepartmentCard({
             )}
           </div>
           <div data-time>
-            <h3 className="mb-1.5 text-sm font-semibold">
-              Where the time goes <span className="text-xs font-normal text-muted-foreground tabular-nums">{f0(figures.time.total)} h a month</span>
-            </h3>
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <h3 className="text-sm font-semibold">
+                Where the time goes <span className="text-xs font-normal text-muted-foreground tabular-nums">{f0(figures.time.total)} h a month</span>
+              </h3>
+              <div role="group" aria-label="Group the time" className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-xs" data-time-by>
+                {(["process", "purpose"] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    aria-pressed={timeBy === k}
+                    onClick={() => setTimeBy(k)}
+                    className={`rounded-md px-2.5 py-1 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${timeBy === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {k === "process" ? "By process" : "By purpose"}
+                  </button>
+                ))}
+              </div>
+            </div>
             {figures.time.parts.length ? (
               <table className="w-full text-sm">
                 <tbody>
