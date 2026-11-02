@@ -8,6 +8,7 @@ import {
   departmentTime,
   dler,
   dlerSalariesMissing,
+  personFees,
   hiringAdvice,
   hiringDelayAt,
   leaver,
@@ -255,35 +256,57 @@ describe("leaver", () => {
   });
 });
 
-describe("dler", () => {
-  // Retainers: 20 counted clients × 1,000 = 20,000 a month. Salaries (the helper's): Dee 12,500, Ann 7,500, Bo 7,500, Cy 7,500; the contractor is out.
-  test("leadership in: retainers ÷ every salary but the contractor's", () => {
-    const model = tinyModel();
-    const res = dler(capacitySetupFromModel(model, { dlerIncludesLeadership: true }));
+describe("dler (D40: the average of each client-facing person's DLER)", () => {
+  // Counted clients at 1,000: Dee 4, Ann 10, Bo 6, Cy none. Salaries: Dee 12,500, Ann 7,500, Bo 7,500, Cy 7,500; the freelancer is a contractor.
+  // Person DLERs: Dee 4,000 ÷ 12,500 = 0.32; Ann 10,000 ÷ 7,500 = 4/3; Bo 6,000 ÷ 7,500 = 0.8; Cy 0.
+  const DEE = 4000 / 12500;
+  const ANN = 10000 / 7500;
+  const BO = 6000 / 7500;
+  test("leadership in: the mean of Dee, Ann, Bo and Cy", () => {
+    const res = dler(capacitySetupFromModel(tinyModel(), { dlerIncludesLeadership: true }));
     const org = res.departments.find((d) => d.departmentId === "org")!;
+    expect(org.people).toBe(4);
+    expect(org.ratio).toBeCloseTo((DEE + ANN + BO + 0) / 4, 10);
     expect(org.retainers).toBe(20000);
-    expect(org.salaries).toBe(12500 + 7500 + 7500 + 7500);
-    expect(org.ratio).toBeCloseTo(20000 / 35000, 10);
-    expect(res.whole.ratio).toBeCloseTo(20000 / 35000, 10);
+    expect(res.whole.ratio).toBeCloseTo((DEE + ANN + BO + 0) / 4, 10);
   });
-  test("leadership out: the director's salary leaves the base", () => {
-    const res = dler(capacitySetupFromModel(tinyModel(), { dlerIncludesLeadership: false }));
-    const org = res.departments.find((d) => d.departmentId === "org")!;
-    expect(org.salaries).toBe(22500);
-    expect(org.ratio).toBeCloseTo(20000 / 22500, 10);
+  test("leadership out: the director leaves the average", () => {
+    const org = dler(capacitySetupFromModel(tinyModel(), { dlerIncludesLeadership: false })).departments.find((d) => d.departmentId === "org")!;
+    expect(org.people).toBe(3);
+    expect(org.ratio).toBeCloseTo((ANN + BO + 0) / 3, 10);
   });
-  test("pay hidden: no salaries and no ratio come out", () => {
+  test("someone with no salary entered is left out of the average, not counted as zero", () => {
+    const setup = capacitySetupFromModel(tinyModel(), { dlerIncludesLeadership: false });
+    setup.people.find((p) => p.name === "Cy")!.salary_monthly = null;
+    const org = dler(setup).departments.find((d) => d.departmentId === "org")!;
+    expect(org.people).toBe(2);
+    expect(org.ratio).toBeCloseTo((ANN + BO) / 2, 10);
+  });
+  test("pay hidden: no ratio comes out", () => {
     const res = dler(capacitySetupFromModel(tinyModel(), { payHidden: true }));
-    expect(res.departments.every((d) => d.salaries === null && d.ratio === null)).toBe(true);
-    expect(res.whole.salaries).toBeNull();
-    expect(res.whole.retainers).toBe(20000);
+    expect(res.departments.every((d) => d.hidden && d.ratio === null)).toBe(true);
+    expect(res.whole.hidden).toBe(true);
+    expect(res.whole.ratio).toBeNull();
   });
-  test("named clients bring their own fee, once, and are not also counted at the tier's fee", () => {
+  test("a named client's fee goes to its manager, not to the tier's counted fee", () => {
     const model = tinyModel();
-    model.clients = { n1: { name: "Named", services: ["org-T1"], mrr: 5000, assignments: { mgr_org: "a" }, manager: "a" } };
-    const org = dler(capacitySetupFromModel(model)).departments.find((d) => d.departmentId === "org")!;
-    // 20 counted at 1,000 + the named one at 5,000. (The named client is one of the service's clients but is not counted twice.)
-    expect(org.retainers).toBe(25000);
+    model.clients = { n1: { name: "Named", services: ["org-T1"], mrr: 5000, assignments: { mgr_org: "c" }, manager: "c" } };
+    const setup = capacitySetupFromModel(model, { dlerIncludesLeadership: false });
+    const fees = personFees(setup);
+    // Cy now manages the named client's 5,000; the counted clients stay with their holders.
+    expect(fees.get("c")).toBe(5000);
+    expect(fees.get("a")).toBe(10000);
+    const org = dler(setup).departments.find((d) => d.departmentId === "org")!;
+    expect(org.ratio).toBeCloseTo((ANN + BO + 5000 / 7500) / 3, 10);
+  });
+  test("the Sandbox's retainers for a month are shared by each person's share of today's fees", () => {
+    const setup = capacitySetupFromModel(tinyModel(), { dlerIncludesLeadership: false });
+    // A pool of 32,000 (a third more than today's 20,000... of which Ann, Bo and Cy hold 16,000): Ann 10/16, Bo 6/16, Cy has none and takes the mean share (16,000 / 3).
+    const org = dler(setup, { org: 32000 }).departments.find((d) => d.departmentId === "org")!;
+    const mean = 16000 / 3;
+    const sum = 10000 + 6000 + mean;
+    expect(org.ratio).toBeCloseTo((((32000 * 10000) / sum) / 7500 + ((32000 * 6000) / sum) / 7500 + ((32000 * mean) / sum) / 7500) / 3, 10);
+    expect(org.retainers).toBeCloseTo(32000, 6);
   });
 });
 
@@ -415,13 +438,13 @@ describe("the Overview's figures (P6)", () => {
     // Ann, Bo and Cy are the employees; Dee leads and the freelancer is a contractor.
     expect(w.employees).toBe(3);
     expect(w.revenuePerEmployee).toBeCloseTo(20000 / 3, 10);
-    expect(w.dler.ratio).toBeCloseTo(20000 / 35000, 10);
+    expect(w.dler.ratio).toBeCloseTo((4000 / 12500 + 10000 / 7500 + 6000 / 7500 + 0) / 4, 10);
   });
   test("DLER follows the leadership switch; per-employee does not", () => {
     const withLead = wholeBusiness(capacitySetupFromModel(tinyModel(), { dlerIncludesLeadership: true }));
     const without = wholeBusiness(capacitySetupFromModel(tinyModel(), { dlerIncludesLeadership: false }));
-    expect(withLead.dler.ratio).toBeCloseTo(20000 / 35000, 10);
-    expect(without.dler.ratio).toBeCloseTo(20000 / 22500, 10);
+    expect(withLead.dler.ratio).toBeCloseTo((4000 / 12500 + 10000 / 7500 + 6000 / 7500 + 0) / 4, 10);
+    expect(without.dler.ratio).toBeCloseTo((10000 / 7500 + 6000 / 7500 + 0) / 3, 10);
     expect(without.employees).toBe(withLead.employees);
   });
   test("a missing salary of someone in DLER is flagged; a contractor's is not; hidden pay is never flagged", () => {

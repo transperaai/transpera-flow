@@ -109,14 +109,13 @@ export function playSeries(setup: CapacitySetup, play: Pick<PlayState, "leavers"
     }),
   }));
 
-  // DLER: P5's `dler` on the people there that month, with the engine's retainers.
-  const salaries = range.map((m) => dler(setupInMonth(setup, play, m)));
-  const ratio = (r: number, s: number | null): number | null => (s !== null && s > 0 ? r / s : null);
-  const dlerWhole = range.map((m) => ratio(retainers[m]!, salaries[m]!.whole.salaries));
-  const dlerDepts: PlayLine[] = setup.departments.map((d, i) => ({
+  // DLER (D40): P5's `dler`, the average of each client-facing person's DLER, on the people there that month and the engine's retainers.
+  const dlers = range.map((m) => dler(setupInMonth(setup, play, m), Object.fromEntries(setup.departments.map((d, i) => [d.id, deptRetainers[i]!.values[m]!]))));
+  const dlerWhole = dlers.map((x) => x.whole.ratio);
+  const dlerDepts: PlayLine[] = setup.departments.map((d) => ({
     id: d.id,
     name: d.name,
-    values: range.map((m) => ratio(deptRetainers[i]!.values[m]!, salaries[m]!.departments.find((x) => x.departmentId === d.id)?.salaries ?? null)),
+    values: dlers.map((x) => x.departments.find((r) => r.departmentId === d.id)?.ratio ?? null),
   }));
 
   // Teams over their line, and when to hire (P5).

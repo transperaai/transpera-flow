@@ -13,7 +13,6 @@ import {
   departmentCeiling,
   departmentTime,
   dler,
-  dlerSalariesMissing,
   perEmployee,
   serviceLines,
   todayModel,
@@ -114,11 +113,10 @@ function StartChecklist({ setup, base }: { setup: CapacitySetup; base: string })
   );
 }
 
-/** DLER as a card: the ratio and what it is made of; "Salaries not entered" with a link when pay is missing; "Hidden" when the viewer can't see pay. */
-function DlerKpi({ label, row, missing, setup, base }: { label: string; row: DlerRow; missing: boolean; setup: CapacitySetup; base: string }) {
-  const money = (v: number) => formatWholeCurrency(v, setup.currency);
-  if (row.salaries === null) return <Kpi label={label} value="Hidden" sub="Pay is hidden for your role" />;
-  if (missing || !(row.salaries > 0)) {
+/** DLER as a card (D40): the average of each client-facing person's DLER; "Salaries not entered" with a link when nobody has one; "Hidden" when the viewer can't see pay. */
+function DlerKpi({ label, row, base }: { label: string; row: DlerRow; base: string }) {
+  if (row.hidden) return <Kpi label={label} value="Hidden" sub="Pay is hidden for your role" />;
+  if (!row.people || row.ratio === null) {
     return (
       <Kpi
         label={label}
@@ -134,7 +132,7 @@ function DlerKpi({ label, row, missing, setup, base }: { label: string; row: Dle
       />
     );
   }
-  return <Kpi label={label} value={row.ratio === null ? "—" : f1(row.ratio)} sub={`${money(row.retainers)} ÷ ${money(row.salaries)}`} />;
+  return <Kpi label={label} value={f1(row.ratio)} sub={`Average of ${row.people} ${row.people === 1 ? "person's" : "people's"} DLER`} />;
 }
 
 function DepartmentCard({
@@ -159,7 +157,6 @@ function DepartmentCard({
   const per = useMemo(() => perEmployee(setup, departmentId), [setup, departmentId]);
   const lines = useMemo(() => serviceLines(setup), [setup]);
   const row = useMemo(() => dler(setup).departments.find((x) => x.departmentId === departmentId)!, [setup, departmentId]);
-  const missingSalaries = useMemo(() => dlerSalariesMissing(setup, departmentId), [setup, departmentId]);
   const others = setup.departments.filter((d) => d.id !== departmentId);
   const money = (v: number) => formatWholeCurrency(v, setup.currency);
 
@@ -190,7 +187,7 @@ function DepartmentCard({
       <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-2.5" data-kpis>
         <Kpi label="Clients" value={f0(per.clients)} sub={`${f0(lines.both)} also take ${others.length === 1 ? others[0]!.name : "another department"}`} />
         <Kpi label="Revenue per employee" value={per.revenuePerEmployee === null ? "—" : money(per.revenuePerEmployee)} sub={`a month, retainers ÷ ${per.employees} people`} />
-        <DlerKpi label="DLER" row={row} missing={missingSalaries} setup={setup} base={base} />
+        <DlerKpi label="DLER" row={row} base={base} />
         <Kpi label="Past their busy line" value={figures ? f0(figures.over.length) : pending("Past their busy line")} sub={figures?.lineNote} />
         <Kpi
           label="Room for more clients"
@@ -260,14 +257,13 @@ function DepartmentCard({
 
 function WholeBusinessRow({ setup, base }: { setup: CapacitySetup; base: string }) {
   const w = useMemo(() => wholeBusiness(setup), [setup]);
-  const missing = useMemo(() => dlerSalariesMissing(setup, null), [setup]);
   const money = (v: number) => formatWholeCurrency(v, setup.currency);
   return (
     <Section title="Whole business" data-whole-business>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-2.5">
         <Kpi label="Clients" value={f0(w.unique)} sub={`${w.byDepartment.map((d) => `${f0(d.clients)} ${d.name}`).join(" + ")} − ${f0(w.both)} taking both`} />
         <Kpi label="Revenue per employee" value={w.revenuePerEmployee === null ? "—" : money(w.revenuePerEmployee)} sub={`a month, ${w.employees} people`} />
-        <DlerKpi label="DLER" row={w.dler} missing={missing} setup={setup} base={base} />
+        <DlerKpi label="DLER" row={w.dler} base={base} />
       </div>
     </Section>
   );

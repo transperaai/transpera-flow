@@ -334,12 +334,14 @@ export function serviceLines(setup: CapacitySetup): ServiceLines {
 export interface DlerRow {
   departmentId: string | null;
   name: string;
-  /** Retainers a month. */
+  /** Retainers a month credited to the people averaged. */
   retainers: number;
-  /** Salaries a month; null when the viewer can't see pay. */
-  salaries: number | null;
-  /** Retainers ÷ salaries; null when salaries are hidden or zero. No ":1". */
+  /** How many people's DLER the average is over (client-facing, salary entered, contractors out). */
+  people: number;
+  /** The average of those people's DLER (D40); null when pay is hidden or nobody qualifies. No ":1". */
   ratio: number | null;
+  /** The viewer can't see pay, so no ratio is worked out. */
+  hidden: boolean;
 }
 
 /** The department a named client's fee counts under: its manager's, else its first service's. */
@@ -371,26 +373,77 @@ function inDler(setup: CapacitySetup, p: SetupPerson, role: SetupRole | null): b
 }
 
 /**
- * DLER: retainers ÷ salaries, per department and for the whole business (all retainers ÷ all salaries of the departments). Directors and heads are in
- * only when `dler_includes_leadership` is on; contractors never. Where pay is hidden the salaries and ratios are null.
+ * What each client-facing person's clients pay a month (D40): the fee of every client they manage.
+ * - A named client's fee goes to the person who looks after it in the client-facing role of each service's department. A client taking
+ *   both services counts each service's share of its fee with that service's manager (split by the services' tier fees; equally when
+ *   they have none).
+ * - Counted clients: the person's portfolio count × the tier's fee.
  */
-export function dler(setup: CapacitySetup): { departments: DlerRow[]; whole: DlerRow } {
+export function personFees(setup: CapacitySetup): Map<string, number> {
+  const { roleById } = lookups(setup);
+  const fees = new Map<string, number>();
+  const add = (id: string, v: number) => fees.set(id, (fees.get(id) ?? 0) + v);
+  for (const r of setup.portfolio) {
+    const svc = setup.services.find((x) => x.id === r.service_id);
+    if (svc?.active && svc.tier_id) add(r.person_id, r.client_count * svc.price);
+  }
+  for (const c of setup.clients) {
+    if (!c.active) continue;
+    const svcs = setup.services.filter((x) => x.active && x.tier_id && c.service_ids.includes(x.id));
+    if (!svcs.length) continue;
+    const total = svcs.reduce((a, x) => a + x.price, 0);
+    for (const svc of svcs) {
+      const managerRole = Object.keys(c.assignments).find((rid) => {
+        const role = roleById.get(rid);
+        return role?.kind === "client_facing" && role.department_id === svc.department_id;
+      });
+      const manager = managerRole ? c.assignments[managerRole] : undefined;
+      if (manager) add(manager, total > 0 ? (c.mrr * svc.price) / total : c.mrr / svcs.length);
+    }
+  }
+  return fees;
+}
+
+/**
+ * DLER (D40, amending D9 and D24): the average of each client-facing person's DLER. A person's DLER is the monthly retainers of the
+ * clients they manage (`personFees`) ÷ their monthly salary. A department's is the mean over its client-facing people; the whole business's is
+ * the mean over all of them. People with no salary entered and contractors are left out; directors are in only when
+ * `dler_includes_leadership` is on. Where pay is hidden the ratios are null.
+ *
+ * `retainers` (the Sandbox): the retainers a month each department takes in a month of a run, in place of today's. A department's pool is
+ * shared among its people in proportion to the fees they manage today (a hire or anyone with none takes the department's average share),
+ * so a leaver's clients and a hire's work move the average the way the run says.
+ */
+export function dler(setup: CapacitySetup, retainers?: Record<string, number>): { departments: DlerRow[]; whole: DlerRow } {
   const { personRole, deptOf } = lookups(setup);
-  const row = (departmentId: string | null, name: string, retainers: number, ps: SetupPerson[]): DlerRow => {
-    const salaries = setup.payHidden ? null : ps.reduce((s, p) => s + (p.salary_monthly ?? 0), 0);
-    return { departmentId, name, retainers, salaries, ratio: salaries && salaries > 0 ? retainers / salaries : null };
+  const fees = personFees(setup);
+  type Member = { dept: string; fee: number; salary: number };
+  const members: Member[] = [];
+  for (const p of activePeople(setup)) {
+    const role = personRole(p);
+    const dept = deptOf(p);
+    if (!dept || role?.kind !== "client_facing" || !inDler(setup, p, role)) continue;
+    const salary = p.salary_monthly;
+    if (!setup.payHidden && !(salary !== null && salary > 0)) continue;
+    members.push({ dept, fee: fees.get(p.id) ?? 0, salary: salary ?? 0 });
+  }
+  const hidden = setup.payHidden;
+  // Each member's fee this month: their own, or their share of the department's pool from the run.
+  const feeOf = (m: Member, mine: Member[]): number => {
+    const pool = retainers?.[m.dept];
+    if (pool === undefined) return m.fee;
+    const mean = mine.reduce((a, x) => a + x.fee, 0) / (mine.length || 1);
+    const weight = (x: Member) => (x.fee > 0 ? x.fee : mean);
+    const sum = mine.reduce((a, x) => a + weight(x), 0);
+    return sum > 0 ? (pool * weight(m)) / sum : pool / (mine.length || 1);
   };
-  const departments = setup.departments.map((d) =>
-    row(
-      d.id,
-      d.name,
-      departmentRetainers(setup, d.id),
-      activePeople(setup).filter((p) => deptOf(p) === d.id && inDler(setup, p, personRole(p))),
-    ),
-  );
-  const retainers = departments.reduce((s, d) => s + d.retainers, 0);
-  const salaries = setup.payHidden ? null : departments.reduce((s, d) => s + (d.salaries ?? 0), 0);
-  return { departments, whole: { departmentId: null, name: "Whole business", retainers, salaries, ratio: salaries && salaries > 0 ? retainers / salaries : null } };
+  const row = (departmentId: string | null, name: string, ms: Member[]): DlerRow => {
+    const fee = ms.map((m) => feeOf(m, members.filter((x) => x.dept === m.dept)));
+    const ratios = hidden ? [] : ms.map((m, k) => fee[k]! / m.salary);
+    return { departmentId, name, retainers: fee.reduce((a, b) => a + b, 0), people: ms.length, ratio: ratios.length ? ratios.reduce((a, b) => a + b, 0) / ratios.length : null, hidden };
+  };
+  const departments = setup.departments.map((d) => row(d.id, d.name, members.filter((m) => m.dept === d.id)));
+  return { departments, whole: row(null, "Whole business", members) };
 }
 
 export interface PerEmployee {
@@ -667,7 +720,8 @@ export function dlerSalariesMissing(setup: CapacitySetup, departmentId: string |
   return activePeople(setup).some((p) => {
     const d = deptOf(p);
     if (!d || (departmentId !== null && d !== departmentId)) return false;
-    return inDler(setup, p, personRole(p)) && p.salary_monthly === null;
+    const role = personRole(p);
+    return role?.kind === "client_facing" && inDler(setup, p, role) && p.salary_monthly === null;
   });
 }
 
@@ -707,7 +761,7 @@ export interface WholeBusiness {
   employees: number;
   /** All retainers a month ÷ all employees (D22's definition of an employee). */
   revenuePerEmployee: number | null;
-  /** All retainers ÷ all salaries. */
+  /** The average of every client-facing person's DLER (D40). */
   dler: DlerRow;
 }
 
@@ -721,7 +775,7 @@ export function wholeBusiness(setup: CapacitySetup): WholeBusiness {
     byDepartment: lines.byDepartment.map((d) => ({ name: d.name, clients: d.clients })),
     both: lines.both,
     employees,
-    revenuePerEmployee: employees > 0 ? dl.retainers / employees : null,
+    revenuePerEmployee: employees > 0 ? setup.departments.reduce((a, d) => a + departmentRetainers(setup, d.id), 0) / employees : null,
     dler: dl,
   };
 }

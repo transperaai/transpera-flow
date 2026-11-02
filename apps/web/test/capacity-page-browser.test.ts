@@ -71,12 +71,12 @@ describe("Capacity page", { timeout: 180_000 }, () => {
       const root = page.locator("[data-capacity]");
       console.log(`capacity runs (${width}px): today ${await root.getAttribute("data-today-ms")} ms, 12 months ${await root.getAttribute("data-year-ms")} ms`);
 
-      // Headline: clients by service line, taking both, and DLER with the goal.
+      // Headline: clients by service line, taking both, and DLER as the average of each person's DLER (D40, no goal).
       const kpis = await page.locator("[data-headline] [data-kpi]").allInnerTexts();
       expect(kpis.some((k) => /Clients with Organic \(SEO\) services/.test(k))).toBe(true);
       expect(kpis.some((k) => /Clients with Performance services/.test(k))).toBe(true);
       expect(kpis.some((k) => /Clients taking both\s+\d+\s+\d+ clients in all/.test(k))).toBe(true);
-      expect(kpis.filter((k) => k.includes("DLER") && k.includes("goal 4.5"))).toHaveLength(3);
+      expect(kpis.filter((k) => k.includes("DLER") && /Average of \d+ people.s DLER/.test(k) && !k.includes("goal"))).toHaveLength(3);
       expect(kpis.some((k) => k.includes("DLER whole business"))).toBe(true);
 
       // Room for more clients: a sentence, the gauge with its limits, and chips.

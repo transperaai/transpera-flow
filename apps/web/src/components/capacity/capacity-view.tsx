@@ -9,7 +9,6 @@ import { useMemo, useState } from "react";
 import {
   bottleneck,
   busyShares,
-  DLER_GOAL,
   departmentCeiling,
   dler,
   hiringAdvice,
@@ -155,13 +154,12 @@ function Attention({ base, problems, missing }: { base: string; problems: Return
 function Headline({ setup }: { setup: CapacitySetup }) {
   const lines = useMemo(() => serviceLines(setup), [setup]);
   const d = useMemo(() => dler(setup), [setup]);
-  const money = (v: number) => formatWholeCurrency(v, setup.currency);
   const dlerKpi = (label: string, row: (typeof d)["whole"]) => (
     <Kpi
       key={label}
       label={label}
-      value={row.ratio === null ? "Hidden" : f1(row.ratio)}
-      sub={row.salaries === null ? "Pay is hidden for your role" : `${money(row.retainers)} ÷ ${money(row.salaries)} · goal ${DLER_GOAL}`}
+      value={row.hidden ? "Hidden" : row.ratio === null ? "—" : f1(row.ratio)}
+      sub={row.hidden ? "Pay is hidden for your role" : row.ratio === null ? "No salaries entered" : `Average of ${row.people} ${row.people === 1 ? "person's" : "people's"} DLER`}
     />
   );
   return (

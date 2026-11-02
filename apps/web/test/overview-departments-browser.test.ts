@@ -87,6 +87,8 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
         expect(await kpi(page, name, "Revenue per employee")).toContain(`retainers ÷ ${per.employees} people`);
         const d = await kpi(page, name, "DLER");
         expect(d).toContain(row.ratio!.toFixed(1));
+        expect(d).toContain(`Average of ${row.people} people's DLER`);
+        expect(d).not.toMatch(/[£÷]/);
         expect(d).not.toMatch(/goal/);
         expect(d).not.toContain(":1");
         expect(await kpi(page, name, "Room for more clients")).toMatch(/Limit: .+/);
