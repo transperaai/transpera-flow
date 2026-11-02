@@ -40,10 +40,10 @@ afterAll(async () => {
 
 describe("the department column", () => {
   it("leaves every existing process unset, which means worked out", async () => {
-    const rows = await q("select department_id from public.processes where workspace_id = $1", [OLD_WS]);
+    const rows = await q("select department_id, whole_business from public.processes where workspace_id = $1", [OLD_WS]);
     // The pipeline, and the company map the workspace made for itself.
     expect(rows).toHaveLength(2);
-    expect(rows.every((r) => r.department_id === null)).toBe(true);
+    expect(rows.every((r) => r.department_id === null && r.whole_business === false)).toBe(true);
   });
 
   it("takes a department of the same workspace, and refuses another workspace's", async () => {
@@ -56,6 +56,13 @@ describe("the department column", () => {
     await expect(db.client.query("update public.processes set department_id = $1 where id = $2", [theirs!.id, old[0]!.id])).rejects.toThrow(/processes_department_fkey/);
   });
 
+  it("keeps whole business apart from a department, so both can never be set", async () => {
+    const [mine] = await q("select id from public.departments where workspace_id = $1 order by sort limit 1", [OLD_WS]);
+    await db.client.query("update public.processes set whole_business = true, department_id = null where id = $1", [old[0]!.id]);
+    await expect(db.client.query("update public.processes set department_id = $1 where id = $2", [mine!.id, old[0]!.id])).rejects.toThrow(/processes_department_or_whole/);
+    await db.client.query("update public.processes set whole_business = false, department_id = $1 where id = $2", [mine!.id, old[0]!.id]);
+  });
+
   it("is cleared, not the process, when its department is deleted", async () => {
     const [d] = await q("select department_id from public.processes where id = $1", [old[0]!.id]);
     await db.client.query("delete from public.departments where id = $1", [d!.department_id]);
@@ -65,6 +72,7 @@ describe("the department column", () => {
 
   it("is a column a restore accepts", () => {
     expect(IMPORT_COLUMNS.processes).toContain("department_id");
+    expect(IMPORT_COLUMNS.processes).toContain("whole_business");
   });
 });
 
@@ -117,6 +125,10 @@ describe("a backup and restore", () => {
         ),
       ) as WorkspaceBundle;
       expect(bundle.processes.find((p) => p.id === proc.id)?.department_id).toBe(target.id);
+      // Another process put under Sales and whole business on purpose.
+      const [other] = (await fresh.client.query("select id, name from public.processes where workspace_id = $1 and not is_company and archived_at is null and live_revision_id is not null and id <> $2 order by created_at, id limit 1", [NORTHBEAM_WORKSPACE_ID, proc.id])).rows;
+      await fresh.client.query("update public.processes set whole_business = true where id = $1", [other.id]);
+      bundle.processes.find((p) => p.id === other.id)!.whole_business = true;
 
       const { plan } = planWorkspaceImport(bundle, { canManage: true });
       const planned = plan.processes.find((p) => p.name === proc.name)!;
@@ -132,6 +144,8 @@ describe("a backup and restore", () => {
 
       const restored = (await fresh.client.query("select p.name, d.name as department from public.processes p left join public.departments d on d.id = p.department_id and d.workspace_id = p.workspace_id where p.workspace_id = $1 and p.department_id is not null", [ws])).rows;
       expect(restored).toEqual([{ name: proc.name, department: target.name }]);
+      const whole = (await fresh.client.query("select name from public.processes where workspace_id = $1 and whole_business", [ws])).rows;
+      expect(whole).toEqual([{ name: other.name }]);
     } finally {
       await fresh.close();
     }

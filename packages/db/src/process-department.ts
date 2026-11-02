@@ -3,12 +3,15 @@
 // A process may carry a department of its own (`processes.department_id`, the owner's choice on the process page). Without one it
 // is worked out from its servicing links: the tier services (a service with both a department and a tier) the links use. When
 // they all sit in one department, that is the process's; otherwise it has none, which the map and the process page call
-// "Sales and whole business": the pipeline, the internal processes and anything serving both departments or none.
+// "Sales and whole business": the pipeline, the internal processes and anything serving both departments or none. The owner can also
+// put a process there on purpose (`processes.whole_business`) when its links would otherwise work out a department.
 // Whether a tier service is switched on does not matter here: pausing a tier must not move a process to another lane.
 
 export interface DepartmentOwner {
   id: string;
   department_id?: string | null;
+  /** The owner chose "Sales and whole business" (so a department is not worked out). */
+  whole_business?: boolean;
 }
 export interface ServicingLinkLike {
   process_id: string;
@@ -26,7 +29,7 @@ export const WHOLE_BUSINESS_LABEL = "Sales and whole business";
 export interface ProcessDepartment {
   /** The department, or null for "Sales and whole business". */
   departmentId: string | null;
-  /** True when the owner chose it (a stored department that still exists); false when it is worked out. */
+  /** True when the owner chose it (a stored department that still exists, or whole business); false when it is worked out. */
   chosen: boolean;
 }
 
@@ -53,6 +56,7 @@ export function processDepartment(
   departmentIds: ReadonlySet<string>,
 ): ProcessDepartment {
   if (process.department_id && departmentIds.has(process.department_id)) return { departmentId: process.department_id, chosen: true };
+  if (process.whole_business) return { departmentId: null, chosen: true };
   const derived = derivedDepartment(process.id, links, services);
   return { departmentId: derived && departmentIds.has(derived) ? derived : null, chosen: false };
 }

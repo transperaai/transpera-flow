@@ -475,6 +475,10 @@ export interface Processes {
   parent_process_id: string | null;
   source: Generated<string>;
   updated_at: Generated<string>;
+  /**
+   * True when the owner put this process under Sales and whole business although its servicing links would work out a department; never with department_id.
+   */
+  whole_business: Generated<boolean>;
   workspace_id: string;
 }
 

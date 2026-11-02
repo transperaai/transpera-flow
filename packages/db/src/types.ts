@@ -187,6 +187,8 @@ export interface ProcessRow {
    * out from the tier services its servicing links use (`processDepartment`). Absent on fixtures.
    */
   department_id?: string | null;
+  /** The owner put it under "Sales and whole business" although its servicing links would work out a department. Never with `department_id`. */
+  whole_business?: boolean;
 }
 
 export interface ProcessRevisionRow {
@@ -1048,8 +1050,8 @@ export type _SchemaDriftChecks = [
   Assert<Matches<PersonSkillRow, "person_skills">>,
   Assert<Matches<PersonLeaveRow, "person_leave">>,
   // is_company and archived_at are optional here (absent on fixtures).
-  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "department_id">, "processes">>,
-  Assert<Matches<Required<Pick<ProcessRow, "archived_at" | "department_id">>, "processes">>,
+  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "department_id" | "whole_business">, "processes">>,
+  Assert<Matches<Required<Pick<ProcessRow, "archived_at" | "department_id" | "whole_business">>, "processes">>,
   Assert<Matches<ProcessRevisionRow, "process_revisions">>,
   // replaced_by defaults to '{}' in the table; the app leaves it out of new steps.
   Assert<Matches<Omit<StepRow, "replaced_by">, "steps">>,

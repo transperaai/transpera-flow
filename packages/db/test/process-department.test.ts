@@ -46,6 +46,10 @@ describe("processDepartment", () => {
     expect(processDepartment({ id: "audit", department_id: PPC }, links, services, known)).toEqual({ departmentId: PPC, chosen: true });
   });
 
+  it("is the whole business when the owner put it there, whatever its links say", () => {
+    expect(processDepartment({ id: "audit", whole_business: true }, links, services, known)).toEqual({ departmentId: null, chosen: true });
+  });
+
   it("works it out when none is set", () => {
     expect(processDepartment({ id: "audit", department_id: null }, links, services, known)).toEqual({ departmentId: SEO, chosen: false });
     expect(processDepartment({ id: "audit" }, links, services, known)).toEqual({ departmentId: SEO, chosen: false });
