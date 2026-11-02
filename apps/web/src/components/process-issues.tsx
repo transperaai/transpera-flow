@@ -40,6 +40,8 @@ export interface ProcessIssues {
   stepExtras: (stepId: string) => StepExtras | null;
   /** The steps to highlight on the map: those of the issue the pointer or focus is on. */
   highlight: string[] | null;
+  /** Light these steps on the map (the facts list calls it on hover and focus); null clears it. */
+  light: (stepIds: string[] | null) => void;
   /** The scenario panel reports its saved scenarios here, so issues can link and run them. */
   onScenariosChange: (scenarios: ScenarioRow[]) => void;
   /** The saved scenarios as the scenario panel last reported them. */
@@ -273,6 +275,7 @@ export function useProcessIssues({
     rating: stepRatingOf(ratings),
     stepExtras: (id) => extras.get(id) ?? null,
     highlight,
+    light: setLit,
     rail,
     facts,
     issuesList: section("issues"),

@@ -17,6 +17,7 @@ import { IssueTrackView } from "@/components/issue-track";
 import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { FactsList } from "@/components/facts-list";
+import type { FactNames } from "@/lib/insights/fact-sentence";
 import { capacityBlockers, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -180,6 +181,10 @@ export function ProcessPage({
   };
   // The steps of this process and of the processes inside it, which the wait chart is about (the model may hold more).
   const stepIds = useMemo(() => processStepIds(bundle), [bundle]);
+  const factNames = useMemo<FactNames>(
+    () => ({ step: (id) => stepNameOf.get(id) ?? null, role: (id) => model?.roles[id]?.name ?? null, person: (id) => model?.people?.[id]?.name ?? null }),
+    [stepNameOf, model],
+  );
   const unpublished = liveVersion === 0;
   const about = useMemo(() => aboutProcess({ bundle, liveVersion }), [bundle, liveVersion]);
   const supporting = useMemo(
@@ -316,7 +321,7 @@ export function ProcessPage({
         </Section>
 
         <Section id="facts" title="Facts from the run" hint="What the simulation measured. These are evidence, not issues: log an issue below when one matters.">
-          <FactsList facts={issuesUi.facts} currency={bundle.workspace.settings.currency} stepName={(id) => stepNameOf.get(id) ?? null} />
+          <FactsList facts={issuesUi.facts} names={factNames} onLight={issuesUi.light} />
         </Section>
 
         <Section
