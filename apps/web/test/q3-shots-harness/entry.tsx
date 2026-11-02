@@ -12,8 +12,8 @@ import type { TierSetup } from "@/lib/tier-setup";
 declare global {
   interface Window {
     workerScripts: Record<string, string>;
-    shotData: { rows: ProcessRowData[]; bundle: ProcessBundle; tierSetup: TierSetup };
-    mountShots: (what: "processes" | "process") => void;
+    q3ShotData: { rows: ProcessRowData[]; bundle: ProcessBundle; tierSetup: TierSetup };
+    mountQ3Shots: (what: "processes" | "process") => void;
   }
 }
 
@@ -26,8 +26,8 @@ window.Worker = class extends NativeWorker {
   }
 } as typeof Worker;
 
-window.mountShots = (what) => {
-  const { rows, bundle, tierSetup } = window.shotData;
+window.mountQ3Shots = (what) => {
+  const { rows, bundle, tierSetup } = window.q3ShotData;
   const root = createRoot(document.getElementById("root")!);
   if (what === "processes") {
     root.render(

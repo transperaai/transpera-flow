@@ -81,9 +81,9 @@ describe("Q3 screenshots", () => {
       const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
       page.on("pageerror", (e) => console.log("pageerror", e.message));
       await page.setContent(`<style>${css}</style><div id="root"></div>`);
-      await page.evaluate(([w, d]) => ((window.workerScripts = { "simulate.worker.ts": w as string }), (window.shotData = d as never)), [worker, data] as const);
+      await page.evaluate(([w, d]) => ((window.workerScripts = { "simulate.worker.ts": w as string }), (window.q3ShotData = d as never)), [worker, data] as const);
       await page.addScriptTag({ content: script });
-      await page.evaluate((w) => window.mountShots(w), what);
+      await page.evaluate((w) => window.mountQ3Shots(w), what);
       await page.waitForSelector(wait, { timeout: 240_000 });
       if (what === "process") await page.waitForSelector("[data-supporting-headline]:not(:has(span))", { timeout: 240_000 });
       if (what === "process") await page.locator("[data-role-hours] summary").first().click();

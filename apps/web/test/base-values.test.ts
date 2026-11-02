@@ -231,7 +231,10 @@ describe("the tier setup", () => {
       tiers: [{ id: "b", key: "T2", sort: 2 }, { id: "a", key: "T1", sort: 1 }],
       services: [{ id: "s1", tier_id: "a", words: 4000, links: null, tech_hours: 2 }, { id: "s2", tier_id: null, words: 1 }],
     } as never;
-    expect(tierSetupFrom(setup)).toEqual({ keys: ["T1", "T2"], services: { s1: { tier: "T1", deliverables: { words: 4000, techHours: 2 } } } });
+    expect(tierSetupFrom(setup)).toEqual({ keys: ["T1", "T2"], services: { s1: { tier: "T1", deliverables: { words: 4000, techHours: 2 } } }, departments: { names: {}, ofRole: {} } });
+    // The departments and which role sits in which (the process page's headline share).
+    const withDepartments = { ...(setup as object), departments: [{ id: "d1", name: "Organic" }], roles: [{ id: "r1", department_id: "d1" }, { id: "r2", department_id: null }] } as never;
+    expect(tierSetupFrom(withDepartments).departments).toEqual({ names: { d1: "Organic" }, ofRole: { r1: "d1", r2: null } });
     expect(tierSetupFrom({ tiers: [], services: [] } as never).keys).toEqual(["T1", "T2", "T3"]);
   });
 });

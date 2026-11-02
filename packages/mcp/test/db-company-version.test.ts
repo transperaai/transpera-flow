@@ -25,7 +25,7 @@ async function companyMap(ws: string, label: string) {
   await admin.query("delete from steps where process_id in (select id from processes where workspace_id = $1 and is_company)", [ws]);
   await admin.query("delete from process_revisions where process_id in (select id from processes where workspace_id = $1 and is_company)", [ws]);
   await admin.query("delete from processes where workspace_id = $1 and is_company", [ws]);
-  const company = (await one("insert into processes (workspace_id, name, is_company) values ($1, 'Company map', true) returning id", [ws])).id as string;
+  const company = (await one("insert into processes (workspace_id, name, is_company, category) values ($1, 'Company map', true, 'internal') returning id", [ws])).id as string;
   const out: string[] = [];
   for (const [number, status] of [[1, "superseded"], [2, "published"], [3, "draft"]] as const) {
     const rev = (await one("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, $3, $4) returning id", [ws, company, number, status])).id as string;

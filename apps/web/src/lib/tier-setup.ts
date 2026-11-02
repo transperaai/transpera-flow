@@ -37,8 +37,8 @@ export function tierSetupFrom(setup: CapacitySetup | null): TierSetup {
     services[s.id] = { tier, deliverables };
   }
   const departments: DepartmentMap = {
-    names: Object.fromEntries(setup.departments.map((d) => [d.id, d.name])),
-    ofRole: Object.fromEntries(setup.roles.map((r) => [r.id, r.department_id ?? null])),
+    names: Object.fromEntries((setup.departments ?? []).map((d) => [d.id, d.name])),
+    ofRole: Object.fromEntries((setup.roles ?? []).map((r) => [r.id, r.department_id ?? null])),
   };
   return { keys: tiers.length ? tiers.map((t) => t.key) : [...DEFAULT_TIER_KEYS], services, departments };
 }
