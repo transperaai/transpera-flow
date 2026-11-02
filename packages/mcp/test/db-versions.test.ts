@@ -145,7 +145,7 @@ describe("process versions and provenance (editor, direct writes)", () => {
     await expectRefused(postProc({ workspace_id: ids.ws, name: "Forged B", draft_revision_id: ids.v3 }), /no versions yet/);
     await expectRefused(postProc({ workspace_id: ids.ws, name: "Forged C", created_by: randomUUID() }), /no versions yet/);
     await expectRefused(postProc({ workspace_id: ids.ws, name: "Forged D", created_at: "2020-01-01T00:00:00Z" }), /no versions yet/);
-    const ok = await editor.insertInto("processes").values({ workspace_id: ids.ws, name: "Made the usual way", source: "mcp" }).returning("created_by").executeTakeFirstOrThrow();
+    const ok = await editor.insertInto("processes").values({ workspace_id: ids.ws, name: "Made the usual way", category: "sales", source: "mcp" }).returning("created_by").executeTakeFirstOrThrow();
     expect(ok.created_by).toBe(editorId);
   });
 

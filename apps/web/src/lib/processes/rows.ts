@@ -1,12 +1,14 @@
 // The Processes page's rows (issue #101): every process in the company map's order (each followed by the processes
 // inside it), with the numbers beside it. Pure: the page loads the facts, this works out the rows.
 
-import { companyMap, flattenCompanyMap, type IssueLinkRef, type IssueRow, type StepRow } from "@transpera-flow/db";
+import { companyMap, flattenCompanyMap, type IssueLinkRef, type IssueRow, type ProcessCategory, type StepRow } from "@transpera-flow/db";
 
 export interface ProcessFacts {
   id: string;
   name: string;
   kind: "pipeline" | "servicing";
+  /** What the process is for, in people's words (Q3): shown in the Type column. The kind stays underneath. */
+  category: ProcessCategory;
   /** What the process is for, shown as its goal line. */
   description: string | null;
   parentId: string | null;

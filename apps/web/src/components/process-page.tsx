@@ -9,7 +9,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } f
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
-import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
+import type { IssueRow, ProcessBundle, ProcessCategory, ScenarioRow, SourceRow } from "@transpera-flow/db";
+import type { ProcessAdminResult } from "@/lib/processes/admin";
 import { AboutProcess } from "@/components/about-process";
 import { Help } from "@/components/help";
 import { IssueTrackView } from "@/components/issue-track";
@@ -64,6 +65,7 @@ export function ProcessPage({
   liveRevisions,
   registerHref,
   settingsHref,
+  editCategory,
   editHref,
   historyHref,
   solutions,
@@ -89,6 +91,8 @@ export function ProcessPage({
   liveRevisions?: Record<string, string>;
   registerHref?: string;
   settingsHref?: string;
+  /** Saves a new category for this process (a server action bound to it): the Owner and Agency admins; absent for everyone else and on an earlier version. */
+  editCategory?: (category: ProcessCategory) => Promise<ProcessAdminResult>;
   /** The Editor for this process, if the viewer may edit. */
   editHref?: string;
   /** The History page (A40, not built yet): a plain link to its route. */
@@ -253,7 +257,7 @@ export function ProcessPage({
           </div>
         )}
 
-        <AboutProcess about={about} />
+        <AboutProcess about={about} editCategory={editCategory} />
 
         <Section
           id="map"

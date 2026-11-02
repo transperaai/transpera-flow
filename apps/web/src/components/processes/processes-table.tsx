@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { ChevronRight, CornerDownRight } from "lucide-react";
+import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { Badge } from "@/components/ui/badge";
 import { MapSkeleton } from "@/components/map/map-placeholder";
@@ -72,11 +73,7 @@ export function ProcessesTable({
             <th className="px-2 py-2 font-medium">Process</th>
             <th className="hidden px-2 py-2 font-medium md:table-cell">
               Type
-              <Help
-                label="Type"
-                description="Sales pipeline is how new work comes in and is won. Client work is a recurring process this company runs for its own existing clients, like a monthly report."
-                example="Northbeam's sales pipeline is a pipeline; its monthly reporting is client work."
-              />
+              <Help label="Type" description={PROCESS_CATEGORIES.map((c) => `${PROCESS_CATEGORY_LABELS[c]}: ${PROCESS_CATEGORY_HELP[c]}`).join(" ")} example="Northbeam's lead pipeline is Sales; its monthly reporting is Routine client work." />
             </th>
             <th className="hidden px-2 py-2 text-right font-medium lg:table-cell">
               Steps
@@ -143,7 +140,7 @@ export function ProcessesTable({
                       )}
                     </span>
                   </td>
-                  <td className="hidden px-2 py-2.5 text-xs md:table-cell">{r.kind === "servicing" ? "Client work" : "Sales pipeline"}</td>
+                  <td className="hidden px-2 py-2.5 text-xs md:table-cell">{PROCESS_CATEGORY_LABELS[r.category]}</td>
                   <td className="hidden px-2 py-2.5 text-right tabular-nums lg:table-cell">{r.steps}</td>
                   <td className="px-2 py-2.5 text-right tabular-nums">{r.openIssues > 0 ? <span className="font-semibold">{r.openIssues}</span> : <span className="text-muted-foreground">0</span>}</td>
                   <td className="hidden px-2 py-2.5 text-xs whitespace-nowrap lg:table-cell">

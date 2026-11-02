@@ -8,7 +8,7 @@
 // "Upload process" and process library need lives here, and the tools that edited a draft, with the ability to write into an
 // existing draft, are gone.
 
-import { checklistItems, EVIDENCE_COLUMNS, listProcesses, loadProcessBundle, type Json, type SourceRow, type StepRow } from "../index";
+import { defaultProcessCategory, type ProcessCategory, checklistItems, EVIDENCE_COLUMNS, listProcesses, loadProcessBundle, type Json, type SourceRow, type StepRow } from "../index";
 import { rpc } from "../client";
 import {
   flattenNesting,
@@ -107,6 +107,8 @@ export interface ProcessJson {
   name?: string;
   kind?: "pipeline" | "servicing";
   entity_name?: string;
+  /** What the process is for (a /2 file's `category`). Absent: from the kind. */
+  category?: ProcessCategory;
   description?: string | null;
   steps: ImportStepJson[];
   edges?: ImportEdgeJson[];
@@ -295,7 +297,7 @@ async function createProcessWithDraft(
     proc = (await writing("create processes", () =>
       ctx.db
         .insertInto("processes")
-        .values({ workspace_id: ws.id, name: input.name, kind: input.kind, entity_name: input.entity_name, description: input.description, source: input.source })
+        .values({ workspace_id: ws.id, name: input.name, kind: input.kind, entity_name: input.entity_name, description: input.description, source: input.source, category: defaultProcessCategory(input.kind) })
         .returning([...columns])
         .executeTakeFirstOrThrow(),
     )) as unknown as ProcessWithDraft;
@@ -349,6 +351,7 @@ interface ImportNode {
   name: string;
   kind: "pipeline" | "servicing";
   entity_name: string;
+  category: ProcessCategory;
   description: string | null;
   steps: unknown[];
   edges: unknown[];
@@ -394,7 +397,7 @@ export interface ImportBundleResult {
  * Check a whole import before writing any of it (a failed call creates no process and opens no draft), then return what writes it.
  * `json` is process_json; steps held in groups are unfolded (flattenNesting).
  */
-async function prepareImport(scope: ImportScope, json: ProcessJson, create: { id: string; name: string; kind: "pipeline" | "servicing"; entity_name: string }): Promise<PreparedImport> {
+async function prepareImport(scope: ImportScope, json: ProcessJson, create: { id: string; name: string; kind: "pipeline" | "servicing"; entity_name: string; category: ProcessCategory }): Promise<PreparedImport> {
   const { ctx, ws, stamp } = scope;
   const { steps: flat } = flattenNesting(json.steps);
 
@@ -443,6 +446,7 @@ async function prepareImport(scope: ImportScope, json: ProcessJson, create: { id
         name: create.name,
         kind: create.kind,
         entity_name: create.entity_name,
+        category: create.category,
         description,
         steps: plan.insertSteps,
         edges: plan.insertEdges,
@@ -452,7 +456,7 @@ async function prepareImport(scope: ImportScope, json: ProcessJson, create: { id
       const r = results.get(create.id);
       if (!r) throw new Error("import_new_process returned no draft for a new process");
       ensured = {
-        proc: { id: create.id, workspace_id: ws.id, name: create.name, kind: create.kind, entity_name: create.entity_name, description, live_revision_id: null, draft_revision_id: r.revision_id, parent_process_id: null } as ProcessWithDraft,
+        proc: { id: create.id, workspace_id: ws.id, name: create.name, kind: create.kind, entity_name: create.entity_name, description, category: create.category, live_revision_id: null, draft_revision_id: r.revision_id, parent_process_id: null } as ProcessWithDraft,
         draft: { revision_id: r.revision_id, number: r.number, created: true },
       };
     },
@@ -497,7 +501,7 @@ export async function importNewProcess(ctx: ImportContext, workspaceId: string, 
   if (!json.kind) assumptions.push("kind defaulted to pipeline.");
   const entity = json.entity_name ?? (kind === "pipeline" ? "lead" : "item");
   if (!json.entity_name) assumptions.push(`entity_name defaulted to '${entity}'.`);
-  const prepared = await prepareImport(scope, json, { id: bundle?.processId ?? newId(), name: json.name, kind, entity_name: entity });
+  const prepared = await prepareImport(scope, json, { id: bundle?.processId ?? newId(), name: json.name, kind, entity_name: entity, category: json.category ?? defaultProcessCategory(kind) });
 
   const nodes: ImportNode[] = [];
   prepared.collect(nodes);

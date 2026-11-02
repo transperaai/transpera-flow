@@ -120,6 +120,36 @@ describe("/1 files are read as before", () => {
   });
 });
 
+describe("category (Q3)", () => {
+  it("is optional, kept when it is one of the five, and named in the schema", () => {
+    expect(checkProcessFile(base()).file!.category).toBeUndefined();
+    for (const c of ["sales", "onboarding", "routine_client_work", "ad_hoc", "internal"]) {
+      const f = base();
+      f.category = c;
+      const checked = checkProcessFile(f);
+      expect(checked.errors).toEqual([]);
+      expect(checked.file!.category).toBe(c);
+    }
+    expect(PROCESS_FILE_SCHEMA_2.properties.category.enum).toEqual(["sales", "onboarding", "routine_client_work", "ad_hoc", "internal"]);
+  });
+
+  it("says which values it takes when it is not one of the five", () => {
+    const f = base();
+    f.category = "retainer";
+    expect(errorsOf(f)).toEqual(['The process category \'retainer\' isn\'t one Transpera knows. Use "sales", "onboarding", "routine_client_work", "ad_hoc", "internal", or leave it out.']);
+  });
+
+  it("is not a /1 field: a /1 file's category is ignored with a warning", () => {
+    const f = clone(PROCESS_FILE_EXAMPLE);
+    f.format = "transpera-process/1";
+    f.category = "sales";
+    const checked = checkProcessFile(f);
+    expect(checked.errors).toEqual([]);
+    expect(checked.warnings).toEqual(["The file has a field 'category' that Transpera doesn't use. It was ignored."]);
+    expect(checked.file!.category).toBeUndefined();
+  });
+});
+
 describe("sources", () => {
   it("reads kind, date, speakers and body, defaulting the kind to transcript", () => {
     const f = base();

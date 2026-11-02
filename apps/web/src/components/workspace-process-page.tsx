@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { restoreProcess } from "@/app/w/[slug]/process-admin-actions";
+import { changeProcessCategory, restoreProcess } from "@/app/w/[slug]/process-admin-actions";
 import { createProcess } from "@/app/w/[slug]/process-actions";
 import { ArchivedBanner } from "@/components/processes/archived-banner";
 import { isUnpublished } from "@transpera-flow/db";
@@ -59,6 +59,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       registerHref={`${base}/issues`}
       settingsHref={`${base}/settings`}
       tierSetup={tierSetup}
+      editCategory={canEdit && !earlier && !archivedAt ? changeProcessCategory.bind(null, live.process.id) : undefined}
       editHref={canEdit && !archivedAt ? `${base}/p/${live.process.id}/edit` : undefined}
       historyHref={`${base}/p/${live.process.id}/history`}
       solutions={{ data: solutions, base, viewerId, memberNames }}

@@ -120,17 +120,17 @@ describe("the issue status track", () => {
 });
 
 describe("About this process", () => {
-  const about: About = { type: "Pipeline", steps: 6, roles: 3, version: 4 };
+  const about: About = { category: "sales", steps: 6, roles: 3, version: 4 };
   it("reads as plain attributes, with the version as a bare number", () => {
     expect(aboutLine(about)).toEqual([
-      { label: "Type", value: "Pipeline" },
+      { label: "Type", value: "Sales" },
       { label: "Size", value: "6 steps, 3 roles" },
       { label: "Version", value: "4" },
     ]);
   });
   it("says so when there is no live version", () => {
     const rows = aboutLine({ ...about, version: null, steps: 1, roles: 1 });
-    expect(rows.map((r) => r.value)).toEqual(["Pipeline", "1 step, 1 role", "Not published yet"]);
+    expect(rows.map((r) => r.value)).toEqual(["Sales", "1 step, 1 role", "Not published yet"]);
   });
   it("no longer shows the company map trail, sources or last published", () => {
     const labels = aboutLine(about).map((r) => r.label);
@@ -143,6 +143,16 @@ describe("About this process", () => {
     expect(html).toContain("About this process");
     expect(html).toContain("Version");
     expect(read("components/about-process.tsx")).not.toContain("<Help");
+  });
+  it("shows Type as text for a viewer, and as a select of the five categories for someone who can edit", () => {
+    const viewer = renderToStaticMarkup(createElement(AboutProcess, { about }));
+    expect(viewer).not.toContain("<select");
+    expect(viewer).toContain("Sales");
+    const editor = renderToStaticMarkup(createElement(AboutProcess, { about, editCategory: async () => ({ status: "ok" as const }) }));
+    expect(editor).toContain("<select");
+    expect(editor.match(/<option/g)).toHaveLength(5);
+    for (const label of ["Sales", "Onboarding", "Routine client work", "Ad hoc", "Internal"]) expect(editor).toContain(`>${label}</option>`);
+    expect(editor).toContain('value="sales"');
   });
 });
 

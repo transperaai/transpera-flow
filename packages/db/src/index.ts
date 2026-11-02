@@ -27,6 +27,7 @@ export {
   type ModelOptions,
 } from "./model";
 export { loadAnalysisRules, saveAnalysisRules, type AnalysisRules, type SaveAnalysisRulesOutcome } from "./analysis-rules";
+export * from "./process-category";
 export * from "./capacity-setup";
 export * from "./capacity-figures";
 export * from "./capacity-changes";

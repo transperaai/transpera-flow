@@ -78,6 +78,7 @@ A process is one trigger to one outcome, with one kind of thing flowing through 
 - Several sources about the same process make one file (two interviews, one SOP).
 - A different trigger or a different thing flowing (a monthly report against onboarding a client) makes a separate file. A passing mention of another process stays out of the steps and is asked about.
 - `kind` is `pipeline` when new leads become clients (it needs lead volume), `servicing` when work recurs for existing clients.
+- `category` (optional) is what the process is for, in the company's words: `sales` (how new work comes in and is won), `onboarding` (getting a new client set up), `routine_client_work` (work done again and again for existing clients), `ad_hoc` (requests that come in at random) or `internal` (work for the agency itself). Leave it out when the sources do not say: a pipeline is then `sales` and a servicing process `routine_client_work`. It does not change `kind`, which is what the simulation uses.
 - Each source appears in every file it supports. 
 
 ## Left out of the file, first principles
@@ -92,7 +93,7 @@ A process is one trigger to one outcome, with one kind of thing flowing through 
 
 Run the checker's rules over each file before showing it; the upload preview applies them again and quotes any it finds.
 
-- Top level: `format`, `name`, `steps` (at least one). Every field is in the schema.
+- Top level: `format`, `name`, `steps` (at least one); `category`, when given, is one of the five. Every field is in the schema.
 - Step and source ids and step names are unique; every link, `rework_to` and group member names an existing id; every quote's `source` is a source id.
 - One `start`; it leads to one step. Nothing leaves an `end`; no link into the start or from a step to itself; no link twice.
 - Branch odds add to 1. No loop without a decision. A step with `rework_to` has a rework rate, stated or quoted.

@@ -101,7 +101,7 @@ export function defaultCompanyPart(workspaceId: string, parts: readonly ProcessP
     }
   }
   return {
-    process: { id: DEMO_COMPANY_PROCESS_ID, workspace_id: workspaceId, name: "Company map", kind: "pipeline", entity_name: "process", description: null, live_revision_id: revisionId, parent_process_id: null, is_company: true },
+    process: { id: DEMO_COMPANY_PROCESS_ID, workspace_id: workspaceId, name: "Company map", kind: "pipeline", entity_name: "process", description: null, category: "internal", live_revision_id: revisionId, parent_process_id: null, is_company: true },
     revision: { id: revisionId, workspace_id: workspaceId, process_id: DEMO_COMPANY_PROCESS_ID, number: 1, status: "published" },
     steps,
     edges,

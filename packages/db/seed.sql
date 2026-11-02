@@ -355,6 +355,14 @@ insert into public.processes (id, workspace_id, name, kind, entity_name, descrip
   ('c0000000-0000-4000-8001-000000000002', 'a0000000-0000-4000-8001-000000000001', 'Content calendar', 'servicing', 'calendar', 'Next month''s posts: planned, written, designed and approved by the client.', null),
   ('c0000000-0000-4000-8001-000000000003', 'a0000000-0000-4000-8001-000000000001', 'Ad-hoc request', 'servicing', 'request', 'A last-minute graphic or post the client asks for.', null);
 
+do $seed$
+begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'processes' and column_name = 'category') then
+    update public.processes set category = 'ad_hoc' where id = 'c0000000-0000-4000-8001-000000000003';
+  end if;
+end
+$seed$;
+
 insert into public.services (id, workspace_id, name, pricing_model, price, margin, tenure_months, churn_monthly_base, churn_health_sensitivity, mix_share, entry_process_id, path_tags, fallback_ongoing_load, active) values
   ('80000000-0000-4000-8001-000000000001', 'a0000000-0000-4000-8001-000000000001', 'Content retainer', 'retainer', 3100, 0.4, 14, 0.035, 3, 0.3, 'c0000000-0000-4000-8001-000000000001', array['content']::text[], '{"b0000000-0000-4000-8001-000000000002":4,"b0000000-0000-4000-8001-000000000003":3,"b0000000-0000-4000-8001-000000000004":24,"b0000000-0000-4000-8001-000000000007":1}', true),
   ('80000000-0000-4000-8001-000000000002', 'a0000000-0000-4000-8001-000000000001', 'Social media retainer', 'retainer', 2400, 0.35, 10, 0.04, 3.5, 0.5, 'c0000000-0000-4000-8001-000000000001', array['social']::text[], '{"b0000000-0000-4000-8001-000000000002":4,"b0000000-0000-4000-8001-000000000005":12,"b0000000-0000-4000-8001-000000000003":10,"b0000000-0000-4000-8001-000000000007":1}', true),

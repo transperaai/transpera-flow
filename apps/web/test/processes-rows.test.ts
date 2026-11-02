@@ -8,6 +8,7 @@ const proc = (id: string, parentId: string | null = null, over: Partial<ProcessF
   id,
   name: id.toUpperCase(),
   kind: "pipeline",
+  category: "sales",
   description: null,
   parentId,
   live: true,

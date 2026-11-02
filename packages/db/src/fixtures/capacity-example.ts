@@ -22,10 +22,21 @@
 
 import { randomUUID } from "node:crypto";
 import { capacityModel, type EngineStep, type Recurrence, type TierDeliverables } from "@transpera-flow/engine";
+import type { ProcessCategory } from "../process-category";
 import { applyCapacityStarter, type Queryable } from "../capacity-starter";
 import { EXAMPLE_PURPOSE_KEY, examplePurposes } from "./capacity-example-purposes";
 
 export { EXAMPLE_PURPOSES, EXAMPLE_PURPOSE_KEY, examplePurposes } from "./capacity-example-purposes";
+
+/**
+ * A servicing process's category in the example (Q3): onboarding processes are Onboarding, the ad-hoc request processes Ad hoc, and the
+ * rest Routine client work. (The pipeline is Sales.)
+ */
+export function exampleCategory(key: string, name: string): ProcessCategory {
+  if (/onboard/i.test(key) || /onboard/i.test(name)) return "onboarding";
+  if (/ad-?hoc/i.test(key) || /ad-?hoc/i.test(name)) return "ad_hoc";
+  return "routine_client_work";
+}
 
 /** The prototype's `both`: counted clients who take both departments' services, by tier. */
 export const EXAMPLE_BOTH: Record<string, number> = { T1: 1, T2: 5, T3: 8 };
@@ -121,6 +132,8 @@ export async function loadCapacityExample(db: Queryable, workspaceId: string, to
   }
   // Is P4's migration applied? Its step columns, and whether the recurrence check accepts a driver.
   const stepBaseValues = (await rows("select 1 from information_schema.columns where table_schema = 'public' and table_name = 'steps' and column_name = 'to_client_manager'")).length > 0;
+  // Q3's `processes.category`, once its migration is applied; an older database gives each process its kind's category itself.
+  const hasCategory = (await rows("select 1 from information_schema.columns where table_schema = 'public' and table_name = 'processes' and column_name = 'category'")).length > 0;
   const driverRecurrences = (await one("select private.is_recurrence($1::jsonb) as ok", [JSON.stringify({ driver: "words", perMonth: 1, per: 1000 })])).ok === true;
   // Sales runs the pipeline, not a department's clients: a shared team counted in hours.
   const sales = await one(
@@ -186,10 +199,14 @@ export async function loadCapacityExample(db: Queryable, workspaceId: string, to
   /** The model's step id -> the id of the step row it became (what a stored change points at). */
   const stepDbIds = new Map<string, string>();
   /** A published process: a start step, the given steps in `list` order, and the end steps `ends` (id -> outcome). Returns its id. */
-  const makeProcess = async (name: string, kind: "pipeline" | "servicing", entity: string, entry: string, list: EngineStep[], ends: Record<string, "won" | "lost" | "done">) => {
+  const makeProcess = async (name: string, kind: "pipeline" | "servicing", entity: string, entry: string, list: EngineStep[], ends: Record<string, "won" | "lost" | "done">, category: ProcessCategory) => {
     const processId = randomUUID();
     const revisionId = randomUUID();
-    await db.query("insert into public.processes (id, workspace_id, name, kind, entity_name) values ($1, $2, $3, $4, $5)", [processId, workspaceId, name, kind, entity]);
+    if (hasCategory) {
+      await db.query("insert into public.processes (id, workspace_id, name, kind, entity_name, category) values ($1, $2, $3, $4, $5, $6)", [processId, workspaceId, name, kind, entity, category]);
+    } else {
+      await db.query("insert into public.processes (id, workspace_id, name, kind, entity_name) values ($1, $2, $3, $4, $5)", [processId, workspaceId, name, kind, entity]);
+    }
     await db.query("insert into public.process_revisions (id, workspace_id, process_id, number, status, published_at) values ($1, $2, $3, 1, 'published', now())", [revisionId, workspaceId, processId]);
     const ids = new Map<string, string>();
     const startId = randomUUID();
@@ -237,12 +254,12 @@ export async function loadCapacityExample(db: Queryable, workspaceId: string, to
   };
 
   const pipelineIds = ["qualify", "discovery", "pitch", "contract"];
-  await makeProcess("Win new clients", "pipeline", "lead", model.entry, pipelineIds.map((id) => stepById.get(id)!), { [model.sinks.won]: "won", [model.sinks.lost]: "lost" });
+  await makeProcess("Win new clients", "pipeline", "lead", model.entry, pipelineIds.map((id) => stepById.get(id)!), { [model.sinks.won]: "won", [model.sinks.lost]: "lost" }, "sales");
   let processes = 1;
   const processDbIds = new Map<string, string>();
   for (const [key, p] of Object.entries(model.servicingProcesses!)) {
     // "done" is the model's one end; the step ids of the model's other processes' steps are never targets here.
-    processDbIds.set(key, await makeProcess(p.name, "servicing", "task", p.entry, p.steps.map((id) => stepById.get(id)!), { done: "done" }));
+    processDbIds.set(key, await makeProcess(p.name, "servicing", "task", p.entry, p.steps.map((id) => stepById.get(id)!), { done: "done" }, exampleCategory(key, p.name)));
     processes++;
   }
 
