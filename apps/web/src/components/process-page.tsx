@@ -312,6 +312,7 @@ export function ProcessPage({
             bundle={bundle}
             result={result}
             savedLabel="Saved"
+            defaultLanes
             openIssues={issuesUi.openIssues}
             rating={issuesUi.rating}
             stepExtras={issuesUi.stepExtras}

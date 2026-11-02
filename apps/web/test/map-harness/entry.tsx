@@ -44,6 +44,8 @@ export interface HarnessOptions {
   member?: boolean;
   /** A step whose detail is open when the map first shows, as `?step=<id>` opens it on the process page. */
   openStep?: string;
+  /** The swimlane view is on when the map first shows, as the process page opens it. */
+  lanes?: boolean;
   /** The step's base values, read only, in its detail, as the process page shows them to a Viewer. */
   baseValues?: boolean;
 }
@@ -183,6 +185,7 @@ function Harness({ options }: { options: HarnessOptions }) {
         stepExtras={() => ({ insights: ["An insight"], issues: ["An issue"] })}
         computing={options.computing}
         initialStepId={options.openStep ?? null}
+        defaultLanes={options.lanes}
         stepBaseValues={
           options.baseValues
             ? (step) => <StepBaseValues bundle={base} step={step} editor={{ run: () => undefined } as unknown as ProcessEditor} stamp={() => ({ at: "2026-10-05T00:00:00Z" })} readOnly />
