@@ -7,7 +7,6 @@ import { ProcessNav } from "@/components/process-nav";
 import { ProcessPage } from "@/components/process-page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentUserId } from "@/lib/access-data";
-import { processRatings } from "@/lib/processes/rows";
 import { loadCompanyId, loadMemberNames, loadProcessForEditing, loadProcessVersion, loadTierSetup, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /**
@@ -42,7 +41,6 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const shown = earlier ?? (isUnpublished(live) && draft ? draft : live);
   const base = `/w/${slug}`;
   const hrefs = Object.fromEntries(processes.map((p) => [p.id, `${base}/p/${p.id}`]));
-  const ratings = processRatings(processes, issues, [...live.steps, ...(live.otherProcesses ?? []).flatMap((p) => p.steps)]);
   return (
     <SourceLinkingScope workspaceId={live.workspace.id} sources={sources} canEdit={canEdit && !earlier && !archivedAt}>
     <ProcessPage
@@ -61,7 +59,6 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       registerHref={`${base}/issues`}
       settingsHref={`${base}/settings`}
       tierSetup={tierSetup}
-      rating={ratings[live.process.id] ?? null}
       editHref={canEdit && !archivedAt ? `${base}/p/${live.process.id}/edit` : undefined}
       historyHref={`${base}/p/${live.process.id}/history`}
       solutions={{ data: solutions, base, viewerId, memberNames }}
@@ -72,7 +69,6 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
           current={live.process.id}
           hrefs={hrefs}
           create={canEdit ? createProcess.bind(null, live.workspace.id, slug) : undefined}
-          ratings={ratings}
           processesHref={`${base}/processes`}
           companyMapHref={base}
         />

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isOnProcess, processRatings, processRows, shortDate, type ProcessFacts } from "@/lib/processes/rows";
+import { isOnProcess, processRows, shortDate, type ProcessFacts } from "@/lib/processes/rows";
 
 // The Processes page's rows (issue #101): company-map order with sub-processes indented, and each row's numbers
 // rolled up over the processes inside it.
@@ -26,7 +26,7 @@ describe("an issue that links several processes", () => {
   const processes = [proc("a"), proc("b"), proc("c", "b")];
   const linked = (links: { process_id: string | null; step_id: string | null }[], over: Partial<ReturnType<typeof issue>> = {}) => ({ ...issue(links[0]!.process_id, "critical", "open", links[0]!.step_id), links, ...over });
 
-  it("counts toward every process its links touch, once each, and rates each by it", () => {
+  it("counts toward every process its links touch, once each", () => {
     const steps = [step("s1", "a"), step("s2", "b"), step("s3", "c")];
     const rows = processRows({
       processes,
@@ -34,25 +34,16 @@ describe("an issue that links several processes", () => {
       issues: [linked([{ process_id: "a", step_id: "s1" }, { process_id: "a", step_id: null }, { process_id: "c", step_id: "s3" }])],
       versions: new Map(),
     });
-    const by = Object.fromEntries(rows.map((r) => [r.id, [r.openIssues, r.rating]]));
-    expect(by.a).toEqual([1, "risk"]);
-    expect(by.c).toEqual([1, "risk"]);
+    const by = Object.fromEntries(rows.map((r) => [r.id, r.openIssues]));
+    expect(by.a).toBe(1);
+    expect(by.c).toBe(1);
     // b has c inside it, so its total includes c's; the issue is not counted in b on its own.
-    expect(by.b).toEqual([1, "risk"]);
+    expect(by.b).toBe(1);
   });
 
   it("looks a step's process up when the link names none", () => {
     const rows = processRows({ processes, steps: [step("s1", "a")], issues: [linked([{ process_id: null, step_id: "s1" }])], versions: new Map() });
     expect(rows.find((r) => r.id === "a")!.openIssues).toBe(1);
-  });
-
-  it("ratings count it for each process too, and a closed one counts nowhere", () => {
-    const steps = [step("s1", "a"), step("s2", "b")];
-    const open = linked([{ process_id: "a", step_id: "s1" }, { process_id: "b", step_id: "s2" }]);
-    const closed = { ...open, status: "resolved" as const };
-    expect(processRatings(processes, [open], steps).a).toBe("risk");
-    expect(processRatings(processes, [open], steps).b).toBe("risk");
-    expect(processRatings(processes, [closed], steps).b).toBeNull();
   });
 
   it("isOnProcess finds an issue through any of its links", () => {
@@ -95,7 +86,7 @@ describe("processRows", () => {
     expect(n("d")).toBe(0);
   });
 
-  it("counts open issues and takes the worst rating, rolled up; a Great or closed issue does not rate", () => {
+  it("counts open issues, rolled up; a closed issue does not count", () => {
     const rows = processRows({
       processes,
       steps: [],
@@ -103,15 +94,15 @@ describe("processRows", () => {
       versions: new Map(),
     });
     const r = (id: string) => rows.find((x) => x.id === id)!;
-    expect(r("c")).toMatchObject({ openIssues: 1, rating: "good" });
-    expect(r("b")).toMatchObject({ openIssues: 2, rating: "bad" });
-    expect(r("a")).toMatchObject({ openIssues: 3, rating: "bad" });
-    expect(r("d")).toMatchObject({ openIssues: 1, rating: null });
+    expect(r("c").openIssues).toBe(1);
+    expect(r("b").openIssues).toBe(2);
+    expect(r("a").openIssues).toBe(3);
+    expect(r("d").openIssues).toBe(1);
   });
 
   it("places an issue with no process by its step", () => {
     const rows = processRows({ processes, steps: [step("s1", "c")], issues: [issue(null, "critical", "testing", "s1")], versions: new Map() });
-    expect(rows.find((r) => r.id === "a")).toMatchObject({ openIssues: 1, rating: "risk" });
+    expect(rows.find((r) => r.id === "a")).toMatchObject({ openIssues: 1 });
   });
 
   it("carries the live version, and a process that was never published has none", () => {
@@ -128,19 +119,6 @@ describe("processRows", () => {
   it("treats a process whose parent is missing as top level", () => {
     const rows = processRows({ processes: [proc("x", "gone")], steps: [], issues: [], versions: new Map() });
     expect(rows[0]).toMatchObject({ depth: 1, trail: [] });
-  });
-});
-
-describe("processRatings", () => {
-  it("gives each process the worst rating of its open issues and those inside it", () => {
-    expect(processRatings([proc("a"), proc("b", "a")], [issue("b", "critical")])).toEqual({ a: "risk", b: "risk" });
-    expect(processRatings([proc("a")], [])).toEqual({ a: null });
-  });
-  it("counts an issue that names only a step toward that step's process", () => {
-    const procs = [proc("a"), proc("b")];
-    const issues = [issue(null, "critical", "open", "s1")];
-    expect(processRatings(procs, issues)).toEqual({ a: null, b: null });
-    expect(processRatings(procs, issues, [step("s1", "b")])).toEqual({ a: null, b: "risk" });
   });
 });
 

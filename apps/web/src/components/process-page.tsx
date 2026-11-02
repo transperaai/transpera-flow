@@ -10,7 +10,6 @@ import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
-import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { AboutProcess } from "@/components/about-process";
 import { Help } from "@/components/help";
 import { IssueTrackView } from "@/components/issue-track";
@@ -47,13 +46,6 @@ import { WaitByStep } from "./wait-by-step";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
 import { EDIT_ONLY } from "@/lib/phone";
 
-const RATING_PILL: Record<Rating, string> = {
-  risk: "border-crit bg-crit-soft",
-  bad: "border-serious bg-crit-soft/60",
-  good: "border-warn bg-warn-soft",
-  great: "border-line bg-panel-2",
-};
-
 /** A process inside this one, for the "Inside:" chips. */
 export interface ChildProcess {
   id: string;
@@ -70,7 +62,6 @@ export function ProcessPage({
   issues = [],
   sources = [],
   liveRevisions,
-  rating,
   registerHref,
   settingsHref,
   editHref,
@@ -96,8 +87,6 @@ export function ProcessPage({
   sources?: SourceRow[];
   /** Each process's live revision id, which a dismissed insight is measured against. Omitted: this bundle's, when it is the live one. */
   liveRevisions?: Record<string, string>;
-  /** The process's rating: the worst of its open issues and of those of the processes inside it, as the switcher shows it. */
-  rating?: Rating | null;
   registerHref?: string;
   settingsHref?: string;
   /** The Editor for this process, if the viewer may edit. */
@@ -227,16 +216,6 @@ export function ProcessPage({
               <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2.5 py-0.5 text-xs font-medium">
                 <i aria-hidden className="size-1.5 rounded-full bg-accent" />
                 {unpublished ? "Draft, not published yet" : `Version ${liveVersion}`}
-              </span>
-            )}
-            {rating && (
-              <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${RATING_PILL[rating]}`} data-process-rating={rating}>
-                {RATING_LABELS[rating]}
-                <Help
-                  label="Process rating"
-                  description="The worst rating among the confirmed open issues on this process and the processes inside it: Great, Good, Bad or Operational risk. Facts from the run don't count until someone logs an issue."
-                  example="Bad, not urgent: one confirmed issue is rated Bad and none is worse."
-                />
               </span>
             )}
             {inside.length > 0 && (

@@ -5,7 +5,6 @@ import Link from "next/link";
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { ChevronRight, CornerDownRight } from "lucide-react";
 import { Help } from "@/components/help";
-import { RatingPill } from "@/components/processes/rating";
 import { Badge } from "@/components/ui/badge";
 import { MapSkeleton } from "@/components/map/map-placeholder";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -79,14 +78,6 @@ export function ProcessesTable({
                 example="Northbeam's sales pipeline is a pipeline; its monthly reporting is client work."
               />
             </th>
-            <th className="px-2 py-2 font-medium">
-              Rating
-              <Help
-                label="Rating"
-                description="The worst rating among this process's open issues, including the processes inside it. It is the same colour the map uses. Not rated means it has no open issue worse than Great."
-                example="One open Operational risk issue on a step makes the whole process Operational risk."
-              />
-            </th>
             <th className="hidden px-2 py-2 text-right font-medium lg:table-cell">
               Steps
               <Help
@@ -153,9 +144,6 @@ export function ProcessesTable({
                     </span>
                   </td>
                   <td className="hidden px-2 py-2.5 text-xs md:table-cell">{r.kind === "servicing" ? "Client work" : "Sales pipeline"}</td>
-                  <td className="px-2 py-2.5">
-                    <RatingPill rating={r.rating} />
-                  </td>
                   <td className="hidden px-2 py-2.5 text-right tabular-nums lg:table-cell">{r.steps}</td>
                   <td className="px-2 py-2.5 text-right tabular-nums">{r.openIssues > 0 ? <span className="font-semibold">{r.openIssues}</span> : <span className="text-muted-foreground">0</span>}</td>
                   <td className="hidden px-2 py-2.5 text-xs whitespace-nowrap lg:table-cell">
@@ -179,7 +167,7 @@ export function ProcessesTable({
                 </tr>
                 {isOpen && (
                   <tr id={panel} className="border-b bg-muted/20">
-                    <td colSpan={actions ? 9 : 8} className="p-3 sm:p-4">
+                    <td colSpan={actions ? 8 : 7} className="p-3 sm:p-4">
                       <MapCard row={r} card={cards[r.id] ?? { state: "loading" }} href={hrefs[r.id] ?? "#"} />
                     </td>
                   </tr>

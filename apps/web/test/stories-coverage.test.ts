@@ -38,8 +38,6 @@ const SHARED: [string, string][] = [
   ["sandbox/goal-seek-dialog", "GoalSeekDialog"],
   ["purposes/purposes-settings", "PurposesSettings"],
   ["overview/rating-pill", "RatingPill"],
-  ["processes/rating", "RatingDot"],
-  ["processes/rating", "RatingPill"],
   ["pay-hidden", "PayHidden"],
   ["simulation-gaps", "GapList"],
   ["simulation-gaps", "MissingForSimulation"],
