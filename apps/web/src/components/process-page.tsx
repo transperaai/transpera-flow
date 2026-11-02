@@ -42,7 +42,6 @@ import { ProcessSolutions, type SolutionsData } from "./solutions/process-soluti
 import { NO_SOLUTIONS_DATA } from "@/lib/solutions/cards";
 import { useProcessIssues } from "./process-issues";
 import { useEngineModel, type EditMode } from "@/lib/sim/use-engine-model";
-import { ServicingBanner } from "./servicing-banner";
 import { UtilisationBars } from "./utilisation-bars";
 import { WaitByStep } from "./wait-by-step";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
@@ -80,13 +79,10 @@ export function ProcessPage({
   inside = [],
   processPicker,
   notice,
-  aboutInfo,
   tierSetup,
 }: {
   /** The tiers and what each service's tier gets, for the step base values (a driver recurrence is read from them). */
   tierSetup?: TierSetup;
-  /** What "About this process" needs from the server: where the process sits on the company map, whether a draft is open, and who last changed it. */
-  aboutInfo?: { trail: string[]; hasDraft: boolean; lastChange: { at: string | null; by: string } | null };
   /** The process at the version on screen: live, or an earlier one when `viewingVersion` is set. */
   bundle: ProcessBundle;
   /** The earlier version being shown (`?version=N`), or null for live. */
@@ -192,14 +188,7 @@ export function ProcessPage({
   // The steps of this process and of the processes inside it, which the wait chart is about (the model may hold more).
   const stepIds = useMemo(() => processStepIds(bundle), [bundle]);
   const unpublished = liveVersion === 0;
-  const linking = useSourceLinking();
-  const about = useMemo(() => {
-    const ids = new Set([bundle.process.id, ...(bundle.otherProcesses ?? []).map((o) => o.process.id)]);
-    const linked = linking
-      ? new Set(linking.links.filter((l) => (l.kind === "process" && l.process_id && ids.has(l.process_id)) || (l.kind === "step" && l.step_id && stepIds.has(l.step_id))).map((l) => l.source_id))
-      : null;
-    return aboutProcess({ bundle, trail: aboutInfo?.trail ?? [], liveVersion, hasDraft: aboutInfo?.hasDraft ?? false, sources: linked ? linked.size : null, lastChange: aboutInfo?.lastChange ?? null });
-  }, [bundle, aboutInfo, liveVersion, linking, stepIds]);
+  const about = useMemo(() => aboutProcess({ bundle, liveVersion }), [bundle, liveVersion]);
   const supporting = useMemo(
     () =>
       model
@@ -237,7 +226,7 @@ export function ProcessPage({
             ) : (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2.5 py-0.5 text-xs font-medium">
                 <i aria-hidden className="size-1.5 rounded-full bg-accent" />
-                {unpublished ? "Viewing the draft · not published yet" : `Viewing live · version ${liveVersion}`}
+                {unpublished ? "Draft, not published yet" : `Version ${liveVersion}`}
               </span>
             )}
             {rating && (
@@ -273,11 +262,10 @@ export function ProcessPage({
           </div>
         </header>
 
-        {(notice || bundle.process.kind === "servicing" || error || gaps.length > 0) && (
+        {(notice || error || gaps.length > 0) && (
           <div className="flex flex-col gap-2">
             <Fragment key="notice">{notice}</Fragment>
             <MissingForSimulation gaps={gaps} onSelectStep={showGapStep} settingsHref={settingsHref} />
-            {bundle.process.kind === "servicing" && <ServicingBanner bundle={bundle} settingsHref={settingsHref} />}
             {error && (
               <Alert className="border-crit bg-crit-soft">
                 <AlertDescription className="text-fg">This process can&apos;t be simulated yet: {error}.</AlertDescription>
@@ -324,6 +312,7 @@ export function ProcessPage({
             bundle={bundle}
             result={result}
             savedLabel="Saved"
+            defaultLanes
             openIssues={issuesUi.openIssues}
             rating={issuesUi.rating}
             stepExtras={issuesUi.stepExtras}

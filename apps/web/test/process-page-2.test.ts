@@ -4,11 +4,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { simulate, type EngineModel, type EngineStep } from "@transpera-flow/engine";
-import type { IssueRow, SolutionIssueRow, SolutionRow, StepRow } from "@transpera-flow/db";
+import type { IssueRow, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
 import { AboutProcess } from "@/components/about-process";
 import { IssueTrackView } from "@/components/issue-track";
 import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
-import { aboutLine, citedNumbers, type About } from "@/lib/process-page/about";
+import { aboutLine, type About } from "@/lib/process-page/about";
 import { cycleSpread, keyPersonRows, loopRows, timeSplitRows } from "@/lib/process-page/supporting";
 import { linkedSolutions, otherImprovements, trackOf, TRACK_STAGES } from "@/lib/process-page/track";
 
@@ -120,55 +120,28 @@ describe("the issue status track", () => {
 });
 
 describe("About this process", () => {
-  const about: About = {
-    type: "Pipeline",
-    steps: 6,
-    roles: 3,
-    trail: ["Sales"],
-    version: 4,
-    draft: true,
-    sources: 2,
-    cited: { cited: 3, of: 4 },
-    lastChange: { at: "2026-09-29T10:00:00Z", by: "Maya Collins" },
-  };
-  it("reads as plain attributes", () => {
+  const about: About = { type: "Pipeline", steps: 6, roles: 3, version: 4 };
+  it("reads as plain attributes, with the version as a bare number", () => {
     expect(aboutLine(about)).toEqual([
       { label: "Type", value: "Pipeline" },
       { label: "Size", value: "6 steps, 3 roles" },
-      { label: "On the company map", value: "Inside Sales" },
-      { label: "Version", value: "Live is version 4, draft open" },
-      { label: "Sources", value: "2 sources, 3 of 4 step numbers cited" },
-      { label: "Last published", value: "29 Sep 2026 by Maya Collins" },
+      { label: "Version", value: "4" },
     ]);
   });
-  it("says so when things are missing", () => {
-    const rows = aboutLine({ ...about, trail: [], version: null, draft: false, sources: 0, cited: null, lastChange: null, steps: 1, roles: 1 });
-    expect(rows.map((r) => r.value)).toEqual(["Pipeline", "1 step, 1 role", "Top level", "Not published yet", "None linked", "Not published yet"]);
-    expect(aboutLine({ ...about, sources: null }).some((r) => r.label === "Sources")).toBe(false);
-    expect(aboutLine({ ...about, lastChange: null }).at(-1)).toEqual({ label: "Last published", value: "Not recorded" });
+  it("says so when there is no live version", () => {
+    const rows = aboutLine({ ...about, version: null, steps: 1, roles: 1 });
+    expect(rows.map((r) => r.value)).toEqual(["Pipeline", "1 step, 1 role", "Not published yet"]);
   });
-  it("counts cited step numbers out of all of them, whether or not an origin is recorded", () => {
-    const st = (id: string, provenance: StepRow["provenance"] = {}, kind: StepRow["kind"] = "task") => ({ id, kind, child_process_id: null, provenance });
-    expect(citedNumbers([], [])).toBeNull();
-    // Ten steps carry thirty numbers; one has a cited source: 1 of 30.
-    const ten = Array.from({ length: 10 }, (_, i) => st(`s${i}`, i === 0 ? { work_hours: { source: "entered", evidence: [{ source_id: "s", quote: "q" } as never] } } : {}));
-    expect(citedNumbers(ten, [])).toEqual({ cited: 1, of: 30 });
-    // Measured data counts; an estimate or an empty list of evidence does not; start and end steps carry no numbers.
-    const mixed = [
-      st("a", { work_hours: { source: "measured" }, wait_hours: { source: "estimated" }, rework_rate: { source: "entered", evidence: [] } }),
-      st("start", {}, "start"),
-      st("end", {}, "end"),
-    ];
-    expect(citedNumbers(mixed, [])).toEqual({ cited: 1, of: 3 });
-    // A step with two ways out also counts its branch odds.
-    const split = [st("a", { branch_odds: { source: "measured" } })];
-    expect(citedNumbers(split, [{ from_step_id: "a" }, { from_step_id: "a" }])).toEqual({ cited: 1, of: 4 });
-    expect(citedNumbers(split, [{ from_step_id: "a" }])).toEqual({ cited: 0, of: 3 });
+  it("no longer shows the company map trail, sources or last published", () => {
+    const labels = aboutLine(about).map((r) => r.label);
+    expect(labels).not.toContain("On the company map");
+    expect(labels).not.toContain("Sources");
+    expect(labels).not.toContain("Last published");
   });
   it("renders in a labelled section with no (i)", () => {
     const html = renderToStaticMarkup(createElement(AboutProcess, { about }));
     expect(html).toContain("About this process");
-    expect(html).toContain("Live is version 4, draft open");
+    expect(html).toContain("Version");
     expect(read("components/about-process.tsx")).not.toContain("<Help");
   });
 });

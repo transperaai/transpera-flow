@@ -32,9 +32,10 @@ export function ProcessesPage({
   hrefs: Record<string, string>;
   /**
    * The company map button. `edit` is the Editor, for a workspace with nothing published yet (there is nothing to read at the
-   * Overview): editors only, and it changes things, so a phone doesn't show it. Omit it to show no button.
+   * Overview): editors only, and it changes things, so a phone doesn't show it. Omit it to show no button. `editHref` is the
+   * Editor again, for editors once something is published: it sits beside the Company map button, to make a new version.
    */
-  companyMap?: { href: string; edit: boolean };
+  companyMap?: { href: string; edit: boolean; editHref?: string };
   /** The company map's History page: a button beside Company map. Omit it when the map has no published version. */
   companyHistoryHref?: string;
   loadCard: (processId: string) => Promise<ProcessCardData | null>;
@@ -63,11 +64,18 @@ export function ProcessesPage({
                 <Link href={companyMap.href}>✎ Edit company map</Link>
               </Button>
             ) : (
-              <Button variant="outline" asChild>
-                <Link href={companyMap.href}>
-                  <Network /> Company map
-                </Link>
-              </Button>
+              <>
+                <Button variant="outline" asChild>
+                  <Link href={companyMap.href}>
+                    <Network /> Company map
+                  </Link>
+                </Button>
+                {companyMap.editHref && (
+                  <Button asChild className={`bg-edit text-edit-fg hover:bg-edit/90 ${EDIT_ONLY}`} data-edit-entry data-edit-company-map>
+                    <Link href={companyMap.editHref}>✎ Edit company map</Link>
+                  </Button>
+                )}
+              </>
             ))}
           {companyHistoryHref && (
             <Button variant="outline" asChild>

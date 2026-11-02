@@ -274,6 +274,23 @@ describe("a step's detail", () => {
   }, 60_000);
 });
 
+describe("swimlanes on a read-only process map", () => {
+  it("shows the role lanes at once when the map opens in lane view, as the process page does", async () => {
+    const page = await mount({ lanes: true });
+    await page.waitForSelector("[data-lane]");
+    expect(await page.locator("[data-lane]").evaluateAll((els) => els.map((e) => e.getAttribute("data-lane")))).toEqual(["Sales", "Strategist", "Account manager", "SEO specialist", "PPC specialist", "No role"]);
+    expect(await page.getByRole("button", { name: "Swimlanes" }).getAttribute("aria-pressed")).toBe("true");
+    await page.close();
+  }, 60_000);
+
+  it("stays in the free layout when not asked for lanes", async () => {
+    const page = await mount();
+    await page.waitForSelector(".react-flow__node");
+    expect(await page.locator("[data-lane]").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+});
+
 describe("a step linked from another page (?step=<id>)", () => {
   it("opens that step's detail at once, with its base values read only for a viewer", async () => {
     const audit = (await (await mount()).evaluate(() => window.mapIds.audit)) as string;

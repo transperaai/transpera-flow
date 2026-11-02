@@ -19,11 +19,12 @@ export default async function WorkspaceProcessesPage(props: PageProps<"/w/[slug]
   const [{ rows, archived }, canEdit] = await Promise.all([loadProcessesAndArchived(workspace.id), canEditWorkspace(workspace.id)]);
   const base = `/w/${slug}`;
   // With nothing published the Overview is the start page, which has no map to read: editors go to the company map's Editor (and
-  // come back here), and members and viewers get no button (issue #243).
+  // come back here), and members and viewers get no button (issue #243). Once something is published, everyone reads the map at
+  // the Overview and editors also get the Editor beside it, to make a new company map version.
   const published = rows.some((r) => r.version !== null);
   const anyCompanyId = await loadCompanyId(workspace.id);
-  const companyId = !published && canEdit ? anyCompanyId : null;
-  const companyMap = published ? { href: base, edit: false } : companyId ? { href: `${base}/p/${companyId}/edit?from=${encodeURIComponent(`${base}/processes`)}`, edit: true } : undefined;
+  const editHref = canEdit && anyCompanyId ? `${base}/p/${anyCompanyId}/edit?from=${encodeURIComponent(`${base}/processes`)}` : undefined;
+  const companyMap = published ? { href: base, edit: false, editHref } : editHref ? { href: editHref, edit: true } : undefined;
   return (
     <ProcessesPage
       rows={rows}

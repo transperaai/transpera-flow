@@ -922,6 +922,8 @@ interface CanvasProps {
   playbackRollUp?: boolean;
   /** Offer the swimlane view (when the map has no groups). Default true. */
   showLanes?: boolean;
+  /** Start in the swimlane view (a read-only process map shows its lanes at once). Default false: the toggle turns them on. */
+  defaultLanes?: boolean;
   /**
    * `fill`: as tall as the space it is given (the editor). `auto`: as tall as the map needs, from 16 to 40 rem,
    * so a small map doesn't sit in a tall empty panel. Default `auto` when read-only, `fill` when editable.
@@ -993,6 +995,7 @@ function Canvas({
   playbackAbove = false,
   playbackRollUp = false,
   showLanes = true,
+  defaultLanes = false,
   height: heightProp,
   onStepClick,
   stepDetail = true,
@@ -1094,7 +1097,7 @@ function Canvas({
       viewRef.current = null;
     };
   }, [viewRef, flow, measured, diff]);
-  const [lanes, setLanes] = useState(false);
+  const [lanes, setLanes] = useState(defaultLanes && showLanes);
   const [editing, setEditing] = useState<{ id: string; field: InlineField } | null>(null);
   const [menu, setMenu] = useState<(MenuState & { bounds: { width: number; height: number } }) | null>(null);
   // Which step's menu is open, synchronously, so the context-menu event that follows Shift+F10 doesn't reopen it.
@@ -1878,6 +1881,7 @@ function LaneLayer({ lanes }: { lanes: Lane[] }) {
         {lanes.map((lane, i) => (
           <div
             key={lane.key}
+            data-lane={lane.label}
             className={`absolute border-b border-line ${i % 2 ? "bg-panel" : "bg-panel-2/60"} ${i === 0 ? "border-t" : ""}`}
             style={{ left: lane.x, top: lane.y, width: lane.width, height: lane.height }}
           >
