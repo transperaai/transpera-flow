@@ -23,6 +23,7 @@
 import { randomUUID } from "node:crypto";
 import { capacityModel, type EngineStep, type Recurrence, type TierDeliverables } from "@transpera-flow/engine";
 import { applyCapacityStarter, type Queryable } from "../capacity-starter";
+import { DEFAULT_PURPOSES, parsePurposes, type PurposeCategory } from "../purposes";
 
 /** The prototype's `both`: counted clients who take both departments' services, by tier. */
 export const EXAMPLE_BOTH: Record<string, number> = { T1: 1, T2: 5, T3: 8 };
@@ -56,6 +57,43 @@ const PERSON_EXTRAS: Record<string, { salary: number; title: string; label?: "co
   michaela: { salary: 6500, title: "Performance Specialist" },
   liam: { salary: 7500, title: "Conversion Tracking Specialist" },
   sales: { salary: 8000, title: "Sales lead" },
+};
+
+/**
+ * What the example's steps achieve (Q1 item 19). The engine fixture gives each step a free-text purpose from the prototype ("Client meetings", "Content",
+ * "Links"); the database only stores a key of the workspace's category list, so the loader used to drop them and every servicing step fell to
+ * Automatic, "Moves the client's job forward": one bucket, and a skewed "What the time achieves". Now the example workspace gets four categories
+ * of its own beside the seven defaults, and every free-text purpose maps to one category.
+ */
+export const EXAMPLE_PURPOSES: PurposeCategory[] = [
+  ...DEFAULT_PURPOSES.map((p) => ({ ...p })),
+  { key: "c0000c001", name: "Content", description: "Briefs, writing and editing." },
+  { key: "c0000c002", name: "Links", description: "Outreach, vetting and link admin." },
+  { key: "c0000c003", name: "Technical", description: "Technical tickets and tracking fixes." },
+  { key: "c0000c004", name: "Reporting and strategy", description: "Monthly reports and strategy reviews." },
+];
+
+/** The example workspace's category list, checked by the same rules the database applies. */
+export function examplePurposes(): PurposeCategory[] {
+  const parsed = parsePurposes(EXAMPLE_PURPOSES);
+  if (!parsed.ok) throw new Error(parsed.error);
+  return parsed.purposes;
+}
+
+/** The category key of an example step's free-text purpose. */
+export const EXAMPLE_PURPOSE_KEY: Record<string, string> = {
+  "Client meetings": "coordination",
+  "Account management": "coordination",
+  "Ad hoc": "coordination",
+  Content: "c0000c001",
+  Links: "c0000c002",
+  Technical: "c0000c003",
+  Reporting: "c0000c004",
+  Strategy: "c0000c004",
+  Pacing: "client_job",
+  Optimisation: "client_job",
+  Implementation: "client_job",
+  Creative: "client_job",
 };
 
 /** The starter's department names, by the model's department key. */
@@ -130,7 +168,7 @@ export async function loadCapacityExample(db: Queryable, workspaceId: string, to
   // ---- settings, demand, "taking both" and tenure ------------------------------------------------------------------------------------
   await db.query(
     `update public.workspaces set settings = settings || $2::jsonb where id = $1`,
-    [workspaceId, JSON.stringify({ hours_per_week: model.hoursPerWeek, horizon_weeks: model.horizonWeeks, churn_monthly: model.churnMonthly, retainer: model.retainer, active_clients: 0, capacity_factor_enabled: true })],
+    [workspaceId, JSON.stringify({ hours_per_week: model.hoursPerWeek, horizon_weeks: model.horizonWeeks, churn_monthly: model.churnMonthly, retainer: model.retainer, active_clients: 0, capacity_factor_enabled: true, purposes: examplePurposes() })],
   );
   await db.query("insert into public.lead_sources (workspace_id, name, volume_week, conversion_to_qualified) values ($1, 'Leads', $2, 1)", [workspaceId, round(model.leadsPerWeek)]);
   for (const [key, n] of Object.entries(EXAMPLE_BOTH)) await db.query("update public.tiers set both_count = $3 where workspace_id = $1 and key = $2", [workspaceId, key, n]);
@@ -201,6 +239,9 @@ export async function loadCapacityExample(db: Queryable, workspaceId: string, to
          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, $13${more.marks})`,
         [id, revisionId, workspaceId, processId, label, kindOf, extra.outcome ?? null, extra.role ?? null, extra.person ?? null, extra.work ?? 0, extra.wait ?? 0, x, y, ...more.values],
       );
+      // What it achieves: the example's free-text purpose, as the category it maps to (Q1 item 19).
+      const purpose = extra.base?.purpose ? EXAMPLE_PURPOSE_KEY[extra.base.purpose] : undefined;
+      if (purpose) await db.query("update public.steps set purpose = $2 where id = $1", [id, purpose]);
       steps++;
     };
     await insertStep(startId, "Start", "start", 40, 60);

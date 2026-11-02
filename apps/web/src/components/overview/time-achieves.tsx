@@ -13,11 +13,16 @@ import { timelineMonths } from "@/lib/forecast/timeline";
 import { timeView } from "@/lib/sandbox/time";
 
 export function TimeAchieves({ monthly, hoursPerWeek, start, categories, sandboxHref, span }: { monthly: MonthlyResult; hoursPerWeek: number; start: string; categories: readonly PurposeCategory[]; sandboxHref?: string; span: string }) {
-  const view = useMemo(() => timeView(monthly, timelineMonths(start, monthly.months, hoursPerWeek), categories, { kind: "team" }), [monthly, hoursPerWeek, start, categories]);
+  // Categories biggest first (so the biggest sits at the foot of every bar and leads the legend), then Idle, then work nobody was there for.
+  const view = useMemo(() => {
+    const v = timeView(monthly, timelineMonths(start, monthly.months, hoursPerWeek), categories, { kind: "team" });
+    const rank = (r: (typeof v.rows)[number]) => (r.kind === "uncovered" ? 2 : r.kind === "idle" ? 1 : 0);
+    return { ...v, rows: [...v.rows].sort((a, b) => rank(a) - rank(b) || (rank(a) === 0 ? b.runShare - a.runShare : 0)) };
+  }, [monthly, hoursPerWeek, start, categories]);
   if (!view.total.some((t) => t.mean > 0)) return <p className="text-sm text-muted-foreground" data-empty>The team has no hours in this run.</p>;
   return (
     <div className="flex flex-col gap-3" data-time-achieves>
-      <TimeLegend rows={view.rows} />
+      <TimeLegend rows={view.rows} shares />
       <TimeChart view={view} label={`What the team's time achieves each month over the next ${span}: ${view.rows.filter((r) => r.runShare > 0).map((r) => `${r.name} ${formatPercent(r.runShare)}`).join(", ")}.`} />
       {sandboxHref ? (
         <p className="text-xs text-muted-foreground">

@@ -224,3 +224,26 @@ describe("what a change anchored to an issue frees (P8)", () => {
     expect(f.moreClients).toBeGreaterThanOrEqual(0);
   }, 300_000);
 });
+
+describe("what the example's steps achieve (Q1 item 19)", () => {
+  it("gives the workspace the example's categories and every servicing step one of them (the free-text purposes were dropped before)", async () => {
+    const settings = (await q("select settings from workspaces where id = $1", [ws]))[0]!.settings as { purposes: { key: string; name: string }[] };
+    expect(settings.purposes.map((p) => p.name)).toEqual(expect.arrayContaining(["Content", "Links", "Technical", "Reporting and strategy", "Coordination", "Moves the client's job forward"]));
+    const listed = new Set(settings.purposes.map((p) => p.key));
+    const rows = await q("select s.purpose from steps s join processes p on p.id = s.process_id where s.workspace_id = $1 and p.kind = 'servicing' and s.kind = 'task'", [ws]);
+    expect(rows.length).toBeGreaterThan(20);
+    for (const r of rows) expect(listed.has(String(r.purpose)), String(r.purpose)).toBe(true);
+    expect(new Set(rows.map((r) => r.purpose)).size).toBeGreaterThanOrEqual(6);
+  });
+
+  it("spreads the team's work over several categories, none of them most of it", async () => {
+    const pipeline = (await q("select id from processes where workspace_id = $1 and kind = 'pipeline' and is_company is not true", [ws]))[0]!.id as string;
+    const bundle = (await loadProcessBySlug(dbAs, SLUG, { draft: false, processId: pipeline }))!.live;
+    const m = toEngineModel(bundle, { startDate: TODAY, planned: true, purposes: true });
+    const hours: Record<string, number> = {};
+    for (const s of m.steps) hours[s.purpose ?? "none"] = (hours[s.purpose ?? "none"] ?? 0) + s.work;
+    const total = Object.values(hours).reduce((a, b) => a + b, 0);
+    expect(Object.keys(hours).length).toBeGreaterThanOrEqual(6);
+    expect(Math.max(...Object.values(hours)) / total).toBeLessThan(0.5);
+  });
+});
