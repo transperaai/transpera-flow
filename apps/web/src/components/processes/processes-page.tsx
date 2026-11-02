@@ -20,6 +20,7 @@ export function ProcessesPage({
   rows,
   hrefs,
   companyMap,
+  companyHistoryHref,
   loadCard,
   create,
   upload,
@@ -35,6 +36,8 @@ export function ProcessesPage({
    * Editor again, for editors once something is published: it sits beside the Company map button, to make a new version.
    */
   companyMap?: { href: string; edit: boolean; editHref?: string };
+  /** The company map's History page: a button beside Company map. Omit it when the map has no published version. */
+  companyHistoryHref?: string;
   loadCard: (processId: string) => Promise<ProcessCardData | null>;
   /** Start a process (signed-in editors only). */
   create?: CreateProcess;
@@ -74,6 +77,13 @@ export function ProcessesPage({
                 )}
               </>
             ))}
+          {companyHistoryHref && (
+            <Button variant="outline" asChild>
+              <Link href={companyHistoryHref} data-company-history>
+                History
+              </Link>
+            </Button>
+          )}
           {upload && <UploadProcessButton upload={upload} />}
           {create && <NewProcessButton create={create} />}
         </>

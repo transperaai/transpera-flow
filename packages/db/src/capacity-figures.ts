@@ -273,6 +273,35 @@ export interface DepartmentCeiling {
   perPerson: Record<string, { max: number; canTake: number; clients: number }>;
 }
 
+export type RoomStatus = "Plenty of room" | "Some room" | "Tight" | "Full";
+
+export interface RoomPulse {
+  status: RoomStatus;
+  tone: "ok" | "warn" | "bad";
+  /** Room rounded for talking about: the nearest 5 from 10 up, else the nearest whole client. */
+  approx: number;
+  /** "about 15 more clients"; empty when full. */
+  words: string;
+}
+
+/**
+ * Room for more clients as a pulse check (Q1 item 15), not a fact: a status word from the room as a share of today's clients (plenty from
+ * 20%, some from 5%, tight above 0, full at 0), with the figure rounded to the nearest 5 once it is 10 or more.
+ */
+export function roomPulse(room: number, clients: number): RoomPulse {
+  const whole = Math.max(0, Math.floor(room));
+  const approx = whole >= 10 ? Math.round(whole / 5) * 5 : whole;
+  if (whole < 1) return { status: "Full", tone: "bad", approx: 0, words: "" };
+  const share = clients > 0 ? whole / clients : 1;
+  const status: RoomStatus = share >= 0.2 ? "Plenty of room" : share >= 0.05 ? "Some room" : "Tight";
+  return { status, tone: status === "Tight" ? "warn" : "ok", approx, words: `about ${approx} more ${approx === 1 ? "client" : "clients"}` };
+}
+
+/** What stops a department taking more clients, in words: "its client managers", or the team's name. */
+export function limitedBy(limit: string): string {
+  return limit === "Client-facing people" ? "client managers" : limit;
+}
+
 /** The share of a department's wins that go to each of its tier services (the services' `mixShare`, normalised; equal when none is set). */
 export function winMix(setup: CapacitySetup, model: EngineModel, departmentId: string): Record<string, number> {
   const ids = setup.services.filter((s) => s.active && s.department_id === departmentId && s.tier_id && model.services?.[s.id]).map((s) => s.id);
@@ -334,12 +363,14 @@ export function serviceLines(setup: CapacitySetup): ServiceLines {
 export interface DlerRow {
   departmentId: string | null;
   name: string;
-  /** Retainers a month. */
+  /** Retainers a month credited to the people averaged. */
   retainers: number;
-  /** Salaries a month; null when the viewer can't see pay. */
-  salaries: number | null;
-  /** Retainers ÷ salaries; null when salaries are hidden or zero. No ":1". */
+  /** How many people's DLER the average is over (client-facing, salary entered, contractors out). */
+  people: number;
+  /** The average of those people's DLER (D40); null when pay is hidden or nobody qualifies. No ":1". */
   ratio: number | null;
+  /** The viewer can't see pay, so no ratio is worked out. */
+  hidden: boolean;
 }
 
 /** The department a named client's fee counts under: its manager's, else its first service's. */
@@ -371,26 +402,77 @@ function inDler(setup: CapacitySetup, p: SetupPerson, role: SetupRole | null): b
 }
 
 /**
- * DLER: retainers ÷ salaries, per department and for the whole business (all retainers ÷ all salaries of the departments). Directors and heads are in
- * only when `dler_includes_leadership` is on; contractors never. Where pay is hidden the salaries and ratios are null.
+ * What each client-facing person's clients pay a month (D40): the fee of every client they manage.
+ * - A named client's fee goes to the person who looks after it in the client-facing role of each service's department. A client taking
+ *   both services counts each service's share of its fee with that service's manager (split by the services' tier fees; equally when
+ *   they have none).
+ * - Counted clients: the person's portfolio count × the tier's fee.
  */
-export function dler(setup: CapacitySetup): { departments: DlerRow[]; whole: DlerRow } {
+export function personFees(setup: CapacitySetup): Map<string, number> {
+  const { roleById } = lookups(setup);
+  const fees = new Map<string, number>();
+  const add = (id: string, v: number) => fees.set(id, (fees.get(id) ?? 0) + v);
+  for (const r of setup.portfolio) {
+    const svc = setup.services.find((x) => x.id === r.service_id);
+    if (svc?.active && svc.tier_id) add(r.person_id, r.client_count * svc.price);
+  }
+  for (const c of setup.clients) {
+    if (!c.active) continue;
+    const svcs = setup.services.filter((x) => x.active && x.tier_id && c.service_ids.includes(x.id));
+    if (!svcs.length) continue;
+    const total = svcs.reduce((a, x) => a + x.price, 0);
+    for (const svc of svcs) {
+      const managerRole = Object.keys(c.assignments).find((rid) => {
+        const role = roleById.get(rid);
+        return role?.kind === "client_facing" && role.department_id === svc.department_id;
+      });
+      const manager = managerRole ? c.assignments[managerRole] : undefined;
+      if (manager) add(manager, total > 0 ? (c.mrr * svc.price) / total : c.mrr / svcs.length);
+    }
+  }
+  return fees;
+}
+
+/**
+ * DLER (D40, amending D9 and D24): the average of each client-facing person's DLER. A person's DLER is the monthly retainers of the
+ * clients they manage (`personFees`) ÷ their monthly salary. A department's is the mean over its client-facing people; the whole business's is
+ * the mean over all of them. People with no salary entered and contractors are left out; directors are in only when
+ * `dler_includes_leadership` is on. Where pay is hidden the ratios are null.
+ *
+ * `retainers` (the Sandbox): the retainers a month each department takes in a month of a run, in place of today's. A department's pool is
+ * shared among its people in proportion to the fees they manage today (a hire or anyone with none takes the department's average share),
+ * so a leaver's clients and a hire's work move the average the way the run says.
+ */
+export function dler(setup: CapacitySetup, retainers?: Record<string, number>): { departments: DlerRow[]; whole: DlerRow } {
   const { personRole, deptOf } = lookups(setup);
-  const row = (departmentId: string | null, name: string, retainers: number, ps: SetupPerson[]): DlerRow => {
-    const salaries = setup.payHidden ? null : ps.reduce((s, p) => s + (p.salary_monthly ?? 0), 0);
-    return { departmentId, name, retainers, salaries, ratio: salaries && salaries > 0 ? retainers / salaries : null };
+  const fees = personFees(setup);
+  type Member = { dept: string; fee: number; salary: number };
+  const members: Member[] = [];
+  for (const p of activePeople(setup)) {
+    const role = personRole(p);
+    const dept = deptOf(p);
+    if (!dept || role?.kind !== "client_facing" || !inDler(setup, p, role)) continue;
+    const salary = p.salary_monthly;
+    if (!setup.payHidden && !(salary !== null && salary > 0)) continue;
+    members.push({ dept, fee: fees.get(p.id) ?? 0, salary: salary ?? 0 });
+  }
+  const hidden = setup.payHidden;
+  // Each member's fee this month: their own, or their share of the department's pool from the run.
+  const feeOf = (m: Member, mine: Member[]): number => {
+    const pool = retainers?.[m.dept];
+    if (pool === undefined) return m.fee;
+    const mean = mine.reduce((a, x) => a + x.fee, 0) / (mine.length || 1);
+    const weight = (x: Member) => (x.fee > 0 ? x.fee : mean);
+    const sum = mine.reduce((a, x) => a + weight(x), 0);
+    return sum > 0 ? (pool * weight(m)) / sum : pool / (mine.length || 1);
   };
-  const departments = setup.departments.map((d) =>
-    row(
-      d.id,
-      d.name,
-      departmentRetainers(setup, d.id),
-      activePeople(setup).filter((p) => deptOf(p) === d.id && inDler(setup, p, personRole(p))),
-    ),
-  );
-  const retainers = departments.reduce((s, d) => s + d.retainers, 0);
-  const salaries = setup.payHidden ? null : departments.reduce((s, d) => s + (d.salaries ?? 0), 0);
-  return { departments, whole: { departmentId: null, name: "Whole business", retainers, salaries, ratio: salaries && salaries > 0 ? retainers / salaries : null } };
+  const row = (departmentId: string | null, name: string, ms: Member[]): DlerRow => {
+    const fee = ms.map((m) => feeOf(m, members.filter((x) => x.dept === m.dept)));
+    const ratios = hidden ? [] : ms.map((m, k) => fee[k]! / m.salary);
+    return { departmentId, name, retainers: fee.reduce((a, b) => a + b, 0), people: ms.length, ratio: ratios.length ? ratios.reduce((a, b) => a + b, 0) / ratios.length : null, hidden };
+  };
+  const departments = setup.departments.map((d) => row(d.id, d.name, members.filter((m) => m.dept === d.id)));
+  return { departments, whole: row(null, "Whole business", members) };
 }
 
 export interface PerEmployee {
@@ -667,7 +749,8 @@ export function dlerSalariesMissing(setup: CapacitySetup, departmentId: string |
   return activePeople(setup).some((p) => {
     const d = deptOf(p);
     if (!d || (departmentId !== null && d !== departmentId)) return false;
-    return inDler(setup, p, personRole(p)) && p.salary_monthly === null;
+    const role = personRole(p);
+    return role?.kind === "client_facing" && inDler(setup, p, role) && p.salary_monthly === null;
   });
 }
 
@@ -677,11 +760,27 @@ export interface DepartmentTimePart {
   share: number;
 }
 
+/** The process each step of the model is in, by step id: a servicing process's own name; steps outside any (the sales pipeline) are "Sales". */
+export function modelProcessOfStep(model: EngineModel): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const p of Object.values(model.servicingProcesses ?? {})) for (const id of p.steps) out.set(id, p.name);
+  for (const s of model.steps) if (!out.has(s.id)) out.set(s.id, "Sales");
+  return out;
+}
+
 /**
- * Where a department's time goes (hours a month, from the run): every step hour its people spend, grouped by the step's purpose.
- * `names` turns a purpose key into the words the workspace uses; hand-holding is its own part.
+ * Where a department's time goes (hours a month, from the run): every step hour its people spend, grouped by the step's purpose
+ * (default) or by the process the step is in (`by: { processOfStep }`, using the process names). `names` turns a purpose key into the words
+ * the workspace uses; hand-holding is its own part either way.
  */
-export function departmentTime(setup: CapacitySetup, model: EngineModel, result: SimulationResult, departmentId: string, names: Record<string, string> = {}): { total: number; parts: DepartmentTimePart[] } {
+export function departmentTime(
+  setup: CapacitySetup,
+  model: EngineModel,
+  result: SimulationResult,
+  departmentId: string,
+  names: Record<string, string> = {},
+  by?: { processOfStep: ReadonlyMap<string, string> },
+): { total: number; parts: DepartmentTimePart[] } {
   const { deptOf } = lookups(setup);
   const purposeOf = new Map(model.steps.map((s) => [s.id, s.purpose?.trim() || "Other"]));
   const hours: Record<string, number> = {};
@@ -690,8 +789,7 @@ export function departmentTime(setup: CapacitySetup, model: EngineModel, result:
     if (deptOf(p) !== departmentId) continue;
     for (const [stepId, h] of Object.entries(result.personTime?.stepHours[p.id] ?? {})) {
       if (!(h > 0)) continue;
-      const key = stepId === "hand" ? "Hand-holding" : (purposeOf.get(stepId) ?? "Other");
-      const name = names[key] ?? key;
+      const name = stepId === "hand" ? "Hand-holding" : by ? (by.processOfStep.get(stepId) ?? "Other") : (names[purposeOf.get(stepId) ?? "Other"] ?? purposeOf.get(stepId) ?? "Other");
       hours[name] = (hours[name] ?? 0) + h;
       total += h;
     }
@@ -707,7 +805,7 @@ export interface WholeBusiness {
   employees: number;
   /** All retainers a month ÷ all employees (D22's definition of an employee). */
   revenuePerEmployee: number | null;
-  /** All retainers ÷ all salaries. */
+  /** The average of every client-facing person's DLER (D40). */
   dler: DlerRow;
 }
 
@@ -721,7 +819,7 @@ export function wholeBusiness(setup: CapacitySetup): WholeBusiness {
     byDepartment: lines.byDepartment.map((d) => ({ name: d.name, clients: d.clients })),
     both: lines.both,
     employees,
-    revenuePerEmployee: employees > 0 ? dl.retainers / employees : null,
+    revenuePerEmployee: employees > 0 ? setup.departments.reduce((a, d) => a + departmentRetainers(setup, d.id), 0) / employees : null,
     dler: dl,
   };
 }

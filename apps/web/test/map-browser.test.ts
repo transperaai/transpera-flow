@@ -171,6 +171,50 @@ describe("group tiles (issue #242)", () => {
   }, 60_000);
 });
 
+/** Every node's box lies inside the map's panel (the pane React Flow draws in), within a pixel. */
+const outsidePanel = (page: Page) =>
+  page.evaluate(() => {
+    const pane = document.querySelector(".react-flow")!.getBoundingClientRect();
+    return [...document.querySelectorAll(".react-flow__node")].flatMap((e) => {
+      const r = e.getBoundingClientRect();
+      const inside = r.left >= pane.left - 1 && r.right <= pane.right + 1 && r.top >= pane.top - 1 && r.bottom <= pane.bottom + 1;
+      return inside ? [] : [`${e.getAttribute("data-id")}`];
+    });
+  });
+
+describe("Fit (Q1 item 11)", () => {
+  it("brings every node into view with all the groups open and nested, in a narrow panel", async () => {
+    const page = await mount({ nested: true, controlled: true, card: true }, 480);
+    await page.getByRole("button", { name: "Expand all" }).click();
+    await page.waitForFunction(() => window.mapApi.getOpen().length === 2);
+    await settled(page);
+    // Move the view away by hand, then Fit.
+    await page.getByRole("button", { name: /^Zoom in|^\+$/ }).first().click().catch(() => undefined);
+    await page.getByRole("button", { name: "Fit", exact: true }).click();
+    await page.waitForTimeout(700);
+    await settled(page);
+    expect(await page.locator(".react-flow__node").count()).toBeGreaterThan(5);
+    expect(await outsidePanel(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it("brings every card into view on the company map with every process opened (child processes)", async () => {
+    const page = await mount({ company: true, card: true }, 480);
+    for (let i = 0; i < 6; i++) {
+      const open = page.getByRole("button", { name: /^Expand / });
+      if (!(await open.count())) break;
+      await open.first().click();
+      await page.waitForTimeout(150);
+    }
+    await settled(page);
+    await page.getByRole("button", { name: "Fit", exact: true }).click();
+    await page.waitForTimeout(700);
+    await settled(page);
+    expect(await outsidePanel(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
+});
+
 describe("open groups and highlight", () => {
   it("keeps open groups in the state it is given, and follows that state", async () => {
     const page = await mount({ nested: true, controlled: true });

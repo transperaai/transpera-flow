@@ -91,7 +91,8 @@ window.mountOverview = () =>
         startDate={DEMO_FORECAST_START}
         hrefs={{}}
         processesHref="/processes"
-        issuesHref="/issues"
+        forecastHref="/sandbox"
+        companyHistoryHref="/w/x/p/company/history"
       />
     </SidebarProvider>,
   );

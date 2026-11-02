@@ -2,13 +2,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { northbeamBundle, northbeamIssues, partOf, toEngineModel, type IssueRow, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
-import { RATING_LABELS, ratingOfStored, ratingRank, simulate, type DetectedIssue, type EngineModel, type Rating, type SimulationResult } from "@transpera-flow/engine";
-import { ProcessGroups, countsLine } from "@/components/overview/process-groups";
-import { BeforeAfterChart, IssuesDonut, OpenedResolvedChart, TimeSplitChart } from "@/components/overview/trend-charts";
+import { ratingOfStored, ratingRank, simulate, type EngineModel, type Rating, type SimulationResult } from "@transpera-flow/engine";
+import { IssuesDonut, TimeSplitChart } from "@/components/overview/trend-charts";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { ratingOfRank } from "@/lib/map/rating";
 import { COMPANY_GROUP, groupByProcess, groupOfFact, groupOfIssue } from "@/lib/overview/by-process";
-import { countByRating, flowEfficiencyWords, monthOf, openIssues, openedVersusResolved, processHealth, timeSplitByProcess, timeSplitOf, workingShare } from "@/lib/overview/health";
+import { countByRating, flowEfficiencyWords, monthOf, openIssues, processHealth, timeSplitByProcess, timeSplitOf, workingShare } from "@/lib/overview/health";
 import { hoursAMonth, impactNumbers, impactPairs, improvementDelivered, measureImpact, solutionsToCompare, type SolutionImpact } from "@/lib/overview/impact";
 import { processRatings } from "@/lib/processes/rows";
 import { playbackRun, rolledUpSteps } from "@/lib/playback/graph";
@@ -127,7 +126,7 @@ describe("open issues", () => {
     expect(h.byRating.map((c) => c.count)).toEqual([2, 1, 0, 0]);
     expect(h).toMatchObject({ notRated: 1, total: 4, attention: 3 });
   });
-  it("takes this month in the time zone given, the same for the card and the chart, around a month's end", () => {
+  it("takes this month in the time zone given, for the card, around a month's end", () => {
     // 23:30 UTC on 31 October: still October in Los Angeles, already November in Auckland.
     const late = [issue({ status: "resolved", severity: "serious", created_at: "2026-10-31T23:30:00Z", resolved_at: "2026-10-31T23:30:00Z" })];
     const now = new Date("2026-11-01T00:10:00Z");
@@ -137,37 +136,6 @@ describe("open issues", () => {
     expect(openIssues(late, now, "America/Los_Angeles").resolvedThisMonth).toBe(1);
     expect(openIssues(late, now, "Europe/London").resolvedThisMonth).toBe(0);
     expect(openIssues(late, now, "Pacific/Auckland").resolvedThisMonth).toBe(1);
-    const la = openedVersusResolved(late, now, 2, "America/Los_Angeles");
-    expect(la.map((m) => [m.month, m.opened, m.resolved])).toEqual([
-      ["2026-09", 0, 0],
-      ["2026-10", 1, 1],
-    ]);
-    const london = openedVersusResolved(late, now, 2, "Europe/London");
-    expect(london.map((m) => [m.month, m.opened, m.resolved])).toEqual([
-      ["2026-10", 1, 1],
-      ["2026-11", 0, 0],
-    ]);
-  });
-});
-
-describe("issues opened versus resolved", () => {
-  it("counts each of the last months, up to this one, by when issues were opened and resolved", () => {
-    const issues = [
-      issue({ created_at: "2026-10-01T00:00:00Z", status: "open" }),
-      issue({ created_at: "2026-08-10T00:00:00Z", status: "resolved", resolved_at: "2026-10-04T00:00:00Z" }),
-      issue({ created_at: "2026-09-10T00:00:00Z", status: "wont_fix", resolved_at: "2026-09-12T00:00:00Z" }),
-      issue({ created_at: "2026-09-11T00:00:00Z", status: "dismissed" }),
-      issue({ created_at: "2025-01-01T00:00:00Z", status: "open" }),
-    ];
-    const months = openedVersusResolved(issues, new Date("2026-10-20T00:00:00Z"), 3, "UTC");
-    expect(months).toEqual([
-      { month: "2026-08", label: "Aug 26", opened: 1, resolved: 0 },
-      { month: "2026-09", label: "Sep", opened: 1, resolved: 0 },
-      { month: "2026-10", label: "Oct", opened: 1, resolved: 1 },
-    ]);
-  });
-  it("marks the year on January", () => {
-    expect(openedVersusResolved([], new Date("2027-02-03T00:00:00Z"), 3, "UTC").map((m) => m.label)).toEqual(["Dec 26", "Jan 27", "Feb"]);
   });
 });
 
@@ -239,13 +207,6 @@ describe("groups by process", () => {
     expect(row.rating).toBe(card);
     const health = processHealth(groups.slice(1).map((g) => g.rating));
     expect(health.byRating.find((c) => c.rating === card)!.count).toBeGreaterThanOrEqual(1);
-    const out = html(createElement(ProcessGroups, { groups, renderItems: () => null }));
-    const at = out.indexOf(`data-process-group="${nb.process.id}"`);
-    expect(out.slice(at, out.indexOf("data-top-issue", at))).toContain(RATING_LABELS[card!]);
-  });
-  it("says a group's counts in words, leaving out zeros", () => {
-    expect(countsLine({ openIssues: 2, solutionsInProgress: 1 })).toBe("2 open issues · 1 solution in progress");
-    expect(countsLine({ openIssues: 0, solutionsInProgress: 0 })).toBe("Nothing open");
   });
 });
 
@@ -382,54 +343,6 @@ describe("the trend charts", () => {
     expect(out).toContain("Waiting on others");
     expect(out).toContain("working");
     expect(html(createElement(TimeSplitChart, { rows: [], months: 3 }))).toContain("No work went through");
-  });
-  it("opened versus resolved: two columns a month, a legend, and an empty note", () => {
-    const months = openedVersusResolved([issue({ created_at: "2026-10-01T00:00:00Z" })], new Date("2026-10-20T00:00:00Z"), 6);
-    const out = html(createElement(OpenedResolvedChart, { months }));
-    expect(out).toContain("Opened");
-    expect(out).toContain("Resolved");
-    expect(out).toContain("Oct 1 opened, 0 resolved");
-    expect(html(createElement(OpenedResolvedChart, { months: openedVersusResolved([], new Date("2026-10-20T00:00:00Z"), 6) }))).toContain("No issues were opened or resolved");
-  });
-  it("before and after: a pair of bars per solution, and how it fills in", () => {
-    const impacts: SolutionImpact[] = [
-      { id: "a", name: "Faster audits", implemented: true, processId: "p", processName: "P", baseRevisionId: "v1", before: { handsOnPerItem: 10, itemsPerMonth: 10, cycleHours: 80 }, after: { handsOnPerItem: 7, itemsPerMonth: 12, cycleHours: 64 } },
-    ];
-    const out = html(createElement(BeforeAfterChart, { impacts, hoursPerWeek: 40 }));
-    expect(out).toContain("Faster audits");
-    expect(out).toContain("Implemented");
-    expect(out).toContain("100 h");
-    expect(out).toContain("70 h");
-    expect(out).toContain("−30 h");
-    expect(html(createElement(BeforeAfterChart, { impacts: [], hoursPerWeek: 40 }))).toContain("No solution has a verdict yet.");
-  });
-});
-
-describe("the by-process tier", () => {
-  it("draws a collapsed row per group, Across the company first", () => {
-    const detected: DetectedIssue[] = rerate(model, result, {}, live.process.id);
-    const groups = groupByProcess({ parts, pipelineId: live.process.id, facts: detected, issues: [], solutions: [] });
-    const out = html(createElement(ProcessGroups, { groups, renderItems: () => "ITEMS" }));
-    expect(out.indexOf("Across the company")).toBeLessThan(out.indexOf(parts[0]!.process.name));
-    expect(out).toContain('aria-expanded="false"');
-    expect(out).not.toContain("ITEMS");
-    // A collapsed row points at no panel; an open one points at its panel.
-    expect(out).not.toContain("aria-controls");
-    const open = html(createElement(ProcessGroups, { groups, renderItems: () => "ITEMS", initiallyOpen: [live.process.id] }));
-    expect(open).toContain("ITEMS");
-    expect(open).toContain(`aria-controls="group-${live.process.id}"`);
-    expect(open).toContain(`id="group-${live.process.id}"`);
-  });
-  it("gives the worst open issue its rating in words, and an open row with nothing open a short line", () => {
-    const groups = groupByProcess({ parts, pipelineId: live.process.id, facts: [], issues: northbeamIssues(), solutions: [] });
-    const withTop = groups.find((g) => g.top)!;
-    const out = html(createElement(ProcessGroups, { groups: [withTop], renderItems: () => "ITEMS" }));
-    const top = out.slice(out.indexOf("data-top-issue"));
-    expect(top.slice(0, top.indexOf(withTop.top!.title))).toContain(RATING_LABELS[withTop.top!.rating]);
-    const empty = { ...withTop, facts: [], issues: [], top: null, openIssues: 0 };
-    const openEmpty = html(createElement(ProcessGroups, { groups: [empty], renderItems: () => "ITEMS", initiallyOpen: [empty.id] }));
-    expect(openEmpty).toContain("Nothing open.");
-    expect(openEmpty).not.toContain("ITEMS");
   });
 });
 

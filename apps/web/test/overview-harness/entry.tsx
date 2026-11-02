@@ -1,22 +1,19 @@
 // The Overview's map tier and by-process tier on a bare page, for ../overview-browser.test.ts (issue #173): the company map
-// with Play and the horizon picker, run for the horizon picked, and the groups by process. Bundled by esbuild and driven
+// with Play and the horizon picker, run for the horizon picked. Bundled by esbuild and driven
 // through `window.mountOverview`; nothing here ships. The simulation runs on the page (a few runs, so the test is quick);
 // the app runs the same model in a worker.
 
 import { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { partOf, toEngineModel } from "@transpera-flow/db";
+import { partOf } from "@transpera-flow/db";
 import { simulate } from "@transpera-flow/engine";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
-import { ProcessGroups } from "@/components/overview/process-groups";
 import { DEMO_FORECAST_START } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
 import { horizonLabel, horizonWeeks } from "@/lib/horizon";
-import { groupByProcess } from "@/lib/overview/by-process";
 import { companyMap } from "@/lib/overview/company-map";
 import { timeSplitOf, workingShare } from "@/lib/overview/health";
-import { rerate } from "@/lib/rules/edit";
 import { demoBundle } from "@/lib/sources/demo";
 
 declare global {
@@ -29,9 +26,6 @@ declare global {
 
 const live = demoBundle();
 const parts = [partOf(live), ...(live.otherProcesses ?? [])];
-const base = toEngineModel(live);
-const baseResult = simulate(base, 3, 1);
-const groups = groupByProcess({ parts, pipelineId: live.process.id, facts: rerate(base, baseResult, {}, live.process.id), issues: [], solutions: [] });
 
 function Harness() {
   const [months, setMonths] = useState(3);
@@ -52,7 +46,7 @@ function Harness() {
       </div>
       <div style={{ display: "flex", flexDirection: "column", height: 520 }}>
         <ProcessCanvas
-          key={[...expanded].sort().join("|")}
+          refitOn={[...expanded].sort().join("|")}
           bundle={map.bundle}
           result={result.result}
           selection={NO_SELECTION}
@@ -65,7 +59,6 @@ function Harness() {
           stepDetail={false}
         />
       </div>
-      <ProcessGroups groups={groups} renderItems={(g) => <ul data-rendered>{g.facts.map((f) => <li key={f.key}>{f.title}</li>)}</ul>} />
     </div>
   );
 }

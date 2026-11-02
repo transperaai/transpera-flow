@@ -2,6 +2,7 @@
 // limit marked, the person chips, the before/after dumbbell and the stack bar. Plain markup with the app's colour tokens (light and dark).
 
 import type { ReactNode } from "react";
+import { roomPulse } from "@transpera-flow/db";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +45,7 @@ export function RoomGauge({ clients, limits, room }: { clients: number; limits: 
   const shown = limits.filter((l) => l.max < clients * 3);
   const top = Math.max(clients, ...shown.map((l) => l.max), 1) * 1.08;
   const x = (v: number) => `${Math.min(100, (v * 100) / top)}%`;
-  const tone: Tone = room < 1 ? "bad" : room < 5 ? "warn" : "ok";
+  const tone: Tone = roomPulse(room, clients).tone;
   return (
     <div data-gauge>
       <div className="relative h-3.5 rounded-full bg-panel-2" role="img" aria-label={`${formatNumber(clients, 0)} clients today. ${shown.map((l) => `${l.name} limit ${formatNumber(l.max, 0)}`).join(". ")}`}>

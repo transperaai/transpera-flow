@@ -7,14 +7,15 @@
 // Capacity costs nothing. Never run on the server.
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   busyShares,
-  DLER_GOAL,
   departmentCeiling,
+  limitedBy,
+  roomPulse,
   departmentTime,
+  modelProcessOfStep,
   dler,
-  dlerSalariesMissing,
   perEmployee,
   serviceLines,
   todayModel,
@@ -23,13 +24,22 @@ import {
   type DlerRow,
 } from "@transpera-flow/db";
 import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
-import { BusyBar, Kpi, Section } from "@/components/capacity/widgets";
+import { BusyBar, Kpi, Section, TONE_TEXT } from "@/components/capacity/widgets";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
 import { useCapacityRuns } from "@/lib/sim/use-capacity-runs";
 
 const f0 = (v: number) => formatNumber(v, 0);
 const f1 = (v: number) => formatNumber(v, 1);
+
+/** What the busy line is: "Busy above 85%", or the range when roles differ: "Busy above 80–85% (each role's line)". Undefined with nobody in the department. */
+export function busyLineNote(lines: readonly number[]): string | undefined {
+  if (!lines.length) return undefined;
+  const pct = (v: number) => Math.round(v * 100);
+  const low = pct(Math.min(...lines));
+  const high = pct(Math.max(...lines));
+  return low === high ? `Busy above ${low}%` : `Busy above ${low}–${high}% (each role's line)`;
+}
 
 export interface DepartmentCardsProps {
   setup: CapacitySetup;
@@ -38,11 +48,13 @@ export interface DepartmentCardsProps {
   modelError?: string | null;
   /** Purpose key → the words the workspace uses. */
   purposeNames?: Record<string, string>;
+  /** Step id → the name of the process it is in, for "Where the time goes" by process. Left out: worked out from the model. */
+  processOfStep?: ReadonlyMap<string, string>;
   /** `/w/<slug>`. */
   base: string;
 }
 
-export function DepartmentCards({ setup, model, modelError = null, purposeNames = {}, base }: DepartmentCardsProps) {
+export function DepartmentCards({ setup, model, modelError = null, purposeNames = {}, processOfStep, base }: DepartmentCardsProps) {
   const departments = useMemo(() => setup.departments.filter((d) => setup.services.some((s) => s.active && s.department_id === d.id && s.tier_id)), [setup]);
   const today = useMemo(() => (model && departments.length ? todayModel(model) : null), [model, departments.length]);
   const runs = useCapacityRuns(today, null, null);
@@ -68,10 +80,10 @@ export function DepartmentCards({ setup, model, modelError = null, purposeNames 
           The simulation could not run: {runs.today.error}
         </div>
       )}
-      {departments.map((d) => (
-        <DepartmentCard key={d.id} setup={setup} departmentId={d.id} name={d.name} base={base} model={model} result={result} failed={!!modelError || runs.today.status === "error"} purposeNames={purposeNames} />
-      ))}
       <WholeBusinessRow setup={setup} base={base} />
+      {departments.map((d) => (
+        <DepartmentCard key={d.id} setup={setup} departmentId={d.id} name={d.name} base={base} model={model} result={result} failed={!!modelError || runs.today.status === "error"} purposeNames={purposeNames} processOfStep={processOfStep} />
+      ))}
     </section>
   );
 }
@@ -106,11 +118,10 @@ function StartChecklist({ setup, base }: { setup: CapacitySetup; base: string })
   );
 }
 
-/** DLER as a card: the ratio and what it is made of; "Salaries not entered" with a link when pay is missing; "Hidden" when the viewer can't see pay. */
-function DlerKpi({ label, row, missing, setup, base, goalNote = true }: { label: string; row: DlerRow; missing: boolean; setup: CapacitySetup; base: string; goalNote?: boolean }) {
-  const money = (v: number) => formatWholeCurrency(v, setup.currency);
-  if (row.salaries === null) return <Kpi label={label} value="Hidden" sub="Pay is hidden for your role" />;
-  if (missing || !(row.salaries > 0)) {
+/** DLER as a card (D40): the average of each client-facing person's DLER; "Salaries not entered" with a link when nobody has one; "Hidden" when the viewer can't see pay. */
+function DlerKpi({ label, row, base }: { label: string; row: DlerRow; base: string }) {
+  if (row.hidden) return <Kpi label={label} value="Hidden" sub="Pay is hidden for your role" />;
+  if (!row.people || row.ratio === null) {
     return (
       <Kpi
         label={label}
@@ -126,7 +137,7 @@ function DlerKpi({ label, row, missing, setup, base, goalNote = true }: { label:
       />
     );
   }
-  return <Kpi label={label} value={row.ratio === null ? "—" : f1(row.ratio)} sub={`${money(row.retainers)} ÷ ${money(row.salaries)}${goalNote ? ` · goal ${DLER_GOAL}` : ""}`} />;
+  return <Kpi label={label} value={f1(row.ratio)} sub={`Average of ${row.people} ${row.people === 1 ? "person's" : "people's"} DLER`} />;
 }
 
 function DepartmentCard({
@@ -138,6 +149,7 @@ function DepartmentCard({
   result,
   failed,
   purposeNames,
+  processOfStep,
 }: {
   setup: CapacitySetup;
   departmentId: string;
@@ -147,11 +159,12 @@ function DepartmentCard({
   result: SimulationResult | null;
   failed: boolean;
   purposeNames: Record<string, string>;
+  processOfStep?: ReadonlyMap<string, string>;
 }) {
+  const [timeBy, setTimeBy] = useState<"process" | "purpose">("process");
   const per = useMemo(() => perEmployee(setup, departmentId), [setup, departmentId]);
   const lines = useMemo(() => serviceLines(setup), [setup]);
   const row = useMemo(() => dler(setup).departments.find((x) => x.departmentId === departmentId)!, [setup, departmentId]);
-  const missingSalaries = useMemo(() => dlerSalariesMissing(setup, departmentId), [setup, departmentId]);
   const others = setup.departments.filter((d) => d.id !== departmentId);
   const money = (v: number) => formatWholeCurrency(v, setup.currency);
 
@@ -159,13 +172,16 @@ function DepartmentCard({
     if (!model || !result) return null;
     const people = busyShares(setup, model, result).people.filter((p) => p.departmentId === departmentId);
     const ordered = [...people].sort((a, b) => b.busy - a.busy);
+    const ceiling = departmentCeiling(setup, model, result, departmentId);
     return {
-      busiest: ordered.slice(0, 6),
+      busiest: ordered,
       over: ordered.filter((p) => p.over),
-      ceiling: departmentCeiling(setup, model, result, departmentId),
-      time: departmentTime(setup, model, result, departmentId, purposeNames),
+      lineNote: busyLineNote(ordered.map((p) => p.line)),
+      ceiling,
+      pulse: roomPulse(ceiling.room, ceiling.clients),
+      time: departmentTime(setup, model, result, departmentId, purposeNames, timeBy === "process" ? { processOfStep: processOfStep ?? modelProcessOfStep(model) } : undefined),
     };
-  }, [setup, model, result, departmentId, purposeNames]);
+  }, [setup, model, result, departmentId, purposeNames, processOfStep, timeBy]);
 
   const pending = (value: string) => (failed ? "—" : <Skeleton className="mt-1 h-6 w-12" aria-busy="true" aria-label={`${value} is being worked out`} />);
   return (
@@ -180,18 +196,21 @@ function DepartmentCard({
     >
       <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-2.5" data-kpis>
         <Kpi label="Clients" value={f0(per.clients)} sub={`${f0(lines.both)} also take ${others.length === 1 ? others[0]!.name : "another department"}`} />
-        <Kpi label="Clients per employee" value={per.clientsPerEmployee === null ? "—" : f1(per.clientsPerEmployee)} sub={`${f0(per.clients)} clients ÷ ${per.employees} people in the department`} />
         <Kpi label="Revenue per employee" value={per.revenuePerEmployee === null ? "—" : money(per.revenuePerEmployee)} sub={`a month, retainers ÷ ${per.employees} people`} />
-        <DlerKpi label="DLER" row={row} missing={missingSalaries} setup={setup} base={base} />
-        <Kpi
-          label="At or over their line"
-          value={figures ? f0(figures.over.length) : pending("At or over their line")}
-          sub={figures ? `${figures.over.slice(0, 3).map((p) => p.name.split(" ")[0]).join(", ") || "Nobody"}${figures.over.length > 3 ? "…" : ""}` : undefined}
-        />
+        <DlerKpi label="DLER" row={row} base={base} />
+        <Kpi label="Past their busy line" value={figures ? f0(figures.over.length) : pending("Past their busy line")} sub={figures?.lineNote} />
         <Kpi
           label="Room for more clients"
-          value={figures ? f0(figures.ceiling.room) : pending("Room for more clients")}
-          sub={figures ? `Limit: ${figures.ceiling.limit.toLowerCase()}` : undefined}
+          value={figures ? <span className={`text-lg ${TONE_TEXT[figures.pulse.tone]}`} data-room-status>{figures.pulse.status}</span> : pending("Room for more clients")}
+          sub={
+            figures ? (
+              <>
+                {figures.pulse.words && <span className="block">{figures.pulse.words}</span>}
+                <span className="block">Limited by {limitedBy(figures.ceiling.limit)}</span>
+                <span className="mt-0.5 block italic">A rough guide from the simulation, not a promise</span>
+              </>
+            ) : undefined
+          }
         />
       </div>
       {figures ? (
@@ -219,9 +238,24 @@ function DepartmentCard({
             )}
           </div>
           <div data-time>
-            <h3 className="mb-1.5 text-sm font-semibold">
-              Where the time goes <span className="text-xs font-normal text-muted-foreground tabular-nums">{f0(figures.time.total)} h a month</span>
-            </h3>
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+              <h3 className="text-sm font-semibold">
+                Where the time goes <span className="text-xs font-normal text-muted-foreground tabular-nums">{f0(figures.time.total)} h a month</span>
+              </h3>
+              <div role="group" aria-label="Group the time" className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-xs" data-time-by>
+                {(["process", "purpose"] as const).map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    aria-pressed={timeBy === k}
+                    onClick={() => setTimeBy(k)}
+                    className={`rounded-md px-2.5 py-1 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${timeBy === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {k === "process" ? "By process" : "By purpose"}
+                  </button>
+                ))}
+              </div>
+            </div>
             {figures.time.parts.length ? (
               <table className="w-full text-sm">
                 <tbody>
@@ -256,14 +290,13 @@ function DepartmentCard({
 
 function WholeBusinessRow({ setup, base }: { setup: CapacitySetup; base: string }) {
   const w = useMemo(() => wholeBusiness(setup), [setup]);
-  const missing = useMemo(() => dlerSalariesMissing(setup, null), [setup]);
   const money = (v: number) => formatWholeCurrency(v, setup.currency);
   return (
     <Section title="Whole business" data-whole-business>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-2.5">
         <Kpi label="Clients" value={f0(w.unique)} sub={`${w.byDepartment.map((d) => `${f0(d.clients)} ${d.name}`).join(" + ")} − ${f0(w.both)} taking both`} />
         <Kpi label="Revenue per employee" value={w.revenuePerEmployee === null ? "—" : money(w.revenuePerEmployee)} sub={`a month, ${w.employees} people`} />
-        <DlerKpi label="DLER" row={w.dler} missing={missing} setup={setup} base={base} />
+        <DlerKpi label="DLER" row={w.dler} base={base} />
       </div>
     </Section>
   );

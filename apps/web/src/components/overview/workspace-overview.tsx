@@ -5,8 +5,7 @@ import { Overview } from "@/components/overview/overview";
 import { StartOverview } from "@/components/overview/start-overview";
 import { setupChecklist } from "@/lib/overview/setup";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
-import { loadLiveProcess, loadSolutionBase, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSetup, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
-import { solutionsToCompare, type SolutionBases } from "@/lib/overview/impact";
+import { loadLiveProcess, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceOverview, loadWorkspaceSetup, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 import { canEditWorkspace } from "@/lib/access-data";
 import { companyMapView } from "@/lib/overview/company-version";
 import { loadCompanyVersion, loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
@@ -58,11 +57,6 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
   // An earlier version of the company map (only its layout and handoff lines differ); a number that isn't one shows live.
   const found = company && mapVersion ? await loadCompanyVersion(ws, mapVersion) : null;
   const view = companyMapView(company, found, canEdit);
-  // The solutions the Overview compares before and after (B15): for any copied from an earlier version than live, that version's steps.
-  const liveRevision = new Map(parts.map((p) => [p.process.id, p.revision.id]));
-  const older = solutionsToCompare(solutions, issues).filter(({ solution: s }) => liveRevision.get(s.process_id) !== s.base_revision_id);
-  const loaded = await Promise.all(older.map(({ solution: s }) => loadSolutionBase(slug, s.process_id, s.base_revision_id, live).catch(() => null)));
-  const solutionBases: SolutionBases = Object.fromEntries(older.flatMap(({ solution: s }, i) => (loaded[i] ? [[s.id, { steps: loaded[i]!.base.steps, edges: loaded[i]!.base.edges }]] : [])));
   return (
     <SourceLinkingScope workspaceId={ws} sources={sources} canEdit={canEdit}>
     <Overview
@@ -74,13 +68,11 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       issues={issues}
       mode={canEdit ? "live" : "readonly"}
       solutions={solutions}
-      solutionBases={solutionBases}
       hrefs={Object.fromEntries(parts.map((p) => [p.process.id, `${base}/p/${p.process.id}`]))}
       processesHref={`${base}/processes`}
       companyEditHref={view.canEdit && company ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
       companyHistoryHref={company ? `${base}/p/${company.process.id}/history` : undefined}
       bundleHref={canEdit ? `${base}/export/bundle` : undefined}
-      issuesHref={`${base}/issues`}
       forecastHref={`${base}/sandbox`}
       capacity={capacitySetup ? { setup: capacitySetup, base } : null}
     />

@@ -4,14 +4,35 @@
 
 const WORKING_DAYS_PER_WEEK = 5;
 
-/** Playback speeds in working days of simulation per second. */
+/** Working weeks in a month for playback: a year of 52 weeks over 12 months. */
+const WEEKS_PER_MONTH = 52 / 12;
+
+/**
+ * Playback speeds: how much simulated working time passes each second. A day and a week are working time (the workspace's hours per
+ * week, as the scrubber counts them); a month is 52/12 working weeks.
+ */
 export const SPEEDS = [
-  { days: 1, label: "1 day/s" },
-  { days: 2, label: "2 days/s" },
-  { days: 5, label: "1 week/s" },
-  { days: 10, label: "2 weeks/s" },
+  { unit: "hour", label: "1 hour per second" },
+  { unit: "day", label: "1 day per second" },
+  { unit: "week", label: "1 week per second" },
+  { unit: "month", label: "1 month per second" },
 ] as const;
 
+/** Simulated working hours per wall-clock second for a speed. */
+export function speedHoursPerSecond(unit: (typeof SPEEDS)[number]["unit"], hoursPerWeek: number): number {
+  switch (unit) {
+    case "hour":
+      return 1;
+    case "day":
+      return hoursPerWeek / WORKING_DAYS_PER_WEEK;
+    case "week":
+      return hoursPerWeek;
+    case "month":
+      return hoursPerWeek * WEEKS_PER_MONTH;
+  }
+}
+
+/** One day per second: the nearest to the old default of two days. */
 export const DEFAULT_SPEED = 1;
 
 /** Wall-clock seconds a hop (a move with no external wait) takes along an edge, up to `maxHopHours`. */
@@ -39,14 +60,14 @@ export interface ClockState {
 export class PlaybackClock {
   private time = 0;
   private horizon: number;
-  private hoursPerDay: number;
+  private hoursPerWeek: number;
   private state: ClockState = { playing: false, active: false, speed: DEFAULT_SPEED, atEnd: false };
   private readonly listeners = new Set<() => void>();
   private readonly timeListeners = new Set<(t: number) => void>();
 
   constructor({ H = 0, hoursPerWeek = 40 }: { H?: number; hoursPerWeek?: number } = {}) {
     this.horizon = Math.max(0, H);
-    this.hoursPerDay = hoursPerWeek / WORKING_DAYS_PER_WEEK;
+    this.hoursPerWeek = hoursPerWeek;
   }
 
   get t(): number {
@@ -59,12 +80,12 @@ export class PlaybackClock {
 
   /** Simulation hours per wall-clock second at the current speed. */
   get hoursPerSecond(): number {
-    return SPEEDS[this.state.speed]!.days * this.hoursPerDay;
+    return speedHoursPerSecond(SPEEDS[this.state.speed]!.unit, this.hoursPerWeek);
   }
 
   /** Simulation hours a hop takes at the current speed. */
   get hop(): number {
-    return Math.min(HOP_SECONDS * this.hoursPerSecond, maxHopHours(this.hoursPerDay * WORKING_DAYS_PER_WEEK));
+    return Math.min(HOP_SECONDS * this.hoursPerSecond, maxHopHours(this.hoursPerWeek));
   }
 
   getState = (): ClockState => this.state;
@@ -84,7 +105,7 @@ export class PlaybackClock {
   /** A new run: keep the time (clamped) so an edit re-runs in place. */
   configure({ H, hoursPerWeek }: { H: number; hoursPerWeek: number }): void {
     this.horizon = Math.max(0, H);
-    this.hoursPerDay = hoursPerWeek / WORKING_DAYS_PER_WEEK;
+    this.hoursPerWeek = hoursPerWeek;
     this.setTime(this.time);
   }
 

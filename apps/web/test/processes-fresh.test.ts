@@ -99,6 +99,7 @@ describe("the Processes page once something is published", () => {
     state.canEdit = false;
     const reader = await render();
     expect(reader).not.toContain("Edit company map");
-    expect(reader).not.toContain(`/p/${COMPANY_ID}`);
+    // A reader still gets the company map's History link (/p/<id>/history), but never the Editor.
+    expect(reader).not.toContain(`/p/${COMPANY_ID}/edit`);
   });
 });

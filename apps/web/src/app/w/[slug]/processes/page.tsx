@@ -22,14 +22,16 @@ export default async function WorkspaceProcessesPage(props: PageProps<"/w/[slug]
   // come back here), and members and viewers get no button (issue #243). Once something is published, everyone reads the map at
   // the Overview and editors also get the Editor beside it, to make a new company map version.
   const published = rows.some((r) => r.version !== null);
-  const companyId = canEdit ? await loadCompanyId(workspace.id) : null;
-  const editHref = companyId ? `${base}/p/${companyId}/edit?from=${encodeURIComponent(`${base}/processes`)}` : undefined;
+  const anyCompanyId = await loadCompanyId(workspace.id);
+  const editHref = canEdit && anyCompanyId ? `${base}/p/${anyCompanyId}/edit?from=${encodeURIComponent(`${base}/processes`)}` : undefined;
   const companyMap = published ? { href: base, edit: false, editHref } : editHref ? { href: editHref, edit: true } : undefined;
   return (
     <ProcessesPage
       rows={rows}
       hrefs={Object.fromEntries([...rows, ...archived].map((r) => [r.id, `${base}/p/${r.id}`]))}
       companyMap={companyMap}
+      // The company map's History: the same page the Overview's History button opens.
+      companyHistoryHref={published && anyCompanyId ? `${base}/p/${anyCompanyId}/history` : undefined}
       loadCard={openProcessCard.bind(null, slug)}
       create={canEdit ? createProcess.bind(null, workspace.id, slug) : undefined}
       upload={canEdit ? { preview: previewUpload.bind(null, workspace.id, slug), create: createUpload.bind(null, workspace.id, slug) } : undefined}

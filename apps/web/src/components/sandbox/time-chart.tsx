@@ -48,7 +48,7 @@ function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] 
   return [ref, width];
 }
 
-export function TimeLegend({ rows }: { rows: TimeRow[] }) {
+export function TimeLegend({ rows, shares = false }: { rows: TimeRow[]; /** Say each row's share of the run after its name. */ shares?: boolean }) {
   return (
     <ul className="flex flex-wrap items-center gap-x-3 gap-y-1" data-legend data-time-legend>
       {rows.map((r) => (
@@ -59,6 +59,7 @@ export function TimeLegend({ rows }: { rows: TimeRow[] }) {
             style={r.kind === "uncovered" ? { backgroundImage: HATCH } : { background: fillOf(r) }}
           />
           {r.name}
+          {shares && r.kind !== "uncovered" ? <span className="tabular-nums text-fg-2" data-legend-share>{formatPercent(r.runShare)}</span> : null}
         </li>
       ))}
     </ul>
