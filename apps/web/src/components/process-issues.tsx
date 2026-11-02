@@ -11,6 +11,7 @@ import { perceptionGapDetections } from "@/lib/issues/perception";
 import { visibleFindings } from "@/lib/rules/edit";
 import { useDetectedIssues } from "@/lib/issues/use-detected";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
+import { factsForProcess } from "@/lib/insights/process-facts";
 import { entryView, factsCostingIssues, mapFeed, promoteInput, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { useIssues } from "@/lib/issues/use-issues";
 import { issueFormOptions } from "@/lib/issues/draft";
@@ -104,6 +105,8 @@ export function useProcessIssues({
   // The run's facts (D40): read-only evidence. The issues acknowledged from one before are costed by it while the run still finds it.
   const facts = useMemo(() => (found ? visibleFindings(rules, [...broken, ...found, ...gaps]) : null), [found, broken, gaps, rules]);
   const detected = useMemo(() => (facts ? factsCostingIssues(state.issues, facts) : null), [facts, state.issues]);
+  // What the page lists: only the facts about this process (its steps, the people and roles who work them, the process itself).
+  const shownFacts = useMemo(() => (facts ? factsForProcess(facts, bundle, result) : null), [facts, bundle, result]);
   const brokenScenarios = useMemo(() => new Set(broken.flatMap((d) => (d.scenarioId ? [d.scenarioId] : []))), [broken]);
 
   // A tracked broken-scenario issue resolves itself once its scenario is fixed (re-pointed or deleted).
@@ -277,7 +280,7 @@ export function useProcessIssues({
     highlight,
     light: setLit,
     rail,
-    facts,
+    facts: shownFacts,
     issuesList: section("issues"),
     showIssues: () => setTab("issues"),
     onScenariosChange: setScenarios,
