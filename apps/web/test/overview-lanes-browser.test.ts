@@ -129,6 +129,11 @@ describe("department lanes on the Overview company map", () => {
     expect(expected.Performance!.length).toBeGreaterThan(0);
     expect(expected["Sales and whole business"]!.length).toBeGreaterThan(0);
     for (const [label, list] of Object.entries(expected)) expect(lane[label]!.sort()).toEqual(list.sort());
+    // Each process card carries a pill with its category, in Q3's words.
+    const tags = await page.locator("[data-company-map] [data-process-tag]").allInnerTexts();
+    expect(tags).toHaveLength(data.parts.length);
+    expect(tags).toContain("Sales");
+    expect(tags).toContain("Routine client work");
     expect(errors).toEqual([]);
     await page.close();
   }, 120_000);

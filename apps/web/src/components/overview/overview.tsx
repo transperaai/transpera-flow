@@ -40,6 +40,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { OVERVIEW_HORIZONS, horizonLabel, horizonWeeks, isOverviewHorizon, nearestOverviewHorizon } from "@/lib/horizon";
 import { perceptionGapDetections } from "@/lib/issues/perception";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
+import { PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { companyMap } from "@/lib/overview/company-map";
 import { laneOfProcesses, laneSpecs, type DepartmentLaneInput } from "@/lib/overview/department-lanes";
 import { sortFindings } from "@/lib/overview/findings";
@@ -261,6 +262,8 @@ export function Overview({
     () => (laneInput ? { spec: { lanes: laneSpecs(laneInput), laneOf: laneOfProcesses(parts.map((p) => p.process), laneInput) }, always: true } : undefined),
     [laneInput, parts],
   );
+  // A pill with each process's category on its card (Q4, with Q3's labels).
+  const cardTags = useMemo(() => new Map(parts.map((p) => [p.process.id, PROCESS_CATEGORY_LABELS[p.process.category]] as const)), [parts]);
   const openProcess = (stepId: string) => {
     const process = map.processOfStep.get(stepId);
     const href = process ? hrefs[process] : undefined;
@@ -408,6 +411,7 @@ export function Overview({
                 playbackAbove
                 showLanes={false}
                 departmentLanes={departmentLanes}
+                cardTags={cardTags}
                 handoffs
                 height="auto"
                 stepDetail={false}

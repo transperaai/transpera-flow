@@ -37,6 +37,7 @@ import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/sav
 import type { TargetVerdict } from "@/lib/solutions/verdict";
 import { verdictInWorker } from "@/lib/solutions/verdict-client";
 import { Button } from "@/components/ui/button";
+import { PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
 import { laneOfProcesses, laneSpecs, type DepartmentLaneInput } from "@/lib/overview/department-lanes";
 import { SaveProblems } from "@/components/save-problems";
@@ -146,6 +147,12 @@ export function EditorView({
   const diff = useMemo(() => (marksChanges ? diffBundles(live, working) : EMPTY_DIFF), [marksChanges, live, working]);
   const names = useMemo(() => namesOf(working, live), [working, live]);
   // The company map's department lanes (Q4): each holder card goes in the lane of the process it holds.
+  // A pill with the category of the process each holder card holds (Q4, with Q3's labels).
+  const cardTags = useMemo(() => {
+    if (!company) return undefined;
+    const label = new Map((working.otherProcesses ?? []).map((p) => [p.process.id, PROCESS_CATEGORY_LABELS[p.process.category]] as const));
+    return new Map(working.steps.flatMap((s) => (s.child_process_id && label.has(s.child_process_id) ? [[s.id, label.get(s.child_process_id)!] as const] : [])));
+  }, [company, working.otherProcesses, working.steps]);
   const departmentLanes = useMemo(() => {
     if (!company || !laneInput) return undefined;
     const lane = laneOfProcesses((working.otherProcesses ?? []).map((p) => p.process), laneInput);
@@ -409,6 +416,7 @@ export function EditorView({
               commands={company ? null : commands}
               handoffs={company}
               departmentLanes={departmentLanes}
+              cardTags={cardTags}
               diff={marksChanges ? diff : null}
               highlight={outlined}
               onRestore={restore}

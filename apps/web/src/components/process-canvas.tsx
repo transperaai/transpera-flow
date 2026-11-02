@@ -183,6 +183,8 @@ type GroupNodeData = {
   rated: boolean;
   /** Highlighting: true outlined, false dimmed (closed cards only), null when nothing is highlighted. */
   lit: boolean | null;
+  /** The process's category as a small pill (the company map; Q4), or null. */
+  tag: string | null;
 };
 
 type StepFlowNode = Node<StepNodeData, "step">;
@@ -495,6 +497,7 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
             <p className="text-[11px] text-fg-3">
               Group · {roll.steps} {roll.steps === 1 ? "step" : "steps"}
             </p>
+            {data.tag && <TagPill tag={data.tag} />}
           </div>
           {toggle}
         </div>
@@ -522,6 +525,7 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
       <p data-field="name" title={step.name} className="mt-0.5 line-clamp-2 text-sm leading-tight font-semibold text-fg">
         {step.name}
       </p>
+      {data.tag && <TagPill tag={data.tag} />}
       <p className={headlineRowClass}>
         <span className="font-mono text-base leading-none font-medium text-fg tabular-nums">{roll.steps}</span>
         <span className="min-w-0 truncate text-[11.5px] leading-4 text-fg-2" title="Hands-on time of every step inside, added up">
@@ -535,6 +539,15 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
       {warning && <Warning text={warning} />}
       <Handle type="source" position={Position.Right} className={handleClass(editable)} />
     </div>
+  );
+}
+
+/** A process's category, as a small pill on its card. */
+function TagPill({ tag }: { tag: string }) {
+  return (
+    <span data-process-tag className="mt-1 inline-block max-w-full truncate rounded-full border border-line bg-panel px-2 text-[10.5px] leading-4 font-medium text-fg-2">
+      {tag}
+    </span>
   );
 }
 
@@ -930,6 +943,8 @@ interface CanvasProps {
    * another lane: the department is set on the process page.
    */
   departmentLanes?: { spec: BandSpec; always?: boolean };
+  /** A small pill of text on a process card, by the card's step id: the process's category on the company map (Q4). */
+  cardTags?: ReadonlyMap<string, string>;
   /**
    * `fill`: as tall as the space it is given (the editor). `auto`: as tall as the map needs, from 16 to 40 rem,
    * so a small map doesn't sit in a tall empty panel. Default `auto` when read-only, `fill` when editable.
@@ -1003,6 +1018,7 @@ function Canvas({
   showLanes = true,
   defaultLanes = false,
   departmentLanes,
+  cardTags,
   height: heightProp,
   onStepClick,
   stepDetail = true,
@@ -1186,6 +1202,7 @@ function Canvas({
             rated: rating !== undefined,
             // An open group is a box around its steps: it can be outlined but never fades.
             lit: lit ? (open ? lit.has(step.id) || null : lit.has(step.id)) : null,
+            tag: cardTags?.get(step.id) ?? null,
           };
           return {
             id: step.id,
@@ -1293,7 +1310,7 @@ function Canvas({
         };
       });
     return [...ghosts, ...drafted];
-  }, [bundle, result, selection.steps, dragging, measured, warnings, editable, order, layout, editing, editingId, nodeCache, playback.pulsing, diff, drawn, lit, openIssues, rating, handoffs]);
+  }, [bundle, result, selection.steps, dragging, measured, warnings, editable, order, layout, editing, editingId, nodeCache, playback.pulsing, diff, drawn, lit, openIssues, rating, handoffs, cardTags]);
 
   const edges = useMemo(() => {
     const selected = new Set(selection.edges);
