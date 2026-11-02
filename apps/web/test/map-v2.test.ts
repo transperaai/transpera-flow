@@ -41,6 +41,20 @@ describe("fitting the map to its panel", () => {
     expect(big.y + 50 * big.zoom).toBeCloseTo(56);
   });
 
+  it("the Fit button's zoom may go below 70% so the whole map is shown, down to the lowest zoom", () => {
+    const bounds = { x: 100, y: 50, width: 2000, height: 800 };
+    const pad = { top: 56, right: 24, bottom: 24, left: 24 };
+    const all = fitViewport(bounds, { width: 800, height: 600 }, pad, MIN_ZOOM);
+    expect(all.zoom).toBeLessThan(MIN_FIT_ZOOM);
+    expect(all.zoom).toBeCloseTo((800 - 48) / 2000);
+    // Every corner of the map lands inside the panel.
+    expect(all.x + bounds.x * all.zoom).toBeGreaterThanOrEqual(23.99);
+    expect(all.x + (bounds.x + bounds.width) * all.zoom).toBeLessThanOrEqual(800 - 23.99);
+    expect(all.y + (bounds.y + bounds.height) * all.zoom).toBeLessThanOrEqual(600);
+    // Past what the - button reaches it stops at that.
+    expect(fitViewport({ x: 0, y: 0, width: 10_000, height: 800 }, { width: 800, height: 600 }, pad, MIN_ZOOM).zoom).toBe(MIN_ZOOM);
+  });
+
   it("steps the zoom by buttons and stops at the ends", () => {
     expect(stepZoom(1, "in")).toBe(1.15);
     expect(stepZoom(1, "out")).toBe(0.85);
