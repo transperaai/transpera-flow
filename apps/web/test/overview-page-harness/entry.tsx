@@ -92,6 +92,7 @@ window.mountOverview = () =>
         hrefs={{}}
         processesHref="/processes"
         forecastHref="/sandbox"
+        companyHistoryHref="/w/x/p/company/history"
         issuesHref="/issues"
       />
     </SidebarProvider>,

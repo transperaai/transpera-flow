@@ -46,6 +46,10 @@ describe("the Overview page's runs", () => {
     // Q1 item 9: 1, 3 and 6 months, and a way on to the Sandbox.
     expect(await page.getByRole("group", { name: "Time horizon" }).getByRole("button").allInnerTexts()).toEqual(["1m", "3m", "6m"]);
     expect(await page.locator("[data-sandbox-link]").innerText()).toBe("Simulate further in the Sandbox");
+    // Item 7/8: History opens the company map's history page directly, and looks like Export (outline, small).
+    expect(await page.locator("[data-company-history]").getAttribute("href")).toBe("/w/x/p/company/history");
+    const look = (sel: string) => page.locator(sel).evaluate((e) => e.className.split(/\s+/).sort().join(" "));
+    expect(await look("[data-company-history]")).toEqual(await look("[data-export-menu]"));
     const before = await posts(page);
     const runsBefore = count(before, "simulate.worker.ts");
     expect(runsBefore).toBeGreaterThanOrEqual(1);
