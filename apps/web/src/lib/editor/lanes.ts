@@ -117,3 +117,63 @@ export function laneLayout(bundle: ProcessBundle, sizes: ReadonlyMap<string, Siz
   }
   return { lanes, positions, laneOf };
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Bands: the company map's lanes (capacity Q4). Unlike the role lanes above, which stack steps into rows, a band keeps the
+// stored layout: each top-level card keeps its stored x, and its stored y relative to the highest card of its lane. The lane
+// is as tall as its cards need, so a lane edge never cuts a card.
+
+/** Empty stretches of a lane longer than this are closed up to BAND_GAP. */
+const BAND_MAX_GAP = 160;
+const BAND_GAP = 48;
+/** Room above a lane's first card for its name. */
+const BAND_TOP = 60;
+
+export interface BandSpec {
+  /** The lanes top to bottom; one with no cards is not drawn. */
+  lanes: readonly { key: string; label: string }[];
+  /** A top-level step's lane key; a step with none goes in the first lane. */
+  laneOf: ReadonlyMap<string, string>;
+}
+
+/** Cards in horizontal bands by `spec`, at their stored x and y within the band. Steps inside a group are not placed here. */
+export function bandLayout(steps: readonly StepRow[], spec: BandSpec, sizeOf: (step: StepRow) => Size): LaneLayout {
+  const top = steps.filter((s) => !s.parent_step_id);
+  const first = spec.lanes[0]?.key ?? NO_ROLE_LANE;
+  const keys = new Set(spec.lanes.map((l) => l.key));
+  const laneKey = (s: StepRow) => {
+    const k = spec.laneOf.get(s.id);
+    return k !== undefined && keys.has(k) ? k : first;
+  };
+  const laneOf = new Map(top.map((s) => [s.id, laneKey(s)]));
+  const minX = Math.min(0, ...top.map((s) => Number(s.x)));
+  const maxX = Math.max(0, ...top.map((s) => Number(s.x) + sizeOf(s).width));
+  const left = minX - LABEL_WIDTH;
+  const width = maxX + PAD * 2 - left;
+  const lanes: Lane[] = [];
+  const positions = new Map<string, { x: number; y: number }>();
+  let at = 0;
+  for (const lane of spec.lanes) {
+    const cards = top.filter((s) => laneOf.get(s.id) === lane.key);
+    if (!cards.length) continue;
+    // Stored y, relative to the lane's highest card. A stretch with no card of this lane (where other lanes' cards sat in the one stored
+    // map) longer than BAND_MAX_GAP is closed up to BAND_GAP; everything else, side by side or close, stays as stored.
+    const sorted = [...cards].sort((a, b) => Number(a.y) - Number(b.y) || Number(a.x) - Number(b.x) || a.id.localeCompare(b.id));
+    const minY = Number(sorted[0]!.y);
+    let taken = 0;
+    let reach = -Infinity;
+    let bottom = 0;
+    for (const s of sorted) {
+      const y = Number(s.y);
+      if (reach > -Infinity && y - reach > BAND_MAX_GAP) taken += y - reach - BAND_GAP;
+      const shown = Math.round(at + BAND_TOP + (y - minY) - taken);
+      positions.set(s.id, { x: Number(s.x), y: shown });
+      reach = Math.max(reach, y + sizeOf(s).height);
+      bottom = Math.max(bottom, shown + sizeOf(s).height);
+    }
+    const height = bottom + PAD - at;
+    lanes.push({ key: lane.key, label: lane.label, color: null, x: left, y: at, width, height });
+    at += height;
+  }
+  return { lanes, positions, laneOf };
+}

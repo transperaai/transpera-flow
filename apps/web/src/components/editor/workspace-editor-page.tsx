@@ -7,6 +7,7 @@ import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentViewer } from "@/lib/access-data";
 import { loadDismissedEditorTours, loadProcessForEditing, loadTierSetup, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources } from "@/lib/data";
 import { loadLiveParts } from "@/lib/overview/data";
+import { loadDepartmentLaneInput } from "@/lib/overview/lanes-data";
 import { loadLibrary } from "@/lib/editor/library-data";
 import { exitHref, parseEditorMode, parseHorizon, parseIssueParam } from "@/lib/editor/modes";
 import { issueAboutProcess, solutionIssueOf } from "@/lib/solutions/area";
@@ -44,7 +45,7 @@ export async function WorkspaceEditorPage({
   const canEdit = await canEditWorkspace(live.workspace.id);
   // An archived process (issue #182) is read only until it is restored: its page says so.
   if (!canEdit || live.process.archived_at) redirect(base);
-  const [scenarios, blocks, sources, viewer, tours, tierSetup, storedChanges] = await Promise.all([
+  const [scenarios, blocks, sources, viewer, tours, tierSetup, storedChanges, laneInput] = await Promise.all([
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceBlocks(live.workspace.id),
     loadWorkspaceSources(live.workspace.id),
@@ -52,6 +53,7 @@ export async function WorkspaceEditorPage({
     loadDismissedEditorTours(),
     loadTierSetup(live.workspace.id),
     getDb().then((db) => loadCapacityChanges(db, live.workspace.id)).catch(() => []),
+    company ? loadDepartmentLaneInput(live.workspace.id) : Promise.resolve(undefined),
   ]);
   const tourDismissed = tours.includes(company ? "company" : "process");
   // Solution mode built for an issue (`?issue=`, A49): the issue's steps are outlined and its target is what the verdict checks.
@@ -82,6 +84,7 @@ export async function WorkspaceEditorPage({
       horizonMonths={parseHorizon(searchParams.horizon)}
       library={editorMode === "draft" ? library : undefined}
       tierSetup={tierSetup}
+      laneInput={laneInput}
       changesOnSteps={{ sandboxHref: `/w/${slug}/sandbox`, changes: storedChanges.map((c) => ({ id: c.id, name: c.name, kind: c.kind, steps: changeStepIds(c) })) }}
     />
     </SourceLinkingScope>

@@ -9,6 +9,7 @@ import { loadLiveProcess, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceO
 import { canEditWorkspace } from "@/lib/access-data";
 import { companyMapView } from "@/lib/overview/company-version";
 import { loadCompanyVersion, loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
+import { loadDepartmentLaneInput } from "@/lib/overview/lanes-data";
 import { workspaceIsEmpty } from "@/lib/restore/empty";
 import { getDb } from "@/lib/auth/session";
 import { loadCapacitySetup } from "@transpera-flow/db";
@@ -43,7 +44,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     );
   }
   const ws = live.workspace.id;
-  const [parts, company, issues, sources, canEdit, solutions, capacitySetup] = await Promise.all([
+  const [parts, company, issues, sources, canEdit, solutions, capacitySetup, laneInput] = await Promise.all([
     loadLiveParts(ws),
     loadLiveCompany(ws),
     loadWorkspaceIssues(ws),
@@ -52,6 +53,8 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
     loadWorkspaceSolutions(ws),
     // Set up's data for the department cards (P6), loaded as the viewer: pay a role can't see never arrives.
     getDb().then((db) => loadCapacitySetup(db, ws)),
+    // The departments, tier services and servicing links the map's lanes are worked out from (Q4).
+    loadDepartmentLaneInput(ws),
   ]);
   const base = `/w/${slug}`;
   // An earlier version of the company map (only its layout and handoff lines differ); a number that isn't one shows live.
@@ -64,6 +67,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       live={live}
       parts={parts}
       company={view.map}
+      laneInput={laneInput}
       viewingMapVersion={view.viewingVersion}
       issues={issues}
       mode={canEdit ? "live" : "readonly"}

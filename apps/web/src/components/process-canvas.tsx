@@ -90,8 +90,8 @@ import type { ChangeKind, DraftDiff, StepChange } from "@/lib/drafts/diff";
 import type { EditorState, ProcessEditor } from "@/lib/editor/editor";
 import type { InlineField } from "@/lib/editor/inline-edit";
 import type { Table } from "@/lib/editor/ops";
-import { laneLayout, type Lane } from "@/lib/editor/lanes";
-import { CARD_SIZE, TERMINAL_SIZE, groupIds, openGroupSize } from "@/lib/map/groups";
+import { bandLayout, laneLayout, type BandSpec, type Lane, type LaneLayout } from "@/lib/editor/lanes";
+import { CARD_SIZE, GROUP_CARD, TERMINAL_SIZE, groupIds, openGroupSize } from "@/lib/map/groups";
 import { groupsToOpen, litIds, withHighlightOpen } from "@/lib/map/highlight";
 import { ratingOfRank } from "@/lib/map/rating";
 import { ISSUE_PILL_CLASS, tileColours, tileHeadline } from "@/lib/map/tile";
@@ -925,6 +925,12 @@ interface CanvasProps {
   /** Start in the swimlane view (a read-only process map shows its lanes at once). Default false: the toggle turns them on. */
   defaultLanes?: boolean;
   /**
+   * The company map's department lanes (Q4): its top-level cards sit in labelled bands at their stored positions. `always`: the
+   * Overview, where they are always on; otherwise a toggle (on to start with) switches them. Dragging a card never moves it to
+   * another lane: the department is set on the process page.
+   */
+  departmentLanes?: { spec: BandSpec; always?: boolean };
+  /**
    * `fill`: as tall as the space it is given (the editor). `auto`: as tall as the map needs, from 16 to 40 rem,
    * so a small map doesn't sit in a tall empty panel. Default `auto` when read-only, `fill` when editable.
    */
@@ -996,6 +1002,7 @@ function Canvas({
   playbackRollUp = false,
   showLanes = true,
   defaultLanes = false,
+  departmentLanes,
   height: heightProp,
   onStepClick,
   stepDetail = true,
@@ -1108,13 +1115,25 @@ function Canvas({
   const warnings = useMemo(() => (editable && !handoffs ? stepWarnings(bundle) : new Map<string, string>()), [bundle, editable, handoffs]);
   const order = useMemo(() => flowOrder(bundle), [bundle]);
   const editingId = editing && bundle.steps.some((s) => s.id === editing.id) ? editing.id : null;
-  const layout = useMemo(() => {
+  const [bandsOn, setBandsOn] = useState(true);
+  const bandsActive = !!departmentLanes && (departmentLanes.always === true || bandsOn);
+  const layout = useMemo((): (LaneLayout & { bands: boolean }) | null => {
+    // Department bands (the company map): top-level cards in lanes, at their stored positions within each.
+    if (departmentLanes && bandsActive) {
+      const sizeOf = (st: StepRow) =>
+        measured.get(st.id) ?? (isGroup(st) ? (drawn.has(st.id) ? openGroupSize(bundle.steps, st.id, drawn, measured) : GROUP_CARD) : st.child_process_id ? GROUP_CARD : CARD_SIZE);
+      return { ...bandLayout(bundle.steps, departmentLanes.spec, sizeOf), bands: true };
+    }
     // Lanes place every step by its role; a group's steps sit inside its box instead.
     if (!lanes || hasGroups) return null;
     // The card being edited grows; its lane keeps its size meanwhile.
     const sizes = new Map([...measured].filter(([id]) => id !== editingId));
-    return laneLayout(bundle, sizes);
-  }, [lanes, hasGroups, bundle, measured, editingId]);
+    return { ...laneLayout(bundle, sizes), bands: false };
+  }, [departmentLanes, bandsActive, lanes, hasGroups, bundle, measured, editingId, drawn]);
+  const layoutRef = useRef(layout);
+  useEffect(() => {
+    layoutRef.current = layout;
+  });
 
   // The last node object made for each step (see sameNode).
   const [nodeCache] = useState(() => new Map<string, StepFlowNode | TerminalFlowNode>());
@@ -1171,7 +1190,7 @@ function Canvas({
           return {
             id: step.id,
             type: "group",
-            position: dragging.get(step.id) ?? { x: Number(step.x), y: Number(step.y) },
+            position: dragging.get(step.id) ?? layout?.positions.get(step.id) ?? { x: Number(step.x), y: Number(step.y) },
             selected: selected.has(step.id),
             ariaLabel: `${step.name}, ${isGroup(step) ? "group" : handoffs ? "process" : "child process"} of ${roll.steps} ${roll.steps === 1 ? "step" : "steps"}${isGroup(step) ? (open ? ", open" : ", closed") : ""}${gdata.rated && gdata.rating ? `, worst inside: ${RATING_LABELS[gdata.rating]}` : ""}${roll.openIssues > 0 ? `, ${roll.openIssues} confirmed ${roll.openIssues === 1 ? "issue" : "issues"}` : ""}`,
             ...(step.parent_step_id ? { parentId: step.parent_step_id } : {}),
@@ -1378,7 +1397,10 @@ function Canvas({
         else {
           // Lanes place steps top to bottom by role, so in the lane view only left and right are saved.
           const stored = bundle.steps.find((s) => s.id === c.id);
-          moves.push({ id: c.id, x: c.position.x, y: layout && stored ? Number(stored.y) : c.position.y });
+          const shown = layout?.positions.get(c.id);
+          // In a department band a card moves up and down within its lane (the band's offset is taken off again); in role lanes only sideways.
+          const y = !layout || !stored ? c.position.y : layout.bands && shown ? c.position.y - (shown.y - Number(stored.y)) : Number(stored.y);
+          moves.push({ id: c.id, x: c.position.x, y });
           drags.delete(c.id);
         }
         moved = true;
@@ -1544,6 +1566,10 @@ function Canvas({
     setLanes(!lanes);
     requestFit();
   };
+  const toggleBands = () => {
+    setBandsOn(!bandsOn);
+    requestFit();
+  };
 
   // Zoom (issue #99): the map is framed once when it first appears, never below 70%; a bigger map is dragged around
   // instead. After that it moves only when asked: Fit, Expand or Collapse all, the swimlane toggle, or (read-only
@@ -1582,8 +1608,17 @@ function Canvas({
       let bounds = flow.getNodesBounds(wanted.length ? wanted : all);
       // Room around what is framed, so a step or two is seen in its surroundings and not blown up to fill the panel.
       if (wanted.length) bounds = { x: bounds.x - 260, y: bounds.y - 140, width: bounds.width + 520, height: bounds.height + 280 };
+      // Department lanes are part of the picture: frame them too (their names sit inside them, so no extra room on the left).
+      const bands = layoutRef.current?.bands ? layoutRef.current.lanes : [];
+      if (bands.length && !wanted.length) {
+        const left = Math.min(bounds.x, ...bands.map((l) => l.x));
+        const top = Math.min(bounds.y, ...bands.map((l) => l.y));
+        const right = Math.max(bounds.x + bounds.width, ...bands.map((l) => l.x + l.width));
+        const bottom = Math.max(bounds.y + bounds.height, ...bands.map((l) => l.y + l.height));
+        bounds = { x: left, y: top, width: right - left, height: bottom - top };
+      }
       // A bar in its own strip above takes no room off the map.
-      const pad = fitPadding(lanes, editable, showPlayback && !playbackAbove);
+      const pad = fitPadding(lanes && !bands.length, editable, showPlayback && !playbackAbove);
       let panelHeight = panel.height;
       if (heightMode === "auto") {
         panelHeight = autoPanelHeight(bounds, panel.width, pad, minZoom);
@@ -1691,11 +1726,19 @@ function Canvas({
           aria-label={`${bundle.process.name} process map`}
         >
           {/* Above the map in the page, so Tab reaches these first: open or close every group, zoom, and what the colours mean. */}
-          {(zoomControls || legend || allGroups.length > 0 || (showLanes && !hasGroups)) && (
+          {(zoomControls || legend || allGroups.length > 0 || (showLanes && !hasGroups) || (departmentLanes && !departmentLanes.always)) && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2">
-              {((showLanes && !hasGroups) || allGroups.length > 0) && (
+              {((showLanes && !hasGroups) || allGroups.length > 0 || (departmentLanes && !departmentLanes.always)) && (
                 <div className="flex items-center gap-1.5">
-                  {showLanes && !hasGroups && <LaneToggle lanes={lanes} onToggle={toggleLanes} />}
+                  {departmentLanes && !departmentLanes.always && (
+                    <LaneToggle
+                      lanes={bandsOn}
+                      onToggle={toggleBands}
+                      label="Department lanes"
+                      title="Lay the process cards in a lane for each department. Dragging a card does not change its department: set that on the process page."
+                    />
+                  )}
+                  {showLanes && !hasGroups && !departmentLanes && <LaneToggle lanes={lanes} onToggle={toggleLanes} />}
                   {allGroups.length > 0 && <GroupControls allOpen={allGroups.every((id) => expanded.has(id))} onToggle={toggleAllGroups} />}
                 </div>
               )}
@@ -1893,7 +1936,7 @@ function LaneLayer({ lanes }: { lanes: Lane[] }) {
       {lanes.map((lane) => (
         <p
           key={lane.key}
-          className="absolute max-w-32 truncate text-xs font-semibold text-fg-2"
+          className="absolute line-clamp-2 max-w-32 text-xs leading-tight font-semibold text-fg-2"
           style={{ left: Math.max(8, tx + lane.x * zoom + 10), top: ty + lane.y * zoom + 6 }}
         >
           {lane.label}
@@ -1929,16 +1972,26 @@ function GroupControls({ allOpen, onToggle }: { allOpen: boolean; onToggle: () =
   );
 }
 
-function LaneToggle({ lanes, onToggle }: { lanes: boolean; onToggle: () => void }) {
+function LaneToggle({
+  lanes,
+  onToggle,
+  label = "Swimlanes",
+  title = "Group steps in lanes by role. A step's lane follows its role; dragging moves steps left or right.",
+}: {
+  lanes: boolean;
+  onToggle: () => void;
+  label?: string;
+  title?: string;
+}) {
   return (
     <button
       type="button"
       aria-pressed={lanes}
       onClick={onToggle}
-      title="Group steps in lanes by role. A step's lane follows its role; dragging moves steps left or right."
+      title={title}
       className={`${toolButton} text-xs ${lanes ? "!border-accent !bg-accent-soft" : ""}`}
     >
-      Swimlanes
+      {label}
     </button>
   );
 }
