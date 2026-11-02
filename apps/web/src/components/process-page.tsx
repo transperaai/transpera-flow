@@ -17,7 +17,7 @@ import { IssueTrackView } from "@/components/issue-track";
 import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { FactsList } from "@/components/facts-list";
-import { capacityGaps, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
+import { capacityBlockers, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -161,7 +161,7 @@ export function ProcessPage({
 
   // What the process still lacks for meaningful numbers (issue #167): the same check as the upload preview, on this version.
   const gaps = useMemo(
-    () => (bundle.process.is_company ? [] : [...findGaps(gapInputFromBundle(bundle)), ...capacityGaps(bundle, model)]),
+    () => (bundle.process.is_company ? [] : [...findGaps(gapInputFromBundle(bundle)), ...capacityBlockers(model)]),
     [bundle, model],
   );
   const [gapStep, setGapStep] = useState<string | null>(null);
