@@ -53,10 +53,53 @@ appear, and keep those pages' tests green.
 14. **Remove two charts:** "Issues opened and resolved" and "Before and after, per solution". Delete their components
     and tests if nothing else uses them.
 
-## Don't change yet (Austin is deciding)
+## Austin's decisions, round 2 (same day): build these too
 
-- DLER as an "average" (item 4 only removes the goal text).
-- "By process", "What the time achieves" and "Team load by role".
+15. **Room for more clients is a pulse check, not a fact.**
+    - Lead with a status word and colour:
+      - **Plenty of room** (room ≥ 20% of today's clients);
+      - **Some room** (5–20%);
+      - **Tight** (above 0, under 5%);
+      - **Full** (0).
+    - Then an approximate figure: "about N more clients", rounded to the nearest 5 when N ≥ 10, else to the nearest
+      whole client.
+    - Then "Limited by <team>".
+    - Add one plain line, "A rough guide from the simulation, not a promise". The "How this works" fold keeps the method.
+    - Same treatment on the Capacity page's "Room for more clients" sentence and gauge.
+16. **Where the time goes: by process or by purpose.** On each department card, add a two-way toggle, "By process" /
+    "By purpose". Default **By process**: hours grouped by the process each step is in, using the process names. Same
+    data: `personTime.stepHours` summed per department.
+17. **Remove the "By process" section** from the Overview (the list of processes with run facts and issues). Its
+    content stays on the Processes page. Delete the Overview-only code and tests.
+18. **DLER is the average of each person's DLER** (decision D40; record it in `client-requirements.md`, amending
+    D9/D24).
+    - A client-facing person's DLER = the monthly retainers of the clients they manage ÷ their monthly salary.
+      - Named clients: their fee, credited to their manager.
+      - Counted clients: their portfolio count × the tier's fee.
+      - A client taking both services counts each service's fee with that service's manager.
+    - The department DLER is the mean of its client-facing people's DLERs. Leave out people with no salary entered, and
+      contractors. Directors follow `dler_includes_leadership`.
+    - The whole-business DLER is the mean over all client-facing people.
+    - Subtext: "Average of N people's DLER". No money breakdown, no goal.
+    - Change it in `capacity-figures.ts` (`dler`), so the Capacity headline, the Overview and the Sandbox's DLER chart
+      and verdict all use the same definition.
+    - Keep the 4.5 goal line on the Sandbox chart only.
+    - Hand-checked tests.
+    - Pay-hidden viewers: unchanged (hidden).
+19. **"What the time achieves": keep it and make it read cleanly.** Austin says it looks skewed to one category.
+    - First find out why. Check whether the example's step purposes (free text such as "Client meetings") map to the
+      workspace's purpose categories (Settings → What it achieves). Unmatched ones fall into one bucket, and that may be
+      the skew.
+    - Fix the cause: the example loader and/or the starter should create matching categories, or map purposes to them.
+    - Then make the chart cleaner: categories sorted by size, readable labels, consistent colours.
+    - Screenshot it on the example data with all categories visible.
+20. **Team load by role, simplified.**
+    - Lead with the "What to do" sentence(s) from the Capacity page ("Performance managers go over their line from
+      March; start hiring by January", or "No team goes over its line in the next N months").
+    - Below that, one compact row per role: one cell per month, coloured green / amber / red against that role's line,
+      with the percentage on hover or focus.
+    - Remove the uncovered-hours and market overlays, and the hire and leave markers, from this Overview version.
+    - Keep the link to the Sandbox.
 
 ## Done when
 
