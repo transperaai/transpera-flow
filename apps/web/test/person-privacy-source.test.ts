@@ -11,7 +11,7 @@ const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8"
 /** Per-person displays: a member sees only their own row. */
 const OWN_ROW = [
   "components/people-page.tsx",
-  "components/utilisation-bars.tsx",
+  "components/process-supporting-data.tsx",
   "lib/forecast/timeline.ts",
   "lib/scenarios/levers.ts",
 ];

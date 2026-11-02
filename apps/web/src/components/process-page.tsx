@@ -14,7 +14,7 @@ import type { ProcessAdminResult } from "@/lib/processes/admin";
 import { AboutProcess } from "@/components/about-process";
 import { Help } from "@/components/help";
 import { IssueTrackView } from "@/components/issue-track";
-import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
+import { HeaviestSteps, HoursByRole, KeyPersonPanel, SupportingHeadline, TimeSplit } from "@/components/process-supporting-data";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { FactsList } from "@/components/facts-list";
 import type { FactNames } from "@/lib/insights/fact-sentence";
@@ -25,7 +25,8 @@ import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { aboutProcess } from "@/lib/process-page/about";
-import { cycleSpread, keyPersonRows, loopRows, timeSplitRows } from "@/lib/process-page/supporting";
+import { processHeadline, processHours } from "@/lib/process-page/hours";
+import { keyPersonRows, timeSplitRows } from "@/lib/process-page/supporting";
 import { linkedSolutions, trackOf } from "@/lib/process-page/track";
 import { buildSolutionHref } from "@/lib/solutions/links";
 import { useDemoSolutions } from "@/lib/solutions/demo";
@@ -43,8 +44,6 @@ import { ProcessSolutions, type SolutionsData } from "./solutions/process-soluti
 import { NO_SOLUTIONS_DATA } from "@/lib/solutions/cards";
 import { useProcessIssues } from "./process-issues";
 import { useEngineModel, type EditMode } from "@/lib/sim/use-engine-model";
-import { UtilisationBars } from "./utilisation-bars";
-import { WaitByStep } from "./wait-by-step";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
 import { EDIT_ONLY } from "@/lib/phone";
 
@@ -114,7 +113,8 @@ export function ProcessPage({
   // A ?horizon= in the address still sets how far ahead the run looks (the Overview and the Editor use it); this page has no picker.
   const pickedMonths = isHorizonMonths(horizonParam) ? horizonParam : null;
   const { model, error } = useEngineModel(bundle, pickedMonths === null ? null : horizonWeeks(pickedMonths));
-  const sim = useSimulation(model);
+  // personTime on: the Supporting data's hours a month by role, person and step come from it.
+  const sim = useSimulation(model, 30, 1, { personTime: true });
   const result = sim.run?.result ?? null;
 
   const sourceTitles = Object.fromEntries(sources.map((s) => [s.id, s.title]));
@@ -191,13 +191,13 @@ export function ProcessPage({
     () =>
       model
         ? {
+            headline: processHeadline(model, result, stepIds, tierSetup?.departments ?? null),
+            hours: processHours(model, result, stepIds),
             timeSplit: timeSplitRows(model, result, stepIds),
-            spread: cycleSpread(result),
             keyPeople: keyPersonRows(model, result, stepIds),
-            loops: loopRows(model, result, { processId: bundle.process.id, stepIds, issues, solutions: solData.solutions.filter((s) => s.process_id === bundle.process.id) }),
           }
         : null,
-    [model, result, stepIds, bundle.process.id, issues, solData.solutions],
+    [model, result, stepIds, tierSetup],
   );
 
   return (
@@ -355,14 +355,13 @@ export function ProcessPage({
 
         <Section id="supporting-data" title="Supporting data" hint="From the latest run.">
           {model && supporting ? (
-            <div className="grid gap-3 md:grid-cols-2">
-              <WaitByStep model={model} result={result} stepIds={stepIds} />
-              <UtilisationBars model={model} result={result} viewer={bundle.viewer} />
-              <TimeSplit rows={supporting.timeSplit} result={result} />
-              <CycleSpreadPanel spread={supporting.spread} hoursPerWeek={model.hoursPerWeek} result={result} />
-              <KeyPersonPanel rows={supporting.keyPeople} result={result} />
-              <div className="min-w-0 md:col-span-2">
-                <ReworkLoopsPanel rows={supporting.loops} result={result} hoursPerWeek={model.hoursPerWeek} base={solBase} />
+            <div className="flex flex-col gap-3">
+              <SupportingHeadline headline={supporting.headline} result={result} />
+              <div className="grid gap-3 md:grid-cols-2">
+                <HoursByRole hours={supporting.hours} result={result} viewer={bundle.viewer} />
+                <HeaviestSteps hours={supporting.hours} result={result} />
+                <TimeSplit rows={supporting.timeSplit} result={result} />
+                <KeyPersonPanel rows={supporting.keyPeople} result={result} />
               </div>
             </div>
           ) : (

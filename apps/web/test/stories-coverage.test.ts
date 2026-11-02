@@ -75,8 +75,6 @@ const CHARTS: [string, string][] = [
   ["sandbox/tornado", "TornadoBars"],
   ["forecast/forecast-timeline", "ForecastTimeline"],
   ["forecast/forecast-timeline", "TimelineLegend"],
-  ["utilisation-bars", "UtilisationBars"],
-  ["wait-by-step", "WaitByStep"],
   ["kpi-strip", "KpiStrip"],
 ];
 

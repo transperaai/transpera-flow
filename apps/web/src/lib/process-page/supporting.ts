@@ -1,10 +1,7 @@
-// What the process page's Supporting data shows beyond the wait and busy charts (issue #174): the time split per step, the
-// cycle time spread, key-person risk and the rework loops, all read off one simulation result. Pure.
+// What the process page's Supporting data shows besides the hours (lib/process-page/hours.ts): the time split per step and key-person
+// risk, read off one simulation result. Pure.
 
-import type { EngineModel, SimulationResult, Stat } from "@transpera-flow/engine";
-import type { IssueRow } from "@transpera-flow/db";
-import { isOnProcess } from "@/lib/processes/rows";
-import type { LinkedSolution } from "./track";
+import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
 
 export interface TimeSplitRow {
   id: string;
@@ -53,68 +50,4 @@ export function keyPersonRows(model: EngineModel, result: SimulationResult | nul
     if (f.keyPerson) return [{ id: s.id, step: s.name, person: f.keyPerson.personName, placeholder: f.keyPerson.personId.includes("#") }];
     return f.nobodyCanDo ? [{ id: s.id, step: s.name, person: null, placeholder: false }] : [];
   });
-}
-
-export interface CycleSpread {
-  p50: number;
-  p90: number;
-  /** How much longer a slow item takes than a typical one (p90 over median), 0 when the median is 0. */
-  ratio: number;
-}
-
-export function cycleSpread(result: SimulationResult | null): CycleSpread | null {
-  const c = result?.kpi.cycle;
-  if (!c || !(c.p90 > 0)) return null;
-  return { p50: c.p50, p90: c.p90, ratio: c.p50 > 0 ? c.p90 / c.p50 : 0 };
-}
-
-export interface LoopRow {
-  id: string;
-  kind: "redo" | "back-edge";
-  /** The step names, in the order items go round them. */
-  steps: string[];
-  /** Plain description: "Redo at Review" or "Review sends work back to Draft". */
-  title: string;
-  share: Stat;
-  meanRounds: Stat;
-  hoursPerMonth: Stat;
-  /** Elapsed working hours a trip adds to the average item that enters the loop. */
-  extraCycleHours: Stat;
-  /** Issues on any of its steps (open or being tested) and solutions that change them. */
-  issues: { id: string; number: number | null; label: string }[];
-  solutions: { id: string; name: string }[];
-}
-
-/** One row per rework loop, biggest cost first, with the issues and solutions that touch its steps. */
-export function loopRows(
-  model: EngineModel,
-  result: SimulationResult | null,
-  input: { processId: string; stepIds: ReadonlySet<string>; issues: readonly IssueRow[]; solutions: readonly LinkedSolution["solution"][] },
-): LoopRow[] {
-  if (!result?.loops) return [];
-  const names = new Map(model.steps.map((s) => [s.id, s.name]));
-  const name = (id: string) => names.get(id) ?? "a removed step";
-  const out: LoopRow[] = [];
-  for (const l of result.loops) {
-    if (!l.steps.some((id) => input.stepIds.has(id))) continue;
-    const mine = new Set(l.steps);
-    const issues = input.issues
-      .filter((i) => (i.status === "open" || i.status === "testing") && isOnProcess(i, input.processId, input.stepIds))
-      .filter((i) => [i.step_id, ...i.links.map((k) => k.step_id)].some((id) => id !== null && mine.has(id)))
-      .map((i) => ({ id: i.id, number: i.number, label: `${i.number == null ? "" : `#${i.number} `}${i.title}` }));
-    const solutions = input.solutions.filter((s) => s.changed_step_ids.some((id) => mine.has(id))).map((s) => ({ id: s.id, name: s.name }));
-    out.push({
-      id: l.id,
-      kind: l.kind,
-      steps: l.steps.map(name),
-      title: l.kind === "redo" ? `Redo at ${name(l.from)}` : `${name(l.from)} sends work back to ${name(l.to)}`,
-      share: l.share,
-      meanRounds: l.meanRounds,
-      hoursPerMonth: l.extraHandsOnHoursPerMonthTotal,
-      extraCycleHours: l.extraCycleHours,
-      issues,
-      solutions,
-    });
-  }
-  return out.sort((a, b) => b.hoursPerMonth.mean - a.hoursPerMonth.mean || a.id.localeCompare(b.id));
 }
