@@ -20,7 +20,7 @@ export function useSimulation(
   model: EngineModel | null,
   reps = 30,
   seed = 1,
-  { monthly = false, monthStarts }: { monthly?: boolean; monthStarts?: readonly number[] | null } = {},
+  { monthly = false, monthStarts, personTime = false }: { monthly?: boolean; monthStarts?: readonly number[] | null; personTime?: boolean } = {},
 ): SimulationState {
   // The months' edges by value, so a new array with the same edges doesn't run the model again.
   const starts = monthStarts ? monthStarts.join(",") : "";
@@ -41,7 +41,7 @@ export function useSimulation(
     const timer = setTimeout(() => {
       setState((s) => ({ status: "running", run: s.run, model: s.model }));
       clientRef.current
-        ?.run(model, { reps, seed, monthly, ...(starts ? { monthStarts: starts.split(",").map(Number) } : {}) })
+        ?.run(model, { reps, seed, monthly, ...(personTime ? { personTime } : {}), ...(starts ? { monthStarts: starts.split(",").map(Number) } : {}) })
         .then((run) => active && setState({ status: "done", run, model }))
         .catch((err: Error) => {
           if (active && !(err instanceof SimulationCancelled)) setState((s) => ({ status: "error", error: err.message, run: s.run, model: s.model }));
@@ -51,7 +51,7 @@ export function useSimulation(
       active = false;
       clearTimeout(timer);
     };
-  }, [model, reps, seed, monthly, starts]);
+  }, [model, reps, seed, monthly, starts, personTime]);
 
   return state;
 }

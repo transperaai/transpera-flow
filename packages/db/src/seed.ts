@@ -1,4 +1,5 @@
 import { storedStatus } from "@transpera-flow/db/issue-status";
+import { defaultProcessCategory } from "@transpera-flow/db/process-category";
 import type { NewSourceLink } from "./source-links";
 import type { IssueRow, ProcessBundle, SandboxScenarioRow, ScenarioRow, SourceRow, StepRow } from "./types";
 
@@ -59,7 +60,16 @@ export function seedSql(
     const { live_revision_id, ...process } = b.process;
     // The workspace's other processes (servicing, issue #19), each linked to its live revision last, like the main one.
     const others = b.otherProcesses ?? [];
-    out.push(insert("processes", [process, ...others.map(({ process: { live_revision_id: _live, ...p } }) => p)]));
+    // `category` is left out of the insert, so the seed still loads into a database built up to an older migration (the tests that
+    // migrate in steps); the column's trigger gives each process the category its kind implies. A category that differs from that is
+    // set after, only where the column exists.
+    const all = [process, ...others.map(({ process: { live_revision_id: _live, ...p } }) => p)];
+    out.push(insert("processes", all.map(({ category: _category, ...p }) => p)));
+    const chosen = all.filter((p) => p.category !== defaultProcessCategory(p.kind));
+    if (chosen.length) {
+      const updates = chosen.map((p) => `    update public.processes set category = ${literal(p.category)} where id = ${literal(p.id)};\n`).join("");
+      out.push(`do $seed$\nbegin\n  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'processes' and column_name = 'category') then\n${updates}  end if;\nend\n$seed$;\n`);
+    }
     // The fee range (phase 3) is left out while null, so the seed still loads into a database built up to an older migration (the tests that migrate in steps).
     out.push(insert("services", b.services.map(({ price_low, price_high, ...r }) => ({ ...r, ...(price_low !== null ? { price_low } : {}), ...(price_high !== null ? { price_high } : {}) }))));
     out.push(insert("lead_sources", (b.leadSources ?? []).map((r) => ({ ...r }))));

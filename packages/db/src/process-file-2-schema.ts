@@ -2,6 +2,7 @@
 // kept in step by a test), the worked example, and the prompt "Copy prompt for Claude" copies. The checker is in
 // process-file.ts (steps, links, groups) and process-file-2.ts (what /2 adds). /1 is untouched and still uploads.
 
+import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS } from "@transpera-flow/db/process-category";
 import { PROCESS_FILE_BLOCK_TYPE, PROCESS_FILE_SCHEMA } from "@transpera-flow/db/process-file";
 import {
   EVIDENCE_FIELDS,
@@ -58,6 +59,10 @@ export const PROCESS_FILE_SCHEMA_2 = {
     kind: PROCESS_FILE_SCHEMA.properties.kind,
     description: PROCESS_FILE_SCHEMA.properties.description,
     entity_name: PROCESS_FILE_SCHEMA.properties.entity_name,
+    category: {
+      enum: [...PROCESS_CATEGORIES],
+      description: `What the process is for, in people's words: ${PROCESS_CATEGORIES.map((c) => `${c} (${PROCESS_CATEGORY_LABELS[c]}: ${PROCESS_CATEGORY_HELP[c]})`).join("; ")}. Optional. Left out: a pipeline is sales and a servicing process is routine_client_work. The kind stays what the simulation uses.`,
+    },
     sources: {
       type: "array",
       maxItems: MAX_FILE_SOURCES,

@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { defaultProcessCategory } from "@transpera-flow/db";
 import { isId } from "@/lib/editor/validate";
 import { rpc } from "@transpera-flow/db/client";
 import { pgCode } from "@/app/action-db";
@@ -40,7 +41,7 @@ export async function createProcess(workspaceId: string, slug: string, _prev: Cr
   try {
     proc = await db
       .insertInto("processes")
-      .values({ workspace_id: workspaceId, name, kind: chosen, entity_name: kind.entity, source: "manual" })
+      .values({ workspace_id: workspaceId, name, kind: chosen, entity_name: kind.entity, category: defaultProcessCategory(chosen), source: "manual" })
       .returning("id")
       .executeTakeFirstOrThrow();
   } catch (e) {

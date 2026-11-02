@@ -76,6 +76,16 @@
       "maxLength": 100,
       "description": "What flows through it, e.g. lead, task. Default: lead for a pipeline, item for a servicing process."
     },
+    "category": {
+      "enum": [
+        "sales",
+        "onboarding",
+        "routine_client_work",
+        "ad_hoc",
+        "internal"
+      ],
+      "description": "What the process is for, in people's words: sales (Sales: How new work comes in and is won.); onboarding (Onboarding: Getting a new client set up, once per client.); routine_client_work (Routine client work: Work done again and again for existing clients, like a monthly report.); ad_hoc (Ad hoc: Requests that come in at random, with no fixed schedule.); internal (Internal: Work for the agency itself, not for a client.). Optional. Left out: a pipeline is sales and a servicing process is routine_client_work. The kind stays what the simulation uses."
+    },
     "sources": {
       "type": "array",
       "maxItems": 50,

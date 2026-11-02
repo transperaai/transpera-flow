@@ -84,7 +84,22 @@ describe("process admin", () => {
     await dialog(page).getByRole("radio", { name: /Sales pipeline/ }).check();
     await dialog(page).getByRole("button", { name: "Change type" }).click();
     await expect.poll(() => calls(page)).toContainEqual(["kind", "50000000-0000-4000-8000-000000000004", "pipeline"]);
-    await expect.poll(() => page.locator('[data-process="50000000-0000-4000-8000-000000000004"] td:nth-child(3)').innerText()).toBe("Sales pipeline");
+    // The engine kind changed; what people call the process (its category) is theirs to change and stays.
+    await expect.poll(() => page.locator('[data-process="50000000-0000-4000-8000-000000000004"] td:nth-child(3)').innerText()).toBe("Ad hoc");
+    await page.close();
+  }, 60_000);
+
+  it("the Type column shows each process's category, and a filter narrows the list to one", async () => {
+    const { page, errors } = await mount({ canEdit: true });
+    const types = () => page.locator("[data-process] td:nth-child(3)").allInnerTexts();
+    expect(await types()).toEqual(["Sales", "Onboarding", "Routine client work", "Ad hoc"]);
+    const filter = page.getByRole("group", { name: "Type" });
+    expect(await filter.getByRole("button").allInnerTexts()).toEqual(["All", "Sales (1)", "Onboarding (1)", "Routine client work (1)", "Ad hoc (1)"]);
+    await filter.getByRole("button", { name: /^Onboarding/ }).click();
+    expect(await names(page)).toEqual(["Onboarding"]);
+    await filter.getByRole("button", { name: "All" }).click();
+    expect((await names(page)).length).toBe(4);
+    expect(errors).toEqual([]);
     await page.close();
   }, 60_000);
 

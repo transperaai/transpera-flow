@@ -7,13 +7,13 @@ import { simulate, type EngineModel, type EngineStep } from "@transpera-flow/eng
 import type { IssueRow, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
 import { AboutProcess } from "@/components/about-process";
 import { IssueTrackView } from "@/components/issue-track";
-import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
+import { KeyPersonPanel, TimeSplit } from "@/components/process-supporting-data";
 import { aboutLine, type About } from "@/lib/process-page/about";
-import { cycleSpread, keyPersonRows, loopRows, timeSplitRows } from "@/lib/process-page/supporting";
+import { keyPersonRows, timeSplitRows } from "@/lib/process-page/supporting";
 import { linkedSolutions, otherImprovements, trackOf, TRACK_STAGES } from "@/lib/process-page/track";
 
 // Issue #174, part 2: the process page's About line, the issue status track, "Other improvements" and the supporting data
-// (time split, cycle spread, key-person risk, rework loops), as pure functions and as rendered markup.
+// (time split and key-person risk; the hours panels are in process-hours.test.ts), as pure functions and as rendered markup.
 
 const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8");
 
@@ -120,17 +120,17 @@ describe("the issue status track", () => {
 });
 
 describe("About this process", () => {
-  const about: About = { type: "Pipeline", steps: 6, roles: 3, version: 4 };
+  const about: About = { category: "sales", steps: 6, roles: 3, version: 4 };
   it("reads as plain attributes, with the version as a bare number", () => {
     expect(aboutLine(about)).toEqual([
-      { label: "Type", value: "Pipeline" },
+      { label: "Type", value: "Sales" },
       { label: "Size", value: "6 steps, 3 roles" },
       { label: "Version", value: "4" },
     ]);
   });
   it("says so when there is no live version", () => {
     const rows = aboutLine({ ...about, version: null, steps: 1, roles: 1 });
-    expect(rows.map((r) => r.value)).toEqual(["Pipeline", "1 step, 1 role", "Not published yet"]);
+    expect(rows.map((r) => r.value)).toEqual(["Sales", "1 step, 1 role", "Not published yet"]);
   });
   it("no longer shows the company map trail, sources or last published", () => {
     const labels = aboutLine(about).map((r) => r.label);
@@ -143,6 +143,16 @@ describe("About this process", () => {
     expect(html).toContain("About this process");
     expect(html).toContain("Version");
     expect(read("components/about-process.tsx")).not.toContain("<Help");
+  });
+  it("shows Type as text for a viewer, and as a select of the five categories for someone who can edit", () => {
+    const viewer = renderToStaticMarkup(createElement(AboutProcess, { about }));
+    expect(viewer).not.toContain("<select");
+    expect(viewer).toContain("Sales");
+    const editor = renderToStaticMarkup(createElement(AboutProcess, { about, editCategory: async () => ({ status: "ok" as const }) }));
+    expect(editor).toContain("<select");
+    expect(editor.match(/<option/g)).toHaveLength(5);
+    for (const label of ["Sales", "Onboarding", "Routine client work", "Ad hoc", "Internal"]) expect(editor).toContain(`>${label}</option>`);
+    expect(editor).toContain('value="sales"');
   });
 });
 
@@ -180,12 +190,6 @@ describe("the supporting data", () => {
     expect(timeSplitRows(model, null, ids)).toEqual([]);
     expect(timeSplitRows(model, result, new Set())).toEqual([]);
   });
-  it("gives the cycle time's median and 90th percentile", () => {
-    const s = cycleSpread(result)!;
-    expect(s.p90).toBeGreaterThanOrEqual(s.p50);
-    expect(s.ratio).toBeCloseTo(s.p90 / s.p50, 9);
-    expect(cycleSpread(null)).toBeNull();
-  });
   it("lists the steps one person can do, and steps nobody can", () => {
     const one: EngineModel = {
       ...model,
@@ -200,59 +204,27 @@ describe("the supporting data", () => {
     expect(rows[0]!.person).toBeTruthy();
     expect(keyPersonRows(model, simulate(model, 3, 1), ids)).toEqual([]);
   });
-  it("makes a row per rework loop with its cost, and the issues and solutions on its steps", () => {
-    const i = { id: "i1", number: 7, title: "Reviews bounce", status: "open", process_id: "p1", step_id: "review", links: [{ process_id: "p1", step_id: "review" }] } as unknown as IssueRow;
-    const done = { ...i, id: "i2", number: 8, status: "resolved" } as IssueRow;
-    const rows = loopRows(model, result, { processId: "p1", stepIds: ids, issues: [i, done], solutions: [{ id: "a", name: "Solution a", process_id: "p1", changed_step_ids: ["draft"] }] });
-    expect(rows.map((r) => r.kind).sort()).toEqual(["back-edge", "redo"]);
-    const back = rows.find((r) => r.kind === "back-edge")!;
-    expect(back.title).toBe("REVIEW sends work back to DRAFT");
-    expect(back.steps).toEqual(["DRAFT", "REVIEW"]);
-    expect(back.share.mean).toBeGreaterThan(0.1);
-    expect(back.hoursPerMonth.mean).toBeGreaterThan(0);
-    expect(back.issues.map((x) => x.id)).toEqual(["i1"]);
-    expect(back.solutions).toEqual([{ id: "a", name: "Solution a" }]);
-    expect(rows[0]!.hoursPerMonth.mean).toBeGreaterThanOrEqual(rows[1]!.hoursPerMonth.mean);
-    expect(loopRows(model, null, { processId: "p1", stepIds: ids, issues: [], solutions: [] })).toEqual([]);
-  });
-  it("stays quiet when nothing loops", () => {
-    const straight = { ...model, steps: [step("draft", [{ to: "review", p: 1 }]), step("review", [{ to: "done", p: 1 }])] };
-    expect(loopRows(straight, simulate(straight, 3, 1), { processId: "p1", stepIds: ids, issues: [], solutions: [] })).toEqual([]);
-  });
 });
 
 describe("the supporting data panels", () => {
-  const rows = loopRows(model, result, { processId: "p1", stepIds: ids, issues: [], solutions: [] });
   const html = renderToStaticMarkup(
     createElement("div", null, [
       createElement(TimeSplit, { key: 1, rows: timeSplitRows(model, result, ids), result }),
-      createElement(CycleSpreadPanel, { key: 2, spread: cycleSpread(result), hoursPerWeek: 40, result }),
       createElement(KeyPersonPanel, { key: 3, rows: [{ id: "draft", step: "Draft", person: "Pat", placeholder: false }, { id: "x", step: "Send", person: null, placeholder: false }, { id: "y", step: "Check", person: "Reviewer 1", placeholder: true }], result }),
-      createElement(ReworkLoopsPanel, { key: 4, rows, result, hoursPerWeek: 40, base: "/demo" }),
     ]),
   );
-  it("shows all four panels with plain headings", () => {
-    for (const h of ["Time split per step", "Cycle time spread", "Key-person risk per step", "Rework loops"]) expect(html).toContain(h);
+  it("shows the time split and key-person panels with plain headings, and says what the time split shows", () => {
+    for (const h of ["Time split per step", "Key-person risk per step"]) expect(html).toContain(h);
+    expect(html).toContain("Hands-on work against waiting (for a person, or on others), for one visit to the step.");
+    for (const gone of ["Cycle time spread", "Rework loops"]) expect(html).not.toContain(gone);
     expect(html).toContain("Hands-on");
-    expect(html).toContain("Typical (median)");
     expect(html).toContain("Pat");
     expect(html).toContain("Nobody can do it");
     expect(html).toContain("Reviewer 1");
     expect(html).toContain("placeholder, no named person");
     expect(html).toContain("Waiting on others (hatched)");
-    expect(html).toContain("REVIEW sends work back to DRAFT");
-    expect(html).toContain("Redo at REVIEW");
-  });
-  it("words a loop that never happens and a cycle with a zero median plainly", () => {
-    const never = { ...rows[0]!, share: { mean: 0, p10: 0, p90: 0 } };
-    expect(renderToStaticMarkup(createElement(ReworkLoopsPanel, { rows: [never], result, hoursPerWeek: 40, base: "/demo" }))).toContain("Never in this run");
-    const zero = renderToStaticMarkup(createElement(CycleSpreadPanel, { spread: { p50: 0, p90: 20, ratio: 0 }, hoursPerWeek: 40, result }));
-    expect(zero).toContain("Most items finish straight away");
-    expect(zero).not.toContain("about as long");
   });
   it("says what is missing instead of an empty chart", () => {
-    const empty = renderToStaticMarkup(createElement(ReworkLoopsPanel, { rows: [], result, hoursPerWeek: 40, base: "/demo" }));
-    expect(empty).toContain("Nothing goes back to an earlier step.");
     expect(renderToStaticMarkup(createElement(TimeSplit, { rows: [], result: null }))).toContain("Simulating");
     expect(renderToStaticMarkup(createElement(KeyPersonPanel, { rows: [], result }))).toContain("No step depends on one person.");
   });

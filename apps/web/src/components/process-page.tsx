@@ -9,22 +9,24 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } f
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
-import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
-import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
+import type { IssueRow, ProcessBundle, ProcessCategory, ScenarioRow, SourceRow } from "@transpera-flow/db";
+import type { ProcessAdminResult } from "@/lib/processes/admin";
 import { AboutProcess } from "@/components/about-process";
 import { Help } from "@/components/help";
 import { IssueTrackView } from "@/components/issue-track";
-import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
+import { HeaviestSteps, HoursByRole, KeyPersonPanel, SupportingHeadline, TimeSplit } from "@/components/process-supporting-data";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { FactsList } from "@/components/facts-list";
-import { capacityGaps, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
+import type { FactNames } from "@/lib/insights/fact-sentence";
+import { capacityBlockers, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { aboutProcess } from "@/lib/process-page/about";
-import { cycleSpread, keyPersonRows, loopRows, timeSplitRows } from "@/lib/process-page/supporting";
+import { processHeadline, processHours } from "@/lib/process-page/hours";
+import { keyPersonRows, timeSplitRows } from "@/lib/process-page/supporting";
 import { linkedSolutions, trackOf } from "@/lib/process-page/track";
 import { buildSolutionHref } from "@/lib/solutions/links";
 import { useDemoSolutions } from "@/lib/solutions/demo";
@@ -42,17 +44,8 @@ import { ProcessSolutions, type SolutionsData } from "./solutions/process-soluti
 import { NO_SOLUTIONS_DATA } from "@/lib/solutions/cards";
 import { useProcessIssues } from "./process-issues";
 import { useEngineModel, type EditMode } from "@/lib/sim/use-engine-model";
-import { UtilisationBars } from "./utilisation-bars";
-import { WaitByStep } from "./wait-by-step";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
 import { EDIT_ONLY } from "@/lib/phone";
-
-const RATING_PILL: Record<Rating, string> = {
-  risk: "border-crit bg-crit-soft",
-  bad: "border-serious bg-crit-soft/60",
-  good: "border-warn bg-warn-soft",
-  great: "border-line bg-panel-2",
-};
 
 /** A process inside this one, for the "Inside:" chips. */
 export interface ChildProcess {
@@ -70,9 +63,9 @@ export function ProcessPage({
   issues = [],
   sources = [],
   liveRevisions,
-  rating,
   registerHref,
   settingsHref,
+  editCategory,
   editHref,
   historyHref,
   solutions,
@@ -96,10 +89,10 @@ export function ProcessPage({
   sources?: SourceRow[];
   /** Each process's live revision id, which a dismissed insight is measured against. Omitted: this bundle's, when it is the live one. */
   liveRevisions?: Record<string, string>;
-  /** The process's rating: the worst of its open issues and of those of the processes inside it, as the switcher shows it. */
-  rating?: Rating | null;
   registerHref?: string;
   settingsHref?: string;
+  /** Saves a new category for this process (a server action bound to it): the Owner and Agency admins; absent for everyone else and on an earlier version. */
+  editCategory?: (category: ProcessCategory) => Promise<ProcessAdminResult>;
   /** The Editor for this process, if the viewer may edit. */
   editHref?: string;
   /** The History page (A40, not built yet): a plain link to its route. */
@@ -120,7 +113,8 @@ export function ProcessPage({
   // A ?horizon= in the address still sets how far ahead the run looks (the Overview and the Editor use it); this page has no picker.
   const pickedMonths = isHorizonMonths(horizonParam) ? horizonParam : null;
   const { model, error } = useEngineModel(bundle, pickedMonths === null ? null : horizonWeeks(pickedMonths));
-  const sim = useSimulation(model);
+  // personTime on: the Supporting data's hours a month by role, person and step come from it.
+  const sim = useSimulation(model, 30, 1, { personTime: true });
   const result = sim.run?.result ?? null;
 
   const sourceTitles = Object.fromEntries(sources.map((s) => [s.id, s.title]));
@@ -168,7 +162,7 @@ export function ProcessPage({
 
   // What the process still lacks for meaningful numbers (issue #167): the same check as the upload preview, on this version.
   const gaps = useMemo(
-    () => (bundle.process.is_company ? [] : [...findGaps(gapInputFromBundle(bundle)), ...capacityGaps(bundle, model)]),
+    () => (bundle.process.is_company ? [] : [...findGaps(gapInputFromBundle(bundle)), ...capacityBlockers(model)]),
     [bundle, model],
   );
   const [gapStep, setGapStep] = useState<string | null>(null);
@@ -187,19 +181,23 @@ export function ProcessPage({
   };
   // The steps of this process and of the processes inside it, which the wait chart is about (the model may hold more).
   const stepIds = useMemo(() => processStepIds(bundle), [bundle]);
+  const factNames = useMemo<FactNames>(
+    () => ({ step: (id) => stepNameOf.get(id) ?? null, role: (id) => model?.roles[id]?.name ?? null, person: (id) => model?.people?.[id]?.name ?? null }),
+    [stepNameOf, model],
+  );
   const unpublished = liveVersion === 0;
   const about = useMemo(() => aboutProcess({ bundle, liveVersion }), [bundle, liveVersion]);
   const supporting = useMemo(
     () =>
       model
         ? {
+            headline: processHeadline(model, result, stepIds, tierSetup?.departments ?? null),
+            hours: processHours(model, result, stepIds),
             timeSplit: timeSplitRows(model, result, stepIds),
-            spread: cycleSpread(result),
             keyPeople: keyPersonRows(model, result, stepIds),
-            loops: loopRows(model, result, { processId: bundle.process.id, stepIds, issues, solutions: solData.solutions.filter((s) => s.process_id === bundle.process.id) }),
           }
         : null,
-    [model, result, stepIds, bundle.process.id, issues, solData.solutions],
+    [model, result, stepIds, tierSetup],
   );
 
   return (
@@ -227,16 +225,6 @@ export function ProcessPage({
               <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2.5 py-0.5 text-xs font-medium">
                 <i aria-hidden className="size-1.5 rounded-full bg-accent" />
                 {unpublished ? "Draft, not published yet" : `Version ${liveVersion}`}
-              </span>
-            )}
-            {rating && (
-              <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${RATING_PILL[rating]}`} data-process-rating={rating}>
-                {RATING_LABELS[rating]}
-                <Help
-                  label="Process rating"
-                  description="The worst rating among the confirmed open issues on this process and the processes inside it: Great, Good, Bad or Operational risk. Facts from the run don't count until someone logs an issue."
-                  example="Bad, not urgent: one confirmed issue is rated Bad and none is worse."
-                />
               </span>
             )}
             {inside.length > 0 && (
@@ -274,7 +262,7 @@ export function ProcessPage({
           </div>
         )}
 
-        <AboutProcess about={about} />
+        <AboutProcess about={about} editCategory={editCategory} />
 
         <Section
           id="map"
@@ -333,7 +321,7 @@ export function ProcessPage({
         </Section>
 
         <Section id="facts" title="Facts from the run" hint="What the simulation measured. These are evidence, not issues: log an issue below when one matters.">
-          <FactsList facts={issuesUi.facts} currency={bundle.workspace.settings.currency} stepName={(id) => stepNameOf.get(id) ?? null} />
+          <FactsList facts={issuesUi.facts} names={factNames} onLight={issuesUi.light} />
         </Section>
 
         <Section
@@ -367,14 +355,13 @@ export function ProcessPage({
 
         <Section id="supporting-data" title="Supporting data" hint="From the latest run.">
           {model && supporting ? (
-            <div className="grid gap-3 md:grid-cols-2">
-              <WaitByStep model={model} result={result} stepIds={stepIds} />
-              <UtilisationBars model={model} result={result} viewer={bundle.viewer} />
-              <TimeSplit rows={supporting.timeSplit} result={result} />
-              <CycleSpreadPanel spread={supporting.spread} hoursPerWeek={model.hoursPerWeek} result={result} />
-              <KeyPersonPanel rows={supporting.keyPeople} result={result} />
-              <div className="min-w-0 md:col-span-2">
-                <ReworkLoopsPanel rows={supporting.loops} result={result} hoursPerWeek={model.hoursPerWeek} base={solBase} />
+            <div className="flex flex-col gap-3">
+              <SupportingHeadline headline={supporting.headline} result={result} />
+              <div className="grid gap-3 md:grid-cols-2">
+                <HoursByRole hours={supporting.hours} result={result} viewer={bundle.viewer} />
+                <HeaviestSteps hours={supporting.hours} result={result} />
+                <TimeSplit rows={supporting.timeSplit} result={result} />
+                <KeyPersonPanel rows={supporting.keyPeople} result={result} />
               </div>
             </div>
           ) : (

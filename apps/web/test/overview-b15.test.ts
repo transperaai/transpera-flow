@@ -9,7 +9,7 @@ import { ratingOfRank } from "@/lib/map/rating";
 import { COMPANY_GROUP, groupByProcess, groupOfFact, groupOfIssue } from "@/lib/overview/by-process";
 import { countByRating, flowEfficiencyWords, monthOf, openIssues, processHealth, timeSplitByProcess, timeSplitOf, workingShare } from "@/lib/overview/health";
 import { hoursAMonth, impactNumbers, impactPairs, improvementDelivered, measureImpact, solutionsToCompare, type SolutionImpact } from "@/lib/overview/impact";
-import { processRatings } from "@/lib/processes/rows";
+import { processRatings } from "@/lib/overview/process-ratings";
 import { playbackRun, rolledUpSteps } from "@/lib/playback/graph";
 import { rerate } from "@/lib/rules/edit";
 import { solutionCopy } from "@/lib/solutions/bundle";
