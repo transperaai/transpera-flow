@@ -22,7 +22,6 @@ const { saveCapacityFactor, saveCapacityFactorSwitch, saveField, saveFields, sav
 const { workspaceIsEmpty } = await import("@/lib/restore/empty");
 const { loadImports, loadLeadSourceOptions } = await import("@/lib/calibration/import-data");
 const { loadLatestChecks } = await import("@/lib/calibration/client-data");
-const { loadLastChange } = await import("@/lib/process-page/data");
 
 let tdb: TestDb;
 const ws = NORTHBEAM_WORKSPACE_ID;
@@ -249,16 +248,5 @@ describe("calibration reads", () => {
   it("finds no latest client checks when none were saved", async () => {
     actAs("viewer");
     expect(await loadLatestChecks(ws)).toBeNull();
-  });
-});
-
-describe("process page reads", () => {
-  it("names who published the live version, and the system when nobody did", async () => {
-    const live = (await tdb.client.query("select live_revision_id from processes where workspace_id = $1 and live_revision_id is not null limit 1", [ws])).rows[0].live_revision_id as string;
-    actAs("viewer");
-    const out = await loadLastChange(live, {});
-    expect(out).not.toBeNull();
-    expect(out!.by).toMatch(/A team member|The system/);
-    expect(await loadLastChange(randomUUID(), {})).toBeNull();
   });
 });

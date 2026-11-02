@@ -7,8 +7,7 @@ import { ProcessNav } from "@/components/process-nav";
 import { ProcessPage } from "@/components/process-page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentUserId } from "@/lib/access-data";
-import { loadLastChange } from "@/lib/process-page/data";
-import { processRatings, trailOf } from "@/lib/processes/rows";
+import { processRatings } from "@/lib/processes/rows";
 import { loadCompanyId, loadMemberNames, loadProcessForEditing, loadProcessVersion, loadTierSetup, loadWorkspaceHead, loadWorkspaceIssues, loadWorkspaceLiveRevisionIds, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /**
@@ -40,12 +39,9 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     loadMemberNames(live.workspace.id),
     loadTierSetup(live.workspace.id),
   ]);
-  // Who last published the live version.
-  const lastChange = isUnpublished(live) ? null : await loadLastChange(live.revision.id, memberNames);
   const shown = earlier ?? (isUnpublished(live) && draft ? draft : live);
   const base = `/w/${slug}`;
   const hrefs = Object.fromEntries(processes.map((p) => [p.id, `${base}/p/${p.id}`]));
-  const byId = new Map(processes.map((p) => [p.id, { id: p.id, name: p.name, parentId: p.parentId ?? null }]));
   const ratings = processRatings(processes, issues, [...live.steps, ...(live.otherProcesses ?? []).flatMap((p) => p.steps)]);
   return (
     <SourceLinkingScope workspaceId={live.workspace.id} sources={sources} canEdit={canEdit && !earlier && !archivedAt}>
@@ -69,7 +65,6 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       editHref={canEdit && !archivedAt ? `${base}/p/${live.process.id}/edit` : undefined}
       historyHref={`${base}/p/${live.process.id}/history`}
       solutions={{ data: solutions, base, viewerId, memberNames }}
-      aboutInfo={{ trail: trailOf({ id: live.process.id, parentId: live.process.parent_process_id }, byId).map((t) => t.name), hasDraft: draft !== null && !isUnpublished(live), lastChange }}
       inside={processes.filter((p) => p.parentId === live.process.id).map((p) => ({ id: p.id, name: p.name, href: hrefs[p.id]! }))}
       processPicker={
         <ProcessNav
