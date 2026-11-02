@@ -12,16 +12,16 @@ import type { TimelineMonth, TimelineRow } from "@/lib/forecast/timeline";
 import { cn } from "@/lib/utils";
 
 /**
- * The "What to do" sentences from the Capacity page's hiring advice: "Performance managers go over their line from Mar 27; start hiring by Jan 27.",
+ * The "What to do" sentences from the Capacity page's hiring advice: "Performance managers: over the line from Mar 27. Start hiring by Jan 27.",
  * or, with nobody over, "No team goes over its line in the next 3 months." (`span` is "3 months").
  */
 export function whatToDo(advice: readonly Pick<HiringAdvice, "name" | "overFrom" | "hireBy">[], monthName: (i: number) => string, span: string): string[] {
   const over = advice.filter((a) => a.overFrom !== null);
   if (!over.length) return [`No team goes over its line in the next ${span}.`];
   return over.map((a) => {
-    const from = a.overFrom === 0 ? "go over their line now" : `go over their line from ${monthName(a.overFrom!)}`;
-    const hire = a.hireBy! <= 0 ? "start hiring now" : `start hiring by ${monthName(a.hireBy!)}`;
-    return `${a.name} ${from}; ${hire}.`;
+    const from = a.overFrom === 0 ? "over the line now" : `over the line from ${monthName(a.overFrom!)}`;
+    const hire = a.hireBy! <= 0 ? "Start hiring now" : `Start hiring by ${monthName(a.hireBy!)}`;
+    return `${a.name}: ${from}. ${hire}.`;
   });
 }
 

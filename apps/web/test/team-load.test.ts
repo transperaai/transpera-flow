@@ -15,9 +15,9 @@ const row = (id: string, name: string, means: (number | null)[]): TimelineRow =>
 describe("what to do", () => {
   const name = (i: number) => months[i]!.short;
   it("says when a team goes over its line and when to start hiring", () => {
-    expect(whatToDo([{ name: "Performance managers", overFrom: 2, hireBy: 0 }], name, "3 months")).toEqual(["Performance managers go over their line from Jan 27; start hiring now."]);
-    expect(whatToDo([{ name: "SEO managers", overFrom: 2, hireBy: 1 }], name, "3 months")).toEqual(["SEO managers go over their line from Jan 27; start hiring by Dec."]);
-    expect(whatToDo([{ name: "Tech", overFrom: 0, hireBy: -2 }], name, "3 months")).toEqual(["Tech go over their line now; start hiring now."]);
+    expect(whatToDo([{ name: "Performance managers", overFrom: 2, hireBy: 0 }], name, "3 months")).toEqual(["Performance managers: over the line from Jan 27. Start hiring now."]);
+    expect(whatToDo([{ name: "SEO managers", overFrom: 2, hireBy: 1 }], name, "3 months")).toEqual(["SEO managers: over the line from Jan 27. Start hiring by Dec."]);
+    expect(whatToDo([{ name: "Tech", overFrom: 0, hireBy: -2 }], name, "3 months")).toEqual(["Tech: over the line now. Start hiring now."]);
   });
   it("says so when no team goes over", () => {
     expect(whatToDo([{ name: "SEO managers", overFrom: null, hireBy: null }], name, "6 months")).toEqual(["No team goes over its line in the next 6 months."]);
@@ -46,7 +46,7 @@ describe("the team load rows", () => {
   it("puts the percentage in each cell's tooltip, leads with what to do, and keeps the Sandbox link", () => {
     expect(html).toContain('title="Dec: 78% busy, against a line of 85%"');
     expect(html.indexOf("data-todo")).toBeLessThan(html.indexOf("<table"));
-    expect(html).toContain("SEO managers go over their line from Jan 27");
+    expect(html).toContain("SEO managers: over the line from Jan 27");
     expect(html).toContain('href="/w/x/sandbox"');
     // None of the Sandbox timeline's extras.
     expect(html).not.toMatch(/uncovered|market|starts|leaves/i);
