@@ -460,6 +460,10 @@ export interface Processes {
   archived_by: string | null;
   created_at: Generated<string>;
   created_by: Generated<string | null>;
+  /**
+   * The department this process sits under on the company map; null: worked out from its servicing links' tier services, else Sales and whole business.
+   */
+  department_id: string | null;
   description: string | null;
   draft_revision_id: string | null;
   entity_name: Generated<string>;

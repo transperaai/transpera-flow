@@ -182,6 +182,11 @@ export interface ProcessRow {
    * absent for a process in use.
    */
   archived_at?: string | null;
+  /**
+   * The department the company map puts this process under (Q4, migration 20270127000000): the owner's choice, or null when it is worked
+   * out from the tier services its servicing links use (`processDepartment`). Absent on fixtures.
+   */
+  department_id?: string | null;
 }
 
 export interface ProcessRevisionRow {
@@ -1043,8 +1048,8 @@ export type _SchemaDriftChecks = [
   Assert<Matches<PersonSkillRow, "person_skills">>,
   Assert<Matches<PersonLeaveRow, "person_leave">>,
   // is_company and archived_at are optional here (absent on fixtures).
-  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at">, "processes">>,
-  Assert<Matches<Required<Pick<ProcessRow, "archived_at">>, "processes">>,
+  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "department_id">, "processes">>,
+  Assert<Matches<Required<Pick<ProcessRow, "archived_at" | "department_id">>, "processes">>,
   Assert<Matches<ProcessRevisionRow, "process_revisions">>,
   // replaced_by defaults to '{}' in the table; the app leaves it out of new steps.
   Assert<Matches<Omit<StepRow, "replaced_by">, "steps">>,

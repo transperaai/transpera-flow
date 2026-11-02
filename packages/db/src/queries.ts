@@ -409,7 +409,7 @@ export async function loadProcessBundle(
   };
 }
 
-const PROCESS_COLUMNS = "id, workspace_id, name, kind, entity_name, description, live_revision_id, parent_process_id, is_company, archived_at" as const;
+const PROCESS_COLUMNS = "id, workspace_id, name, kind, entity_name, description, live_revision_id, parent_process_id, is_company, archived_at, department_id" as const;
 
 /** Where a process sits: the process whose LIVE version holds it by a link (B12, ADR 0014). */
 export interface Placement {

@@ -29,6 +29,7 @@ export {
 export { loadAnalysisRules, saveAnalysisRules, type AnalysisRules, type SaveAnalysisRulesOutcome } from "./analysis-rules";
 export * from "./capacity-setup";
 export * from "./capacity-figures";
+export * from "./process-department";
 export * from "./capacity-changes";
 export * from "./issue-changes";
 export * from "./sandbox-play";
