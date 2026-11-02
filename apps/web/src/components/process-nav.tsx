@@ -4,10 +4,8 @@ import Link from "next/link";
 import { Fragment, useState } from "react";
 import { Check, ChevronRight, ChevronsUpDown, Network, Plus } from "lucide-react";
 import { companyMap, flattenCompanyMap, type ProcessListing } from "@transpera-flow/db";
-import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import type { CreateProcessResult } from "@/app/w/[slug]/process-actions";
 import { NewProcessDialog } from "@/components/new-process-dialog";
-import { RatingDot } from "@/components/processes/rating";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -17,7 +15,7 @@ import { EDIT_ONLY } from "@/lib/phone";
 /**
  * The title of a process page (issues #76, #101): breadcrumbs above it (Processes, then the processes it sits
  * inside) and the process switcher, which is the title itself. The name opens every process of the workspace,
- * indented by how deep it sits and marked with its rating, with "All processes" at the foot. Editors can start a
+ * indented by how deep it sits with "All processes" at the foot. Editors can start a
  * new servicing process from it.
  */
 export function ProcessNav({
@@ -25,7 +23,6 @@ export function ProcessNav({
   current,
   hrefs,
   create,
-  ratings,
   processesHref,
   companyMapHref,
 }: {
@@ -35,8 +32,6 @@ export function ProcessNav({
   hrefs: Record<string, string>;
   /** Start a servicing process (signed-in editors only). */
   create?: (prev: CreateProcessResult, form: FormData) => Promise<CreateProcessResult>;
-  /** Each process's rating (the worst of its open issues), by id; none shows a grey dot. */
-  ratings?: Record<string, Rating | null>;
   /** The Processes page, for the breadcrumb and the foot of the switcher. */
   processesHref?: string;
   /** The company map, the same place as the Processes page's Company map button. */
@@ -99,8 +94,6 @@ export function ProcessNav({
               {ordered.map(({ process: p, depth }) => (
                 <DropdownMenuItem key={p.id} asChild>
                   <Link href={hrefs[p.id]!} aria-current={p.id === current ? "page" : undefined} style={{ paddingLeft: 8 + (depth - 1) * 16 }}>
-                    <RatingDot rating={ratings?.[p.id] ?? null} />
-                    <span className="sr-only">{ratings?.[p.id] ? `${RATING_LABELS[ratings[p.id]!]}: ` : "Not rated: "}</span>
                     <span className="min-w-0 flex-1 truncate">{p.name}</span>
                     {p.kind === "servicing" && <Badge variant="secondary">servicing</Badge>}
                     {!p.live && (

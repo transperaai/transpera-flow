@@ -51,6 +51,17 @@ describe("loading the example", () => {
     ]);
   });
 
+  it("gives each process a category (Q3): the pipeline is Sales, the ad-hoc request processes Ad hoc, the rest Routine client work", async () => {
+    const rows = await q("select name, kind, category from processes where workspace_id = $1 and is_company is not true order by name", [ws]);
+    for (const r of rows) {
+      const want = r.kind === "pipeline" ? "sales" : /ad-?hoc/i.test(String(r.name)) ? "ad_hoc" : "routine_client_work";
+      expect(r.category, String(r.name)).toBe(want);
+    }
+    const categories = new Set(rows.map((r) => r.category));
+    expect([...categories].sort()).toEqual(["ad_hoc", "routine_client_work", "sales"]);
+    expect(rows.filter((r) => r.category === "ad_hoc").length).toBe(2);
+  });
+
   it("refuses a workspace that has anything in it, and changes nothing", async () => {
     const before = Number((await q("select count(*)::int as n from people where workspace_id = $1", [ws]))[0]!.n);
     await db.client.query("begin");

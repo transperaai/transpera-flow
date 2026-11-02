@@ -9,6 +9,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Shuffle } from "lucide-react";
+import { PROCESS_CATEGORIES, PROCESS_CATEGORY_LABELS, type ProcessCategory } from "@transpera-flow/db";
 import { ProcessesTable } from "@/components/processes/processes-table";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -52,6 +53,10 @@ export function ProcessesList({
 }) {
   const router = useRouter();
   const [view, setView] = useState<"active" | "archived">("active");
+  // The Type filter: one category, or all. Only the categories some process has are offered.
+  const [category, setCategory] = useState<ProcessCategory | null>(null);
+  const present = useMemo(() => PROCESS_CATEGORIES.filter((c) => rows.some((r) => r.category === c)), [rows]);
+  const shown = useMemo(() => (category && present.includes(category) ? rows.filter((r) => r.category === category) : rows), [rows, category, present]);
   const [open, setOpen] = useState<Open>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
@@ -96,12 +101,25 @@ export function ProcessesList({
           Archived ({archived.length})
         </ViewChip>
       </div>
+      {view === "active" && present.length > 1 && (
+        <div role="group" aria-label="Type" className="flex flex-wrap items-center gap-1.5" data-process-category-filter={category ?? "all"}>
+          <span className="text-xs text-muted-foreground">Type</span>
+          <ViewChip on={category === null} onPick={() => setCategory(null)}>
+            All
+          </ViewChip>
+          {present.map((c) => (
+            <ViewChip key={c} on={category === c} onPick={() => setCategory(c)}>
+              {PROCESS_CATEGORY_LABELS[c]} ({rows.filter((r) => r.category === c).length})
+            </ViewChip>
+          ))}
+        </div>
+      )}
       <p role="status" aria-live="polite" className={status ? "text-xs text-muted-foreground" : "sr-only"} data-process-status>
         {status}
       </p>
       {view === "active" ? (
         <ProcessesTable
-          rows={rows}
+          rows={shown}
           hrefs={hrefs}
           loadCard={loadCard}
           empty={empty}

@@ -4,11 +4,11 @@
 // people are, client groups and churn, the forecast). Pure.
 //
 // A group's rating is the one the map, the process page and the Processes table give the process (decision D24): the worst
-// of its confirmed open issues, never what a run only detected (`processRatings`).
+// of its confirmed open issues, never what a run only detected (`process-ratings.ts`).
 
 import { isActiveStatus, isVisibleIssue, type IssueRow, type ProcessPart, type SolutionRow } from "@transpera-flow/db";
 import { compareRatingsDesc, ratingOfStored, type DetectedIssue, type Rating } from "@transpera-flow/engine";
-import { processRatings } from "@/lib/processes/rows";
+import { processRatings } from "./process-ratings";
 import { worseOf } from "./health";
 
 /** The id of the "Across the company" group. */

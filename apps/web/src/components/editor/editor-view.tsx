@@ -45,7 +45,7 @@ import { IssueArea } from "./issue-area";
 import { Inspector } from "./inspector";
 import { Palette } from "./palette";
 import { useEditorTour } from "./editor-tour";
-import { blockersOf, capacityGaps, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
+import { capacityBlockers, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
 import type { TierSetup } from "@/lib/tier-setup";
 import type { ChangesOnSteps } from "@/components/step-base-values";
@@ -147,7 +147,7 @@ export function EditorView({
   const unresolved = useMemo(() => unresolvedSteps(working), [working]);
   // What the draft still lacks for meaningful numbers (issue #167): the same check as the upload preview, on the draft as edited.
   const gaps = useMemo(
-    () => (company || scratch ? [] : [...findGaps(gapInputFromBundle(working)), ...capacityGaps(working, workingModel.model)]),
+    () => (company || scratch ? [] : [...findGaps(gapInputFromBundle(working)), ...capacityBlockers(workingModel.model)]),
     [company, scratch, working, workingModel],
   );
 
@@ -448,7 +448,7 @@ export function EditorView({
         liveNumber={live.revision.number}
         solution={solutionMode}
         verdict={verdict}
-        incomplete={blockersOf(gaps).length}
+        incomplete={gaps.length}
       />
       )}
     </div>

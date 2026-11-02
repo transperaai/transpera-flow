@@ -5,7 +5,6 @@ import { ProcessNav } from "@/components/process-nav";
 import { canEditWorkspace } from "@/lib/access-data";
 import { isId } from "@/lib/editor/validate";
 import { loadHistory } from "@/lib/history/data";
-import { loadProcessesPage } from "@/lib/processes/data";
 import { duplicateVersion, restoreVersion } from "./actions";
 
 /**
@@ -18,7 +17,7 @@ export default async function ProcessHistoryPage(props: PageProps<"/w/[slug]/p/[
   const history = await loadHistory(slug, processId);
   if (!history) notFound();
   const { workspace, process, processes } = history;
-  const [canEdit, rows] = await Promise.all([canEditWorkspace(workspace.id), loadProcessesPage(workspace.id)]);
+  const canEdit = await canEditWorkspace(workspace.id);
   const base = `/w/${slug}`;
   const here = `${base}/p/${process.id}`;
   return (
@@ -38,7 +37,6 @@ export default async function ProcessHistoryPage(props: PageProps<"/w/[slug]/p/[
           processes={processes}
           current={process.id}
           hrefs={Object.fromEntries(processes.map((p) => [p.id, `${base}/p/${p.id}/history`]))}
-          ratings={Object.fromEntries(rows.map((r) => [r.id, r.rating]))}
           processesHref={`${base}/processes`}
           companyMapHref={base}
         />

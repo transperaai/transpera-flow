@@ -21,6 +21,7 @@ import {
   type FileSourceLabel,
   type Env,
 } from "@transpera-flow/db/process-file-2";
+import { isProcessCategory, PROCESS_CATEGORIES, type ProcessCategory } from "@transpera-flow/db/process-category";
 import { isObject, MAX_ID, MAX_SUGGESTIONS, norm, plural, q, round, suggest } from "@transpera-flow/db/process-file-util";
 
 export const PROCESS_FILE_FORMAT = "transpera-process/1";
@@ -104,6 +105,8 @@ export interface ProcessFile {
   kind: "pipeline" | "servicing";
   description?: string;
   entity_name?: string;
+  /** What the process is for (/2 only; Q3). Absent: the importer gives one from the kind. */
+  category?: ProcessCategory;
   steps: ProcessFileStep[];
   links: ProcessFileLink[];
   groups: ProcessFileGroup[];
@@ -223,7 +226,7 @@ export const PROCESS_FILE_EXAMPLE = {
 // ---------------------------------------------------------------------------
 
 const TOP_FIELDS = ["$schema", "format", "name", "kind", "description", "entity_name", "steps", "links", "groups"];
-const TOP_FIELDS_2 = [...TOP_FIELDS, "sources"];
+const TOP_FIELDS_2 = [...TOP_FIELDS, "sources", "category"];
 const STEP_FIELDS = ["id", "name", "type", "role", "person", "hands_on_hours", "wait_hours", "rework_rate", "notes", "x", "y"];
 const STEP_FIELDS_V2 = [...STEP_FIELDS, ...STEP_FIELDS_2];
 const LINK_FIELDS = ["from", "to", "probability", "label"];
@@ -297,6 +300,11 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
   };
   const description = text("description", 4000);
   const entity_name = text("entity_name", 100);
+  let category: ProcessCategory | undefined;
+  if (v2 && input.category !== undefined && input.category !== null) {
+    if (isProcessCategory(input.category)) category = input.category;
+    else errors.push(`The process category ${typeof input.category === "string" ? q(input.category) : "given"} isn't one Transpera knows. Use ${PROCESS_CATEGORIES.map((c) => `"${c}"`).join(", ")}, or leave it out.`);
+  }
 
   // Steps.
   const rawSteps = input.steps;
@@ -661,6 +669,7 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
       kind,
       ...(description ? { description } : {}),
       ...(entity_name ? { entity_name } : {}),
+      ...(category ? { category } : {}),
       steps: normalised,
       links,
       groups,

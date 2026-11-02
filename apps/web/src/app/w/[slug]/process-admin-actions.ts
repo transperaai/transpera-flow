@@ -2,7 +2,7 @@
 
 import { isId } from "@/lib/editor/validate";
 import { cleanProcessName, type ProcessAdminResult, type ProcessKind } from "@/lib/processes/admin";
-import type { Db } from "@transpera-flow/db";
+import { isProcessCategory, type Db, type ProcessCategory } from "@transpera-flow/db";
 import { pgCode } from "@/app/action-db";
 import { getDb, getSessionUser } from "@/lib/auth/session";
 
@@ -35,7 +35,7 @@ async function readProcess(db: Db, processId: string) {
 async function update(
   db: Db,
   processId: string,
-  changes: { name?: string; kind?: ProcessKind; entity_name?: string; archived_at?: string | null },
+  changes: { name?: string; kind?: ProcessKind; entity_name?: string; category?: ProcessCategory; archived_at?: string | null },
 ): Promise<ProcessAdminResult> {
   try {
     const data = await db.updateTable("processes").set(changes).where("id", "=", processId).where("is_company", "=", false).returning("id").execute();
@@ -96,6 +96,16 @@ export async function changeProcessKind(processId: unknown, kind: unknown): Prom
   // The word for what flows through it follows the kind, unless someone chose their own.
   const entity = proc.entity_name === "lead" || proc.entity_name === "task" || proc.entity_name === "item" ? (to === "pipeline" ? "lead" : "task") : proc.entity_name;
   return update(db, processId, { kind: to, entity_name: entity });
+}
+
+/** What a process is for (Q3, D41): Sales, Onboarding, Routine client work, Ad hoc or Internal. The engine kind is not touched. */
+export async function changeProcessCategory(processId: unknown, category: unknown): Promise<ProcessAdminResult> {
+  if (!isId(processId) || !isProcessCategory(category)) return generic;
+  const db = await signedInClient();
+  if (!db) return signedOut;
+  const proc = await readProcess(db, processId);
+  if (!proc) return { status: "error", message: "That process isn't there any more. Reload the page." };
+  return update(db, processId, { category });
 }
 
 export async function archiveProcess(processId: unknown): Promise<ProcessAdminResult> {

@@ -823,3 +823,24 @@ describe("the columns phase 3 added (chance, effect, effect_months; price_low, p
     }
   });
 });
+
+describe("process categories (Q3, migration 20270126000000)", () => {
+  const categories = async (ws: string) => (await q("select name, category from processes where workspace_id = $1 and not is_company order by name", [ws])).map((r) => [r.name, r.category]);
+
+  it("a backup carries each process's category and restores it; one from before categories (or with an unknown one) gets one by kind", async () => {
+    const original = await categories(LARKSPUR_WORKSPACE_ID);
+    expect(original.map((r) => r[1])).toContain("ad_hoc");
+    const bundle = await exportOf(LARKSPUR_WORKSPACE_ID);
+    expect(bundle.processes.every((p) => typeof p.category === "string")).toBe(true);
+    const restored = await restoreInto(bundle);
+    expect(await categories(restored.ws)).toEqual(original);
+
+    const old = structuredClone(bundle);
+    for (const p of old.processes) delete p.category;
+    // An unknown value is left out too, not refused.
+    old.processes[0]!.category = "nonsense";
+    const without = await restoreInto(old);
+    const kinds = new Map((await q("select name, kind from processes where workspace_id = $1 and not is_company", [without.ws])).map((r) => [r.name as string, r.kind as string]));
+    for (const [name, category] of await categories(without.ws)) expect(category, String(name)).toBe(kinds.get(String(name)) === "servicing" ? "routine_client_work" : "sales");
+  });
+});

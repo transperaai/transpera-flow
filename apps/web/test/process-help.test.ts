@@ -8,8 +8,6 @@ import { describe, expect, it } from "vitest";
 const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8");
 
 const EXPECT: Record<string, string[]> = {
-  "components/process-page.tsx": ["Process rating"],
-  "components/utilisation-bars.tsx": ["How busy each role is"],
   "components/horizon-picker.tsx": ["Projection"],
 };
 
@@ -27,7 +25,7 @@ describe("process page help", () => {
     });
   }
 
-  it("only the non-obvious things on the process page keep an (i): the map colours and the process rating", () => {
+  it("only the non-obvious things on the process page keep an (i): the map colours", () => {
     const text = read("components/process-page.tsx");
     expect(text).toContain('label: "Map colours"');
     expect((text.match(/<Help\b/g) ?? []).length).toBeLessThanOrEqual(2);
