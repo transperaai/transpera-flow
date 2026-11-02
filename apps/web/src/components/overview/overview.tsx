@@ -47,6 +47,7 @@ import { openIssues, timeSplitByProcess } from "@/lib/overview/health";
 import { forecastInsights, forecastModel, today } from "@/lib/forecast/forecast";
 import { timelineData } from "@/lib/forecast/timeline";
 import { calendarMonthStarts } from "@transpera-flow/db/sandbox";
+import { hiringAdvice, hiringDelayAt } from "@transpera-flow/db";
 import { rerate, visibleFindings } from "@/lib/rules/edit";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { useAbsenceTest } from "@/lib/sim/absence";
@@ -58,6 +59,7 @@ import { headlineNumbers } from "@/lib/overview/headline";
 import { useIssues } from "@/lib/issues/use-issues";
 import { capacityBaseModel } from "@/lib/capacity/model";
 import { DepartmentCards } from "./department-cards";
+import { TeamLoad } from "./team-load";
 import { EDIT_ONLY } from "@/lib/phone";
 
 // The trend charts and the team load timeline load after the map and the cards.
@@ -65,8 +67,6 @@ const chartLoading = () => <Skeleton className="h-[180px] w-full" aria-busy="tru
 const IssuesDonut = dynamic(() => import("./trend-charts").then((m) => m.IssuesDonut), { ssr: false, loading: chartLoading });
 const TimeSplitChart = dynamic(() => import("./trend-charts").then((m) => m.TimeSplitChart), { ssr: false, loading: chartLoading });
 const TimeAchieves = dynamic(() => import("./time-achieves").then((m) => m.TimeAchieves), { ssr: false, loading: chartLoading });
-const ForecastTimeline = dynamic(() => import("@/components/forecast/forecast-timeline").then((m) => m.ForecastTimeline), { ssr: false, loading: chartLoading });
-const TimelineLegend = dynamic(() => import("@/components/forecast/forecast-timeline").then((m) => m.TimelineLegend), { ssr: false });
 
 export interface OverviewProps {
   /** The workspace's name, as the page's title. */
@@ -285,6 +285,12 @@ export function Overview({
     [groups],
   );
   const cutoffs = useMemo(() => toRatingConfig(rules, hoursPerWeek).rules.busy.cutoffs, [rules, hoursPerWeek]);
+  // The Capacity page's "What to do" for this run, and each role's own line (Set up); without Set up the sentence is worked out from the rows.
+  const advice = useMemo(
+    () => (capacity && horizonModel && horizonResult?.monthly ? hiringAdvice(capacity.setup, horizonResult, (m) => hiringDelayAt(horizonModel.market, m)) : null),
+    [capacity, horizonModel, horizonResult],
+  );
+  const roleLines = useMemo(() => Object.fromEntries((capacity?.setup.roles ?? []).map((r) => [r.id, r.line])), [capacity]);
   const teamLoad = useMemo(() => (horizonModel && horizonResult ? timelineData(horizonModel, horizonResult, live, start) : null), [horizonModel, horizonResult, live, start]);
 
   // "Last updated": the numbers are simulated each time the page opens, so this is when it opened.
@@ -425,30 +431,18 @@ export function Overview({
               id="team-load"
               title="Team load by role"
               wide
-              note={
-                <>
-                  How busy each role is, month by month over the next {span}, with planned hires and leave.{" "}
-                  {forecastHref && (
-                    <Link href={forecastHref} className="underline">
-                      Open the forecast
-                    </Link>
-                  )}
-                </>
-              }
+              note={`What to do, then how busy each role is month by month over the next ${span}, with planned hires and leave.`}
             >
               {teamLoad ? (
                 teamLoad.roles.length ? (
-                  <>
-                    <TimelineLegend busyLine={cutoffs[1]} hasUncovered={teamLoad.roles.some((r) => r.uncovered)} hasMarkers={teamLoad.markers.length > 0} hasMarket={teamLoad.market.length > 0} />
-                    <ForecastTimeline data={teamLoad} rows="roles" cutoffs={cutoffs} label={`How busy each role is per month over the next ${span}, against the ${Math.round(cutoffs[1] * 100)}% too busy line.`} />
-                  </>
+                  <TeamLoad rows={teamLoad.roles} months={teamLoad.months} lines={roleLines} fallbackLine={cutoffs[1]} advice={advice} span={span} sandboxHref={forecastHref} />
                 ) : (
                   <p className="text-sm text-muted-foreground">No role has any work in this run.</p>
                 )
               ) : error ? (
                 <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p>
               ) : (
-                <Skeleton className="h-[260px] w-full" aria-busy="true" />
+                <Skeleton className="h-[160px] w-full" aria-busy="true" />
               )}
             </ChartCard>
           </div>
