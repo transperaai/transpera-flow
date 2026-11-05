@@ -32,7 +32,6 @@ export * from "./capacity-setup";
 export * from "./capacity-figures";
 export * from "./process-department";
 export * from "./capacity-changes";
-export * from "./issue-changes";
 export * from "./sandbox-play";
 export * from "./sandbox-play-series";
 export * from "./sandbox-verdict";

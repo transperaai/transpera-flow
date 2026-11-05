@@ -12,16 +12,6 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import type { PlayProcess } from "./play-types";
 
-export interface IssueOption {
-  id: string;
-  /** The issue's number in the workspace, shown before its title. */
-  number?: number | null;
-  title: string;
-}
-
-/** An open issue as the picker shows it: "#3 Meeting prep is data hunting". */
-export const issueLabel = (i: IssueOption): string => (i.number ? `#${i.number} ${i.title}` : i.title);
-
 const SOURCE_WORDS: Record<SourceLabel, string> = { interview: "An interview", calculator: "The calculator", measured: "Measured", estimate: "An estimate" };
 
 interface EffectRow {
@@ -53,7 +43,6 @@ export function PlayChangeDialog({
   existing,
   processes,
   tiers,
-  issues,
   onSave,
   onRemove,
   onClose,
@@ -61,7 +50,6 @@ export function PlayChangeDialog({
   existing: CapacityChangeRow | null;
   processes: PlayProcess[];
   tiers: { key: string; name: string }[];
-  issues: IssueOption[];
   /** Saves; returns why not, or null when it saved (the dialog closes). */
   onSave: (input: CapacityChangeInput) => Promise<string | null>;
   onRemove?: () => Promise<string | null>;
@@ -75,7 +63,6 @@ export function PlayChangeDialog({
   const [ramp, setRamp] = useState(String(existing?.ramp_months ?? 0));
   const [picked, setPicked] = useState<string[]>(existing?.tiers ?? []);
   const [cost, setCost] = useState(existing?.cost_monthly != null ? String(existing.cost_monthly) : "");
-  const [issue, setIssue] = useState(existing?.issue_id ?? "");
   const [source, setSource] = useState<SourceLabel>(existing?.source ?? "estimate");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -89,7 +76,8 @@ export function PlayChangeDialog({
     ramp_months: num(ramp),
     tiers: picked.length ? picked : null,
     cost_monthly: cost.trim() === "" ? null : num(cost),
-    issue_id: issue || null,
+    // Changes are not linked to issues (D42); a link an older change already has is kept as it was.
+    issue_id: existing?.issue_id ?? null,
     source,
   });
 
@@ -216,17 +204,6 @@ export function PlayChangeDialog({
           </fieldset>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className={field}>
-              The issue it fixes
-              <NativeSelect value={issue} onChange={(e) => setIssue(e.target.value)} aria-label="Issue it fixes">
-                <option value="">None</option>
-                {issues.map((i) => (
-                  <option key={i.id} value={i.id}>
-                    {issueLabel(i)}
-                  </option>
-                ))}
-              </NativeSelect>
-            </label>
             <label className={field}>
               Where the numbers came from
               <NativeSelect value={source} onChange={(e) => setSource(e.target.value as SourceLabel)}>
