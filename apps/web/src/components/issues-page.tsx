@@ -12,11 +12,12 @@ import { RATING_LABELS, detectBrokenScenarios, ratingOfStored, resolveMoney, typ
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help } from "@/components/help";
 import { LIST_HELP } from "@/lib/issues/help";
+import { StatusPill } from "@/components/issues/status-pill";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { emptyDraft, issueFormOptions, toSaveInput } from "@/lib/issues/draft";
-import { NO_SOLUTIONS, RATINGS_WORST_FIRST, SHOW_FILTERS, SHOW_LABELS, isOpenIssue, issueHref, listIssues, listQuery, parseListState, ratingCounts, shortDate, showCounts, statusLabel, type ListState } from "@/lib/issues/pages";
+import { NO_SOLUTIONS, RATINGS_WORST_FIRST, SHOW_FILTERS, SHOW_LABELS, isOpenIssue, issueHref, listIssues, listQuery, parseListState, ratingCounts, shortDate, showCounts, type ListState } from "@/lib/issues/pages";
 import { NO_SOLUTIONS_DATA, solutionSummaries, type SolutionsData } from "@/lib/solutions/cards";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { perceptionGapDetections } from "@/lib/issues/perception";
@@ -198,7 +199,7 @@ export function IssuesPage({
                     <td className="max-w-56 px-3 py-2.5 text-xs text-fg-2">{touched.join(", ") || "—"}</td>
                     <td className="px-3 py-2.5 text-xs">{owners.join(", ") || <span className="text-muted-foreground">No owner</span>}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
-                      <StatusChip issue={i} />
+                      <StatusPill status={i.status} />
                       {i.resolved_at && !isOpenIssue(i) && <div className="text-xs text-muted-foreground">{shortDate(i.resolved_at)}</div>}
                     </td>
                     <td className="px-3 py-2.5 text-xs whitespace-nowrap" data-solutions>
@@ -248,21 +249,6 @@ export function RatingPillOf({ issue }: { issue: Pick<IssueRow, "severity"> }) {
 }
 
 const ratingOf = (i: Pick<IssueRow, "severity">): Rating => ratingOfStored(i.severity);
-
-/** The status as a small chip: open ones in the accent, closed ones quiet. */
-export function StatusChip({ issue }: { issue: Pick<IssueRow, "status"> }) {
-  return (
-    <span
-      data-status={issue.status}
-      className={cn(
-        "inline-flex h-5 items-center rounded-full border px-2 text-xs font-medium whitespace-nowrap",
-        isOpenIssue(issue) ? "border-accent/40 bg-accent/10 text-fg" : "border-border bg-muted text-fg-2",
-      )}
-    >
-      {statusLabel(issue.status)}
-    </span>
-  );
-}
 
 function RatingChips({ ratings, value, onChange }: { ratings: ReturnType<typeof ratingCounts>; value: Rating | ""; onChange: (r: Rating | "") => void }) {
   const chip = "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs disabled:opacity-40";

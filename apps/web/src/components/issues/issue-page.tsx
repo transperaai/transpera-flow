@@ -17,7 +17,7 @@ import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help, HelpLabel } from "@/components/help";
 import { ISSUE_PAGE_HELP } from "@/lib/issues/help";
 import { ResolveDialog } from "@/components/issues/resolve-dialog";
-import { StatusChip } from "@/components/issues-page";
+import { StatusPill } from "@/components/issues/status-pill";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { StepIssueBadges } from "@/components/step-issue-badges";
@@ -155,7 +155,7 @@ export function IssuePage(props: IssuePageProps) {
           <h1 className="font-heading text-2xl leading-tight font-semibold tracking-tight">{issue.title}</h1>
           <div className="flex flex-wrap items-center gap-2">
             <RatingPill rating={ratingOfStored(issue.severity)} />
-            <StatusChip issue={issue} />
+            <StatusPill status={issue.status} />
             <span className="text-sm text-muted-foreground">{loggedLine(issue)}</span>
           </div>
         </div>
