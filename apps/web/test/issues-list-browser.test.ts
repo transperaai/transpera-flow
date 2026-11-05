@@ -128,7 +128,7 @@ describe("the Issues list", () => {
   it.runIf(!!process.env.Q9_SHOTS)("saves the screenshots", async () => {
     const dir = process.env.Q9_SHOTS!;
     mkdirSync(dir, { recursive: true });
-    const open = process.env.Q9_SHOT_URL ?? "/w/demo/issues?status=open,testing,resolved,wont_fix";
+    const open = process.env.Q9_SHOT_URL || "/w/demo/issues?status=open,testing,resolved,wont_fix";
     for (const [name, width, scheme] of [["issues-1440-light", 1440, "light"], ["issues-1440-dark", 1440, "dark"], ["issues-400-light", 400, "light"]] as const) {
       const { page } = await mount({ url: open }, width, scheme);
       await page.screenshot({ path: `${dir}/${name}.png`, fullPage: true });
