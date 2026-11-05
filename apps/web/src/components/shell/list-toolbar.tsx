@@ -46,7 +46,7 @@ export interface FilterOption {
 
 /**
  * A multi-select filter: a button naming the filter (and how many choices are on) that opens a list of tick boxes with the number of
- * rows each would show. Nothing ticked means no filter, unless `none` says the empty choice is meaningful.
+ * rows each would show. Nothing ticked means no filter.
  */
 export function FilterMenu({
   name,
@@ -72,10 +72,7 @@ export function FilterMenu({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 gap-0.5 p-1.5" data-filter-menu={name.toLowerCase()}>
-        <div className="flex items-center px-2 py-1 text-2xs font-semibold tracking-wider text-muted-foreground uppercase">
-          {name}
-          {help}
-        </div>
+        <div className="px-2 py-1 text-2xs font-semibold tracking-wider text-muted-foreground uppercase">{name}</div>
         {options.map((o) => (
           <label key={o.value} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
             <input type="checkbox" checked={selected.includes(o.value)} onChange={() => toggle(o.value)} data-option={o.value} />
@@ -84,6 +81,8 @@ export function FilterMenu({
             <span className="text-xs text-muted-foreground tabular-nums">{o.count}</span>
           </label>
         ))}
+        {/* After the options, so opening the menu doesn't focus the (i) and pop its text over them. */}
+        {help && <div className="flex items-center justify-end px-1 pt-0.5 text-xs text-muted-foreground">What is this?{help}</div>}
       </PopoverContent>
     </Popover>
   );
