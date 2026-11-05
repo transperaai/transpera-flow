@@ -47,6 +47,82 @@ async function mount(opts: { canEdit: boolean; published: boolean }, width = 144
   return { page, errors };
 }
 
+const box = (page: Page, sel: string) => page.locator(sel).first().boundingBox();
+
+describe("layout", () => {
+  it("groups the header buttons: company map on the left, Upload process and New process on the right, one size", async () => {
+    const { page, errors } = await mount({ canEdit: true, published: true });
+    const group = page.getByRole("group", { name: "Company map" });
+    expect(await group.getByRole("link").allInnerTexts()).toEqual(["Company map", "✎ Edit company map", "History"]);
+    const actions = page.locator("[data-page-actions]");
+    expect(await actions.locator("[data-slot=button]").allInnerTexts()).toEqual(["Upload process", "✎ New process"]);
+    const g = (await group.boundingBox())!;
+    const a = (await actions.boundingBox())!;
+    expect(g.x + g.width).toBeLessThanOrEqual(a.x);
+    expect(Math.abs(g.y - a.y)).toBeLessThan(8);
+    const heights = await page.locator("[data-processes-actions] [data-slot=button]").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+    expect(new Set(heights).size).toBe(1);
+    expect(await page.locator("[data-edit-company-map]").evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe(await page.getByRole("link", { name: "History" }).evaluate((e) => getComputedStyle(e).backgroundColor));
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("shows Edit only to editors and History only once published", async () => {
+    for (const [canEdit, published, links] of [
+      [false, true, ["Company map", "History"]],
+      [true, false, ["✎ Edit company map"]],
+    ] as const) {
+      const { page } = await mount({ canEdit, published });
+      expect(await page.getByRole("group", { name: "Company map" }).getByRole("link").allInnerTexts()).toEqual([...links]);
+      await page.close();
+    }
+  });
+
+  it("keeps the In use / Archived switch and the category filter on one toolbar line at 1440 px, above the table", async () => {
+    const { page } = await mount({ canEdit: true, published: true });
+    const view = (await box(page, '[role=group][aria-label="Show"]'))!;
+    const type = (await box(page, '[role=group][aria-label="Type"]'))!;
+    const table = (await box(page, "table"))!;
+    expect(Math.abs(view.y - type.y)).toBeLessThan(4);
+    expect(view.height).toBeCloseTo(type.height, 0);
+    expect(view.x + view.width).toBeLessThan(type.x);
+    expect(type.y + type.height).toBeLessThan(table.y);
+    const header = (await box(page, "header:has(h1)"))!;
+    expect(view.y).toBeGreaterThan(header.y + header.height + 8);
+    await page.close();
+  });
+
+  it("centres every column but Process and Type", async () => {
+    const { page } = await mount({ canEdit: true, published: true });
+    const heads = await page.locator("thead th").evaluateAll((els) => els.map((e) => [e.textContent!.trim(), getComputedStyle(e).textAlign] as const));
+    for (const [text, align] of heads) expect(align, text || "(blank)").toBe(text.startsWith("Process") || text.startsWith("Type") ? "left" : "center");
+    const row = await page.locator("[data-process]").first().locator("td").evaluateAll((els) => els.map((e) => getComputedStyle(e).textAlign));
+    // chevron, Process, Type, Steps, Open issues, Live version, menu, Open
+    expect(["left", "start"]).toContain(row[1]);
+    expect(row[2]).toBe("left");
+    expect(row.slice(3)).toEqual(["center", "center", "center", "center", "center"]);
+    await page.close();
+  });
+
+  it("opens a row menu wide enough that no item wraps", async () => {
+    const { page } = await mount({ canEdit: true, published: true });
+    await page.getByRole("button", { name: "Change Monthly reporting" }).click();
+    const items = page.getByRole("menuitem");
+    expect(await items.allInnerTexts()).toEqual(["Rename…", "Change type…", "Archive…"]);
+    const heights = await items.evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
+    expect(Math.max(...heights)).toBeLessThan(36);
+    expect(await items.evaluateAll((els) => els.every((e) => e.scrollWidth <= e.clientWidth))).toBe(true);
+    expect(await page.getByRole("menu").evaluate((e) => e.getBoundingClientRect().width)).toBeGreaterThanOrEqual(150);
+    await page.close();
+  });
+
+  it("wraps the header and toolbar at 400 px without scrolling the page sideways", async () => {
+    const { page } = await mount({ canEdit: false, published: true }, 400);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.close();
+  });
+});
+
 const shots = process.env.Q7_SHOTS;
 describe("screenshots", () => {
   it.skipIf(!shots)("saves the Processes page at 1440 and 400 px, and the Change type dialog", async () => {
@@ -59,9 +135,11 @@ describe("screenshots", () => {
     }
     const { page } = await mount({ canEdit: true, published: true });
     await page.getByRole("button", { name: "Change Monthly reporting" }).click();
+    await page.waitForTimeout(500);
     await page.screenshot({ path: `${shots}/${prefix}-row-menu-1440.png` });
     await page.getByRole("menuitem", { name: /Change type/ }).click();
     await page.waitForSelector("[role=dialog]");
+    await page.waitForTimeout(500);
     await page.screenshot({ path: `${shots}/${prefix}-change-type-1440.png` });
     await page.close();
   }, 120_000);
