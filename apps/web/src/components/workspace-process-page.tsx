@@ -1,8 +1,9 @@
 import { notFound, redirect } from "next/navigation";
+import { getDb } from "@/lib/auth/session";
 import { changeProcessCategory, restoreProcess } from "@/app/w/[slug]/process-admin-actions";
 import { createProcess } from "@/app/w/[slug]/process-actions";
 import { ArchivedBanner } from "@/components/processes/archived-banner";
-import { isUnpublished } from "@transpera-flow/db";
+import { isUnpublished, loadCapacityChanges } from "@transpera-flow/db";
 import { ProcessNav } from "@/components/process-nav";
 import { ProcessPage } from "@/components/process-page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
@@ -28,7 +29,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   const archivedAt = live.process.archived_at ?? null;
   // `?version=N` shows an earlier version, read only; a number that isn't an earlier version shows live.
   const earlier = version ? await loadProcessVersion(live, version) : null;
-  const [canEdit, scenarios, issues, sources, liveRevisions, solutions, viewerId, memberNames, tierSetup, laneInput] = await Promise.all([
+  const [canEdit, scenarios, issues, sources, liveRevisions, solutions, viewerId, memberNames, tierSetup, laneInput, changes] = await Promise.all([
     canEditWorkspace(live.workspace.id),
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceIssues(live.workspace.id),
@@ -40,6 +41,8 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
     loadMemberNames(live.workspace.id),
     loadTierSetup(live.workspace.id),
     loadDepartmentLaneInput(live.workspace.id),
+    // The Sandbox changes that name an issue are listed under it.
+    getDb().then((db) => loadCapacityChanges(db, live.workspace.id)).catch(() => []),
   ]);
   const shown = earlier ?? (isUnpublished(live) && draft ? draft : live);
   const base = `/w/${slug}`;
@@ -62,6 +65,7 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       registerHref={`${base}/issues`}
       settingsHref={`${base}/settings`}
       tierSetup={tierSetup}
+      changes={changes.map((c) => ({ id: c.id, name: c.name, issue_id: c.issue_id }))}
       department={departmentField(live.process, laneInput)}
       editCategory={canEdit && !earlier && !archivedAt ? changeProcessCategory.bind(null, live.process.id) : undefined}
       editHref={canEdit && !archivedAt ? `${base}/p/${live.process.id}/edit` : undefined}

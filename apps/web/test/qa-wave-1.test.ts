@@ -27,8 +27,8 @@ describe("the process page", () => {
     for (const gone of ["HeadlineCards", "HorizonPicker", "LeverPanel", 'id="projection"']) expect(page).not.toContain(gone);
   });
   it("puts Sources last, in a section that starts closed", () => {
-    expect(page.lastIndexOf("<ProcessSources")).toBeGreaterThan(page.lastIndexOf('id="supporting-data"'));
-    const sources = page.slice(page.indexOf("function ProcessSources"), page.indexOf("function Section("));
+    expect(page.lastIndexOf("<ProcessSources")).toBeGreaterThan(page.lastIndexOf("issuesUi.issuesList"));
+    const sources = page.slice(page.indexOf("function ProcessSources"));
     // A heading holding a button (not a heading inside a <summary>), closed to start, opened by a #sources address.
     expect(sources).not.toContain("<summary");
     expect(sources).toContain("useState(false)");

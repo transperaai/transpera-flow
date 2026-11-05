@@ -25,6 +25,12 @@ export function aboutProcess(input: { bundle: ProcessBundle; liveVersion: number
   };
 }
 
+/** The one muted line under the page title: "4 steps · 2 roles · Version 3", or "… · Draft, not published yet" when there is no live version. */
+export function aboutSummary(a: About): string {
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  return [plural(a.steps, "step", "steps"), plural(a.roles, "role", "roles"), a.version === null ? "Draft, not published yet" : `Version ${a.version}`].join(" · ");
+}
+
 /** The attributes as label and value pairs in the order the page shows them, in plain words. */
 export function aboutLine(a: About): { label: string; value: string }[] {
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;

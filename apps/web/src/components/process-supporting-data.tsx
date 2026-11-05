@@ -7,27 +7,40 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import type { Viewer } from "@transpera-flow/db";
 import type { SimulationResult } from "@transpera-flow/engine";
+import { Skeleton } from "@/components/ui/skeleton";
 import { SplitBar, SplitLegend } from "@/components/split-bar";
 import { formatHours, formatPercent } from "@/lib/format";
 import { headlineText, type ProcessHeadline, type ProcessHours } from "@/lib/process-page/hours";
 import type { KeyPersonRow, TimeSplitRow } from "@/lib/process-page/supporting";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
-const card = "min-w-0 rounded-token border border-line bg-panel p-3 shadow-token";
+const card = "flex h-full min-w-0 flex-col rounded-lg bg-muted/40 p-4";
 
-function Panel({ id, title, note, children }: { id: string; title: string; note: string; children: ReactNode }) {
+/** A titled panel with a one-line description, the same on every part of the "What the run shows" card (Q8). */
+export function Panel({ id, title, note, children }: { id: string; title: string; note: string; children: ReactNode }) {
   return (
     <section aria-labelledby={`${id}-heading`} className={card} data-panel={id}>
       <h3 id={`${id}-heading`} className="text-sm font-bold">
         {title}
       </h3>
-      <p className="mb-2 text-xs text-fg-3">{note}</p>
+      <p className="mb-3 text-xs text-fg-3">{note}</p>
       {children}
     </section>
   );
 }
 
-const Waiting = ({ result }: { result: SimulationResult | null }) => <p className="text-sm text-fg-2">{result ? "Nothing to show for this run." : "Simulating…"}</p>;
+const Waiting = ({ result }: { result: SimulationResult | null }) => (
+  <div className="flex flex-col gap-2">
+    {!result && (
+      <div aria-hidden className="flex flex-col gap-2">
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-4 w-full" />
+        ))}
+      </div>
+    )}
+    <p className="text-sm text-fg-2">{result ? "Nothing to show for this run." : "Simulating…"}</p>
+  </div>
+);
 
 /** Whole hours a month, with one decimal under 10. */
 const hoursMonth = (h: number) => `${h < 10 ? h.toLocaleString("en-GB", { maximumFractionDigits: 1 }) : Math.round(h).toLocaleString("en-GB")} h`;
@@ -35,7 +48,7 @@ const hoursMonth = (h: number) => `${h < 10 ? h.toLocaleString("en-GB", { maximu
 /** The answer first: what this process takes, how much of its department's time that is, and how much of it could be automated. */
 export function SupportingHeadline({ headline, result }: { headline: ProcessHeadline | null; result: SimulationResult | null }) {
   return (
-    <p className="text-base font-semibold" data-supporting-headline>
+    <p className="font-display text-xl leading-snug font-semibold text-balance sm:text-2xl" data-supporting-headline>
       {headline ? headlineText(headline) : <span className="text-sm font-normal text-fg-2">{result ? "No work reached a step in this run." : "Simulating…"}</span>}
     </p>
   );
@@ -106,7 +119,7 @@ export function HeaviestSteps({ hours, result, limit = HEAVIEST_SHOWN }: { hours
         <>
           <ul className="flex flex-col gap-2">
             {shown.map((r) => (
-              <li key={r.id} data-heavy-step={r.id} className="grid grid-cols-[7rem_1fr_4rem] items-center gap-2 sm:grid-cols-[9.5rem_1fr_4rem]">
+              <li key={r.id} data-heavy-step={r.id} className="grid grid-cols-[6.5rem_1fr_3.5rem] items-center gap-2">
                 <span className="truncate" title={r.label}>
                   {r.label}
                 </span>
@@ -145,7 +158,7 @@ export function TimeSplit({ rows, result }: { rows: TimeSplitRow[]; result: Simu
             {rows.map((r) => (
               <li
                 key={r.id}
-                className="grid grid-cols-[7rem_1fr_4.5rem] items-center gap-2 sm:grid-cols-[9.5rem_1fr_4.5rem]"
+                className="grid grid-cols-[6.5rem_1fr_4rem] items-center gap-2"
                 aria-label={`${r.label}: ${formatHours(r.handsOn)} hands-on, ${formatHours(r.waitingForPerson)} waiting for a person, ${formatHours(r.fixedWait)} waiting on others, ${formatPercent(r.handsOnShare)} hands-on`}
               >
                 <span className="truncate">{r.label}</span>
