@@ -159,7 +159,7 @@ export function IssuesPage({
                   </span>
                 </th>
                 <th className="px-3 py-2.5">Rating</th>
-                <th className="px-3 py-2.5">Touches</th>
+                <th className="px-3 py-2.5">Step</th>
                 <th className="px-3 py-2.5">Owners</th>
                 <th className="px-3 py-2.5">Status</th>
                 <th className="px-3 py-2.5">

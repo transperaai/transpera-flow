@@ -15,7 +15,7 @@ export const LIST_HELP = {
   },
   table: {
     label: "Reading the table",
-    description: "Each row is one confirmed issue: its number and title, its rating, the steps it touches, who owns it, where it stands and how many solutions have been tested. The most serious come first, then the costliest.",
+    description: "Each row is one confirmed issue: its number and title, its rating, the step it is about, who owns it, where it stands and how many solutions have been tested. The most serious come first, then the costliest.",
     example: "“#2 Only Maya can do Audit & proposal · Bad · Audit & proposal · Rosa · Testing solutions · 1 tested”.",
   },
   solutions: {
