@@ -6,7 +6,6 @@
 import { isReadOnly, type ScreenMode } from "@/lib/mode";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Download } from "lucide-react";
 import { useMemo, useState } from "react";
 import { retiredSteps, ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
 import { RATING_LABELS, detectBrokenScenarios, ratingOfStored, resolveMoney, type IssueCost, type Rating } from "@transpera-flow/engine";
@@ -22,8 +21,6 @@ import { NO_SOLUTIONS_DATA, solutionSummaries, type SolutionsData } from "@/lib/
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { perceptionGapDetections } from "@/lib/issues/perception";
 import { useIssues } from "@/lib/issues/use-issues";
-import { downloadBlob, exportFileName } from "@/lib/export/map-image";
-import { issuesCsv } from "@/lib/issues/csv";
 import { useDetectedIssues } from "@/lib/issues/use-detected";
 import { visibleFindings } from "@/lib/rules/edit";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
@@ -103,12 +100,6 @@ export function IssuesPage({
   const ratings = ratingCounts(state.issues, filters.show);
   const list = listIssues(state.issues, filters, costOf);
   const canEdit = !isReadOnly(mode);
-  // The CSV is the list as drawn: the same filters, order and costs.
-  const exportCsv = () => {
-    const names = { processes: processNames, steps: stepNames, people: peopleNames };
-    const csv = issuesCsv(list, names, costOf, bundle.workspace.settings.currency);
-    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), exportFileName(`${bundle.workspace.name} issues ${filters.show}${filters.rating ? ` ${filters.rating}` : ""}`, "csv", new Date().toISOString().slice(0, 10)));
-  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -135,17 +126,6 @@ export function IssuesPage({
           <RatingChips ratings={ratings} value={filters.rating} onChange={(rating) => setFilter({ ...filters, rating })} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            data-export-csv
-            disabled={list.length === 0 || costs === null}
-            title={costs === null ? "Waiting for the costs from the latest run." : "Download the issues listed here as a CSV file. It follows the filters above."}
-            onClick={exportCsv}
-          >
-            <Download aria-hidden />
-            Export CSV
-          </Button>
           {canEdit && (
             <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
               <Button type="button" onClick={() => setNewOpen(true)}>
