@@ -3,7 +3,7 @@
 // lines and the "Resolved <date> · by …" bar. The components render the results.
 
 import { ISSUE_STATUSES, isActiveStatus, isVisibleIssue, type IssueEventRow, type IssueRow, type IssueStatus, type ResolveHow } from "@transpera-flow/db";
-import { RATINGS, compareCostsDesc, compareRatingsDesc, noCost, ratingOfStored, ruleOfFinding, type IssueCost, type Rating } from "@transpera-flow/engine";
+import { compareCostsDesc, compareRatingsDesc, noCost, ratingOfStored, ruleOfFinding, type IssueCost, type Rating } from "@transpera-flow/engine";
 import { RULES_UI } from "@/lib/rules/catalogue";
 import { RATINGS_WORST_FIRST, STATUS_LABELS } from "./register";
 

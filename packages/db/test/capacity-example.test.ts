@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { capacityModel, checkCapacityInputs, simulate, type EngineModel } from "@transpera-flow/engine";
-import { LARKSPUR_WORKSPACE_ID, NORTHBEAM_WORKSPACE_ID, loadCapacityChanges, loadCapacitySetup, loadProcessBySlug, todayModel, toEngineModel, toEngineStepChange } from "../src";
+import { LARKSPUR_WORKSPACE_ID, NORTHBEAM_WORKSPACE_ID, loadCapacityChanges, loadProcessBySlug, toEngineModel, toEngineStepChange } from "../src";
 import { EXAMPLE_BOTH, fixedRecurrence, loadCapacityExample } from "../src/fixtures/capacity-example";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
