@@ -76,7 +76,7 @@ function Harness({ canEdit, published }: { canEdit: boolean; published: boolean 
       companyHistoryHref={published ? "/w/northbeam/history" : undefined}
       loadCard={async () => null}
       create={canEdit ? async () => ({}) : undefined}
-      upload={canEdit ? { preview: async () => ({ status: "error", message: "Not in this test." }), create: async () => ({ status: "error", message: "Not in this test." }) } : undefined}
+      upload={canEdit ? { preview: async () => ({ error: "Not in this test." }), create: async () => ({ error: "Not in this test." }) } : undefined}
       archived={archived}
       admin={canEdit ? ops : undefined}
     />
