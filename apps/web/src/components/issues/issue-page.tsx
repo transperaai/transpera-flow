@@ -233,7 +233,8 @@ export function IssuePage(props: IssuePageProps) {
         }
         title={
           <>
-            {issue.number != null && <span className="mr-2 font-mono font-normal text-fg-3">#{issue.number}</span>}
+            {issue.number != null && <span className="font-mono font-normal text-fg-3">#{issue.number}</span>}
+            {issue.number != null && " "}
             {issue.title}
           </>
         }

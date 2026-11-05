@@ -79,8 +79,8 @@ export const ISSUE_PAGE_HELP = {
   },
   history: {
     label: "History",
-    description: "Everything that happened to this issue, oldest first: when it was logged, each edit, each solution tested, and when it was resolved or reopened. It stays after the issue is resolved.",
-    example: "5 Oct · You · Logged. 9 Oct · You · Marked resolved by changing the process directly.",
+    description: "Everything that happened to this issue, newest first: when it was logged, each edit, each solution tested, and when it was resolved or reopened. It stays after the issue is resolved.",
+    example: "9 Oct · You · Resolved by changing the process directly. 5 Oct · You · Logged.",
   },
   target: {
     label: "Target",
