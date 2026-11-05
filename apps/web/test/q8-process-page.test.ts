@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { loadCapacityChanges, loadCapacitySetup, loadIssuesForReader, loadProcessBySlug, loadSolutionIssues, loadSolutions, type ProcessBundle } from "@transpera-flow/db";
+import { loadCapacitySetup, loadIssuesForReader, loadProcessBySlug, loadSolutionIssues, loadSolutions, type ProcessBundle } from "@transpera-flow/db";
 import { loadCapacityExample } from "../../../packages/db/src/fixtures/capacity-example";
 import { addExampleIssues, EXAMPLE_MARKER_PROCESS } from "../../../packages/db/src/fixtures/capacity-example-issues";
 import { createTestDb, createUser, type TestDb } from "../../../packages/db/test/harness";
@@ -62,7 +62,6 @@ beforeAll(async () => {
     tierSetup: tierSetupFrom(await loadCapacitySetup(db, ws)),
     issues: await loadIssuesForReader(db, ws),
     solutions: { solutions, links: solutionLinks.filter((l) => solutions.some((s) => s.id === l.solution_id)) },
-    changes: await loadCapacityChanges(db, ws),
     department: departmentField(bundle.process, { departments, services, links }),
   };
   [script, css, workers] = await Promise.all([
@@ -151,7 +150,7 @@ describe("the process page as cards", () => {
   it("with no issues the card says what goes there, with an icon and the button", async () => {
     const { page } = await mount({ editor: true, issues: false });
     const empty = page.locator("#issues [data-issues-empty]");
-    expect(await empty.innerText()).toContain("Log the problems you find on this map, then link solutions and Sandbox changes to them.");
+    expect(await empty.innerText()).toContain("Log the problems you find on this map, then link solutions to them.");
     expect(await empty.locator("svg").count()).toBe(1);
     expect(await empty.getByRole("button", { name: "Log an issue" }).count()).toBe(1);
     await page.close();

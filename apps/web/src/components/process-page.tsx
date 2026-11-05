@@ -45,7 +45,7 @@ import type { TierSetup } from "@/lib/tier-setup";
 import { ProcessSolutions, type SolutionsData } from "./solutions/process-solutions";
 import { NO_SOLUTIONS_DATA } from "@/lib/solutions/cards";
 import { useProcessIssues } from "./process-issues";
-import { IssuesCard, type LinkedChange } from "./process-issues-card";
+import { IssuesCard } from "./process-issues-card";
 import { useEngineModel, type EditMode } from "@/lib/sim/use-engine-model";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
 import { EDIT_ONLY } from "@/lib/phone";
@@ -77,10 +77,7 @@ export function ProcessPage({
   notice,
   tierSetup,
   department,
-  changes = [],
 }: {
-  /** The workspace's Sandbox changes, for the ones that name an issue (listed under it). */
-  changes?: LinkedChange[];
   /** The Department field of "About this process" (Q4): omitted where there is no workspace to read departments from. */
   department?: DepartmentFieldData;
   /** The tiers and what each service's tier gets, for the step base values (a driver recurrence is read from them). */
@@ -159,7 +156,6 @@ export function ProcessPage({
         loading={c.loading && model !== null}
         base={solBase}
         solutions={solData}
-        changes={changes}
         onShowStep={showGapStep}
         buildHref={(issue) => (canBuild && (issue.status === "open" || issue.status === "testing") ? buildSolutionHref(solBase, issue, `${solBase}/p/${bundle.process.id}#issues`) : null)}
         registerHref={registerHref}

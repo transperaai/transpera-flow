@@ -1,7 +1,7 @@
 "use client";
 
 // The process page's "Issues and solutions" card (Q8). Each issue is one row: a rating dot, the title, the step it sits on (a link that
-// lights the step on the map), a status pill and its owner, and under it the changes and solutions linked to it. The row opens the issue
+// lights the step on the map), a status pill and its owner, and under it the solutions linked to it. The row opens the issue
 // page. "Other improvements" (solutions for no issue) sit in the same card. The register still owns saving and the New issue dialog.
 
 import { CircleAlert } from "lucide-react";
@@ -9,14 +9,14 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { RATING_LABELS } from "@transpera-flow/engine";
 import type { IssueRow } from "@transpera-flow/db";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StatusPill } from "@/components/issues/status-pill";
 import { IssueTrackView } from "@/components/issue-track";
 import { VerdictWord } from "@/components/solutions/solution-cards";
 import { issueHref } from "@/lib/issues/pages";
-import { STATUS_LABELS, entryView, type RegisterEntry } from "@/lib/issues/register";
+import { entryView, type RegisterEntry } from "@/lib/issues/register";
 import { EDIT_ONLY } from "@/lib/phone";
 import { issueCounts, issueCountsText } from "@/lib/process-page/issue-counts";
 import { TRACK_STAGES, linkedSolutions, trackOf } from "@/lib/process-page/track";
@@ -24,13 +24,6 @@ import { solutionHref } from "@/lib/solutions/cards";
 import type { SolutionsData } from "@/lib/solutions/cards";
 
 const DOT: Record<string, string> = { risk: "var(--rate-risk)", bad: "var(--rate-bad)", good: "var(--rate-good)", great: "var(--rate-great)" };
-
-/** A change on the Sandbox that names an issue (name only: the hours it frees need a run per change, which the issue page makes). */
-export interface LinkedChange {
-  id: string;
-  name: string;
-  issue_id: string | null;
-}
 
 export interface IssuesCardProps {
   entries: RegisterEntry[];
@@ -42,7 +35,6 @@ export interface IssuesCardProps {
   /** `/w/<slug>` (or `/demo`): the issue and solution pages live under it. */
   base: string;
   solutions: Pick<SolutionsData, "solutions" | "links">;
-  changes: readonly LinkedChange[];
   /** Light this step on the map and bring the map into view. */
   onShowStep: (stepId: string) => void;
   /** Where "Build solution" opens the Editor for an issue, or null. */
@@ -81,7 +73,7 @@ export function IssuesCard(p: IssuesCardProps) {
           ) : (
             <div className="flex flex-col items-center gap-3 rounded-lg bg-muted/40 px-4 py-8 text-center" data-issues-empty>
               <CircleAlert aria-hidden className="size-8 text-fg-3" />
-              <p className="max-w-md text-sm text-fg-2">Log the problems you find on this map, then link solutions and Sandbox changes to them.</p>
+              <p className="max-w-md text-sm text-fg-2">Log the problems you find on this map, then link solutions to them.</p>
               {p.canEdit && (
                 <span className={EDIT_ONLY} data-edit-entry>
                   <Button type="button" size="sm" onClick={p.openNew}>
@@ -111,11 +103,10 @@ export function IssuesCard(p: IssuesCardProps) {
   );
 }
 
-function IssueRowView({ entry, issue, names, base, solutions, changes, onShowStep, buildHref }: IssuesCardProps & { entry: RegisterEntry; issue: IssueRow }) {
+function IssueRowView({ entry, issue, names, base, solutions, onShowStep, buildHref }: IssuesCardProps & { entry: RegisterEntry; issue: IssueRow }) {
   const v = entryView(entry);
   const linked = linkedSolutions(solutions, issue.id);
   const track = trackOf(issue, linked);
-  const mine = changes.filter((c) => c.issue_id === issue.id);
   const owners = (issue.owner_ids.length ? issue.owner_ids : issue.owner_person_id ? [issue.owner_person_id] : []).map((id) => names.person.get(id) ?? "someone who left");
   const first = v.stepIds[0];
   const stepName = first ? (names.step.get(first) ?? "a removed step") : null;
@@ -134,9 +125,7 @@ function IssueRowView({ entry, issue, names, base, solutions, changes, onShowSte
           {issue.number != null && <span className="mr-1.5 font-mono font-normal text-fg-3">#{issue.number}</span>}
           {v.title}
         </Link>
-        <Badge variant="outline" data-issue-status={issue.status}>
-          {STATUS_LABELS[issue.status]}
-        </Badge>
+        <StatusPill status={issue.status} />
         {track.stage !== null && (
           <span className="text-xs text-fg-3" data-issue-stage>
             {TRACK_STAGES[track.stage]}
@@ -162,16 +151,8 @@ function IssueRowView({ entry, issue, names, base, solutions, changes, onShowSte
           )}
         </p>
       )}
-      {(mine.length > 0 || linked.length > 0) && (
-        <ul className="relative flex flex-col gap-0.5 pl-5 text-xs text-fg-2" aria-label="Linked changes and solutions">
-          {mine.length > 0 && (
-            <li data-linked-changes>
-              <Link href={`${base}/sandbox`} className="relative z-10 hover:underline">
-                {mine.length === 1 ? "Change" : `${mine.length} changes`}: {mine.slice(0, 2).map((c) => c.name).join(", ")}
-                {mine.length > 2 ? ` and ${mine.length - 2} more` : ""}
-              </Link>
-            </li>
-          )}
+      {linked.length > 0 && (
+        <ul className="relative flex flex-col gap-0.5 pl-5 text-xs text-fg-2" aria-label="Linked solutions">
           {linked.map((s) => (
             <li key={s.solution.id} data-solution={s.solution.id} className="flex flex-wrap items-baseline gap-x-2">
               <Link href={solutionHref(base, s.solution.id)} className="relative z-10 hover:underline">
