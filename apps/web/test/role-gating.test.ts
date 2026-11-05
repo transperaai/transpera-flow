@@ -66,7 +66,7 @@ describe("screens whose controls come in as props that are undefined without can
     const page = read("components/solutions/solution-page.tsx");
     expect(page).toContain('const canEdit = !isReadOnly(mode);');
     // On a phone the whole block is hidden too (issue #44): the class carries EDIT_ONLY.
-    expect(page).toMatch(/\{canEdit && \(\s*<span className=\{`flex flex-wrap items-center gap-2 \$\{EDIT_ONLY\}`\} data-edit-entry>\s*(\{props\.share\}\s*)?<DeleteSolution/);
+    expect(page).toMatch(/canEdit \? \(\s*<span className=\{`flex flex-wrap items-center gap-2 \$\{EDIT_ONLY\}`\} data-edit-entry>\s*(\{props\.share\}\s*)?<DeleteSolution/);
   });
 
   it("the Block library: no New block link without canEdit", () => {
@@ -78,10 +78,12 @@ describe("screens whose controls come in as props that are undefined without can
     expect(read("components/solutions/process-solutions.tsx")).toMatch(/\{canEdit && \(/);
   });
 
-  it("the issue page: Edit, Resolve, Reopen, Build solution and Link a source only with canEdit", () => {
+  it("the issue page: Edit, Resolve, Reopen, Try a new solution and Link a source only with canEdit", () => {
     const page = read("components/issues/issue-page.tsx");
     expect(page).toContain('const canEdit = !isReadOnly(mode);');
-    expect(page).toMatch(/\{canEdit && \(\s*<div[^>]*>\s*(\{props\.share\}\s*)?<span[^>]*>\s*<Button type="button" variant="outline" onClick=\{\(\) => setEdit\(true\)\}>/);
+    expect(page).toMatch(/canEdit \? \(\s*<span className=\{`flex flex-wrap items-center gap-2 \$\{EDIT_ONLY\}`\} data-edit-entry>\s*(\{props\.share\}\s*)?<span[^>]*>\s*<Button type="button" variant="outline" onClick=\{\(\) => setEdit\(true\)\}>/);
+    // "+ Try a new solution" and "Link an existing solution" are offered to editors, on an issue still open.
+    expect(page).toMatch(/canEdit && open \? \(/);
   });
 });
 

@@ -6,4 +6,5 @@ export { Toolbar, ToolbarSearch, ClearFilters, FilterMenu, type FilterOption } f
 export { StatusPill, StatusPillMenu, type PillOption, type PillTone } from "./status-pill";
 export { EmptyState } from "./empty-state";
 export { MetaLine } from "./meta-line";
+export { EditableText } from "./editable-text";
 export { Timeline, type TimelineEntry } from "./timeline";
