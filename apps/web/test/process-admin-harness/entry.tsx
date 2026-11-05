@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import type { ProcessCategory } from "@transpera-flow/db";
 import { NewProcessButton } from "@/components/new-process-dialog";
 import { ArchivedBanner } from "@/components/processes/archived-banner";
 import { ProcessesList } from "@/components/processes/processes-list";
@@ -47,6 +48,11 @@ function Harness({ canEdit, refuseArchive }: { canEdit: boolean; refuseArchive?:
     async changeKind(pid, kind: ProcessKind) {
       log("kind", pid, kind);
       setFacts((list) => list.map((p) => (p.id === pid ? { ...p, kind } : p)));
+      return { status: "ok" };
+    },
+    async changeCategory(pid, category: ProcessCategory) {
+      log("category", pid, category);
+      setFacts((list) => list.map((p) => (p.id === pid ? { ...p, category } : p)));
       return { status: "ok" };
     },
     async archive(pid) {

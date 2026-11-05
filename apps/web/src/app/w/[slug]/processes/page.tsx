@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { archiveProcess, changeProcessKind, renameProcess, restoreProcess } from "@/app/w/[slug]/process-admin-actions";
+import { archiveProcess, changeProcessCategory, changeProcessKind, renameProcess, restoreProcess } from "@/app/w/[slug]/process-admin-actions";
 import { createProcess } from "@/app/w/[slug]/process-actions";
 import { ProcessesPage } from "@/components/processes/processes-page";
 import { canEditWorkspace } from "@/lib/access-data";
@@ -36,7 +36,7 @@ export default async function WorkspaceProcessesPage(props: PageProps<"/w/[slug]
       create={canEdit ? createProcess.bind(null, workspace.id, slug) : undefined}
       upload={canEdit ? { preview: previewUpload.bind(null, workspace.id, slug), create: createUpload.bind(null, workspace.id, slug) } : undefined}
       archived={archived}
-      admin={canEdit ? { rename: renameProcess, changeKind: changeProcessKind, archive: archiveProcess, restore: restoreProcess } : undefined}
+      admin={canEdit ? { rename: renameProcess, changeKind: changeProcessKind, changeCategory: changeProcessCategory, archive: archiveProcess, restore: restoreProcess } : undefined}
     />
   );
 }

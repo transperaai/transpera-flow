@@ -10,14 +10,13 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { changesForIssue, type CapacityChangeRow, type CapacitySetup, type IssueEventRow, type IssueRow, type ProcessBundle, type SourceRow } from "@transpera-flow/db";
-import { IssueChanges } from "@/components/issues/issue-changes";
+import type { IssueEventRow, IssueRow, ProcessBundle, SourceRow } from "@transpera-flow/db";
 import type { StepBadge } from "@/lib/issues/register";
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help, HelpLabel } from "@/components/help";
 import { ISSUE_PAGE_HELP } from "@/lib/issues/help";
 import { ResolveDialog } from "@/components/issues/resolve-dialog";
-import { StatusChip } from "@/components/issues-page";
+import { StatusPill } from "@/components/issues/status-pill";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { StepIssueBadges } from "@/components/step-issue-badges";
@@ -69,8 +68,6 @@ export interface IssuePageProps {
   solutions?: SolutionsData;
   /** Member names by user id (the person linked to each membership), so the history says who by name. */
   memberNames?: Readonly<Record<string, string>>;
-  /** Set up and the workspace's Sandbox changes, for "Changes anchored to this issue" (absent in the demo). `bundle` is the company model's process; the page's own is used when it is left out. */
-  capacity?: { setup: CapacitySetup; changes: CapacityChangeRow[]; bundle?: ProcessBundle };
 }
 
 export function IssuePage(props: IssuePageProps) {
@@ -155,7 +152,7 @@ export function IssuePage(props: IssuePageProps) {
           <h1 className="font-heading text-2xl leading-tight font-semibold tracking-tight">{issue.title}</h1>
           <div className="flex flex-wrap items-center gap-2">
             <RatingPill rating={ratingOfStored(issue.severity)} />
-            <StatusChip issue={issue} />
+            <StatusPill status={issue.status} />
             <span className="text-sm text-muted-foreground">{loggedLine(issue)}</span>
           </div>
         </div>
@@ -262,10 +259,6 @@ export function IssuePage(props: IssuePageProps) {
               </Card>
             )}
           </section>
-
-          {props.capacity && (
-            <IssueChanges changes={changesForIssue(props.capacity.changes, issue.id)} setup={props.capacity.setup} bundle={props.capacity.bundle ?? bundle} base={base} help={<Help {...ISSUE_PAGE_HELP.changes} />} />
-          )}
 
           <section className="flex flex-col gap-2" data-section="history">
             <div>

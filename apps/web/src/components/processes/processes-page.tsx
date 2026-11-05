@@ -57,36 +57,44 @@ export function ProcessesPage({
       width="max-w-6xl"
       description="This workspace's own processes: the company map and everything inside it. Other workspaces have their own. Open a row to see that process's map card."
       actions={
-        <>
-          {companyMap &&
-            (companyMap.edit ? (
-              <Button asChild className={`bg-edit text-edit-fg hover:bg-edit/90 ${EDIT_ONLY}`} data-edit-entry data-edit-company-map>
-                <Link href={companyMap.href}>✎ Edit company map</Link>
-              </Button>
-            ) : (
-              <>
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2" data-processes-actions>
+          {(companyMap || companyHistoryHref) && (
+            <div role="group" aria-label="Company map" className="inline-flex flex-wrap items-center gap-1 rounded-xl border bg-muted/30 p-0.5" data-company-map-group>
+              {companyMap &&
+                (companyMap.edit ? (
+                  <Button asChild className={`bg-edit text-edit-fg hover:bg-edit/90 ${EDIT_ONLY}`} data-edit-entry data-edit-company-map>
+                    <Link href={companyMap.href}>✎ Edit company map</Link>
+                  </Button>
+                ) : (
+                  <>
+                    <Button variant="outline" asChild>
+                      <Link href={companyMap.href}>
+                        <Network /> Company map
+                      </Link>
+                    </Button>
+                    {companyMap.editHref && (
+                      <Button asChild className={`bg-edit text-edit-fg hover:bg-edit/90 ${EDIT_ONLY}`} data-edit-entry data-edit-company-map>
+                        <Link href={companyMap.editHref}>✎ Edit company map</Link>
+                      </Button>
+                    )}
+                  </>
+                ))}
+              {companyHistoryHref && (
                 <Button variant="outline" asChild>
-                  <Link href={companyMap.href}>
-                    <Network /> Company map
+                  <Link href={companyHistoryHref} data-company-history>
+                    History
                   </Link>
                 </Button>
-                {companyMap.editHref && (
-                  <Button asChild className={`bg-edit text-edit-fg hover:bg-edit/90 ${EDIT_ONLY}`} data-edit-entry data-edit-company-map>
-                    <Link href={companyMap.editHref}>✎ Edit company map</Link>
-                  </Button>
-                )}
-              </>
-            ))}
-          {companyHistoryHref && (
-            <Button variant="outline" asChild>
-              <Link href={companyHistoryHref} data-company-history>
-                History
-              </Link>
-            </Button>
+              )}
+            </div>
           )}
-          {upload && <UploadProcessButton upload={upload} />}
-          {create && <NewProcessButton create={create} />}
-        </>
+          {(upload || create) && (
+            <div className="flex flex-wrap items-center gap-2" data-page-actions>
+              {upload && <UploadProcessButton upload={upload} />}
+              {create && <NewProcessButton create={create} />}
+            </div>
+          )}
+        </div>
       }
     >
       <ProcessesList

@@ -68,14 +68,14 @@ export function ProcessesTable({
     <div className="overflow-x-auto rounded-token border bg-card">
       <table className="w-full min-w-0 border-collapse text-sm">
         <thead>
-          <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+          <tr className="border-b bg-muted/40 text-center text-xs text-muted-foreground">
             <th className="w-8 p-0" aria-label="Open or close" />
-            <th className="px-2 py-2 font-medium">Process</th>
-            <th className="hidden px-2 py-2 font-medium md:table-cell">
+            <th className="px-2 py-2 text-left font-medium">Process</th>
+            <th className="hidden px-2 py-2 text-left font-medium md:table-cell">
               Type
               <Help label="Type" description={PROCESS_CATEGORIES.map((c) => `${PROCESS_CATEGORY_LABELS[c]}: ${PROCESS_CATEGORY_HELP[c]}`).join(" ")} example="Northbeam's lead pipeline is Sales; its monthly reporting is Routine client work." />
             </th>
-            <th className="hidden px-2 py-2 text-right font-medium lg:table-cell">
+            <th className="hidden px-2 py-2 text-center font-medium lg:table-cell">
               Steps
               <Help
                 label="Steps"
@@ -83,7 +83,7 @@ export function ProcessesTable({
                 example="A process with 5 steps and a sub-process of 3 shows 8."
               />
             </th>
-            <th className="px-2 py-2 text-right font-medium">
+            <th className="px-2 py-2 text-center font-medium">
               Open issues
               <Help
                 label="Open issues"
@@ -140,18 +140,18 @@ export function ProcessesTable({
                       )}
                     </span>
                   </td>
-                  <td className="hidden px-2 py-2.5 text-xs md:table-cell">{PROCESS_CATEGORY_LABELS[r.category]}</td>
-                  <td className="hidden px-2 py-2.5 text-right tabular-nums lg:table-cell">{r.steps}</td>
-                  <td className="px-2 py-2.5 text-right tabular-nums">{r.openIssues > 0 ? <span className="font-semibold">{r.openIssues}</span> : <span className="text-muted-foreground">0</span>}</td>
-                  <td className="hidden px-2 py-2.5 text-xs whitespace-nowrap lg:table-cell">
+                  <td className="hidden px-2 py-2.5 text-left text-xs md:table-cell">{PROCESS_CATEGORY_LABELS[r.category]}</td>
+                  <td className="hidden px-2 py-2.5 text-center tabular-nums lg:table-cell">{r.steps}</td>
+                  <td className="px-2 py-2.5 text-center tabular-nums">{r.openIssues > 0 ? <span className="font-semibold">{r.openIssues}</span> : <span className="text-muted-foreground">0</span>}</td>
+                  <td className="hidden px-2 py-2.5 text-center text-xs whitespace-nowrap lg:table-cell">
                     {r.version ? `v${r.version.number}${r.version.publishedAt ? ` · ${shortDate(r.version.publishedAt)}` : ""}` : <span className="text-muted-foreground">Draft only</span>}
                   </td>
                   {actions && (
-                    <td className="p-0 text-right" onClick={(e) => e.stopPropagation()}>
+                    <td className="p-0 text-center" onClick={(e) => e.stopPropagation()}>
                       {actions(r)}
                     </td>
                   )}
-                  <td className="px-2 py-2.5 text-right">
+                  <td className="px-2 py-2.5 text-center">
                     <Link
                       href={hrefs[r.id] ?? "#"}
                       onClick={(e) => e.stopPropagation()}

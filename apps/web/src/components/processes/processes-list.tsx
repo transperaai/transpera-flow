@@ -9,7 +9,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Shuffle } from "lucide-react";
-import { PROCESS_CATEGORIES, PROCESS_CATEGORY_LABELS, type ProcessCategory } from "@transpera-flow/db";
+import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS, type ProcessCategory } from "@transpera-flow/db";
 import { ProcessesTable } from "@/components/processes/processes-table";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -20,6 +20,7 @@ import {
   MAX_PROCESS_NAME,
   PROCESS_KIND_CHOICES,
   PROCESS_KIND_LABELS,
+  PROCESS_KIND_SIMULATED,
   kindChangeWarning,
   type ArchivedProcess,
   type ProcessAdminOps,
@@ -31,7 +32,7 @@ import { shortDate, type ProcessRowData } from "@/lib/processes/rows";
 import { cn } from "@/lib/utils";
 import { EDIT_ONLY } from "@/lib/phone";
 
-type Open = { mode: "rename" | "kind" | "archive"; row: ProcessRowData } | null;
+type Open = { mode: "rename" | "type" | "archive"; row: ProcessRowData } | null;
 
 export function ProcessesList({
   rows,
@@ -93,27 +94,28 @@ export function ProcessesList({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div role="group" aria-label="Show" className="flex flex-wrap items-center gap-1.5" data-process-view={view}>
-        <ViewChip on={view === "active"} onPick={() => setView("active")}>
-          In use ({rows.length})
-        </ViewChip>
-        <ViewChip on={view === "archived"} onPick={() => setView("archived")}>
-          Archived ({archived.length})
-        </ViewChip>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-1" data-processes-toolbar>
+        <Segmented label="Show" data-process-view={view}>
+          <SegmentButton on={view === "active"} onPick={() => setView("active")}>
+            In use ({rows.length})
+          </SegmentButton>
+          <SegmentButton on={view === "archived"} onPick={() => setView("archived")}>
+            Archived ({archived.length})
+          </SegmentButton>
+        </Segmented>
+        {view === "active" && present.length > 1 && (
+          <Segmented label="Type" data-process-category-filter={category ?? "all"}>
+            <SegmentButton on={category === null} onPick={() => setCategory(null)}>
+              All
+            </SegmentButton>
+            {present.map((c) => (
+              <SegmentButton key={c} on={category === c} onPick={() => setCategory(c)}>
+                {PROCESS_CATEGORY_LABELS[c]} ({rows.filter((r) => r.category === c).length})
+              </SegmentButton>
+            ))}
+          </Segmented>
+        )}
       </div>
-      {view === "active" && present.length > 1 && (
-        <div role="group" aria-label="Type" className="flex flex-wrap items-center gap-1.5" data-process-category-filter={category ?? "all"}>
-          <span className="text-xs text-muted-foreground">Type</span>
-          <ViewChip on={category === null} onPick={() => setCategory(null)}>
-            All
-          </ViewChip>
-          {present.map((c) => (
-            <ViewChip key={c} on={category === c} onPick={() => setCategory(c)}>
-              {PROCESS_CATEGORY_LABELS[c]} ({rows.filter((r) => r.category === c).length})
-            </ViewChip>
-          ))}
-        </div>
-      )}
       <p role="status" aria-live="polite" className={status ? "text-xs text-muted-foreground" : "sr-only"} data-process-status>
         {status}
       </p>
@@ -142,7 +144,16 @@ export function ProcessesList({
   );
 }
 
-function ViewChip({ on, onPick, children }: { on: boolean; onPick: () => void; children: ReactNode }) {
+/** A segmented control: one joined, rounded track of buttons, the picked one raised. */
+function Segmented({ label, children, ...rest }: { label: string; children: ReactNode } & Record<`data-${string}`, string>) {
+  return (
+    <div role="group" aria-label={label} className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-lg border bg-muted/40 p-0.5" {...rest}>
+      {children}
+    </div>
+  );
+}
+
+function SegmentButton({ on, onPick, children }: { on: boolean; onPick: () => void; children: ReactNode }) {
   return (
     <button
       type="button"
@@ -150,8 +161,8 @@ function ViewChip({ on, onPick, children }: { on: boolean; onPick: () => void; c
       aria-pressed={on}
       onClick={onPick}
       className={cn(
-        "inline-flex h-7 items-center rounded-full border px-2.5 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        on ? "border-accent bg-accent-soft font-semibold" : "bg-card hover:bg-muted",
+        "inline-flex h-7 items-center rounded-md px-2.5 text-xs whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        on ? "bg-card font-semibold text-foreground shadow-sm ring-1 ring-foreground/10" : "text-muted-foreground hover:bg-muted hover:text-foreground",
       )}
     >
       {children}
@@ -159,7 +170,7 @@ function ViewChip({ on, onPick, children }: { on: boolean; onPick: () => void; c
   );
 }
 
-function RowMenu({ row, onPick }: { row: ProcessRowData; onPick: (mode: "rename" | "kind" | "archive") => void }) {
+function RowMenu({ row, onPick }: { row: ProcessRowData; onPick: (mode: "rename" | "type" | "archive") => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -173,14 +184,14 @@ function RowMenu({ row, onPick }: { row: ProcessRowData; onPick: (mode: "rename"
           <MoreHorizontal aria-hidden className="size-4" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={() => onPick("rename")}>
+      <DropdownMenuContent align="end" className="w-auto min-w-48">
+        <DropdownMenuItem onSelect={() => onPick("rename")} className="whitespace-nowrap">
           <Pencil /> Rename…
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onPick("kind")}>
+        <DropdownMenuItem onSelect={() => onPick("type")} className="whitespace-nowrap">
           <Shuffle /> Change type…
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onPick("archive")}>
+        <DropdownMenuItem onSelect={() => onPick("archive")} className="whitespace-nowrap">
           <Archive /> Archive…
         </DropdownMenuItem>
       </DropdownMenuContent>
@@ -221,9 +232,9 @@ function ArchivedTable({
       <div className="overflow-x-auto rounded-token border bg-card">
         <table className="w-full border-collapse text-sm" aria-label="Archived processes">
           <thead>
-            <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-              <th className="px-3 py-2 font-medium">Process</th>
-              <th className="hidden px-2 py-2 font-medium sm:table-cell">Type</th>
+            <tr className="border-b bg-muted/40 text-center text-xs text-muted-foreground">
+              <th className="px-3 py-2 text-left font-medium">Process</th>
+              <th className="hidden px-2 py-2 text-left font-medium sm:table-cell">Type</th>
               <th className="px-2 py-2 font-medium">Archived</th>
               {canRestore && <th className="w-28 px-2 py-2" aria-label="Restore" />}
             </tr>
@@ -240,10 +251,10 @@ function ArchivedTable({
                     p.name
                   )}
                 </td>
-                <td className="hidden px-2 py-2.5 text-xs sm:table-cell">{PROCESS_KIND_LABELS[p.kind]}</td>
-                <td className="px-2 py-2.5 text-xs whitespace-nowrap text-muted-foreground">{shortDate(p.archivedAt)}</td>
+                <td className="hidden px-2 py-2.5 text-left text-xs sm:table-cell">{PROCESS_KIND_LABELS[p.kind]}</td>
+                <td className="px-2 py-2.5 text-center text-xs whitespace-nowrap text-muted-foreground">{shortDate(p.archivedAt)}</td>
                 {canRestore && (
-                  <td className="px-2 py-2 text-right">
+                  <td className="px-2 py-2 text-center">
                     <Button type="button" size="sm" variant="outline" className={EDIT_ONLY} data-edit-entry disabled={restoring !== null} onClick={() => onRestore(p)} aria-label={`Restore ${p.name}`}>
                       <ArchiveRestore aria-hidden /> {restoring === p.id ? "Restoring…" : "Restore"}
                     </Button>
@@ -258,7 +269,15 @@ function ArchivedTable({
   );
 }
 
-const TITLES = { rename: "Rename process", kind: "Change type", archive: "Archive process" } as const;
+/** What the line under the toolbar says after "Change type" saves. */
+function typeDoneMessage(row: ProcessRowData, category: ProcessCategory, kind: ProcessKind): string {
+  const parts: string[] = [];
+  if (category !== row.category) parts.push(`${row.name} is now ${PROCESS_CATEGORY_LABELS[category]}.`);
+  if (kind !== row.kind) parts.push(`It is now simulated as ${kind === "servicing" ? "client work" : "a sales pipeline"}.`);
+  return parts.join(" ");
+}
+
+const TITLES = { rename: "Rename process", type: "Change type", archive: "Archive process" } as const;
 
 function AdminDialog({
   open: { mode, row },
@@ -275,8 +294,8 @@ function AdminDialog({
   onDone: (message: string) => void;
 }) {
   const [name, setName] = useState(row.name);
-  const other: ProcessKind = row.kind === "servicing" ? "pipeline" : "servicing";
-  const [kind, setKind] = useState<ProcessKind>(other);
+  const [category, setCategory] = useState<ProcessCategory>(row.category);
+  const [kind, setKind] = useState<ProcessKind>(row.kind);
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
   const holder = row.trail.at(-1);
@@ -308,7 +327,20 @@ function AdminDialog({
       if (!next || next.length > MAX_PROCESS_NAME) return setError(`Give it a name (up to ${MAX_PROCESS_NAME} characters).`);
       return run(() => admin.rename(row.id, next), `Renamed ${row.name} to ${next}.`);
     }
-    if (mode === "kind") return run(() => admin.changeKind(row.id, kind), `${row.name} is now ${kind === "servicing" ? "client work" : "a sales pipeline"}.`);
+    if (mode === "type") {
+      // The simulation setting first: the database or the checks may refuse it, and then nothing is saved.
+      return run(async (): Promise<ProcessAdminResult> => {
+        if (kind !== row.kind) {
+          const r = await admin.changeKind(row.id, kind);
+          if (r.status === "error") return r;
+        }
+        if (category !== row.category) {
+          const r = await admin.changeCategory(row.id, category);
+          if (r.status === "error") return kind !== row.kind ? { status: "error", message: `${row.name} is now ${kind === "servicing" ? "client work" : "a sales pipeline"}, but its type didn't save: ${r.message}` } : r;
+        }
+        return { status: "ok" };
+      }, typeDoneMessage(row, category, kind));
+    }
     return run(() => admin.archive(row.id), `Archived ${row.name}. Find it under Archived to restore it.`);
   };
 
@@ -320,8 +352,8 @@ function AdminDialog({
           <DialogDescription>
             {mode === "rename"
               ? "The new name shows everywhere at once, including its card on the company map. Its history keeps the old name."
-              : mode === "kind"
-                ? `${row.name} is ${row.kind === "servicing" ? "client work" : "a sales pipeline"} now. Changing it changes how it is simulated.`
+              : mode === "type"
+                ? `What is ${row.name} for? This is the word people see for it on the Processes page and the process page.`
                 : `Archive ${row.name}?`}
           </DialogDescription>
         </DialogHeader>
@@ -341,33 +373,54 @@ function AdminDialog({
               <Input id="process-new-name" value={name} maxLength={MAX_PROCESS_NAME} autoFocus onChange={(e) => setName(e.target.value)} />
             </div>
           )}
-          {mode === "kind" && (
+          {mode === "type" && (
             <>
               <fieldset className="flex flex-col gap-2">
                 <legend className="sr-only">Type</legend>
-                {PROCESS_KIND_CHOICES.map((k) => (
-                  <label key={k.value} className="flex cursor-pointer items-start gap-2 rounded-token border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
-                    <input type="radio" name="process-kind" value={k.value} checked={kind === k.value} onChange={() => setKind(k.value)} className="mt-1" />
+                {PROCESS_CATEGORIES.map((c) => (
+                  <label key={c} className="flex cursor-pointer items-start gap-2 rounded-token border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
+                    <input type="radio" name="process-category" value={c} checked={category === c} onChange={() => setCategory(c)} className="mt-1" />
                     <span>
                       <span className="font-semibold">
-                        {k.label}
-                        {k.value === row.kind && <span className="font-normal text-muted-foreground"> (now)</span>}
+                        {PROCESS_CATEGORY_LABELS[c]}
+                        {c === row.category && <span className="font-normal text-muted-foreground"> (now)</span>}
                       </span>
-                      <span className="block text-xs text-muted-foreground">{k.description}</span>
+                      <span className="block text-xs text-muted-foreground">{PROCESS_CATEGORY_HELP[c]}</span>
                     </span>
                   </label>
                 ))}
               </fieldset>
-              {kind !== row.kind && (
-                <div role="note" className="rounded-lg border border-warn bg-warn-soft p-3 text-sm" data-kind-warning>
-                  <p className="font-semibold">What changes in the simulation</p>
-                  <ul className="mt-1 list-disc space-y-1 pl-5">
-                    {kindChangeWarning(row.name, kind).map((line) => (
-                      <li key={line}>{line}</li>
+              <details className="rounded-token border p-2 text-sm" data-how-simulated>
+                <summary className="cursor-pointer font-medium">How it&apos;s simulated</summary>
+                <div className="mt-2 flex flex-col gap-2">
+                  <p data-simulated-as>{PROCESS_KIND_SIMULATED[row.kind]}.</p>
+                  <fieldset className="flex flex-col gap-2">
+                    <legend className="sr-only">Simulation</legend>
+                    {PROCESS_KIND_CHOICES.map((k) => (
+                      <label key={k.value} className="flex cursor-pointer items-start gap-2 rounded-token border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
+                        <input type="radio" name="process-kind" value={k.value} checked={kind === k.value} onChange={() => setKind(k.value)} className="mt-1" />
+                        <span>
+                          <span className="font-semibold">
+                            {k.label}
+                            {k.value === row.kind && <span className="font-normal text-muted-foreground"> (now)</span>}
+                          </span>
+                          <span className="block text-xs text-muted-foreground">{k.description}</span>
+                        </span>
+                      </label>
                     ))}
-                  </ul>
+                  </fieldset>
+                  {kind !== row.kind && (
+                    <div role="note" className="rounded-lg border border-warn bg-warn-soft p-3 text-sm" data-kind-warning>
+                      <p className="font-semibold">What changes in the simulation</p>
+                      <ul className="mt-1 list-disc space-y-1 pl-5">
+                        {kindChangeWarning(row.name, kind).map((line) => (
+                          <li key={line}>{line}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
-              )}
+              </details>
             </>
           )}
           {mode === "archive" &&
@@ -388,8 +441,8 @@ function AdminDialog({
               {blocked ? "Close" : "Cancel"}
             </Button>
             {!blocked && (
-              <Button type="submit" disabled={working || (mode === "kind" && kind === row.kind)} variant={mode === "archive" ? "destructive" : "default"}>
-                {working ? "Saving…" : mode === "rename" ? "Save" : mode === "kind" ? "Change type" : "Archive"}
+              <Button type="submit" disabled={working || (mode === "type" && kind === row.kind && category === row.category)} variant={mode === "archive" ? "destructive" : "default"}>
+                {working ? "Saving…" : mode === "archive" ? "Archive" : "Save"}
               </Button>
             )}
           </DialogFooter>

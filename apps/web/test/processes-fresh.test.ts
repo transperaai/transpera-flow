@@ -14,7 +14,7 @@ vi.mock("@/components/shell/shell-header", () => ({ ShellHeader: ({ title }: { t
 vi.mock("@/lib/access-data", () => ({ canEditWorkspace: async () => state.canEdit }));
 vi.mock("@/lib/data", () => ({ loadWorkspaceHead: async () => freshHead, loadCompanyId: async () => COMPANY_ID }));
 vi.mock("@/lib/processes/data", () => ({ loadProcessesAndArchived: async () => ({ rows: state.rows, archived: [] }) }));
-vi.mock("@/app/w/[slug]/process-admin-actions", () => ({ archiveProcess: vi.fn(), changeProcessKind: vi.fn(), renameProcess: vi.fn(), restoreProcess: vi.fn() }));
+vi.mock("@/app/w/[slug]/process-admin-actions", () => ({ archiveProcess: vi.fn(), changeProcessCategory: vi.fn(), changeProcessKind: vi.fn(), renameProcess: vi.fn(), restoreProcess: vi.fn() }));
 vi.mock("@/app/w/[slug]/process-actions", () => ({ createProcess: vi.fn() }));
 vi.mock("@/app/w/[slug]/processes/upload-actions", () => ({ createUpload: vi.fn(), previewUpload: vi.fn() }));
 
