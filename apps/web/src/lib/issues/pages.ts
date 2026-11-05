@@ -61,7 +61,7 @@ export function parseListState(params: Params): ListState {
   const ratings = csv(params.rating);
   return {
     status,
-    ratings: RATINGS.filter((r) => ratings.includes(r)),
+    ratings: RATINGS_WORST_FIRST.filter((r) => ratings.includes(r)),
     owners: csv(params.owner),
     processes: csv(params.process),
     q: (first(params.q) ?? "").trim().slice(0, 100),

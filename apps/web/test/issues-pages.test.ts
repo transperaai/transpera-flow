@@ -326,6 +326,6 @@ describe("(i) help on every control", () => {
     const page = read("components/issues/issue-page.tsx");
     for (const t of ["Where this issue sits", "What&apos;s wrong", "Solutions tested", "History", "Mark resolved", "✎ Build solution", "Reopen", "+ Link", "Linked to", "Owners", "Target"]) expect(page).toContain(t);
     const list = read("components/issues-page.tsx");
-    for (const t of ["+ New issue", "Filter by rating", "Open", "Resolved"]) expect(list).toContain(t);
+    for (const t of ["+ New issue", "Search issues", "Status", "Owner", "Rating", "Clear filters"]) expect(list).toContain(t);
   });
 });
