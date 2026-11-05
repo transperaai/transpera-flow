@@ -4,14 +4,24 @@
 /** The (i) texts for the list's controls. */
 export const LIST_HELP = {
   show: {
-    label: "Open, Resolved and All",
-    description: "Open shows issues still to deal with: Open and Testing solutions. Resolved shows the ones you resolved or decided not to fix. The number is how many each holds.",
-    example: "Open 3 means three issues still need work. Resolved issues keep their full history.",
+    label: "Filter by status",
+    description: "Tick the statuses to show. Open and Testing solutions are issues still to deal with; Resolved and Won't fix are closed. The number is how many issues each would show with your other filters.",
+    example: "Tick Resolved as well to see the ones you have already closed alongside the open ones.",
+  },
+  owner: {
+    label: "Filter by owner",
+    description: "Show only the issues one or more people own. Unassigned finds the issues nobody owns yet.",
+    example: "Tick Rosa and Unassigned to see her issues and the ones still to be given out.",
   },
   rating: {
     label: "Filter by rating",
-    description: "Show only the issues with one rating. The number on each button is how many there are among the issues you are looking at. Click it again, or All, to see everything.",
-    example: "Click Operational risk to see only the issues that could break delivery or lose clients.",
+    description: "Show only the issues with the ratings you tick. The number beside each is how many there are with your other filters. Untick them all to see every rating.",
+    example: "Tick Operational risk to see only the issues that could break delivery or lose clients.",
+  },
+  process: {
+    label: "Filter by process",
+    description: "Show only the issues about the processes you tick, whether they sit on a step or on the whole process.",
+    example: "Tick Monthly reporting to see its issues only.",
   },
   table: {
     label: "Reading the table",
@@ -66,11 +76,6 @@ export const ISSUE_PAGE_HELP = {
     label: "Solutions tested",
     description: "Every solution built for this issue, with an automatic pass or fail against its target, how often that holds across the simulated runs, and your own verdict. You make the final call.",
     example: "“Lead scoring”: automatic pass, holds in 92% of runs, your verdict pass.",
-  },
-  changes: {
-    label: "Changes anchored to this issue",
-    description: "Sandbox automations and augmentations that name this issue as the one they fix. Each is run on its own against today: the hours it frees a month, and how many more clients the department could then hold.",
-    example: "“Auto-collate reports”: 40 hours freed a month, +3 clients.",
   },
   history: {
     label: "History",

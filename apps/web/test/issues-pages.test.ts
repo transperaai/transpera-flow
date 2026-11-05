@@ -5,7 +5,11 @@ import { noCost, type DetectedIssue } from "@transpera-flow/engine";
 import { northbeamIssues, type IssueRow } from "@transpera-flow/db";
 import { ISSUE_PAGE_HELP, LIST_HELP, RESOLVE_HELP } from "@/lib/issues/help";
 import {
+  ALL_STATUSES_STATE,
   DEFAULT_LIST_STATE,
+  UNASSIGNED,
+  facetCounts,
+  filtersOn,
   findIssue,
   historyLines,
   insightRuleOf,
@@ -14,9 +18,8 @@ import {
   listQuery,
   loggedLine,
   parseListState,
-  ratingCounts,
+  type ListState,
   resolvedBar,
-  showCounts,
 } from "@/lib/issues/pages";
 import { mapFeed, registerEntries } from "@/lib/issues/register";
 import { MemoryIssueStore } from "@/lib/issues/store";
@@ -40,57 +43,102 @@ const ok = async (p: Promise<{ status: "ok"; issue: IssueRow } | { status: "erro
 };
 const all = (s: MemoryIssueStore) => s.visible();
 
+const st = (extra: Partial<ListState> = {}): ListState => ({ ...DEFAULT_LIST_STATE, ...extra });
+const RESOLVED: ListState["status"] = ["resolved", "wont_fix"];
+
 describe("filters and the URL", () => {
-  it("reads Open / Resolved / All and a rating, and ignores anything else", () => {
+  it("reads statuses, ratings, owners, processes and a search, and ignores anything else", () => {
     expect(parseListState({})).toEqual(DEFAULT_LIST_STATE);
-    expect(parseListState({ show: "resolved", rating: "bad" })).toEqual({ show: "resolved", rating: "bad" });
-    expect(parseListState({ show: "all", rating: ["risk", "good"] })).toEqual({ show: "all", rating: "risk" });
-    expect(parseListState({ show: "nope", rating: "terrible" })).toEqual(DEFAULT_LIST_STATE);
+    expect(parseListState({ status: "resolved,wont_fix", rating: "bad" })).toEqual(st({ status: RESOLVED, ratings: ["bad"] }));
+    expect(parseListState({ rating: "good,risk,terrible", owner: "p1,none", process: "x", q: "  wait " })).toEqual(st({ ratings: ["risk", "good"], owners: ["p1", UNASSIGNED], processes: ["x"], q: "wait" }));
+    expect(parseListState({ status: "nope", rating: "terrible" })).toEqual(DEFAULT_LIST_STATE);
+    expect(parseListState({ status: "none" })).toEqual(st({ status: [] }));
+  });
+
+  it("still reads the old Open / Resolved / All links", () => {
+    expect(parseListState({ show: "resolved" }).status).toEqual(RESOLVED);
+    expect(parseListState({ show: "all" }).status).toEqual(ALL_STATUSES_STATE);
+    expect(parseListState({ show: "open" })).toEqual(DEFAULT_LIST_STATE);
+    expect(parseListState({ show: "resolved", rating: "bad" })).toEqual(st({ status: RESOLVED, ratings: ["bad"] }));
   });
 
   it("writes only what differs from the defaults, so the plain URL stays plain", () => {
     expect(listQuery(DEFAULT_LIST_STATE)).toBe("");
-    expect(listQuery({ show: "resolved", rating: "" })).toBe("?show=resolved");
-    expect(listQuery({ show: "open", rating: "bad" })).toBe("?rating=bad");
-    expect(listQuery({ show: "all", rating: "risk" })).toBe("?show=all&rating=risk");
+    expect(listQuery(st({ status: RESOLVED }))).toBe("?status=resolved,wont_fix");
+    expect(listQuery(st({ ratings: ["bad"] }))).toBe("?rating=bad");
+    expect(listQuery(st({ status: ALL_STATUSES_STATE, ratings: ["risk"], owners: ["p1"], q: "a b" }))).toBe("?status=open,testing,resolved,wont_fix&rating=risk&owner=p1&q=a+b");
     // And what it writes reads back.
-    for (const s of [{ show: "all", rating: "risk" }, { show: "resolved", rating: "" }, DEFAULT_LIST_STATE] as const) {
+    for (const s of [st({ status: ALL_STATUSES_STATE, ratings: ["risk", "bad"] }), st({ status: RESOLVED }), st({ status: [] }), st({ owners: ["p1", UNASSIGNED], processes: ["x"], q: "wait" }), DEFAULT_LIST_STATE]) {
       expect(parseListState(Object.fromEntries(new URLSearchParams(listQuery(s))))).toEqual(s);
     }
+  });
+
+  it("says a filter is on when anything differs from the defaults", () => {
+    expect(filtersOn(DEFAULT_LIST_STATE)).toBe(false);
+    expect(filtersOn(st({ owners: ["p1"] }))).toBe(true);
+    expect(filtersOn(st({ status: RESOLVED }))).toBe(true);
+    expect(filtersOn(st({ q: "x" }))).toBe(true);
   });
 });
 
 describe("counts and the list", () => {
-  it("counts Open (Open and Testing solutions), Resolved (Resolved and Won't fix) and All, never a dismissed insight", () => {
+  it("counts each status among the issues the other filters leave, never a dismissed insight", () => {
     const rows = [
       issueOf(1, { status: "open" }),
       issueOf(2, { status: "testing" }),
       issueOf(3, { status: "resolved" }),
-      issueOf(4, { status: "wont_fix" }),
+      issueOf(4, { status: "wont_fix", severity: "info" }),
       issueOf(5, { status: "dismissed", number: null }),
     ];
-    expect(showCounts(rows)).toEqual({ open: 2, resolved: 2, all: 4 });
+    expect(Object.fromEntries(facetCounts(rows, DEFAULT_LIST_STATE, "status"))).toEqual({ open: 1, testing: 1, resolved: 1, wont_fix: 1 });
+    // The status filter itself doesn't narrow its own counts; the rating filter does.
+    expect(facetCounts(rows, st({ status: ["open"], ratings: ["great"] }), "status").get("wont_fix")).toBe(1);
+    expect(facetCounts(rows, st({ status: ["open"], ratings: ["great"] }), "status").get("open") ?? 0).toBe(0);
   });
 
-  it("filters by Open / Resolved / All and by rating, with counts among the issues the first choice leaves", () => {
+  it("filters by status and rating, with counts among the issues the other filters leave", () => {
     const rows = [
       issueOf(1, { status: "open", severity: "critical" }),
       issueOf(2, { status: "open", severity: "serious" }),
       issueOf(3, { status: "resolved", severity: "serious" }),
       issueOf(4, { status: "open", severity: "info" }),
     ];
-    expect(listIssues(rows, { show: "open", rating: "" }).map((i) => i.number)).toEqual([1, 2, 4]);
-    expect(listIssues(rows, { show: "resolved", rating: "" }).map((i) => i.number)).toEqual([3]);
-    expect(listIssues(rows, { show: "all", rating: "bad" }).map((i) => i.number)).toEqual([2, 3]);
-    expect(ratingCounts(rows, "open")).toEqual({ all: 3, byRating: { risk: 1, bad: 1, good: 0, great: 1 } });
-    expect(ratingCounts(rows, "all").byRating.bad).toBe(2);
+    expect(listIssues(rows, DEFAULT_LIST_STATE).map((i) => i.number)).toEqual([1, 2, 4]);
+    expect(listIssues(rows, st({ status: RESOLVED })).map((i) => i.number)).toEqual([3]);
+    expect(listIssues(rows, st({ status: ALL_STATUSES_STATE, ratings: ["bad"] })).map((i) => i.number)).toEqual([2, 3]);
+    expect(listIssues(rows, st({ status: ALL_STATUSES_STATE, ratings: ["bad", "risk"] })).map((i) => i.number)).toEqual([1, 2, 3]);
+    expect(listIssues(rows, st({ status: [] }))).toEqual([]);
+    expect(Object.fromEntries(facetCounts(rows, DEFAULT_LIST_STATE, "ratings"))).toEqual({ risk: 1, bad: 1, great: 1 });
+    expect(facetCounts(rows, st({ status: ALL_STATUSES_STATE }), "ratings").get("bad")).toBe(2);
+  });
+
+  it("filters by owner (with Unassigned), process and a search", () => {
+    const link = (process_id: string) => ({ process_id, step_id: null }) as IssueRow["links"][number];
+    const rows = [
+      issueOf(1, { title: "Pacing lives in three places", owner_ids: ["p1"], links: [link("x")] }),
+      issueOf(2, { title: "Only Karl can vet", owner_ids: [], owner_person_id: "p2", links: [link("y")] }),
+      issueOf(3, { title: "Wait for approval", owner_ids: [], owner_person_id: null, links: [], process_id: "x" }),
+      issueOf(4, { title: "Both teams", owner_ids: ["p1", "p2"], links: [link("x"), link("y")] }),
+    ];
+    const nums = (state: ListState) => listIssues(rows, state).map((i) => i.number);
+    expect(nums(st({ owners: ["p1"] }))).toEqual([1, 4]);
+    expect(nums(st({ owners: ["p2"] }))).toEqual([2, 4]);
+    expect(nums(st({ owners: [UNASSIGNED] }))).toEqual([3]);
+    expect(nums(st({ owners: ["p1", UNASSIGNED] }))).toEqual([1, 3, 4]);
+    expect(nums(st({ processes: ["y"] }))).toEqual([2, 4]);
+    expect(nums(st({ processes: ["x"] }))).toEqual([1, 3, 4]);
+    expect(nums(st({ q: "VET" }))).toEqual([2]);
+    expect(nums(st({ q: "#3" }))).toEqual([3]);
+    expect(nums(st({ owners: ["p1"], processes: ["y"] }))).toEqual([4]);
+    const owners = facetCounts(rows, DEFAULT_LIST_STATE, "owners");
+    expect([owners.get("p1"), owners.get("p2"), owners.get(UNASSIGNED)]).toEqual([2, 2, 1]);
   });
 
   it("sorts by rating, worst first, then by cost, costliest first", () => {
     const rows = [issueOf(1, { severity: "serious", detected_key: "a" }), issueOf(2, { severity: "serious", detected_key: "b" }), issueOf(3, { severity: "critical" }), issueOf(4, { severity: "serious" })];
     const cost = (perMonth: number) => ({ ...noCost(""), perMonth }) as ReturnType<typeof noCost>;
     const costs: Record<string, ReturnType<typeof noCost>> = { a: cost(100), b: cost(900) };
-    const order = listIssues(rows, { show: "all", rating: "" }, (i) => (i.detected_key ? (costs[i.detected_key] ?? null) : null));
+    const order = listIssues(rows, st({ status: ALL_STATUSES_STATE }), (i) => (i.detected_key ? (costs[i.detected_key] ?? null) : null));
     // Operational risk first; then the Bad ones, #2 (900) before #1 (100); #4 has no cost and sorts last.
     expect(order.map((i) => i.number)).toEqual([3, 2, 1, 4]);
   });
@@ -152,14 +200,14 @@ describe("resolving and reopening", () => {
     // Before: both are open and badge their step (they sit on the same one).
     const before = mapFeed(registerEntries(all(s), []));
     expect(before.badges[first!.step_id!]?.count).toBe(2);
-    expect(listIssues(all(s), { show: "open", rating: "" }).map((i) => i.id)).toContain(first!.id);
+    expect(listIssues(all(s), DEFAULT_LIST_STATE).map((i) => i.id)).toContain(first!.id);
 
     await ok(s.resolve(first!.id, "not_a_problem", "Gone"));
     const after = mapFeed(registerEntries(all(s), []));
     expect(after.badges[first!.step_id!]?.count).toBe(1);
     expect(after.badges[first!.step_id!]?.titles).toEqual([second!.title]);
-    expect(listIssues(all(s), { show: "open", rating: "" }).map((i) => i.id)).not.toContain(first!.id);
-    expect(listIssues(all(s), { show: "resolved", rating: "" }).map((i) => i.id)).toEqual([first!.id]);
+    expect(listIssues(all(s), DEFAULT_LIST_STATE).map((i) => i.id)).not.toContain(first!.id);
+    expect(listIssues(all(s), st({ status: RESOLVED })).map((i) => i.id)).toEqual([first!.id]);
     expect((await s.events(first!.id)).map((e) => e.kind)).toEqual(["created", "resolved"]);
   });
 
@@ -174,7 +222,7 @@ describe("resolving and reopening", () => {
     // Resolved by an older route that recorded no way (a resolved row with no how) is no different.
     const legacy = all(s).map((i) => (i.id === tracked.id ? { ...i, resolved_how: null } : i));
     expect(mapFeed(registerEntries(legacy, [detection])).badges[tracked.step_id!]?.count).toBe(1);
-    expect(listIssues(legacy, { show: "open", rating: "" }).map((i) => i.id)).not.toContain(tracked.id);
+    expect(listIssues(legacy, DEFAULT_LIST_STATE).map((i) => i.id)).not.toContain(tracked.id);
   });
 
   it("refuses to resolve an issue that is already resolved, and keeps what was recorded", async () => {

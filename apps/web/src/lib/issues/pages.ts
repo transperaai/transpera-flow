@@ -11,40 +11,79 @@ import { RATINGS_WORST_FIRST, STATUS_LABELS } from "./register";
 // The list: filters, counts, sort
 // ---------------------------------------------------------------------------
 
-/** Open: Open and Testing solutions. Resolved: Resolved and Won't fix (both are closed). */
-export type ShowFilter = "open" | "resolved" | "all";
-export const SHOW_FILTERS: readonly ShowFilter[] = ["open", "resolved", "all"];
-export const SHOW_LABELS: Record<ShowFilter, string> = { open: "Open", resolved: "Resolved", all: "All" };
+/** The statuses a person can filter by (a dismissed insight is never an issue they see). */
+export const LISTED_STATUSES = ["open", "testing", "resolved", "wont_fix"] as const satisfies readonly IssueStatus[];
+export type ListedStatus = (typeof LISTED_STATUSES)[number];
+
+/** The owner filter's value for issues nobody owns. */
+export const UNASSIGNED = "none";
 
 export interface ListState {
-  show: ShowFilter;
-  /** One rating, or "" for all. */
-  rating: Rating | "";
+  /** The statuses shown. */
+  status: ListedStatus[];
+  /** The ratings shown; empty is all. */
+  ratings: Rating[];
+  /** Owners (person ids, or UNASSIGNED); empty is all. */
+  owners: string[];
+  /** Processes (ids); empty is all. */
+  processes: string[];
+  /** Words in the title (or its number); "" is all. */
+  q: string;
 }
 
-export const DEFAULT_LIST_STATE: ListState = { show: "open", rating: "" };
+/** Open and Testing solutions: what the list shows until a person chooses otherwise. */
+export const DEFAULT_STATUSES: ListedStatus[] = ["open", "testing"];
+/** Every status. */
+export const ALL_STATUSES_STATE: ListedStatus[] = [...LISTED_STATUSES];
+export const DEFAULT_LIST_STATE: ListState = { status: DEFAULT_STATUSES, ratings: [], owners: [], processes: [], q: "" };
 
 type Params = Record<string, string | string[] | undefined>;
 const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+const csv = (v: string | string[] | undefined): string[] =>
+  (first(v) ?? "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
 
-/** The list's filters from the URL's query. Anything unrecognised is the default, so a stale link still opens. */
+/**
+ * The list's filters from the URL's query. Anything unrecognised is the default, so a stale link still opens. The old `show=` links
+ * still work: `resolved` is Resolved and Won't fix, `all` is every status.
+ */
 export function parseListState(params: Params): ListState {
+  const named = csv(params.status);
+  const known = named.filter((s): s is ListedStatus => (LISTED_STATUSES as readonly string[]).includes(s));
   const show = first(params.show);
-  const rating = first(params.rating);
+  let status: ListedStatus[] = DEFAULT_STATUSES;
+  if (known.length) status = LISTED_STATUSES.filter((s) => known.includes(s));
+  else if (named.includes("none")) status = [];
+  else if (show === "resolved") status = ["resolved", "wont_fix"];
+  else if (show === "all") status = ALL_STATUSES_STATE;
+  const ratings = csv(params.rating);
   return {
-    show: (SHOW_FILTERS as readonly string[]).includes(show ?? "") ? (show as ShowFilter) : DEFAULT_LIST_STATE.show,
-    rating: (RATINGS as readonly string[]).includes(rating ?? "") ? (rating as Rating) : "",
+    status,
+    ratings: RATINGS.filter((r) => ratings.includes(r)),
+    owners: csv(params.owner),
+    processes: csv(params.process),
+    q: (first(params.q) ?? "").trim().slice(0, 100),
   };
 }
+
+const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((x) => b.includes(x));
 
 /** The query string for filters ("" when they are the defaults, so the plain URL stays plain). */
 export function listQuery(state: ListState): string {
   const q = new URLSearchParams();
-  if (state.show !== DEFAULT_LIST_STATE.show) q.set("show", state.show);
-  if (state.rating) q.set("rating", state.rating);
-  const s = q.toString();
+  if (!sameSet(state.status, DEFAULT_STATUSES)) q.set("status", state.status.length ? state.status.join(",") : "none");
+  if (state.ratings.length) q.set("rating", state.ratings.join(","));
+  if (state.owners.length) q.set("owner", state.owners.join(","));
+  if (state.processes.length) q.set("process", state.processes.join(","));
+  if (state.q) q.set("q", state.q);
+  const s = q.toString().replace(/%2C/g, ",");
   return s ? `?${s}` : "";
 }
+
+/** Whether any filter differs from what the list starts with (then "Clear filters" shows). */
+export const filtersOn = (state: ListState): boolean => listQuery(state) !== "";
 
 /** The issues a person sees: everything but a dismissed insight. */
 export const visibleIssues = (issues: readonly IssueRow[]): IssueRow[] => issues.filter(isVisibleIssue);
@@ -52,26 +91,55 @@ export const visibleIssues = (issues: readonly IssueRow[]): IssueRow[] => issues
 /** Whether an issue is still to be dealt with (Open or Testing solutions). */
 export const isOpenIssue = (i: Pick<IssueRow, "status">): boolean => isActiveStatus(i.status);
 
-const inShow = (i: IssueRow, show: ShowFilter) => show === "all" || (show === "open" ? isOpenIssue(i) : !isOpenIssue(i));
+/** The people who own an issue (several, or the one the older column names). */
+export const ownersOf = (i: Pick<IssueRow, "owner_ids" | "owner_person_id">): string[] => (i.owner_ids.length ? i.owner_ids : i.owner_person_id ? [i.owner_person_id] : []);
 
-/** The counts on the Open / Resolved / All buttons. */
-export function showCounts(issues: readonly IssueRow[]): Record<ShowFilter, number> {
-  const v = visibleIssues(issues);
-  return { open: v.filter((i) => inShow(i, "open")).length, resolved: v.filter((i) => inShow(i, "resolved")).length, all: v.length };
+/** The processes an issue is about: the ones it links to, else the one it was logged on. */
+export function processesOf(i: Pick<IssueRow, "links" | "process_id">): string[] {
+  const ids = i.links.map((l) => l.process_id).filter((x): x is string => !!x);
+  if (!ids.length && i.process_id) ids.push(i.process_id);
+  return [...new Set(ids)];
 }
 
-/** The counts on the rating chips: among the issues the Open / Resolved / All choice leaves. */
-export function ratingCounts(issues: readonly IssueRow[], show: ShowFilter): { all: number; byRating: Record<Rating, number> } {
-  const base = visibleIssues(issues).filter((i) => inShow(i, show));
-  const byRating = Object.fromEntries(RATINGS.map((r) => [r, base.filter((i) => ratingOfStored(i.severity) === r).length])) as Record<Rating, number>;
-  return { all: base.length, byRating };
+export type Facet = "status" | "ratings" | "owners" | "processes";
+
+function matches(i: IssueRow, state: ListState, skip?: Facet): boolean {
+  if (skip !== "status" && !(state.status as readonly string[]).includes(i.status)) return false;
+  if (skip !== "ratings" && state.ratings.length && !state.ratings.includes(ratingOfStored(i.severity))) return false;
+  if (skip !== "owners" && state.owners.length) {
+    const o = ownersOf(i);
+    if (!(o.length ? o.some((x) => state.owners.includes(x)) : state.owners.includes(UNASSIGNED))) return false;
+  }
+  if (skip !== "processes" && state.processes.length && !processesOf(i).some((p) => state.processes.includes(p))) return false;
+  const q = state.q.toLowerCase();
+  if (q && !`#${i.number ?? ""} ${i.title}`.toLowerCase().includes(q)) return false;
+  return true;
+}
+
+/**
+ * How many issues each choice of a filter would show, given the other filters: the numbers on the dropdowns. An issue counts under
+ * each value it has for that filter (its owners; UNASSIGNED when it has none).
+ */
+export function facetCounts(issues: readonly IssueRow[], state: ListState, facet: Facet): Map<string, number> {
+  const valuesOf = (i: IssueRow): string[] => {
+    if (facet === "status") return [i.status];
+    if (facet === "ratings") return [ratingOfStored(i.severity)];
+    if (facet === "owners") return ownersOf(i).length ? ownersOf(i) : [UNASSIGNED];
+    return processesOf(i);
+  };
+  const out = new Map<string, number>();
+  for (const i of visibleIssues(issues)) {
+    if (!matches(i, state, facet)) continue;
+    for (const v of valuesOf(i)) out.set(v, (out.get(v) ?? 0) + 1);
+  }
+  return out;
 }
 
 /** The issues the list shows, most severe first, then costliest first (no cost last), then by number. */
 export function listIssues(issues: readonly IssueRow[], state: ListState, costOf: (i: IssueRow) => IssueCost | null = () => null): IssueRow[] {
   const none = noCost("");
   return visibleIssues(issues)
-    .filter((i) => inShow(i, state.show) && (!state.rating || ratingOfStored(i.severity) === state.rating))
+    .filter((i) => matches(i, state))
     .sort(
       (a, b) =>
         compareRatingsDesc(ratingOfStored(a.severity), ratingOfStored(b.severity)) ||

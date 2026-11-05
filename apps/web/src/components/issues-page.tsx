@@ -17,7 +17,10 @@ import { RatingPill } from "@/components/overview/rating-pill";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { emptyDraft, issueFormOptions, toSaveInput } from "@/lib/issues/draft";
-import { NO_SOLUTIONS, RATINGS_WORST_FIRST, SHOW_FILTERS, SHOW_LABELS, isOpenIssue, issueHref, listIssues, listQuery, parseListState, ratingCounts, shortDate, showCounts, type ListState } from "@/lib/issues/pages";
+import { DEFAULT_LIST_STATE, LISTED_STATUSES, NO_SOLUTIONS, RATINGS_WORST_FIRST, UNASSIGNED, facetCounts, filtersOn, isOpenIssue, issueHref, listIssues, listQuery, ownersOf, parseListState, processesOf, shortDate, visibleIssues, type ListState } from "@/lib/issues/pages";
+import { STATUS_LABELS } from "@/lib/issues/register";
+import { STATUS_TONE } from "@/components/issues/status-pill";
+import { ClearFilters, FilterMenu, ListToolbar, ToolbarSearch, type FilterOption } from "@/components/shell/list-toolbar";
 import { NO_SOLUTIONS_DATA, solutionSummaries, type SolutionsData } from "@/lib/solutions/cards";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { perceptionGapDetections } from "@/lib/issues/perception";
@@ -47,7 +50,6 @@ export function IssuesPage({
   base,
   liveRevisions,
   solutions,
-  changeCounts,
 }: {
   bundle: ProcessBundle;
   issues: IssueRow[];
@@ -61,8 +63,6 @@ export function IssuesPage({
   liveRevisions?: Record<string, string>;
   /** The workspace's solutions and which issues they solve, for the "Solutions" column (the demo keeps its own in this tab). */
   solutions?: SolutionsData;
-  /** How many Sandbox changes name each issue, by issue id, for the "Changes" column (absent in the demo). */
-  changeCounts?: Record<string, number>;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -75,6 +75,19 @@ export function IssuesPage({
   const setFilter = (next: ListState) => {
     // The filters are in the URL, so a link or a reload shows the same list.
     router.push(`${pathname}${listQuery(next)}`, { scroll: false });
+  };
+  // The search box is typed into at once; the URL follows (replacing, so each keystroke is not a history step).
+  const [search, setSearch] = useState(filters.q);
+  const [seen, setSeen] = useState(filters.q);
+  if (seen !== filters.q) {
+    // Back, Forward or Clear filters changed the URL's search.
+    setSeen(filters.q);
+    setSearch(filters.q);
+  }
+  const onSearch = (v: string) => {
+    setSearch(v);
+    setSeen(v.trim());
+    router.replace(`${pathname}${listQuery({ ...filters, q: v.trim() })}`, { scroll: false });
   };
 
   const costs = useIssueCosts(bundle, scenarios);
@@ -97,46 +110,44 @@ export function IssuesPage({
   const solutionData = mode === "demo" ? inTab : (solutions ?? NO_SOLUTIONS_DATA);
   const summaries = useMemo(() => solutionSummaries(solutionData), [solutionData]);
 
-  const counts = showCounts(state.issues);
-  const ratings = ratingCounts(state.issues, filters.show);
+  const facets = {
+    status: facetCounts(state.issues, filters, "status"),
+    ratings: facetCounts(state.issues, filters, "ratings"),
+    owners: facetCounts(state.issues, filters, "owners"),
+    processes: facetCounts(state.issues, filters, "processes"),
+  };
   const list = listIssues(state.issues, filters, costOf);
   const canEdit = !isReadOnly(mode);
+  const statusOptions: FilterOption[] = LISTED_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s], count: facets.status.get(s) ?? 0, dot: `var(--${STATUS_TONE[s]})` }));
+  const ratingOptions: FilterOption[] = RATINGS_WORST_FIRST.map((r) => ({ value: r, label: RATING_LABELS[r], count: facets.ratings.get(r) ?? 0, dot: `var(--rate-${r})` }));
+  const ownerIds = [...new Set(visibleIssues(state.issues).flatMap(ownersOf))];
+  const ownerOptions: FilterOption[] = [
+    ...ownerIds.map((id) => ({ value: id, label: peopleNames.get(id) ?? "Someone", count: facets.owners.get(id) ?? 0 })).sort((a, b) => a.label.localeCompare(b.label)),
+    { value: UNASSIGNED, label: "Unassigned", count: facets.owners.get(UNASSIGNED) ?? 0 },
+  ];
+  const processIds = [...new Set(visibleIssues(state.issues).flatMap(processesOf))].filter((id) => processNames.has(id));
+  const processOptions: FilterOption[] = processIds
+    .map((id) => ({ value: id, label: processNames.get(id) ?? "A process", count: facets.processes.get(id) ?? 0 }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <div role="group" aria-label="Show" className="inline-flex rounded-lg border border-border bg-panel p-0.5">
-            {SHOW_FILTERS.map((k) => (
-              <button
-                key={k}
-                type="button"
-                data-show={k}
-                data-allow-on-phone /* a filter (Resolved), not an edit */
-                aria-pressed={filters.show === k}
-                onClick={() => setFilter({ ...filters, show: k })}
-                className={cn("rounded-md px-3 py-1 text-sm", filters.show === k ? "bg-accent font-medium text-accent-fg" : "text-fg-2 hover:bg-muted")}
-              >
-                {SHOW_LABELS[k]} <span className="tabular-nums">{counts[k]}</span>
-              </button>
-            ))}
-          </div>
-          <span className="contents" data-allow-on-phone>
-            <Help {...LIST_HELP.show} className="ml-0" />
+      <ListToolbar>
+        <ToolbarSearch value={search} onChange={onSearch} label="Search issues" placeholder="Search issues" />
+        <FilterMenu name="Status" options={statusOptions} selected={filters.status} onChange={(status) => setFilter({ ...filters, status: LISTED_STATUSES.filter((s) => status.includes(s)) })} help={<Help {...LIST_HELP.show} />} />
+        <FilterMenu name="Owner" options={ownerOptions} selected={filters.owners} onChange={(owners) => setFilter({ ...filters, owners })} help={<Help {...LIST_HELP.owner} />} />
+        <FilterMenu name="Rating" options={ratingOptions} selected={filters.ratings} onChange={(ratings) => setFilter({ ...filters, ratings: RATINGS_WORST_FIRST.filter((r) => ratings.includes(r)) })} help={<Help {...LIST_HELP.rating} />} />
+        {processOptions.length > 1 && <FilterMenu name="Process" options={processOptions} selected={filters.processes} onChange={(processes) => setFilter({ ...filters, processes })} help={<Help {...LIST_HELP.process} />} />}
+        {filtersOn(filters) && <ClearFilters onClick={() => setFilter(DEFAULT_LIST_STATE)} />}
+        {canEdit && (
+          <span className={`ml-auto flex items-center ${EDIT_ONLY}`} data-edit-entry>
+            <Button type="button" onClick={() => setNewOpen(true)}>
+              + New issue
+            </Button>
+            <Help {...LIST_HELP.newIssue} />
           </span>
-          <RatingChips ratings={ratings} value={filters.rating} onChange={(rating) => setFilter({ ...filters, rating })} />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {canEdit && (
-            <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
-              <Button type="button" onClick={() => setNewOpen(true)}>
-                + New issue
-              </Button>
-              <Help {...LIST_HELP.newIssue} />
-            </span>
-          )}
-        </div>
-      </div>
+        )}
+      </ListToolbar>
 
       {state.error && (
         <p role="alert" className="text-sm text-destructive">
@@ -169,7 +180,6 @@ export function IssuesPage({
                     <Help {...LIST_HELP.solutions} />
                   </span>
                 </th>
-                {changeCounts && <th className="px-3 py-2.5">Changes</th>}
               </tr>
             </thead>
             <tbody>
@@ -211,17 +221,6 @@ export function IssuesPage({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    {changeCounts && (
-                      <td className="px-3 py-2.5 text-xs whitespace-nowrap" data-changes>
-                        {changeCounts[i.id] ? (
-                          <Link href={href} className="font-medium text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
-                            {changeCounts[i.id]} change{changeCounts[i.id] === 1 ? "" : "s"} →
-                          </Link>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-                    )}
                   </tr>
                 );
               })}
@@ -249,32 +248,6 @@ export function RatingPillOf({ issue }: { issue: Pick<IssueRow, "severity"> }) {
 }
 
 const ratingOf = (i: Pick<IssueRow, "severity">): Rating => ratingOfStored(i.severity);
-
-function RatingChips({ ratings, value, onChange }: { ratings: ReturnType<typeof ratingCounts>; value: Rating | ""; onChange: (r: Rating | "") => void }) {
-  const chip = "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs disabled:opacity-40";
-  return (
-    <div role="group" aria-label="Filter by rating" className="flex flex-wrap items-center gap-1.5">
-      <button type="button" data-rating="" aria-pressed={!value} onClick={() => onChange("")} className={cn(chip, !value ? "border-accent bg-accent/10 font-medium" : "border-border")}>
-        All <b className="tabular-nums">{ratings.all}</b>
-      </button>
-      {RATINGS_WORST_FIRST.map((r) => (
-        <button
-          key={r}
-          type="button"
-          data-rating={r}
-          aria-pressed={value === r}
-          disabled={!ratings.byRating[r] && value !== r}
-          onClick={() => onChange(value === r ? "" : r)}
-          className={cn(chip, value === r ? "border-accent bg-accent/10 font-medium" : "border-border")}
-        >
-          <i aria-hidden className="size-2 rounded-full" style={{ background: `var(--rate-${r})` }} />
-          {RATING_LABELS[r]} <b className="tabular-nums">{ratings.byRating[r]}</b>
-        </button>
-      ))}
-      <Help {...LIST_HELP.rating} />
-    </div>
-  );
-}
 
 /**
  * What the latest run of the live process says each issue costs a month, by detection key: the list sorts by rating and

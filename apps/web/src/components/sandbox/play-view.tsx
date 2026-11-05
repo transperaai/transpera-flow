@@ -10,7 +10,7 @@ import { defaultPlay, monthKey, monthShort, playIsDefault, type CapacityChangeIn
 import type { PreparedPlay } from "@transpera-flow/db/sandbox";
 import { usePlayRuns, type PlayRuns } from "@/lib/sandbox/use-play-runs";
 import type { DeleteChangeResult, SaveChangeResult } from "@/app/w/[slug]/capacity-change-actions";
-import { PlayChangeDialog, type IssueOption } from "./play-change-dialog";
+import { PlayChangeDialog } from "./play-change-dialog";
 import { PlayLevers } from "./play-levers";
 import { PlayProcesses } from "./play-processes";
 import { PlayResults } from "./play-results";
@@ -43,7 +43,6 @@ export interface PlayViewProps {
   map?: (runs: PlayRuns) => ReactNode;
   /** Agency admins and the Owner: add, edit and remove changes. */
   canEdit: boolean;
-  issues: IssueOption[];
   saveChange?: (id: string | null, input: CapacityChangeInput) => Promise<SaveChangeResult>;
   removeChange?: (id: string) => Promise<DeleteChangeResult>;
   /** The Export menu for the run on screen. */
@@ -55,7 +54,7 @@ export interface PlayViewProps {
 }
 
 export function PlayView(props: PlayViewProps) {
-  const { setup, processes, startDate, today, prepare, canEdit, issues, modelError } = props;
+  const { setup, processes, startDate, today, prepare, canEdit, modelError } = props;
   const [play, setPlay] = useState<PlayState>(defaultPlay);
   const [library, setLibrary] = useState(props.library);
   const [dialog, setDialog] = useState<{ existing: CapacityChangeRow | null } | null>(null);
@@ -111,7 +110,6 @@ export function PlayView(props: PlayViewProps) {
           existing={dialog.existing}
           processes={processes}
           tiers={tiers}
-          issues={issues}
           onClose={() => setDialog(null)}
           onSave={async (input) => {
             const r = await props.saveChange!(dialog.existing?.id ?? null, input);
