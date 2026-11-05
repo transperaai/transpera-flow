@@ -8,16 +8,16 @@ import { Pencil } from "lucide-react";
 import { useState, useTransition, type ReactNode } from "react";
 import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS, isProcessCategory, type ProcessCategory } from "@transpera-flow/db";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { HEADER_PILL, MetaLine, PageHeader } from "@/components/page-kit";
 import { TagPill } from "@/components/tag-pill";
 import type { ProcessAdminResult } from "@/lib/processes/admin";
 import type { DepartmentFieldData } from "@/lib/process-page/department";
 import { aboutSummary, type About } from "@/lib/process-page/about";
 import { EDIT_ONLY } from "@/lib/phone";
 
-const PILL = "px-2.5 py-0.5 text-xs leading-4";
+const PILL = HEADER_PILL;
 
 export function ProcessHeader({
   name,
@@ -60,51 +60,51 @@ export function ProcessHeader({
     });
   };
   const canEdit = Boolean(editCategory) || Boolean(departmentEditor);
-  return (
-    <Card data-testid="about-process" role="region" aria-label="Process">
-      <CardContent className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <h1 className="font-display text-2xl leading-tight font-bold break-words">{name}</h1>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <TagPill tag={PROCESS_CATEGORY_LABELS[category]} className={PILL} />
-            {department && <TagPill tag={department.current} className={PILL} />}
-            {canEdit && (
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button type="button" variant="ghost" size="icon-xs" aria-label="Edit type and department" className={EDIT_ONLY} data-edit-entry data-process-edit>
-                    <Pencil aria-hidden />
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="start" className="w-72 gap-3">
-                  {editCategory && (
-                    <label className="flex flex-col gap-1 text-xs text-fg-3">
-                      Type
-                      <NativeSelect aria-label="Type" data-process-category value={category} disabled={pending} onChange={(e) => change(e.target.value)} title={PROCESS_CATEGORY_HELP[category]} className="h-8 w-full text-sm text-fg">
-                        {PROCESS_CATEGORIES.map((c) => (
-                          <option key={c} value={c}>
-                            {PROCESS_CATEGORY_LABELS[c]}
-                          </option>
-                        ))}
-                      </NativeSelect>
-                    </label>
-                  )}
-                  {error && (
-                    <p role="alert" className="text-xs text-destructive">
-                      {error}
-                    </p>
-                  )}
-                  {departmentEditor}
-                </PopoverContent>
-              </Popover>
+  const pills = (
+    <>
+      <TagPill tag={PROCESS_CATEGORY_LABELS[category]} className={PILL} />
+      {department && <TagPill tag={department.current} className={PILL} />}
+      {canEdit && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button type="button" variant="ghost" size="icon-xs" aria-label="Edit type and department" className={EDIT_ONLY} data-edit-entry data-process-edit>
+              <Pencil aria-hidden />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="w-72 gap-3">
+            {editCategory && (
+              <label className="flex flex-col gap-1 text-xs text-fg-3">
+                Type
+                <NativeSelect aria-label="Type" data-process-category value={category} disabled={pending} onChange={(e) => change(e.target.value)} title={PROCESS_CATEGORY_HELP[category]} className="h-8 w-full text-sm text-fg">
+                  {PROCESS_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {PROCESS_CATEGORY_LABELS[c]}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </label>
             )}
-          </div>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-fg-2">{status ?? <p>{aboutSummary({ ...about, category })}</p>}</div>
-          {inside}
-        </div>
-        <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Process actions">
-          {actions}
-        </div>
-      </CardContent>
-    </Card>
+            {error && (
+              <p role="alert" className="text-xs text-destructive">
+                {error}
+              </p>
+            )}
+            {departmentEditor}
+          </PopoverContent>
+        </Popover>
+      )}
+    </>
+  );
+  return (
+    <PageHeader
+      testId="about-process"
+      label="Process"
+      title={name}
+      pills={pills}
+      meta={<MetaLine>{status ?? <p>{aboutSummary({ ...about, category })}</p>}</MetaLine>}
+      below={inside}
+      actions={actions}
+      actionsLabel="Process actions"
+    />
   );
 }

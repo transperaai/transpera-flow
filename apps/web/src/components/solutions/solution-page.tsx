@@ -10,7 +10,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bundleForProcess, type IssueRow, type ProcessBundle, type SolutionIssueRow, type SolutionRow, type SolutionVerdict } from "@transpera-flow/db";
-import { StatusPill } from "@/components/issues/status-pill";
+import { IssueStatusPill } from "@/components/issues/status-pill";
 import { Help, HelpLabel } from "@/components/help";
 import { VerdictWord } from "@/components/solutions/solution-cards";
 import { SolutionCompare } from "@/components/solutions/solution-compare";
@@ -312,7 +312,7 @@ function SolvesCard({
         )}
         {issue && (
           <span className="flex items-center">
-            <StatusPill status={issue.status} />
+            <IssueStatusPill status={issue.status} />
             <Help {...SOLUTION_PAGE_HELP.status} />
           </span>
         )}

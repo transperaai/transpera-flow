@@ -11,9 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
-export function ListToolbar({ children, className }: { children: ReactNode; className?: string }) {
+export function Toolbar({ children, className, label = "Filter the list" }: { children: ReactNode; className?: string; label?: string }) {
   return (
-    <div role="toolbar" aria-label="Filter the list" data-list-toolbar data-allow-on-phone className={cn("flex flex-wrap items-center gap-x-2 gap-y-2", className)}>
+    <div role="toolbar" aria-label={label} data-list-toolbar data-allow-on-phone className={cn("flex flex-wrap items-center gap-x-2 gap-y-2", className)}>
       {children}
     </div>
   );

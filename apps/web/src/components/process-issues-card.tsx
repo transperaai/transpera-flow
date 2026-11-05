@@ -10,9 +10,9 @@ import type { ReactNode } from "react";
 import { RATING_LABELS } from "@transpera-flow/engine";
 import type { IssueRow } from "@transpera-flow/db";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState, SectionCard } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusPill } from "@/components/issues/status-pill";
+import { IssueStatusPill } from "@/components/issues/status-pill";
 import { IssueTrackView } from "@/components/issue-track";
 import { VerdictWord } from "@/components/solutions/solution-cards";
 import { issueHref } from "@/lib/issues/pages";
@@ -48,58 +48,61 @@ export function IssuesCard(p: IssuesCardProps) {
   const tracked = p.entries.flatMap((e) => (e.kind === "tracked" ? [e.issue] : []));
   const counts = issueCounts(tracked.map((i) => i.status));
   return (
-    <Card id="issues" className="scroll-mt-16" aria-labelledby="issues-heading">
-      <CardHeader>
-        <CardTitle id="issues-heading" className="font-display text-base font-bold">
-          Issues and solutions
-        </CardTitle>
-        <CardDescription data-issue-counts>{p.loading && tracked.length === 0 ? "Checking the latest run…" : issueCountsText(counts)}</CardDescription>
-        {p.canEdit && tracked.length > 0 && (
-          <CardAction className={EDIT_ONLY} data-edit-entry>
-            <Button type="button" size="sm" onClick={p.openNew}>
-              Log an issue
-            </Button>
-          </CardAction>
-        )}
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        {p.error}
-        {tracked.length === 0 ? (
-          p.loading ? (
-            <div className="flex flex-col gap-2" aria-busy="true">
-              <Skeleton className="h-14 w-full" />
-              <Skeleton className="h-14 w-full" />
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-3 rounded-lg bg-muted/40 px-4 py-8 text-center" data-issues-empty>
-              <CircleAlert aria-hidden className="size-8 text-fg-3" />
-              <p className="max-w-md text-sm text-fg-2">Log the problems you find on this map, then link solutions to them.</p>
-              {p.canEdit && (
+    <SectionCard
+      id="issues"
+      title="Issues and solutions"
+      description={p.loading && tracked.length === 0 ? "Checking the latest run…" : issueCountsText(counts)}
+      descriptionProps={{ "data-issue-counts": "" }}
+      action={
+        p.canEdit && tracked.length > 0 ? (
+          <Button type="button" size="sm" onClick={p.openNew}>
+            Log an issue
+          </Button>
+        ) : undefined
+      }
+      actionClassName={EDIT_ONLY}
+      actionIsEdit
+    >
+      {p.error}
+      {tracked.length === 0 ? (
+        p.loading ? (
+          <div className="flex flex-col gap-2" aria-busy="true">
+            <Skeleton className="h-14 w-full" />
+            <Skeleton className="h-14 w-full" />
+          </div>
+        ) : (
+          <EmptyState
+            icon={CircleAlert}
+            data-issues-empty=""
+            action={
+              p.canEdit ? (
                 <span className={EDIT_ONLY} data-edit-entry>
                   <Button type="button" size="sm" onClick={p.openNew}>
                     Log an issue
                   </Button>
                 </span>
-              )}
-            </div>
-          )
-        ) : (
-          <ul className="flex flex-col gap-2" aria-label="Issues">
-            {p.entries.map((e) => (e.kind === "tracked" ? <IssueRowView key={e.issue.id} entry={e} issue={e.issue} {...p} /> : null))}
-          </ul>
-        )}
-        {p.registerHref && (
-          <Link href={p.registerHref} className="text-xs text-fg-2 hover:underline">
-            Open the full register →
-          </Link>
-        )}
-        <div id="solutions" className="flex scroll-mt-16 flex-col gap-2">
-          <h3 className="text-sm font-bold">Other improvements</h3>
-          <p className="-mt-1.5 text-xs text-fg-3">Solutions that are not for a particular issue.</p>
-          {p.other}
-        </div>
-      </CardContent>
-    </Card>
+              ) : undefined
+            }
+          >
+            Log the problems you find on this map, then link solutions to them.
+          </EmptyState>
+        )
+      ) : (
+        <ul className="flex flex-col gap-2" aria-label="Issues">
+          {p.entries.map((e) => (e.kind === "tracked" ? <IssueRowView key={e.issue.id} entry={e} issue={e.issue} {...p} /> : null))}
+        </ul>
+      )}
+      {p.registerHref && (
+        <Link href={p.registerHref} className="text-xs text-fg-2 hover:underline">
+          Open the full register →
+        </Link>
+      )}
+      <div id="solutions" className="flex scroll-mt-16 flex-col gap-2">
+        <h3 className="text-sm font-bold">Other improvements</h3>
+        <p className="-mt-1.5 text-xs text-fg-3">Solutions that are not for a particular issue.</p>
+        {p.other}
+      </div>
+    </SectionCard>
   );
 }
 
@@ -125,7 +128,7 @@ function IssueRowView({ entry, issue, names, base, solutions, onShowStep, buildH
           {issue.number != null && <span className="mr-1.5 font-mono font-normal text-fg-3">#{issue.number}</span>}
           {v.title}
         </Link>
-        <StatusPill status={issue.status} />
+        <IssueStatusPill status={issue.status} />
         {track.stage !== null && (
           <span className="text-xs text-fg-3" data-issue-stage>
             {TRACK_STAGES[track.stage]}
