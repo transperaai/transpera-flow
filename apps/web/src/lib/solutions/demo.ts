@@ -114,6 +114,12 @@ export function removeDemoSolution(solutionId: string): void {
   emit();
 }
 
+/** A solution's status, in this tab (Q10). */
+export function setDemoStatus(solutionId: string, status: SolutionRow["status"]): void {
+  state = { ...state, solutions: state.solutions.map((s) => (s.id === solutionId ? { ...s, status, updated_at: new Date().toISOString() } : s)) };
+  emit();
+}
+
 /** The demo's solutions as they are now (outside a component; the tests read this). */
 export const demoSolutionsNow = (): DemoState => state;
 

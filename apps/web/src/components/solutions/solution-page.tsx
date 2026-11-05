@@ -11,6 +11,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bundleForProcess, type IssueRow, type ProcessBundle, type SolutionIssueRow, type SolutionRow, type SolutionVerdict } from "@transpera-flow/db";
 import { IssueStatusPill } from "@/components/issues/status-pill";
+import { HEADER_PILL, MetaLine, PageHeader } from "@/components/page-kit";
+import { SolutionStatusMenu } from "@/components/solutions/status-menu";
+import { TagPill } from "@/components/tag-pill";
 import { Help, HelpLabel } from "@/components/help";
 import { VerdictWord } from "@/components/solutions/solution-cards";
 import { SolutionCompare } from "@/components/solutions/solution-compare";
@@ -119,8 +122,10 @@ export function SolutionPage(props: SolutionPageProps) {
 
   return (
     <div className="flex flex-col gap-6" data-solution-page={solution.id}>
-      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-        <div className="flex min-w-0 max-w-prose flex-col gap-1.5">
+      <PageHeader
+        label="Solution"
+        testId="solution-header"
+        eyebrow={
           <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
             <Link href={solutionsListHref(base)} className="hover:underline">
               Solutions
@@ -128,42 +133,58 @@ export function SolutionPage(props: SolutionPageProps) {
             <span aria-hidden>/</span>
             <span className="min-w-0 break-words">{solution.name}</span>
           </nav>
-          <h1 className="font-heading text-2xl leading-tight font-semibold tracking-tight break-words">{solution.name}</h1>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="flex items-center text-sm text-muted-foreground" data-built>
-              Built by {builtBy(solution.created_by, viewerId, mode === "demo", props.memberNames)} · {builtDate(solution)} · changes {processName}
+        }
+        title={solution.name}
+        pills={
+          <>
+            <SolutionStatusMenu
+              solution={solution}
+              mode={mode}
+              onError={setError}
+              onSaved={(status) => setLocal((d) => ({ ...d, solutions: d.solutions.map((s): SolutionRow => (s.id === solution.id ? { ...s, status } : s)) }))}
+            />
+            <TagPill tag={processName} className={HEADER_PILL} />
+          </>
+        }
+        meta={
+          <MetaLine>
+            <span className="flex items-center" data-built>
+              Built by {builtBy(solution.created_by, viewerId, mode === "demo", props.memberNames)} · {builtDate(solution)}
               <Help {...SOLUTION_PAGE_HELP.built} />
             </span>
-          </div>
-          <span className="text-xs text-muted-foreground">Changes: {changesLine(solution, 6)}</span>
-        </div>
-        {canEdit && (
-          <span className={`flex flex-wrap items-center gap-2 ${EDIT_ONLY}`} data-edit-entry>
-            <DeleteSolution
-              name={solution.name}
-              linked={links.length}
-              remove={async () => {
-                if (mode === "demo") {
-                  removeDemoSolution(solution.id);
-                  return { status: "ok" };
-                }
-                return deleteSolution(workspaceId, solution.id);
-              }}
-              onDeleted={() => router.push(solutionsListHref(base))}
-            />
-            <span className="flex items-center">
-              <Link
-                href={solutionEditorHref(base, solution.process_id, { from: `${base}/solutions/${solution.id}` })}
-                className="inline-flex h-9 items-center rounded-md bg-edit px-3 text-sm font-medium text-edit-fg hover:opacity-90"
-                data-new-on-process
-              >
-                ✎ New solution on {processName}
-              </Link>
-              <Help {...newOnProcessHelp(processName)} />
+            <span>Changes: {changesLine(solution, 6)}</span>
+          </MetaLine>
+        }
+        actionsLabel="Solution actions"
+        actions={
+          canEdit ? (
+            <span className={`flex flex-wrap items-center gap-2 ${EDIT_ONLY}`} data-edit-entry>
+              <DeleteSolution
+                name={solution.name}
+                linked={links.length}
+                remove={async () => {
+                  if (mode === "demo") {
+                    removeDemoSolution(solution.id);
+                    return { status: "ok" };
+                  }
+                  return deleteSolution(workspaceId, solution.id);
+                }}
+                onDeleted={() => router.push(solutionsListHref(base))}
+              />
+              <span className="flex items-center">
+                <Link
+                  href={solutionEditorHref(base, solution.process_id, { from: `${base}/solutions/${solution.id}` })}
+                  className="inline-flex h-9 items-center rounded-md bg-edit px-3 text-sm font-medium text-edit-fg hover:opacity-90"
+                  data-new-on-process
+                >
+                  ✎ New solution on {processName}
+                </Link>
+                <Help {...newOnProcessHelp(processName)} />
+              </span>
             </span>
-          </span>
-        )}
-      </header>
+          ) : undefined
+        }
+      />
 
       {error && (
         <p role="alert" className="text-sm text-destructive">
