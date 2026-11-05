@@ -1,0 +1,68 @@
+import { chromium, type Browser, type Page } from "playwright-core";
+import { mkdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { bundleHarness } from "./build-harness";
+
+// The Processes page's layout in a real browser with the app's stylesheet (Q7): the header's two button groups, the toolbar row above
+// the table, centred columns, a row menu that never wraps, and "Change type" choosing the category. With Q7_SHOTS=<dir> it also saves
+// the screenshots (1440 and 400 px, and the Change type dialog).
+
+let browser: Browser;
+let script: string;
+let css = "";
+
+/** The app's real stylesheet (Tailwind compiled from globals.css). Test only: postcss is Tailwind's own dependency. */
+async function appCss(): Promise<string> {
+  const require = createRequire(import.meta.url);
+  const here = dirname(require.resolve("@tailwindcss/postcss"));
+  type Process = { process(css: string, o: { from: string }): Promise<{ css: string }> };
+  const postcss = require(require.resolve("postcss", { paths: [here] })) as (plugins: unknown[]) => Process;
+  const tailwind = require("@tailwindcss/postcss") as (o: { base: string }) => unknown;
+  const file = fileURLToPath(new URL("../src/app/globals.css", import.meta.url));
+  return (await postcss([tailwind({ base: fileURLToPath(new URL("..", import.meta.url)) })]).process(readFileSync(file, "utf8"), { from: file })).css;
+}
+
+beforeAll(async () => {
+  [script, css] = await Promise.all([bundleHarness(new URL("./processes-layout-harness/entry.tsx", import.meta.url)), appCss()]);
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
+}, 180_000);
+
+afterAll(async () => {
+  await browser?.close();
+});
+
+async function mount(opts: { canEdit: boolean; published: boolean }, width = 1440): Promise<{ page: Page; errors: string[] }> {
+  const page = await browser.newPage({ viewport: { width, height: 900 } });
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  await page.setContent(`<style>${css}</style><div id="root"></div>`);
+  await page.addScriptTag({ content: script });
+  await page.evaluate((o) => window.mountProcessesLayout(o), opts);
+  await page.waitForSelector("[data-process]");
+  await page.evaluate(() => document.fonts.ready);
+  return { page, errors };
+}
+
+const shots = process.env.Q7_SHOTS;
+describe("screenshots", () => {
+  it.skipIf(!shots)("saves the Processes page at 1440 and 400 px, and the Change type dialog", async () => {
+    mkdirSync(shots!, { recursive: true });
+    const prefix = process.env.Q7_SHOTS_PREFIX ?? "after";
+    for (const width of [1440, 400]) {
+      const { page } = await mount({ canEdit: true, published: true }, width);
+      await page.screenshot({ path: `${shots}/${prefix}-processes-${width}.png`, fullPage: true });
+      await page.close();
+    }
+    const { page } = await mount({ canEdit: true, published: true });
+    await page.getByRole("button", { name: "Change Monthly reporting" }).click();
+    await page.screenshot({ path: `${shots}/${prefix}-row-menu-1440.png` });
+    await page.getByRole("menuitem", { name: /Change type/ }).click();
+    await page.waitForSelector("[role=dialog]");
+    await page.screenshot({ path: `${shots}/${prefix}-change-type-1440.png` });
+    await page.close();
+  }, 120_000);
+});
