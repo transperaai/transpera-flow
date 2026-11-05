@@ -96,7 +96,9 @@ import { groupsToOpen, litIds, withHighlightOpen } from "@/lib/map/highlight";
 import { ratingOfRank } from "@/lib/map/rating";
 import { ISSUE_PILL_CLASS, tileColours, tileHeadline } from "@/lib/map/tile";
 import { MAX_ZOOM, MIN_ZOOM, autoPanelHeight, fitViewport, stepZoom, type Padding } from "@/lib/map/zoom";
-import { MapLegend, ZoomControls } from "./map/map-controls";
+import { MapKey, MapLegend, ZoomControls } from "./map/map-controls";
+import { TagPill } from "./tag-pill";
+import { Help } from "./help";
 import { FirstRunStatus } from "./map/map-placeholder";
 import { EmptyState } from "./shell/empty-state";
 import { NO_EXTRAS, StepDetail, sourcesOf, type StepExtras } from "./map/step-detail";
@@ -497,7 +499,7 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
             <p className="text-[11px] text-fg-3">
               Group · {roll.steps} {roll.steps === 1 ? "step" : "steps"}
             </p>
-            {data.tag && <TagPill tag={data.tag} />}
+            {data.tag && <TagPill tag={data.tag} className="mt-1" />}
           </div>
           {toggle}
         </div>
@@ -525,7 +527,7 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
       <p data-field="name" title={step.name} className="mt-0.5 line-clamp-2 text-sm leading-tight font-semibold text-fg">
         {step.name}
       </p>
-      {data.tag && <TagPill tag={data.tag} />}
+      {data.tag && <TagPill tag={data.tag} className="mt-1" />}
       <p className={headlineRowClass}>
         <span className="font-mono text-base leading-none font-medium text-fg tabular-nums">{roll.steps}</span>
         <span className="min-w-0 truncate text-[11.5px] leading-4 text-fg-2" title="Hands-on time of every step inside, added up">
@@ -539,15 +541,6 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
       {warning && <Warning text={warning} />}
       <Handle type="source" position={Position.Right} className={handleClass(editable)} />
     </div>
-  );
-}
-
-/** A process's category, as a small pill on its card. */
-function TagPill({ tag }: { tag: string }) {
-  return (
-    <span data-process-tag className="mt-1 inline-block max-w-full truncate rounded-full border border-line bg-panel px-2 text-[10.5px] leading-4 font-medium text-fg-2">
-      {tag}
-    </span>
   );
 }
 
@@ -971,6 +964,12 @@ interface CanvasProps {
   refitOn?: string;
   /** What to do about a read-only map with no steps (the process page offers the Editor); shown under the sentence. */
   emptyAction?: ReactNode;
+  /**
+   * The map as the body of a card that is not its own (Q8, the process page): no border or rounding of its own, the bar above it
+   * becomes the card's header (the title, the lane and zoom controls, a "Key" button that opens the colour legend, then `action`),
+   * and the playback bar docks along the card's bottom edge instead of floating over the map.
+   */
+  card?: { title: string; action?: ReactNode; /** The (i) beside the title. */ help?: { label: string; description: string; example: string }; /** Under the header, above the map: the process page's "Missing for simulation" alert. */ below?: ReactNode };
 }
 
 export function ProcessCanvas(props: CanvasProps) {
@@ -1029,6 +1028,7 @@ function Canvas({
   computing = false,
   refitOn,
   emptyAction,
+  card,
 }: CanvasProps) {
   const editable = editor !== null;
   // A read-only map with nothing between start and end has nothing to draw. (The Editor keeps its empty canvas: a new block starts there.)
@@ -1635,7 +1635,7 @@ function Canvas({
         bounds = { x: left, y: top, width: right - left, height: bottom - top };
       }
       // A bar in its own strip above takes no room off the map.
-      const pad = fitPadding(lanes && !bands.length, editable, showPlayback && !playbackAbove);
+      const pad = fitPadding(lanes && !bands.length, editable, showPlayback && !playbackAbove && !card);
       let panelHeight = panel.height;
       if (heightMode === "auto") {
         panelHeight = autoPanelHeight(bounds, panel.width, pad, minZoom);
@@ -1645,7 +1645,7 @@ function Canvas({
       void flow.setViewport(fitViewport(bounds, { width: panel.width, height: panelHeight }, pad, minZoom), animate ? { duration: 200 } : undefined);
       setTimeout(measureOverflow, animate ? 260 : 20);
     },
-    [flow, lanes, editable, showPlayback, playbackAbove, heightMode, measureOverflow, focus],
+    [flow, lanes, editable, showPlayback, playbackAbove, card, heightMode, measureOverflow, focus],
   );
   const fitRef = useRef(fit);
   useEffect(() => {
@@ -1738,13 +1738,21 @@ function Canvas({
           tabIndex={-1}
           onDoubleClick={onDoubleClick}
           onKeyDownCapture={onKeyDownCapture}
-          className={`relative isolate flex min-w-0 flex-col rounded-lg border bg-card ${heightMode === "fill" ? "min-h-[24rem] flex-1" : "h-fit"}`}
+          className={`relative isolate flex min-w-0 flex-col ${card ? "" : "rounded-lg border bg-card"} ${heightMode === "fill" ? "min-h-[24rem] flex-1" : "h-fit"}`}
           role="region"
           aria-label={`${bundle.process.name} process map`}
         >
           {/* Above the map in the page, so Tab reaches these first: open or close every group, zoom, and what the colours mean. */}
-          {(zoomControls || legend || allGroups.length > 0 || (showLanes && !hasGroups) || (departmentLanes && !departmentLanes.always)) && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2">
+          {(card || zoomControls || legend || allGroups.length > 0 || (showLanes && !hasGroups) || (departmentLanes && !departmentLanes.always)) && (
+            <div className={card ? "flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" : "flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2"}>
+              {card && (
+                <div className="mr-auto flex items-center">
+                  <h2 id="map-heading" className="font-display text-base leading-snug font-bold">
+                    {card.title}
+                  </h2>
+                  {card.help && <Help {...card.help} />}
+                </div>
+              )}
               {((showLanes && !hasGroups) || allGroups.length > 0 || (departmentLanes && !departmentLanes.always)) && (
                 <div className="flex items-center gap-1.5">
                   {departmentLanes && !departmentLanes.always && (
@@ -1762,15 +1770,17 @@ function Canvas({
               {zoomControls && (
                 <ZoomControls zoom={zoom} onOut={() => zoomBy("out")} onFit={fitByHand} onIn={() => zoomBy("in")} canOut={zoom > MIN_ZOOM + 0.001} canIn={zoom < MAX_ZOOM - 0.001} />
               )}
-              {legend && <MapLegend badge={!!openIssues} />}
+              {legend && (card ? <MapKey badge={!!openIssues} /> : <MapLegend badge={!!openIssues} />)}
+              {card?.action}
               {(overflow.left || overflow.right) && (
-                <p className="ml-auto text-[11.5px] text-fg-2" data-map-overflow>
+                <p className={`${card ? "w-full" : "ml-auto"} text-[11.5px] text-fg-2`} data-map-overflow>
                   {overflow.right && !overflow.left ? "Drag the map to see the rest →" : overflow.left && !overflow.right ? "← Drag the map to see the rest" : "Drag the map to see the rest"}
                 </p>
               )}
             </div>
           )}
-          {showPlayback && playbackAbove && (
+          {card?.below && <div className="flex flex-col gap-2 px-4 pb-3">{card.below}</div>}
+          {showPlayback && playbackAbove && !card && (
             <div className="border-b border-line px-2.5 py-2" data-playback-strip>
               <PlaybackBar
                 clock={playback.clock}
@@ -1781,7 +1791,7 @@ function Canvas({
               />
             </div>
           )}
-          <div className={`relative min-h-0 ${heightMode === "fill" ? "flex-1" : ""}`} style={heightMode === "auto" ? { height: autoHeight ?? 360 } : undefined}>
+          <div className={`relative min-h-0 ${heightMode === "fill" ? "flex-1" : ""} ${card ? "bg-muted/30" : ""}`} style={heightMode === "auto" ? { height: autoHeight ?? 360 } : undefined}>
           {/* Before the map in the page, so Tab reaches the toolbar first. */}
           {editable && editorState && (
             <div className="absolute top-2.5 left-2.5 z-10 max-w-[calc(100%-1.25rem)]">
@@ -1807,7 +1817,7 @@ function Canvas({
             </p>
           )}
           {/* Playback of the run (issue #14), over the foot of the map; before it in the page, for Tab. */}
-          {showPlayback && !playbackAbove && (
+          {showPlayback && !playbackAbove && !card && (
             <div className="absolute right-2.5 bottom-2.5 left-2.5 z-10">
               <PlaybackBar
                 clock={playback.clock}
@@ -1926,6 +1936,19 @@ function Canvas({
             />
           )}
           </div>
+          {/* Docked along the card's bottom edge (Q8), so it never covers a step. */}
+          {showPlayback && card && (
+            <div className="bg-muted/40 px-3 py-2" data-playback-strip>
+              <PlaybackBar
+                docked
+                clock={playback.clock}
+                H={playback.index?.H ?? null}
+                hoursPerWeek={playback.hoursPerWeek}
+                reps={result?.reps ?? null}
+                describe={playback.describe}
+              />
+            </div>
+          )}
         </div>
       </InlineEditContext.Provider>
     </CanvasContext.Provider>

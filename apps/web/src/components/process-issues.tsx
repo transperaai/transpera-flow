@@ -3,7 +3,7 @@
 // Issues on the process page (issue #17): the Issues tab in the map's Insights panel, badges on the steps.
 
 import { isReadOnly } from "@/lib/mode";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
 import { detectBrokenScenarios, resolveMoney, type DetectedIssue, type EngineModel, type RetiredSteps, type SimulationResult } from "@transpera-flow/engine";
 import { processStepIds, processSteps } from "@/lib/process-steps";
@@ -66,7 +66,10 @@ export function useProcessIssues({
   sources = NO_SOURCES,
   liveRevisions,
   issueExtra,
+  cardView,
 }: {
+  /** Draws the page's Issues card from the register's issues (Q8); see IssuesRegister. */
+  cardView?: ComponentProps<typeof IssuesRegister>["cardView"];
   /** Drawn under each confirmed issue in the page's Issues section (the status track). */
   issueExtra?: (issue: IssueRow) => ReactNode;
   bundle: ProcessBundle;
@@ -184,7 +187,8 @@ export function useProcessIssues({
   const section = (view: "issues") => (
     <IssuesRegister
       issueExtra={issueExtra}
-      includeClosed={Boolean(issueExtra)}
+      cardView={cardView}
+      includeClosed={Boolean(issueExtra) || Boolean(cardView)}
       layout="page"
       view={view}
       stepIds={stepIds}

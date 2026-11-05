@@ -32,16 +32,17 @@ export function FactsList({
   if (!facts)
     return (
       <div className="flex flex-col gap-2" aria-busy="true">
-        {[0, 1].map((i) => (
-          <Skeleton key={i} className="h-8 w-full" />
+        {[0, 1, 2].map((i) => (
+          <Skeleton key={i} className="h-5 w-full" />
         ))}
+        <p className="text-sm text-fg-2">Simulating…</p>
       </div>
     );
-  if (!facts.length) return <p className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground">Nothing stands out in the latest run.</p>;
+  if (!facts.length) return <p className="text-sm text-fg-2">Nothing stands out in the latest run.</p>;
   const shown = all ? facts : facts.slice(0, initialLimit);
   return (
     <div className="flex flex-col gap-2" data-facts>
-      <ul className="flex flex-col divide-y overflow-hidden rounded-xl border bg-card">
+      <ul className="flex flex-col divide-y divide-line">
         {shown.map((f) => {
           const light = f.stepId ? [f.stepId] : null;
           return (
@@ -53,7 +54,7 @@ export function FactsList({
               onMouseLeave={() => onLight?.(null)}
               onFocus={() => onLight?.(light)}
               onBlur={() => onLight?.(null)}
-              className="flex min-w-0 items-start gap-2 px-4 py-2.5 text-sm outline-none focus-visible:bg-muted/50"
+              className="flex min-w-0 items-start gap-2 py-2.5 text-sm outline-none first:pt-0 focus-visible:bg-muted/50"
             >
               <i aria-hidden className="mt-1.5 size-2 shrink-0 rounded-full" style={{ background: DOT[f.rating] }} />
               <span className="min-w-0">

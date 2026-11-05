@@ -7,14 +7,14 @@
 import { isReadOnly } from "@/lib/mode";
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Pencil } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { IssueRow, ProcessBundle, ProcessCategory, ScenarioRow, SourceRow } from "@transpera-flow/db";
 import type { ProcessAdminResult } from "@/lib/processes/admin";
-import { AboutProcess } from "@/components/about-process";
+import { ProcessHeader } from "@/components/process-header";
 import { ProcessDepartmentField } from "@/components/process-department-field";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { DepartmentFieldData } from "@/lib/process-page/department";
-import { Help } from "@/components/help";
 import { IssueTrackView } from "@/components/issue-track";
 import { HeaviestSteps, HoursByRole, KeyPersonPanel, SupportingHeadline, TimeSplit } from "@/components/process-supporting-data";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
@@ -45,6 +45,7 @@ import type { TierSetup } from "@/lib/tier-setup";
 import { ProcessSolutions, type SolutionsData } from "./solutions/process-solutions";
 import { NO_SOLUTIONS_DATA } from "@/lib/solutions/cards";
 import { useProcessIssues } from "./process-issues";
+import { IssuesCard } from "./process-issues-card";
 import { useEngineModel, type EditMode } from "@/lib/sim/use-engine-model";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
 import { EDIT_ONLY } from "@/lib/phone";
@@ -149,6 +150,31 @@ export function ProcessPage({
   const stepNameOf = useMemo(() => new Map(processSteps(bundle).map((s) => [s.id, s.name])), [bundle]);
 
   const issuesUi = useProcessIssues({
+    cardView: (c) => (
+      <IssuesCard
+        {...c}
+        loading={c.loading && model !== null}
+        base={solBase}
+        solutions={solData}
+        onShowStep={showGapStep}
+        buildHref={(issue) => (canBuild && (issue.status === "open" || issue.status === "testing") ? buildSolutionHref(solBase, issue, `${solBase}/p/${bundle.process.id}#issues`) : null)}
+        registerHref={registerHref}
+        other={
+          <ProcessSolutions
+            otherOnly
+            processId={bundle.process.id}
+            processName={bundle.process.name}
+            viewerId={solutions?.viewerId}
+            memberNames={solutions?.memberNames}
+            base={solBase}
+            demo={mode === "demo"}
+            canEdit={canBuild}
+            data={solutions?.data ?? NO_SOLUTIONS_DATA}
+            issues={issues}
+          />
+        }
+      />
+    ),
     issueExtra,
     bundle,
     model,
@@ -205,105 +231,107 @@ export function ProcessPage({
     [model, result, stepIds, tierSetup],
   );
 
+  const exportMenu = (
+    <ExportMenu
+      name={bundle.process.name}
+      note="Groups are drawn open."
+      input={() => {
+        const names = new Map([...bundle.roles.map((r) => [r.id, r.name] as const), ...namedForViewer(viewerOf(bundle), bundle.people).map((x) => [x.id, x.name] as const)]);
+        return {
+          title: bundle.process.name,
+          subtitle: old ? `Version ${viewingVersion}` : unpublished ? "Draft, not published yet" : `Live, version ${liveVersion}`,
+          steps: bundle.steps,
+          edges: bundle.edges,
+          expanded: "all",
+          rating: (id) => {
+            const r = issuesUi.rating(id);
+            return r ? ratingOfRank(r.rank) : null;
+          },
+          issues: issuesUi.openIssues,
+          who: (step) => names.get(step.person_id ?? step.role_id ?? "") ?? null,
+        };
+      }}
+    />
+  );
+
   return (
     <div className="flex min-h-svh flex-1 flex-col">
       <div className="sticky top-0 z-20 flex items-center gap-x-2 border-b bg-background/95 px-4 py-2 backdrop-blur">
         <SidebarTrigger className="-ml-1" />
         <Separator orientation="vertical" className="data-[orientation=vertical]:h-4" />
         {/* Slots arrive from a Server Component; a keyed Fragment keeps React from asking them for keys. */}
-        <Fragment key="picker">{processPicker ?? <h1 className="truncate px-1 font-display text-base font-bold">{bundle.process.name}</h1>}</Fragment>
+        <Fragment key="picker">{processPicker ?? <p className="truncate px-1 font-display text-base font-bold">{bundle.process.name}</p>}</Fragment>
       </div>
 
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 py-5">
-        <header className="flex flex-wrap items-start justify-between gap-3" aria-label="Process">
-          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2">
-            {old ? (
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-5">
+        <Fragment key="notice">{notice}</Fragment>
+
+        <ProcessHeader
+          name={bundle.process.name}
+          about={about}
+          department={department}
+          departmentEditor={department && mode === "live" ? <ProcessDepartmentField processId={bundle.process.id} data={department} canEdit /> : undefined}
+          editCategory={editCategory}
+          status={
+            old ? (
               <>
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-warn bg-warn-soft px-2.5 py-0.5 text-xs font-medium">
-                  Viewing version {viewingVersion} · read only
-                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-warn bg-warn-soft px-2.5 py-0.5 text-xs font-medium text-fg">Viewing version {viewingVersion} · read only</span>
                 <Button asChild variant="outline" size="sm">
                   <Link href={backToLive}>Back to live</Link>
                 </Button>
               </>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2.5 py-0.5 text-xs font-medium">
-                <i aria-hidden className="size-1.5 rounded-full bg-accent" />
-                {unpublished ? "Draft, not published yet" : `Version ${liveVersion}`}
-              </span>
-            )}
-            {inside.length > 0 && (
-              <>
-                <span className="ml-1.5 text-xs text-fg-2">Inside:</span>
+            ) : undefined
+          }
+          inside={
+            inside.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-xs text-fg-2">Inside:</span>
                 {inside.map((c) => (
                   <Link key={c.id} href={c.href} className="rounded-full border border-border px-2.5 py-0.5 text-xs hover:bg-panel-2">
                     {c.name}
                   </Link>
                 ))}
-              </>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <Button asChild variant="outline">
-              <Link href={historyHref}>History</Link>
-            </Button>
-            {editHref && (
-              <Button asChild className={`bg-edit text-edit-fg hover:bg-edit/90 ${EDIT_ONLY}`} data-edit-entry>
-                <Link href={withHorizon(editHref, pickedMonths)}>✎ Open in Editor</Link>
-              </Button>
-            )}
-          </div>
-        </header>
-
-        {(notice || error || gaps.length > 0) && (
-          <div className="flex flex-col gap-2">
-            <Fragment key="notice">{notice}</Fragment>
-            <MissingForSimulation gaps={gaps} onSelectStep={showGapStep} settingsHref={settingsHref} />
-            {error && (
-              <Alert className="border-crit bg-crit-soft">
-                <AlertDescription className="text-fg">This process can&apos;t be simulated yet: {error}.</AlertDescription>
-              </Alert>
-            )}
-          </div>
-        )}
-
-        <AboutProcess about={about} editCategory={editCategory}>
-          {department && <ProcessDepartmentField processId={bundle.process.id} data={department} canEdit={mode === "live"} />}
-        </AboutProcess>
-
-        <Section
-          id="map"
-          title="Map"
-          action={
-            <ExportMenu
-              name={bundle.process.name}
-              note="Groups are drawn open."
-              input={() => {
-                const names = new Map([...bundle.roles.map((r) => [r.id, r.name] as const), ...namedForViewer(viewerOf(bundle), bundle.people).map((x) => [x.id, x.name] as const)]);
-                return {
-                  title: bundle.process.name,
-                  subtitle: old ? `Version ${viewingVersion}` : unpublished ? "Draft, not published yet" : `Live, version ${liveVersion}`,
-                  steps: bundle.steps,
-                  edges: bundle.edges,
-                  expanded: "all",
-                  rating: (id) => {
-                    const r = issuesUi.rating(id);
-                    return r ? ratingOfRank(r.rank) : null;
-                  },
-                  issues: issuesUi.openIssues,
-                  who: (step) => names.get(step.person_id ?? step.role_id ?? "") ?? null,
-                };
-              }}
-            />
+              </div>
+            ) : undefined
           }
-          hint="Coloured by rating. Red badges are confirmed issues. Click a step for detail."
-          help={{
-            label: "Map colours",
-            description: "A step is coloured by the worst rating among its confirmed open issues. Red badges count confirmed issues. Facts from the run show under Facts until someone logs an issue.",
-            example: "A step with one Bad issue is orange with a badge of 1; a step with only an unconfirmed insight stays plain.",
-          }}
-        >
+          actions={
+            <>
+              <Button asChild variant="outline" size="sm">
+                <Link href={historyHref}>History</Link>
+              </Button>
+              {editHref && (
+                <Button asChild size="sm" className={`bg-edit text-edit-fg hover:bg-edit/90 ${EDIT_ONLY}`} data-edit-entry>
+                  <Link href={withHorizon(editHref, pickedMonths)}>
+                    <Pencil aria-hidden /> Edit
+                  </Link>
+                </Button>
+              )}
+              {exportMenu}
+            </>
+          }
+        />
+
+        <Card id="map" className="scroll-mt-16 gap-0 py-0" aria-labelledby="map-heading">
           <ProcessCanvas
+            card={{
+              title: "Process map",
+              help: {
+                label: "Map colours",
+                description: "A step is coloured by the worst rating among its confirmed open issues. Red badges count confirmed issues. Facts from the run show under Facts until someone logs an issue.",
+                example: "A step with one Bad issue is orange with a badge of 1; a step with only an unconfirmed insight stays plain.",
+              },
+              below:
+                gaps.length > 0 || error ? (
+                  <>
+                    <MissingForSimulation gaps={gaps} onSelectStep={showGapStep} settingsHref={settingsHref} />
+                    {error && (
+                      <Alert className="border-crit bg-crit-soft">
+                        <AlertDescription className="text-fg">This process can&apos;t be simulated yet: {error}.</AlertDescription>
+                      </Alert>
+                    )}
+                  </>
+                ) : undefined,
+            }}
             bundle={bundle}
             result={result}
             savedLabel="Saved"
@@ -325,56 +353,41 @@ export function ProcessPage({
               ) : undefined
             }
           />
-        </Section>
+        </Card>
 
-        <Section id="facts" title="Facts from the run" hint="What the simulation measured. These are evidence, not issues: log an issue below when one matters.">
-          <FactsList facts={issuesUi.facts} names={factNames} onLight={issuesUi.light} />
-        </Section>
+        <Card id="run" className="scroll-mt-16" aria-labelledby="run-heading">
+          <CardHeader>
+            <CardTitle id="run-heading" className="font-display text-base font-bold">
+              What the run shows
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {model && supporting ? (
+              <>
+                <SupportingHeadline headline={supporting.headline} result={result} />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <section id="facts" aria-labelledby="facts-heading" data-panel="facts" className="flex h-full min-w-0 scroll-mt-16 flex-col rounded-lg bg-muted/40 p-4">
+                    <h3 id="facts-heading" className="text-sm font-bold">
+                      Facts
+                    </h3>
+                    <p className="mb-3 text-xs text-fg-3">What the simulation measured. Evidence, not issues: log an issue below when one matters.</p>
+                    <FactsList facts={issuesUi.facts} names={factNames} onLight={issuesUi.light} />
+                  </section>
+                  <HoursByRole hours={supporting.hours} result={result} viewer={bundle.viewer} />
+                </div>
+                <div id="supporting-data" className="grid scroll-mt-16 gap-4 lg:grid-cols-3">
+                  <HeaviestSteps hours={supporting.hours} result={result} />
+                  <TimeSplit rows={supporting.timeSplit} result={result} />
+                  <KeyPersonPanel rows={supporting.keyPeople} result={result} />
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-fg-2">Nothing to show until the process can be simulated.</p>
+            )}
+          </CardContent>
+        </Card>
 
-        <Section
-          id="issues"
-          title="Issues and solutions"
-          hint="Each issue with its solutions, and how far it has got. Solutions never change the live map."
-        >
-          {issuesUi.issuesList}
-          {registerHref && (
-            <Link href={registerHref} className="mt-2 block text-xs text-fg-2 hover:underline">
-              Open the full register →
-            </Link>
-          )}
-          <div id="solutions" className="mt-2 flex scroll-mt-16 flex-col gap-2">
-            <h3 className="text-sm font-bold">Other improvements</h3>
-            <p className="-mt-1.5 text-xs text-fg-3">Solutions that are not for a particular issue.</p>
-            <ProcessSolutions
-              otherOnly
-              processId={bundle.process.id}
-              processName={bundle.process.name}
-              viewerId={solutions?.viewerId}
-              memberNames={solutions?.memberNames}
-              base={solBase}
-              demo={mode === "demo"}
-              canEdit={canBuild}
-              data={solutions?.data ?? NO_SOLUTIONS_DATA}
-              issues={issues}
-            />
-          </div>
-        </Section>
-
-        <Section id="supporting-data" title="Supporting data" hint="From the latest run.">
-          {model && supporting ? (
-            <div className="flex flex-col gap-3">
-              <SupportingHeadline headline={supporting.headline} result={result} />
-              <div className="grid gap-3 md:grid-cols-2">
-                <HoursByRole hours={supporting.hours} result={result} viewer={bundle.viewer} />
-                <HeaviestSteps hours={supporting.hours} result={result} />
-                <TimeSplit rows={supporting.timeSplit} result={result} />
-                <KeyPersonPanel rows={supporting.keyPeople} result={result} />
-              </div>
-            </div>
-          ) : (
-            <p className="text-sm text-fg-2">Nothing to show until the process can be simulated.</p>
-          )}
-        </Section>
+        {issuesUi.issuesList}
 
         <ProcessSources processId={bundle.process.id} name={bundle.process.name} />
       </div>
@@ -414,41 +427,6 @@ function ProcessSources({ processId, name }: { processId: string; name: string }
       <div id="sources-body" hidden={!open} className="px-4 pb-4">
         <LinkedSources target={{ kind: "process", processId }} label={`Process: ${name}`} empty="No source linked to this process yet." hideTitle className="flex flex-col gap-2" />
       </div>
-    </section>
-  );
-}
-
-function Section({
-  id,
-  title,
-  hint,
-  help,
-  action,
-  children,
-}: {
-  id: string;
-  title: string;
-  hint?: string;
-  help?: { label: string; description: string; example: string };
-  /** Sits at the right of the heading (the map's Export menu). */
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section id={id} aria-labelledby={`${id}-heading`} className="flex min-w-0 scroll-mt-16 flex-col gap-3">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <div className="flex items-center">
-            <h2 id={`${id}-heading`} className="font-display text-lg font-bold">
-              {title}
-            </h2>
-            {help && <Help {...help} />}
-          </div>
-          {hint && <p className="text-sm text-fg-2">{hint}</p>}
-        </div>
-        {action}
-      </div>
-      {children}
     </section>
   );
 }

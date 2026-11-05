@@ -12,6 +12,8 @@ import { useEffect, useRef, useSyncExternalStore, type KeyboardEvent } from "rea
 import { SPEEDS, formatSimTime, type PlaybackClock } from "@/lib/playback/clock";
 
 interface BarProps {
+  /** Along the foot of a card (Q8): no border, fill or shadow of its own. */
+  docked?: boolean;
   clock: PlaybackClock;
   /** Measured horizon in hours; null while there is no run to play. */
   H: number | null;
@@ -26,7 +28,7 @@ const TEXT_INTERVAL_MS = 100;
 const button =
   "rounded-token border border-line bg-panel px-2 py-1 text-fg hover:bg-panel-2 disabled:cursor-not-allowed disabled:text-fg-3 disabled:hover:bg-panel";
 
-export function PlaybackBar({ clock, H, hoursPerWeek, reps, describe }: BarProps) {
+export function PlaybackBar({ docked = false, clock, H, hoursPerWeek, reps, describe }: BarProps) {
   const state = useSyncExternalStore(clock.subscribe, clock.getState, clock.getState);
   const slider = useRef<HTMLInputElement>(null);
   const time = useRef<HTMLSpanElement>(null);
@@ -102,7 +104,7 @@ export function PlaybackBar({ clock, H, hoursPerWeek, reps, describe }: BarProps
       role="group"
       aria-label="Playback"
       onKeyDown={onKeyDown}
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-token border border-line bg-panel/95 p-1.5 text-xs shadow-token"
+      className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${docked ? "" : "rounded-token border border-line bg-panel/95 p-1.5 shadow-token"}`}
     >
       <button
         type="button"

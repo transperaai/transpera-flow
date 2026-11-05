@@ -6,6 +6,8 @@
 import { RATING_LABELS } from "@transpera-flow/engine";
 import { LEGEND_ORDER, RATING_STYLE } from "@/lib/map/rating";
 import { zoomLabel } from "@/lib/map/zoom";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const button =
   "min-w-8 px-2 py-1 text-fg hover:bg-panel-2 disabled:cursor-not-allowed disabled:text-fg-3 disabled:hover:bg-transparent focus-visible:relative focus-visible:z-10";
@@ -60,9 +62,9 @@ function Item({ color, full, short, title, round = false }: { color: string; ful
 }
 
 /** What the colours on the map mean. `badge`: the red count of confirmed issues is shown too. */
-export function MapLegend({ badge }: { badge: boolean }) {
+export function MapLegend({ badge, column = false }: { badge: boolean; column?: boolean }) {
   return (
-    <ul aria-label="Map colours" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-fg-2">
+    <ul aria-label="Map colours" className={column ? "flex flex-col gap-1.5 text-xs text-fg-2" : "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-fg-2"}>
       {LEGEND_ORDER.map((r) => (
         <Item key={r} color={RATING_STYLE[r].stripe} full={RATING_LABELS[r]} short={SHORT[r]} title={RATING_STYLE[r].hint} />
       ))}
@@ -77,5 +79,22 @@ export function MapLegend({ badge }: { badge: boolean }) {
         />
       )}
     </ul>
+  );
+}
+
+/** The legend behind a "Key" button, for the map inside a card (Q8), where a long row of colours has no room. */
+export function MapKey({ badge }: { badge: boolean }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" size="sm" data-map-key>
+          Key
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-60">
+        <p className="font-medium">What the colours mean</p>
+        <MapLegend badge={badge} column />
+      </PopoverContent>
+    </Popover>
   );
 }

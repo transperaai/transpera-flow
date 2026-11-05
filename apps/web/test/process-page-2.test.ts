@@ -5,10 +5,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { simulate, type EngineModel, type EngineStep } from "@transpera-flow/engine";
 import type { IssueRow, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
-import { AboutProcess } from "@/components/about-process";
+import { ProcessHeader } from "@/components/process-header";
 import { IssueTrackView } from "@/components/issue-track";
 import { KeyPersonPanel, TimeSplit } from "@/components/process-supporting-data";
-import { aboutLine, type About } from "@/lib/process-page/about";
+import { aboutLine, aboutSummary, type About } from "@/lib/process-page/about";
 import { keyPersonRows, timeSplitRows } from "@/lib/process-page/supporting";
 import { linkedSolutions, otherImprovements, trackOf, TRACK_STAGES } from "@/lib/process-page/track";
 
@@ -138,21 +138,34 @@ describe("About this process", () => {
     expect(labels).not.toContain("Sources");
     expect(labels).not.toContain("Last published");
   });
-  it("renders in a labelled section with no (i)", () => {
-    const html = renderToStaticMarkup(createElement(AboutProcess, { about }));
-    expect(html).toContain("About this process");
-    expect(html).toContain("Version");
-    expect(read("components/about-process.tsx")).not.toContain("<Help");
+  it("says the same in one muted line under the title", () => {
+    expect(aboutSummary(about)).toBe("6 steps · 3 roles · Version 4");
+    expect(aboutSummary({ ...about, version: null, steps: 1, roles: 1 })).toBe("1 step · 1 role · Draft, not published yet");
   });
-  it("shows Type as text for a viewer, and as a select of the five categories for someone who can edit", () => {
-    const viewer = renderToStaticMarkup(createElement(AboutProcess, { about }));
-    expect(viewer).not.toContain("<select");
-    expect(viewer).toContain("Sales");
-    const editor = renderToStaticMarkup(createElement(AboutProcess, { about, editCategory: async () => ({ status: "ok" as const }) }));
-    expect(editor).toContain("<select");
-    expect(editor.match(/<option/g)).toHaveLength(5);
-    for (const label of ["Sales", "Onboarding", "Routine client work", "Ad hoc", "Internal"]) expect(editor).toContain(`>${label}</option>`);
-    expect(editor).toContain('value="sales"');
+  const header = (props: Partial<Parameters<typeof ProcessHeader>[0]> = {}) =>
+    renderToStaticMarkup(createElement(ProcessHeader, { name: "Lead to live", about, actions: createElement("span", null, "actions"), ...props }));
+  it("is the page title with the category and department as pills, and the summary line, with no (i)", () => {
+    const html = header({ department: { value: null, options: [], workedOut: "Sales", current: "Performance", chosen: false } });
+    expect(html).toContain("<h1");
+    expect(html).toContain("Lead to live");
+    expect(html).toContain("Sales");
+    expect(html).toContain("Performance");
+    expect(html).toContain("6 steps · 3 roles · Version 4");
+    expect(html).not.toContain("About this process");
+    expect(read("components/process-header.tsx")).not.toContain("<Help");
+  });
+  it("gives a reader the pills only, and someone who can edit a pencil that opens the Type and Department selects", () => {
+    const reader = header();
+    expect(reader).not.toContain("data-process-edit");
+    expect(reader).not.toContain("<select");
+    const editor = header({ editCategory: async () => ({ status: "ok" as const }) });
+    expect(editor).toContain("data-process-edit");
+    expect(editor).toContain("Edit type and department");
+    // The selects live in the popover, which opens on a click (the browser test of the page covers that).
+    const src = read("components/process-header.tsx");
+    expect(src).toContain("PROCESS_CATEGORIES.map");
+    expect(src).toContain("{departmentEditor}");
+    expect(read("components/process-page.tsx")).toMatch(/departmentEditor=\{department && mode === "live" \? <ProcessDepartmentField/);
   });
 });
 
@@ -237,8 +250,8 @@ describe("the supporting data panels", () => {
 describe("the process page layout", () => {
   const page = read("components/process-page.tsx");
   const at = (s: string) => page.indexOf(s);
-  it("runs About, Map, Facts, Issues and solutions, Supporting data, then Sources", () => {
-    const order = ["<AboutProcess", 'id="map"', 'id="facts"', 'id="issues"', 'id="supporting-data"', "<ProcessSources"].map(at);
+  it("runs the header, Process map, What the run shows (facts, then the supporting panels), Issues and solutions, then Sources", () => {
+    const order = ["<ProcessHeader", 'id="map"', 'id="run"', 'id="facts"', 'id="supporting-data"', "issuesUi.issuesList", "<ProcessSources"].map(at);
     expect(order.every((n) => n > 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(page).toContain("Other improvements");
