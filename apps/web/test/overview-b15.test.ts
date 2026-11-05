@@ -217,6 +217,7 @@ const solution = (over: Partial<SolutionRow>): SolutionRow => ({
   base_revision_id: live.revision.id,
   name: "Faster audits",
   notes: "",
+  status: "testing",
   steps: solutionCopy(live),
   changed_step_ids: [],
   lever_changes: [],

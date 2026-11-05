@@ -665,6 +665,7 @@ export interface Solutions {
   name: string;
   notes: Generated<string>;
   process_id: string;
+  status: Generated<string>;
   steps: Json;
   updated_at: Generated<string>;
   workspace_id: string;

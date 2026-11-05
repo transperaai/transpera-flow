@@ -54,6 +54,7 @@ const solution: SolutionRow = {
   base_revision_id: live.revision.id,
   name: "Faster audits",
   notes: "",
+  status: "testing",
   steps: copy,
   changed_step_ids: [target.id],
   lever_changes: [],

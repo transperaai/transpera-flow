@@ -30,7 +30,8 @@ export type EditableTable =
   | "service_servicing"
   | "departments"
   | "tiers"
-  | "person_portfolio";
+  | "person_portfolio"
+  | "solutions";
 
 /** Link tables `save_links` accepts, and their member column. */
 export const LINK_MEMBERS = { person_roles: "role_id", person_skills: "step_id", client_services: "service_id", person_tiers: "tier_id" } as const;

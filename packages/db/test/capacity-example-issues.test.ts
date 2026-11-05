@@ -81,14 +81,14 @@ describe("adding the example issues to a freshly loaded example workspace", () =
 
   it("saves three solutions, each linked to an issue at a different stage", async () => {
     const rows = await q(
-      `select s.name, i.title, i.status, coalesce(i.resolved_solution_id = s.id, false) as fixed, l.user_verdict
+      `select s.name, s.status as solution_status, i.title, i.status, coalesce(i.resolved_solution_id = s.id, false) as fixed, l.user_verdict
          from solutions s join solution_issues l on l.solution_id = s.id join issues i on i.id = l.issue_id where s.workspace_id = $1 order by s.name`,
       [ws],
     );
     expect(rows).toEqual([
-      { name: "Ad QA only on new campaigns", title: "Ad QA repeats checks done at build", status: "done", fixed: true, user_verdict: null },
-      { name: "One budget entry instead of three", title: "Pacing lives in three places", status: "in_progress", fixed: false, user_verdict: null },
-      { name: "Vetting by a second person", title: "Only Karl can vet link domains", status: "in_progress", fixed: false, user_verdict: "pass" },
+      { name: "Ad QA only on new campaigns", solution_status: "adopted", title: "Ad QA repeats checks done at build", status: "done", fixed: true, user_verdict: null },
+      { name: "One budget entry instead of three", solution_status: "testing", title: "Pacing lives in three places", status: "in_progress", fixed: false, user_verdict: null },
+      { name: "Vetting by a second person", solution_status: "works", title: "Only Karl can vet link domains", status: "in_progress", fixed: false, user_verdict: "pass" },
     ]);
   });
 

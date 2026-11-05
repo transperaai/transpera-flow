@@ -25,6 +25,7 @@ export function addDemoSolution(input: SolutionInput): { solution: SolutionRow; 
     base_revision_id: input.baseRevisionId,
     name: input.name,
     notes: "",
+    status: "testing",
     steps: structuredClone(input.copy),
     changed_step_ids: [...input.changedStepIds],
     lever_changes: structuredClone(input.levers),

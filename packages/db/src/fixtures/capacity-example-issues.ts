@@ -198,7 +198,7 @@ export async function addExampleIssues(db: Queryable, workspaceId: string): Prom
     });
 
     // 1. One budget entry instead of three. Pacing checks and the review that follows are one step: the budget is entered once, and the
-    //    checks and the review read the same sheet (about ten minutes a channel of re-typing goes). Stage: just saved, not yet tested.
+    //    checks and the review read the same sheet (about ten minutes a channel of re-typing goes). Stage: just saved, still Testing.
     {
       const copy = await copyOf("perf-pacing");
       const a = byName(copy.steps, "Pacing checks");
@@ -213,7 +213,7 @@ export async function addExampleIssues(db: Queryable, workspaceId: string): Prom
     }
 
     // 2. Vetting by a second person. Half of the vetting goes to a second reviewer, so it no longer runs through one person.
-    //    Stage: tested, and the person's own verdict is a pass.
+    //    Stage: Works, and the person's own verdict is a pass.
     let vettingSolution: string;
     {
       const copy = await copyOf("org-links");
@@ -230,10 +230,11 @@ export async function addExampleIssues(db: Queryable, workspaceId: string): Prom
         issueIds.get("vetting"),
         "Nadiya already knows the publishers' sites. Half each keeps Karl's queue short, and either can cover the other.",
       ]);
+      await db.query("update public.solutions set status = 'works' where id = $1", [vettingSolution]);
     }
 
     // 3. Ad QA only on new campaigns. Changes to a running campaign skip the full check (4 in 10 still get it).
-    //    Stage: it fixed its issue, which is Resolved with this solution.
+    //    Stage: Adopted: it fixed its issue, which is Resolved with this solution.
     {
       const copy = await copyOf("perf-builds");
       const build = byName(copy.steps, "Campaign builds & changes");
@@ -248,6 +249,7 @@ export async function addExampleIssues(db: Queryable, workspaceId: string): Prom
         "Rolled out: only new campaigns get the full ad check now.",
         solutionId,
       ]);
+      await db.query("update public.solutions set status = 'adopted' where id = $1", [solutionId]);
     }
 
     return { applied: true, issues: ISSUES.length, changesLinked, solutions: 3 };
