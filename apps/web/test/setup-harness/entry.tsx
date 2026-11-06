@@ -10,7 +10,7 @@ import type { WorkspaceSettingsData } from "@/lib/data";
 
 declare global {
   interface Window {
-    mountSetup: (options: { page: "clients" | "people"; who: "owner" | "viewer"; extraTiers?: number }) => void;
+    mountSetup: (options: { page: "clients" | "people"; who: "owner" | "viewer"; extraTiers?: number; scenario?: Scenario }) => void;
     __serverActions?: { name: string; args: unknown[] }[];
   }
 }
@@ -19,6 +19,8 @@ const WS = "00000000-0000-4000-8000-000000000001";
 const ORG = "d0000000-0000-4000-8000-000000000001";
 const PERF = "d0000000-0000-4000-8000-000000000002";
 const id = (prefix: string, n: number) => `${prefix}0000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+type Scenario = "totals" | "no-named" | "other-services";
 
 const tier = (n: number, over: Partial<SetupTier> = {}): SetupTier => ({ id: id("a", n), key: `T${n}`, name: `Tier ${n}`, sort: n, both_count: n === 2 ? 5 : 0, provenance: {}, ...over });
 
@@ -56,7 +58,7 @@ function service(dept: string, t: SetupTier, over: Partial<SetupService>): Setup
   };
 }
 
-export function build(who: "owner" | "viewer", extraTiers: number) {
+export function build(who: "owner" | "viewer", extraTiers: number, scenario?: Scenario) {
   const tiers = [tier(1), tier(2), tier(3), ...Array.from({ length: extraTiers }, (_, i) => tier(4 + i))];
   const services: SetupService[] = [];
   for (const t of tiers) {
@@ -66,6 +68,13 @@ export function build(who: "owner" | "viewer", extraTiers: number) {
     );
   }
   const orgT1 = services[0]!;
+  // Q13: Organic T1 has 1 named client and a typed total of 13 (12 not in anyone's portfolio); Organic T2 has 6 in portfolios and a typed total of 4 (2 too many).
+  if (scenario === "totals") {
+    services[0]!.client_total = 13;
+    services[2]!.client_total = 4;
+  }
+  // D46: two active services that are not tiers.
+  if (scenario === "other-services") services.push(service(ORG, tier(9), { id: id("9", 1), name: "Website project", tier_id: null, department_id: null }), service(ORG, tier(9), { id: id("9", 2), name: "Hourly work", tier_id: null, department_id: null }));
   const roles: SetupRole[] = [
     { id: id("e", 1), name: "SEO Manager", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "client_facing", line: 0.85, rule_of_thumb: 10, unit: null, leadership: false, provenance: { line: { source: "estimate" } } },
     { id: id("e", 2), name: "Content team", color: null, active: true, default_cost_rate: 0, headcount: 1, ongoing_hours_per_client_week: 0, department_id: ORG, kind: "shared", line: 0.85, rule_of_thumb: null, unit: "words", leadership: false, provenance: {} },
@@ -94,7 +103,7 @@ export function build(who: "owner" | "viewer", extraTiers: number) {
     tiers,
     services,
     groups: [],
-    clients,
+    clients: scenario === "no-named" ? [] : clients,
     roles,
     people,
     portfolio: [{ person_id: people[0]!.id, service_id: services[2]!.id, client_count: 6, provenance: {} }], // Organic Tier 2
@@ -130,15 +139,15 @@ export function build(who: "owner" | "viewer", extraTiers: number) {
     marketSchedule: [],
   } as unknown as WorkspaceSettingsData;
   const roster = {
-    clients: clients.map((c) => ({ id: c.id, workspace_id: WS, name: c.name, start_date: null, mrr: c.mrr, health: null, provenance: {}, notes: null, active: true })) as ClientRow[],
-    clientServices: [{ client_id: clients[0]!.id, service_id: orgT1.id, workspace_id: WS, start_date: null }] as ClientServiceRow[],
-    clientAssignments: [{ client_id: clients[0]!.id, role_id: roles[0]!.id, person_id: people[0]!.id, workspace_id: WS }] as ClientAssignmentRow[],
+    clients: (scenario === "no-named" ? [] : clients).map((c) => ({ id: c.id, workspace_id: WS, name: c.name, start_date: null, mrr: c.mrr, health: null, provenance: {}, notes: null, active: true })) as ClientRow[],
+    clientServices: (scenario === "no-named" ? [] : [{ client_id: clients[0]!.id, service_id: orgT1.id, workspace_id: WS, start_date: null }]) as ClientServiceRow[],
+    clientAssignments: (scenario === "no-named" ? [] : [{ client_id: clients[0]!.id, role_id: roles[0]!.id, person_id: people[0]!.id, workspace_id: WS }]) as ClientAssignmentRow[],
   };
   return { setup, data, roster };
 }
 
-window.mountSetup = ({ page, who, extraTiers = 0 }) => {
-  const { setup, data, roster } = build(who, extraTiers);
+window.mountSetup = ({ page, who, extraTiers = 0, scenario }) => {
+  const { setup, data, roster } = build(who, extraTiers, scenario);
   createRoot(document.getElementById("root")!).render(
     <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-6 px-4 py-4">{page === "clients" ? <TiersAndClients setup={setup} data={data} roster={roster} /> : <PeopleAndRoles setup={setup} data={data} />}</div>,
   );

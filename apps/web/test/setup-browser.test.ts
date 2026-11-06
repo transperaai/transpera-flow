@@ -40,6 +40,99 @@ const headTexts = (scope: Locator) =>
 const calls = (page: Page) => page.evaluate(() => window.__serverActions ?? []);
 const noise = (e: string) => /Not available|Failed to load resource/.test(e);
 
+describe("a tier's typed client count (Q13) and what Set up no longer shows (D45 to D47)", { timeout: 120_000 }, () => {
+  it("typing a total saves services.client_total against what is stored; clearing it saves null", async () => {
+    const { page } = await mount({ page: "clients", who: "owner", scenario: "totals" });
+    const cell = page.getByLabel("Organic (SEO) T3: Clients", { exact: true });
+    expect(await cell.inputValue()).toBe("");
+    await cell.fill("20");
+    await cell.blur();
+    await page.waitForFunction(() => (window.__serverActions?.length ?? 0) > 0);
+    expect((await calls(page))[0]).toEqual({ name: "saveSetupField", args: ["services", { id: "b0000000-0000-4000-8000-000000000003" }, "client_total", null, 20] });
+    const typed = page.getByLabel("Organic (SEO) T1: Clients", { exact: true });
+    expect(await typed.inputValue()).toBe("13");
+    await typed.fill("");
+    await typed.blur();
+    await page.waitForFunction(() => (window.__serverActions?.length ?? 0) > 1);
+    expect((await calls(page))[1]!.args.slice(2)).toEqual(["client_total", 13, null]);
+    await page.close();
+  });
+
+  it("shows 'over' as a warning pill and 'unassigned' as a note, each with its sentence", async () => {
+    const { page } = await mount({ page: "clients", who: "owner", scenario: "totals" });
+    const org = (tier: string) => page.locator(`[data-tier=${tier}][data-department='Organic (SEO)']`);
+    // T1: total 13, one named client and nothing in portfolios: 12 are in nobody's portfolio.
+    const unassigned = org("T1").locator("[data-discrepancy=unassigned]");
+    expect(await unassigned.count()).toBe(1);
+    expect(await unassigned.getAttribute("title")).toBe("12 clients aren't in anyone's portfolio.");
+    expect(await unassigned.innerText()).toContain("12 unassigned");
+    // T2: total 4 but 6 in portfolios: 2 too many, and the model counts the portfolios as they are.
+    const over = org("T2").locator("[data-discrepancy=over]");
+    expect(await over.count()).toBe(1);
+    expect(await over.getAttribute("title")).toBe("Portfolios and named clients add up to 6, but the tier has 4 (2 too many). The model counts the portfolios as they are.");
+    expect(await over.innerText()).toContain("2 too many");
+    // T3 has no total: no pill. The effective count of T1 is its total.
+    expect(await org("T3").locator("[data-discrepancy]").count()).toBe(0);
+    expect(await org("T1").locator("[data-tier-count]").getAttribute("data-count")).toBe("13");
+    expect(await org("T2").locator("[data-tier-count]").getAttribute("data-count")).toBe("6");
+    await page.close();
+  });
+
+  it("People & roles shows the same pill beside the tier's portfolio total", async () => {
+    const { page } = await mount({ page: "people", who: "owner", scenario: "totals" });
+    const t2 = page.locator("[data-portfolio-total=T2]");
+    expect(await t2.locator("b").innerText()).toBe("6");
+    const pill = t2.locator("[data-discrepancy=over]");
+    expect(await pill.count()).toBe(1);
+    expect(await pill.getAttribute("title")).toContain("Organic (SEO): Portfolios and named clients add up to 6, but the tier has 4 (2 too many).");
+    expect(await page.locator("[data-portfolio-total=T1] [data-discrepancy=unassigned]").count()).toBe(1);
+    await page.close();
+    const plain = await mount({ page: "people", who: "owner" });
+    expect(await plain.page.locator("[data-discrepancy]").count()).toBe(0);
+    expect(await plain.page.locator("[data-portfolio-total=T2] b").innerText()).toBe("6");
+    await plain.page.close();
+  });
+
+  it("a Viewer sees the typed total and the pill as text, with no input", async () => {
+    const { page } = await mount({ page: "clients", who: "viewer", scenario: "totals" });
+    expect(await page.getByLabel("Organic (SEO) T1: Clients", { exact: true }).innerText()).toBe("13");
+    expect(await page.locator("input[aria-label='Organic (SEO) T1: Clients']").count()).toBe(0);
+    expect(await page.locator("[data-discrepancy]").count()).toBe(2);
+    await page.close();
+  });
+
+  it("D45: Named clients are folded away when there are none, and open when there are some", async () => {
+    const line = "Name a client only when it behaves differently from its tier: its own fee, channels, hand-holding or ad hoc.";
+    const none = await mount({ page: "clients", who: "owner", scenario: "no-named" });
+    expect(await none.page.locator("[data-setup=clients]").innerText()).toContain(line);
+    expect(await none.page.locator("[data-named-body]").count()).toBe(0);
+    expect(await none.page.locator("[data-add-named-client]").count()).toBe(0);
+    await none.page.getByRole("button", { name: "Show named clients" }).click();
+    expect(await none.page.locator("[data-add-named-client]").count()).toBe(1);
+    await none.page.close();
+    const some = await mount({ page: "clients", who: "owner" });
+    expect(await some.page.locator("[data-setup=clients]").innerText()).toContain(line);
+    expect(await some.page.locator("[data-named-body]").count()).toBe(1);
+    await some.page.getByRole("button", { name: "Hide named clients" }).click();
+    expect(await some.page.locator("[data-named-body]").count()).toBe(0);
+    await some.page.close();
+  });
+
+  it("D46 and D47: no Other services section and no client health benchmark; one muted line when there are other services", async () => {
+    const plain = await mount({ page: "clients", who: "owner" });
+    const text = await plain.page.locator("[data-setup=clients]").innerText();
+    expect(text).not.toMatch(/Other services|client health benchmark|Client health benchmark|Health benchmark/i);
+    expect(await plain.page.locator("#other-services").count()).toBe(0);
+    expect(await plain.page.locator("[data-other-services]").count()).toBe(0);
+    await plain.page.close();
+    const other = await mount({ page: "clients", who: "owner", scenario: "other-services" });
+    expect(await other.page.locator("[data-other-services]").innerText()).toBe("This workspace also has 2 other services (projects or hourly work) that aren't tiers. They still count in the simulation.");
+    expect(await other.page.locator("#other-services").count()).toBe(0);
+    expect(await other.page.locator("[data-setup=clients]").innerText()).not.toMatch(/Website project|Hourly work/);
+    await other.page.close();
+  });
+});
+
 describe("Tiers & clients", { timeout: 120_000 }, () => {
   it("shows one table per department with the department's fields, every heading with an (i)", async () => {
     const { page, errors } = await mount({ page: "clients", who: "owner" });
@@ -61,10 +154,15 @@ describe("Tiers & clients", { timeout: 120_000 }, () => {
   it("counts a tier's clients as the sum of the named clients and the portfolios, and shows 'missing' and the source in place", async () => {
     const { page } = await mount({ page: "clients", who: "owner" });
     // Organic T1 has Harbourline (named) only; Organic T2 has Karl's 6 in his portfolio.
-    expect(await page.locator("[data-tier=T1][data-department='Organic (SEO)'] [data-tier-count]").innerText()).toContain("1");
-    expect(await page.locator("[data-tier=T1][data-department='Organic (SEO)'] [data-tier-count]").innerText()).toContain("1 named");
-    expect(await page.locator("[data-tier=T2][data-department='Organic (SEO)'] [data-tier-count]").innerText()).toBe("6");
-    expect(await page.locator("[data-tier=T3][data-department='Organic (SEO)'] [data-tier-count]").innerText()).toBe("0");
+    const count = (tier: string) => page.locator(`[data-tier=${tier}][data-department='Organic (SEO)'] [data-tier-count]`);
+    expect(await count("T1").getAttribute("data-count")).toBe("1");
+    expect(await count("T1").innerText()).toContain("1 named");
+    expect(await count("T2").getAttribute("data-count")).toBe("6");
+    expect(await count("T3").getAttribute("data-count")).toBe("0");
+    // Nothing typed: the worked-out count is the greyed placeholder in the Clients cell, and there is no pill.
+    expect(await page.getByLabel("Organic (SEO) T2: Clients", { exact: true }).getAttribute("placeholder")).toBe("6");
+    expect(await page.getByLabel("Organic (SEO) T2: Clients", { exact: true }).inputValue()).toBe("");
+    expect(await page.locator("[data-discrepancy]").count()).toBe(0);
     // Organic T2 has requests blank: missing. Its words came from an estimate.
     const t2 = page.locator("[data-tier=T2][data-department='Organic (SEO)']");
     expect(await t2.locator("[data-missing]").count()).toBe(1);
