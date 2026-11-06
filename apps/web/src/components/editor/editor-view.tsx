@@ -25,7 +25,7 @@ import { EMPTY_DIFF, diffBundles, publishableChanges, unresolvedSteps } from "@/
 import { useDraftSession } from "@/lib/drafts/use-draft-session";
 import { namesOf } from "@/lib/editor/describe";
 import type { Table } from "@/lib/editor/ops";
-import { MODE_INFO, editorHorizonWeeks, type EditorMode } from "@/lib/editor/modes";
+import { MODE_INFO, NO_ISSUE_REFUSAL, editorHorizonWeeks, type EditorMode } from "@/lib/editor/modes";
 import { connect, connectScratch } from "@/lib/drafts/connect";
 import { newlyBroken } from "@/lib/scenarios/broken";
 import { useSimulation } from "@/lib/sim/use-simulation";
@@ -75,6 +75,9 @@ export function EditorView({
   exitHref,
   horizonMonths = null,
   issue = null,
+  processEditorHref,
+  blockEditorHref,
+  solutionSeed,
   tourDismissed = false,
   historyHref,
   library,
@@ -114,6 +117,11 @@ export function EditorView({
   horizonMonths?: number | null;
   /** Solution mode: the issue the solution is built for, whose steps are outlined and whose target the verdict is checked against. */
   issue?: SolutionIssue | null;
+  /** Solution mode: where "Edit the process instead" (the process's draft) and "Save as a block" (block mode) go when a save is refused for want of an issue. */
+  processEditorHref?: string;
+  blockEditorHref?: string;
+  /** Solution mode opened from a solution's page ("Open in editor", `?solution=<id>`): the map starts as that solution's copy, not as live. */
+  solutionSeed?: { bundle: ProcessBundle; name: string };
   /** The process library (B12): the workspace's processes, where each sits (live links), and the templates. */
   library?: { processes: LibraryProcess[]; templates: LibraryTemplate[] };
 }) {
@@ -130,7 +138,9 @@ export function EditorView({
   // Block and solution modes edit a map of their own, in memory: never the process's live version or its draft. A block
   // starts empty; a solution starts as a copy of live.
   const scratch = blockMode || solutionMode;
-  const [seed] = useState(() => (blockMode ? blockScratch(initialLive) : initialLive));
+  // A solution opened from its own page starts as its copy; what is marked as changed, simulated and saved is still measured against live.
+  const fromSolution = solutionMode && solutionSeed !== undefined;
+  const [seed] = useState(() => (blockMode ? blockScratch(initialLive) : fromSolution ? solutionSeed!.bundle : initialLive));
   const [backend] = useState(() => (scratch ? connectScratch(seed) : connect(mode, seed)));
   const [session, drafts, state] = useDraftSession(seed, scratch ? null : initialDraft, () => backend, () => ({ at: new Date().toISOString(), by: userId }));
   const editor = session.editor;
@@ -138,7 +148,7 @@ export function EditorView({
   const hasDraft = !scratch && (drafts.draft !== null || drafts.opening);
   // What the map marks as new or changed: against the draft's live version, or the solution's copy of it.
   const marksChanges = hasDraft || solutionMode;
-  const live = drafts.live;
+  const live = fromSolution ? initialLive : drafts.live;
   const working = state.bundle;
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   // The written tour: opens the first time this user opens the Editor, and again from "Take the tour".
@@ -211,16 +221,24 @@ export function EditorView({
 
   // Solution mode: what the solution is called, the automatic verdict against the issue's target, and saving. Nothing is
   // written until then, and then only the solution's own rows: not live, not the draft.
-  const [solutionName, setSolutionName] = useState("");
+  const [solutionName, setSolutionName] = useState(() => (solutionSeed ? `Copy of ${solutionSeed.name}` : ""));
   // Where the map is looking, for the palette (new steps appear there).
   const viewRef = useRef<(() => ViewHint | null) | null>(null);
   const [solutionSaving, setSolutionSaving] = useState(false);
   const [solutionError, setSolutionError] = useState<string | null>(null);
+  // Set when the save was refused because no issue is linked: the two ways out are offered beside the message.
+  const [refusedWithout, setRefusedWithout] = useState(false);
   const added = useMemo(() => [...diff.steps.values()].filter((c) => c.kind === "added").map((c) => c.id), [diff]);
   const outlined = useMemo(() => (solutionMode && issue ? currentArea(issue, working.steps, added) : null), [solutionMode, issue, working.steps, added]);
   const area = useMemo(() => (issue ? verdictArea(working.steps, issue, added) : []), [issue, working.steps, added]);
   const saveSolution = async () => {
     setSolutionError(null);
+    setRefusedWithout(false);
+    // Every solution fixes an issue (Q12): without one there is nothing to test it against, and it would have no place in the list.
+    if (!issue) {
+      setRefusedWithout(true);
+      return setSolutionError(NO_ISSUE_REFUSAL);
+    }
     if (!solutionName.trim()) return setSolutionError("Name the solution first.");
     if (isUnpublished(live)) return setSolutionError("Publish the process first: a solution is a copy of its live version.");
     await editor.settled();
@@ -260,7 +278,7 @@ export function EditorView({
     router.push(exitHref);
   };
   const solutionForm: SolutionForm | undefined = solutionMode
-    ? { name: solutionName, onName: setSolutionName, onSave: saveSolution, saving: solutionSaving, error: solutionError }
+    ? { name: solutionName, onName: setSolutionName, onSave: saveSolution, saving: solutionSaving, error: solutionError, refusedWithout: refusedWithout && processEditorHref && blockEditorHref ? { processHref: processEditorHref, blockHref: blockEditorHref } : null }
     : undefined;
   const restore = useCallback(
     (table: Table, id: string) => {

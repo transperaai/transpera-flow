@@ -95,7 +95,8 @@ describe("every (i) on the Editor screen", () => {
       "components/editor/editor-bar.tsx": ["Simulate", "Save to library", "Save solution", "Block name", "Description", "Solution name"],
       "components/editor/simulate-footer.tsx": ["Compared with live", "Automatic verdict"],
       "components/editor/issue-area.tsx": ["Issue area"],
-      "components/solutions/process-solutions.tsx": ["New solution", "Build solution"],
+      // "New solution" moved to the shared button (Q12), which draws its (i) from SOLUTIONS_LIST_HELP.
+      "components/solutions/process-solutions.tsx": ["Build solution"],
     };
     for (const [file, labels] of Object.entries(expected)) {
       const tags = helpTags(read(file));
@@ -146,13 +147,15 @@ describe("every control of solution mode (issue #114)", () => {
     expect(labels("components/editor/editor-bar.tsx")).toEqual(expect.arrayContaining(["Solution name", "Save solution"]));
     expect(labels("components/editor/issue-area.tsx")).toEqual(["Issue area"]);
     expect(labels("components/editor/simulate-footer.tsx")).toContain("Automatic verdict");
-    expect(labels("components/solutions/process-solutions.tsx")).toEqual(["New solution", "Build solution"]);
+    expect(labels("components/solutions/process-solutions.tsx")).toEqual(["Build solution"]);
+    expect(read("components/solutions/new-solution.tsx")).toContain("{...SOLUTIONS_LIST_HELP.newSolution}");
     // The (i) on the process page's Solutions heading was removed on purpose (QA wave 1); its two buttons above keep theirs.
   });
 
   it("has a button for each thing those (i)s describe", () => {
     expect(read("components/editor/editor-bar.tsx")).toContain("Save solution");
-    expect(read("components/solutions/process-solutions.tsx")).toContain("✎ New solution");
+    expect(read("components/solutions/process-solutions.tsx")).toContain("<NewSolutionButton");
+    expect(read("components/solutions/new-solution.tsx")).toContain("✎ New solution");
     expect(read("components/solutions/process-solutions.tsx")).toContain("✎ Build solution");
   });
 

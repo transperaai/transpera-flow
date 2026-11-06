@@ -72,7 +72,7 @@ window.q11cMountSolutions = ({ editor, empty }) => {
   const d = window.q11cData;
   mount(
     <Page title="Solutions" hideHeader>
-      <SolutionsHeader count={empty ? 0 : d.solutions.solutions.length} canEdit={editor} processes={d.processes} base="/w/example" />
+      <SolutionsHeader count={empty ? 0 : d.solutions.solutions.length} canEdit={editor} processes={d.processes} issues={d.issues} base="/w/example" />
       <SolutionsList data={empty ? { solutions: [], links: [] } : d.solutions} issues={d.issues} processes={d.processes} base="/w/example" mode={editor ? "live" : "readonly"} viewerId={null} memberNames={{}} />
     </Page>,
   );

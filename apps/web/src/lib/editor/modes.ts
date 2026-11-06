@@ -32,7 +32,7 @@ export const MODE_INFO: Record<EditorMode, ModeInfo> = {
   },
   solution: {
     title: (subject) => `New solution · ${subject}`,
-    hint: "Change the steps, simulate, then save. You can link the solution to issues afterwards. Solutions never change the live map.",
+    hint: "Change the steps, simulate, then save. Every solution fixes an issue, so pick the issue first. Solutions never change the live map.",
     save: [{ id: "save-solution", label: "Save solution", primary: true }],
     available: true,
   },
@@ -49,6 +49,10 @@ export const SOLUTION_FOR_ISSUE = {
   title: (issue: { number: number | null; title: string }) => `Solution for ${issue.number == null ? "issue" : `#${issue.number}`} · ${issue.title}`,
   hint: "The red outline is the area this issue touches. Select a step or group, then replace it with a block or edit it. Solutions are saved on their own and never change the live map.",
 };
+
+/** What a save says when the solution is linked to no issue (Q12: every solution starts from an issue). */
+export const NO_ISSUE_REFUSAL =
+  "Pick the issue this solution fixes. To change the process without an issue, edit the process itself (a new draft), or save the steps to the Block library.";
 
 /** The issue a `?issue=` names, if it looks like an id. */
 export function parseIssueParam(value: string | string[] | undefined): string | null {

@@ -8,6 +8,7 @@ import type { Json } from "./db-types";
 export interface Functions {
   add_source: { Args: { p_workspace: string; p_source: Json; p_links: Json }; Returns: string };
   add_tier: { Args: { p_workspace: string }; Returns: string };
+  adopt_solution: { Args: { p_solution: string; p_replace?: boolean }; Returns: Json };
   agency_workspace_list: { Args: never; Returns: { id: string; name: string; slug: string; open_risk_issues: number; last_activity: string | null; numbers: Json | null; computed_at: string | null }[] };
   apply_calibration: { Args: { p_calibration: string; p_keys: string[] }; Returns: Json };
   can_edit_workspace: { Args: { ws: string }; Returns: boolean };

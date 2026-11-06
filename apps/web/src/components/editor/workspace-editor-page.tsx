@@ -1,11 +1,12 @@
 import { changeStepIds, loadCapacityChanges } from "@transpera-flow/db";
+import { bundleFromSolution } from "@transpera-flow/db/sandbox";
 import { getDb } from "@/lib/auth/session";
 import { notFound, redirect } from "next/navigation";
 import { EditorPhoneGate } from "@/components/editor/editor-phone-gate";
 import { EditorView } from "@/components/editor/editor-view";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace, currentViewer } from "@/lib/access-data";
-import { loadDismissedEditorTours, loadProcessForEditing, loadTierSetup, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSources } from "@/lib/data";
+import { loadDismissedEditorTours, loadProcessForEditing, loadTierSetup, loadWorkspaceBlocks, loadWorkspaceIssues, loadWorkspaceScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 import { loadLiveParts } from "@/lib/overview/data";
 import { loadDepartmentLaneInput } from "@/lib/overview/lanes-data";
 import { loadLibrary } from "@/lib/editor/library-data";
@@ -23,7 +24,7 @@ export async function WorkspaceEditorPage({
 }: {
   slug: string;
   processId: string;
-  searchParams: { mode?: string | string[]; from?: string | string[]; horizon?: string | string[]; issue?: string | string[] };
+  searchParams: { mode?: string | string[]; from?: string | string[]; horizon?: string | string[]; issue?: string | string[]; solution?: string | string[] };
 }) {
   // The Editor also opens the company map (B11), by its id: the same screen, on its holders and handoff lines.
   const process = await loadProcessForEditing(slug, processId, { includeCompany: true });
@@ -59,7 +60,11 @@ export async function WorkspaceEditorPage({
   // Solution mode built for an issue (`?issue=`, A49): the issue's steps are outlined and its target is what the verdict checks.
   // The company map has no solutions or blocks: it is edited as a draft only.
   const editorMode = company ? "draft" : parseEditorMode(searchParams.mode);
-  const issueId = editorMode === "solution" ? parseIssueParam(searchParams.issue) : null;
+  // "Open in editor" on a solution's page (`?solution=<id>`): the map starts as that solution's copy, linked to the issue it fixes.
+  const fromSolutionId = editorMode === "solution" ? parseIssueParam(searchParams.solution) : null;
+  const stored = fromSolutionId ? await loadWorkspaceSolutions(live.workspace.id) : null;
+  const fromSolution = stored?.solutions.find((s) => s.id === fromSolutionId && s.process_id === live.process.id);
+  const issueId = editorMode === "solution" ? (parseIssueParam(searchParams.issue) ?? (fromSolution ? (stored?.links.find((l) => l.solution_id === fromSolution.id)?.issue_id ?? null) : null)) : null;
   const issueRow = issueId ? (await loadWorkspaceIssues(live.workspace.id)).find((i) => i.id === issueId) : undefined;
   const exit = exitHref(searchParams.from, base);
   return (
@@ -81,6 +86,9 @@ export async function WorkspaceEditorPage({
       sourcesHref={`/w/${slug}/sources`}
       settingsHref={`/w/${slug}/settings`}
       exitHref={exit}
+      solutionSeed={fromSolution ? { bundle: bundleFromSolution(live, fromSolution), name: fromSolution.name } : undefined}
+      processEditorHref={`${base}/edit?from=${encodeURIComponent(exit)}`}
+      blockEditorHref={`${base}/edit?mode=block&from=${encodeURIComponent(exit)}`}
       horizonMonths={parseHorizon(searchParams.horizon)}
       library={editorMode === "draft" ? library : undefined}
       tierSetup={tierSetup}
