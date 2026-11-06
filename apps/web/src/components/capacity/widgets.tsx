@@ -4,6 +4,7 @@
 import type { ReactNode } from "react";
 import { roomPulse } from "@transpera-flow/db";
 import { formatNumber, formatPercent } from "@/lib/format";
+import { SectionCard } from "@/components/page-kit";
 import { cn } from "@/lib/utils";
 
 /** The bar runs to 130% so a line at 85% and a person at 110% both show. */
@@ -17,14 +18,27 @@ export function toneOf(busy: number, line: number): Tone {
   return busy >= line ? "bad" : busy >= line - 0.1 ? "warn" : "ok";
 }
 
-export const TONE_BG: Record<Tone, string> = { ok: "bg-good", warn: "bg-warn", bad: "bg-crit" };
-export const TONE_TEXT: Record<Tone, string> = { ok: "text-good", warn: "text-warn", bad: "text-crit" };
+export const TONE_BG: Record<Tone, string> = {
+  ok: "bg-good",
+  warn: "bg-warn",
+  bad: "bg-crit",
+};
+export const TONE_TEXT: Record<Tone, string> = {
+  ok: "text-good",
+  warn: "text-warn",
+  bad: "text-crit",
+};
 
 export function BusyBar({ busy, line, low, high, label }: { busy: number; line: number; low?: number; high?: number; label?: string }) {
   const tone = toneOf(busy, line);
   const range = low !== undefined && high !== undefined ? `, range ${formatPercent(low)} to ${formatPercent(high)}` : "";
   return (
-    <div className="flex min-w-[9rem] items-center gap-2" data-busy={Math.round(busy * 100)} role="img" aria-label={`${label ? `${label}: ` : ""}${formatPercent(busy)} busy against a line of ${formatPercent(line)}${range}`}>
+    <div
+      className="flex min-w-[9rem] items-center gap-2"
+      data-busy={Math.round(busy * 100)}
+      role="img"
+      aria-label={`${label ? `${label}: ` : ""}${formatPercent(busy)} busy against a line of ${formatPercent(line)}${range}`}
+    >
       <div className="relative h-2 flex-1 rounded-full bg-panel-2">
         <i className={cn("absolute inset-y-0 left-0 rounded-full", TONE_BG[tone])} style={{ width: at(busy) }} />
         {low !== undefined && high !== undefined && <i className="absolute top-0.5 bottom-0.5 rounded-full bg-fg/25" style={{ left: at(low), width: `calc(${at(high)} - ${at(low)})` }} />}
@@ -133,7 +147,7 @@ export function StackBar({ parts, unit = "h" }: { parts: { key: string; name: st
 /** "How this works", folded. */
 export function How({ works, tells }: { works: ReactNode; tells: ReactNode }) {
   return (
-    <details className="mt-3 text-xs text-muted-foreground" data-how>
+    <details className="text-xs text-muted-foreground" data-how>
       <summary className="w-max cursor-pointer font-medium text-accent">How this works</summary>
       <p className="mt-1.5 max-w-prose">{works}</p>
       <p className="mt-1.5 max-w-prose">
@@ -143,16 +157,24 @@ export function How({ works, tells }: { works: ReactNode; tells: ReactNode }) {
   );
 }
 
-/** A card with a heading, as the prototype's `.card.sec`. */
-export function Section({ title, aside, children, ...rest }: { title: string; aside?: ReactNode; children: ReactNode } & Omit<React.ComponentProps<"section">, "title">) {
+/** The id a card is given from its title, for the heading's `aria-labelledby`. */
+const slug = (title: string) =>
+  `card-${title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")}`;
+
+/**
+ * A section of the Capacity page or the Overview: the page kit's `SectionCard` (title at the left, `aside` at the right, then the content),
+ * with the test hooks (`data-…`) on a block around it. Each leads with its answer in a sentence, then the picture.
+ */
+export function Section({ title, aside, description, children, className, ...rest }: { title: string; aside?: ReactNode; description?: ReactNode } & Omit<React.HTMLAttributes<HTMLDivElement>, "title">) {
   return (
-    <section className="flex min-w-0 flex-col gap-3 rounded-token border border-line bg-panel p-4" {...rest}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="font-heading text-base font-semibold tracking-tight">{title}</h2>
-        {aside}
-      </div>
-      {children}
-    </section>
+    <div className={cn("min-w-0", className)} {...rest}>
+      <SectionCard id={slug(title)} title={title} action={aside} description={description} className="h-full" contentClassName="gap-3">
+        {children}
+      </SectionCard>
+    </div>
   );
 }
 
