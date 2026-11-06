@@ -50,6 +50,7 @@ function service(dept: string, t: SetupTier, over: Partial<SetupService>): Setup
     adhoc_chance: null,
     adhoc_requests: null,
     price_rise_churn: 0.5,
+    client_total: null,
     provenance: {},
     ...over,
   };

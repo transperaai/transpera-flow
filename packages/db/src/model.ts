@@ -309,7 +309,10 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
   const people = resolvePeopleRows(bundle, working, startDate, options.planned === true, tier, services);
   const demand = engineDemand(bundle, startDate);
   // Client groups replace the named roster, which stays stored but is not simulated. In a tier workspace they are added to it instead.
-  const clientGroups = tier && services ? engineTierClientGroups(tier, bundle.clientGroups ?? [], services) : engineClientGroups(bundle, services);
+  // A typed tier total (Q13) takes the named clients the engine will simulate off the counted remainder (active, and started by the run's start).
+  const namedOn = (serviceId: string) =>
+    (bundle.clients ?? []).filter((c) => c.active && !(c.start_date && c.start_date > startDate) && (bundle.clientServices ?? []).some((cs) => cs.client_id === c.id && cs.service_id === serviceId)).length;
+  const clientGroups = tier && services ? engineTierClientGroups(tier, bundle.clientGroups ?? [], services, namedOn) : engineClientGroups(bundle, services);
   const clients = clientGroups && !tier ? undefined : engineClients(bundle, services, startDate, tier);
   const market = engineMarket(bundle);
   const churnDrivers = engineChurnDrivers(bundle);

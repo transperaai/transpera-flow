@@ -24,7 +24,7 @@ import {
 const svc = (id: string, department_id: string | null, tier_id: string | null, extra: Partial<SetupService> = {}): SetupService => ({
   id, name: id, active: true, department_id, tier_id, pricing_model: "retainer", price: 0, price_low: null, price_high: null, margin: 0, tenure_months: 12,
   churn_monthly_base: 0, churn_health_sensitivity: 3, mix_share: 1, entry_process_id: null, path_tags: [], words: null, links: null, tech_hours: null, meetings: null,
-  builds: null, creative_sets: null, channels: null, adhoc_chance: null, adhoc_requests: null, price_rise_churn: 0.5, provenance: {}, ...extra,
+  builds: null, creative_sets: null, channels: null, adhoc_chance: null, adhoc_requests: null, price_rise_churn: 0.5, client_total: null, provenance: {}, ...extra,
 });
 const client = (id: string, service_ids: string[], extra: Partial<SetupClient> = {}): SetupClient => ({
   id, name: id, active: true, mrr: 0, start_date: null, health: null, notes: null, provenance: {}, service_ids, assignments: {}, channels: null, hand_holding_hours: null,

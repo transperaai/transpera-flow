@@ -45,6 +45,7 @@ export function capacitySetupFromModel(model: EngineModel, options: { payHidden?
     adhoc_chance: s.adhoc?.chance ?? null,
     adhoc_requests: s.adhoc?.requests ?? null,
     price_rise_churn: 0,
+    client_total: null,
     provenance: {},
   }));
   const roles: SetupRole[] = Object.entries(model.roles).map(([id, r]) => ({
