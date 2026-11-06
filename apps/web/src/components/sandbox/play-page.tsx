@@ -25,7 +25,7 @@ import {
 import { preparePlay } from "@transpera-flow/db/sandbox";
 import { ENGINE_VERSION, toRatingConfig } from "@transpera-flow/engine";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
-import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/page-kit";
 import { deleteCapacityChange, saveCapacityChange } from "@/app/w/[slug]/capacity-change-actions";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { today as todayIso, DEFAULT_FORECAST_MONTHS } from "@/lib/forecast/forecast";
@@ -106,7 +106,7 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
   };
   const renderMap = (runs: PlayRuns) =>
     map.bundle.steps.length ? (
-      <Card className="gap-0 overflow-hidden p-0" data-company-map>
+      <div className="overflow-hidden rounded-lg border" data-company-map>
         <ProcessCanvas
           // Opening a card changes the map's size: start again so it is framed whole.
           key={[...expanded].sort().join("|")}
@@ -124,9 +124,9 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
           onStepClick={scrollToStep}
           computing={runs.status === "running" && runs.changed === null}
         />
-      </Card>
+      </div>
     ) : (
-      <p className="text-sm text-muted-foreground">No process has been published yet.</p>
+      <EmptyState>No process has been published yet.</EmptyState>
     );
 
   const exportSlot = ({ runs, play }: { runs: PlayRuns; play: PlayState }) => <PlayExport live={live} runs={runs} play={play} ctx={ctx} solutions={solutions} start={start} canSeeMoney={canEdit} />;
@@ -160,14 +160,12 @@ function PlayExport({ live, runs, play, ctx, solutions, start, canSeeMoney }: { 
   const changed = runs.changed;
   const ready = runs.status === "done" && today && changed && changed.run.result.monthly && today.run.result.monthly;
   const columns: PrintColumn[] | null = ready
-    ? [
-        { name: "Today's path", monthly: today.run.result.monthly!, priceRise: null, changes: [] },
-        ...(playIsDefault(play) ? [] : [{ name: "Free play", monthly: changed.run.result.monthly!, priceRise: null, changes }]),
-      ]
+    ? [{ name: "Today's path", monthly: today.run.result.monthly!, priceRise: null, changes: [] }, ...(playIsDefault(play) ? [] : [{ name: "Free play", monthly: changed.run.result.monthly!, priceRise: null, changes }])]
     : null;
   const months = useMemo(() => (ready ? timelineMonths(start, changed.run.result.monthly!.months, changed.run.model.hoursPerWeek) : null), [ready, changed, start]);
   const exportCtx = useMemo(() => ({ bundle: live, solutions, changes: changes.map((e) => e.change), mix: {} as Record<string, number> }), [live, solutions, changes]);
-  const data: ExportData | null = ready && columns && months ? { columns, months, model: changed.run.model, categories: workspacePurposes(live.workspace.settings), currency: live.workspace.settings.currency, ctx: exportCtx } : null;
+  const data: ExportData | null =
+    ready && columns && months ? { columns, months, model: changed.run.model, categories: workspacePurposes(live.workspace.settings), currency: live.workspace.settings.currency, ctx: exportCtx } : null;
   const roleNames = useMemo(() => Object.fromEntries(Object.entries(changed?.run.model.roles ?? {}).map(([id, r]) => [id, r.name])), [changed]);
   const timingLine = ready && months ? capacityLine(capacityRunsOut(changed.run.result.monthly!, roleNames, cutoffs), months, horizonLabel(DEFAULT_FORECAST_MONTHS)) : null;
   return (
