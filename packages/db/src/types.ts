@@ -777,6 +777,8 @@ export interface CapacityServiceRow extends CapacityDeliverableColumns {
   tier_id: string | null;
   adhoc_chance: number | null;
   adhoc_requests: number | null;
+  /** The tier's total clients, typed in (Q13). Left out when not set: then the count is worked out as before. */
+  client_total?: number | null;
 }
 
 /** A named client's own values (`clients.<same names>`): each replaces its tier's; null uses the tier's. */

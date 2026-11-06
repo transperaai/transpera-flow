@@ -53,3 +53,14 @@ describe("links into Set up", () => {
     for (const l of links) expect(sectionsOf(l.page).has(l.anchor), `${l.file}: ${l.page}#${l.anchor}`).toBe(true);
   });
 });
+
+// D47: the Client health rules and the benchmark have no controls in Settings or Set up. The components and the engine defaults stay.
+describe("client health controls are hidden (D47)", () => {
+  it("the Settings page does not render the Client health rules", () => {
+    expect(readFileSync(join(SETTINGS, "page.tsx"), "utf8")).not.toContain("HealthSettings");
+  });
+  it("Set up, Tiers & clients does not render the benchmark or the other-services editor (D46)", () => {
+    const tiers = readFileSync(join(SRC, "components/setup/tiers-clients.tsx"), "utf8");
+    for (const gone of ["ClientHealthBenchmark", "ClientGroupsSettings", "ServicesSettings", "other-services\"" ]) expect(tiers, gone).not.toContain(gone);
+  });
+});

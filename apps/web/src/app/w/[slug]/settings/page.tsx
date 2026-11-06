@@ -10,7 +10,6 @@ import { DemandSettings } from "./demand-settings";
 import { MarketSettings } from "./market-settings";
 import { SimulationSettings } from "./people-settings";
 import { SettingsSection } from "./section";
-import { HealthSettings } from "./servicing-settings";
 import { saveOverheadMonthly } from "./actions";
 import { saveWorkspaceCurrency, saveWorkspaceName } from "./workspace-actions";
 import { WorkspaceDetails } from "./workspace-details";
@@ -56,13 +55,12 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
         <LinkRows
           label="Set up pages"
           items={[
-            { href: `/w/${slug}/setup/clients`, title: "Tiers & clients", description: "Services (pricing, entry process, servicing steps, path tags), tiers, counted clients, named clients and the client health benchmark." },
+            { href: `/w/${slug}/setup/clients`, title: "Tiers & clients", description: "Tiers (pricing, entry process, servicing steps, path tags), tier client counts and optional named clients." },
             { href: `/w/${slug}/setup/people`, title: "People & roles", description: "Roles, shared teams, people (hours, leave, skills, dates, per-person times), salaries and portfolios." },
           ]}
         />
       </SettingsSection>
       <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} history={history} />
-      <HealthSettings data={data} />
       <DemandSettings data={data} />
       <MarketSettings data={data} />
     </SettingsPage>

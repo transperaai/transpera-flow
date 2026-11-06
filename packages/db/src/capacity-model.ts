@@ -182,6 +182,7 @@ export function engineTierClientGroups(
   ctx: TierContext,
   rows: readonly ClientGroupRow[],
   services: Record<string, EngineService>,
+  namedOn: (serviceId: string) => number = () => 0,
 ): Record<string, EngineClientGroup> | undefined {
   const groups: Record<string, EngineClientGroup> = {};
   for (const sid of Object.keys(services).sort()) {
@@ -189,10 +190,13 @@ export function engineTierClientGroups(
     // Everyone's portfolio counts, whether or not they are on the team on the start date (as Set up's own count does, `tierCount`).
     const held = ctx.cap.portfolio.filter((r) => r.service_id === sid && Number.isFinite(r.client_count) && r.client_count > 0).reduce((sum, r) => sum + r.client_count, 0);
     const isTier = ctx.tierServices.has(sid);
-    if (!row && !(isTier && held > 0)) continue;
+    // A typed tier total (Q13): the counted clients nobody holds are total - named - portfolios, so the group's count is the portfolios plus
+    // that remainder. "Over" (named + portfolios more than the total) has no negative remainder: the portfolios are used as they are.
+    const total = isTier ? finite(ctx.tierServices.get(sid)!.client_total) : null;
+    if (!row && !(isTier && held > 0) && !(total !== null && total > 0)) continue;
     const sv = services[sid]!;
     groups[sid] = {
-      count: (row ? Number(row.client_count) : 0) + (isTier ? held : 0),
+      count: total !== null ? held + Math.max(0, total - namedOn(sid) - held) : (row ? Number(row.client_count) : 0) + (isTier ? held : 0),
       fee: row ? Number(row.fee) : sv.price,
       churnMonthly: row ? Number(row.churn_monthly) : sv.churnMonthly,
       stayMonths: row ? Number(row.stay_months) : sv.tenureMonths,

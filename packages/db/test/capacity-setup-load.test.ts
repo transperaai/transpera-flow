@@ -100,7 +100,7 @@ describe("the engine's model before and after a service becomes a tier", () => {
     // makes it a tier workspace, and what is keyed reaches the engine (test/capacity-mapping.test.ts has the row-by-row mapping).
     const dept = (await q("select id from departments where workspace_id = $1 order by sort limit 1", [ws]))[0]!.id as string;
     const tier = (await q("insert into tiers (workspace_id, key, name) values ($1, 'T1', 'Tier 1') returning id", [ws]))[0]!.id as string;
-    await q("update services set department_id = $2, tier_id = $3, words = 4000, links = 8, adhoc_chance = 0.9, adhoc_requests = 6.5, price_rise_churn = 0.75 where id = (select id from services where workspace_id = $1 order by id limit 1)", [ws, dept, tier]);
+    await q("update services set department_id = $2, tier_id = $3, words = 4000, links = 8, adhoc_chance = 0.9, adhoc_requests = 6.5, price_rise_churn = 0.75, client_total = 30 where id = (select id from services where workspace_id = $1 order by id limit 1)", [ws, dept, tier]);
     const people = await q("select id from people where workspace_id = $1 order by id", [ws]);
     await q("update people set salary_monthly = 7500, reserved_share = 0.3, label = 'contractor', ramp = '[0.5, 0.75]' where id = $1", [people[0]!.id]);
     const svc = (await q("select id from services where tier_id = $1 limit 1", [tier]))[0]!.id as string;
@@ -117,6 +117,10 @@ describe("the engine's model before and after a service becomes a tier", () => {
     expect(tiered).toHaveLength(1);
     expect(tiered[0]).toMatchObject({ department: dept, deliverables: { words: 4000, links: 8 } });
     expect(after.placeNewClients).toBe("least-busy");
+    // Q13: the typed total of 30 reaches the engine as the portfolio (4) plus the counted remainder (30 - named - 4).
+    const tierId = Object.entries(after.services as Record<string, { tier?: string }>).find(([, x]) => x.tier === "T1")![0];
+    const namedOnIt = (await q("select count(*)::int as n from client_services cs join clients c on c.id = cs.client_id where cs.service_id = $1 and c.active", [tierId]))[0]!.n as number;
+    expect((after.clientGroups as Record<string, { count: number }>)[tierId]!.count).toBe(4 + Math.max(0, 30 - namedOnIt - 4));
     expect(Object.values(after.people as Record<string, { reservedShare?: number; tiers?: string[] }>).find((p) => p.reservedShare === 0.3)?.tiers).toEqual(["T1"]);
     // Everything the Set up data doesn't reach is the snapshot's.
     expect(after.horizonWeeks).toBe(before.horizonWeeks);
