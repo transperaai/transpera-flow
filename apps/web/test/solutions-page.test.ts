@@ -214,7 +214,7 @@ describe("(i) help on every control", () => {
   });
 
   it("shows an (i) beside each, in the screens that use it", () => {
-    const src = [read("components/solutions/solution-cards.tsx"), read("components/solutions/solutions-list.tsx"), read("components/solutions/solution-page.tsx"), read("components/solutions/solution-compare.tsx")].join("\n");
+    const src = [read("components/solutions/solution-cards.tsx"), read("components/solutions/solutions-list.tsx"), read("components/solutions/new-solution.tsx"), read("components/solutions/solution-page.tsx"), read("components/solutions/solution-compare.tsx")].join("\n");
     for (const [name, set] of Object.entries(sets)) {
       for (const key of Object.keys(set)) {
         // Spread into an (i), or handed to the placeholder sections, which draw one.
@@ -250,7 +250,7 @@ describe("(i) help on every control", () => {
     for (const t of ["Live vs this solution", "Measures", "MRR over time", "Market stress test", "Result", "Key number", "Projection"]) expect(compare).toContain(t);
     const cards = read("components/solutions/solution-cards.tsx");
     for (const t of ["Solves", "Open", "✎ New solution on", "Not linked to an issue yet", "Changes"]) expect(cards).toContain(t);
-    expect(read("components/solutions/solutions-list.tsx")).toContain("✎ New solution");
+    expect(read("components/solutions/new-solution.tsx")).toContain("✎ New solution");
   });
 
   it("builds the four places slice 1 marked, off the main thread", () => {

@@ -4,6 +4,7 @@
 // banner, the hint for the mode, and the buttons that save. Publish and Discard ask first (issue #104).
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { StepRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
@@ -42,6 +43,8 @@ export interface SolutionForm {
   saving: boolean;
   /** What went wrong with the last save, in plain English. */
   error: string | null;
+  /** Set when the save was refused for want of an issue (Q12): where "Edit the process instead" and "Save as a block" go. */
+  refusedWithout: { processHref: string; blockHref: string } | null;
 }
 
 const COMPANY_TITLE = "Draft of the company map";
@@ -331,9 +334,23 @@ export function EditorBar({
             <Input value={solutionForm.name} maxLength={200} placeholder="Solution name" onChange={(e) => solutionForm.onName(e.target.value)} />
           </label>
           {solutionForm.error && (
-            <p role="alert" className="text-xs font-semibold text-crit">
-              {solutionForm.error}
-            </p>
+            <div role="alert" className="flex min-w-0 flex-1 flex-col gap-2 text-xs" data-solution-refused={solutionForm.refusedWithout ? "" : undefined}>
+              <p className="font-semibold text-crit">{solutionForm.error}</p>
+              {solutionForm.refusedWithout && (
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={solutionForm.refusedWithout.processHref} data-edit-process-instead>
+                      Edit the process instead
+                    </Link>
+                  </Button>
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={solutionForm.refusedWithout.blockHref} data-save-as-block>
+                      Save as a block
+                    </Link>
+                  </Button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

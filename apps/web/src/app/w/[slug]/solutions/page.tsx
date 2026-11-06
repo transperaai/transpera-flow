@@ -26,7 +26,7 @@ export default async function WorkspaceSolutionsPage(props: PageProps<"/w/[slug]
   const state = Object.keys(live).length === 0 ? await loadPublishState(slug) : null;
   return (
     <Page title="Solutions" hideHeader>
-      <SolutionsHeader count={state ? undefined : solutions.solutions.length} canEdit={canEdit} processes={processes.filter((p) => live[p.id])} base={base} />
+      <SolutionsHeader count={state ? undefined : solutions.solutions.length} canEdit={canEdit} processes={processes.filter((p) => live[p.id])} issues={issues} base={base} />
       {state ? (
         <NotPublished
           what="A solution is a changed copy of a published process, simulated against its issues."

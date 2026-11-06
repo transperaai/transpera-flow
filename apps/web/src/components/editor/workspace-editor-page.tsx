@@ -81,6 +81,8 @@ export async function WorkspaceEditorPage({
       sourcesHref={`/w/${slug}/sources`}
       settingsHref={`/w/${slug}/settings`}
       exitHref={exit}
+      processEditorHref={`${base}/edit?from=${encodeURIComponent(exit)}`}
+      blockEditorHref={`${base}/edit?mode=block&from=${encodeURIComponent(exit)}`}
       horizonMonths={parseHorizon(searchParams.horizon)}
       library={editorMode === "draft" ? library : undefined}
       tierSetup={tierSetup}

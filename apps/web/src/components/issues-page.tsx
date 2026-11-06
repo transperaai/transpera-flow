@@ -21,7 +21,9 @@ import { DEFAULT_LIST_STATE, LISTED_STATUSES, NO_SOLUTIONS, RATINGS_WORST_FIRST,
 import { STATUS_LABELS } from "@/lib/issues/register";
 import { STATUS_TONE } from "@/components/issues/status-pill";
 import { ClearFilters, FilterMenu, Toolbar, ToolbarSearch, type FilterOption } from "@/components/page-kit";
-import { NO_SOLUTIONS_DATA, solutionSummaries, type SolutionsData } from "@/lib/solutions/cards";
+import { NO_SOLUTIONS_DATA, solutionSummaries, solutionsListHref, type SolutionsData } from "@/lib/solutions/cards";
+import { startSolutionHref } from "@/lib/solutions/list";
+import { solutionEditorHref } from "@/lib/solutions/links";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { perceptionGapDetections } from "@/lib/issues/perception";
 import { useIssues } from "@/lib/issues/use-issues";
@@ -70,7 +72,10 @@ export function IssuesPage({
   // The filters are the URL's: Back and Forward change them, and so does a link.
   const params = useSearchParams();
   const filters = useMemo<ListState>(() => parseListState(Object.fromEntries(params.entries())), [params]);
-  const [newOpen, setNewOpen] = useState(false);
+  // "Log a new issue" on the Solutions list opens the Issues list with the New issue dialog already open (`?new=1`), and `then=solution`
+  // takes the person on to the Editor for the issue once it is saved (Q12: every solution starts from an issue).
+  const [newOpen, setNewOpen] = useState(!isReadOnly(mode) && params.get("new") === "1");
+  const thenSolution = params.get("then") === "solution";
 
   const setFilter = (next: ListState) => {
     // The filters are in the URL, so a link or a reload shows the same list.
@@ -237,7 +242,13 @@ export function IssuesPage({
         busy={state.busy}
         error={state.error}
         onClose={() => setNewOpen(false)}
-        onSubmit={(draft) => state.save(toSaveInput(draft, options))}
+        onSubmit={async (draft) => {
+          const saved = await state.save(toSaveInput(draft, options));
+          if (saved && thenSolution) {
+            router.push(startSolutionHref(base, saved, solutionsListHref(base)) ?? solutionEditorHref(base, bundle.process.id, { issueId: saved.id, from: solutionsListHref(base) }));
+          }
+          return saved;
+        }}
       />
     </div>
   );

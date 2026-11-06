@@ -5,7 +5,7 @@
 export const SOLUTIONS_LIST_HELP = {
   newSolution: {
     label: "New solution",
-    description: "Opens the Editor on a copy of a process. Change the steps, simulate, and save it as a solution. The live map and its draft don't change, and you can link the solution to issues afterwards.",
+    description: "First pick the open issue it is for, or log a new one. Then the Editor opens on a copy of that issue's process: change the steps, simulate, and save it as a solution. The live map and its draft don't change.",
     example: "Try an AI lead check before the sales call, save it as “AI lead qualifier”, and compare it with live.",
   },
   changes: {
