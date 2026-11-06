@@ -20,6 +20,7 @@ import {
   type TierField,
 } from "@transpera-flow/db";
 import type { ClientRow, ClientAssignmentRow, ClientServiceRow } from "@transpera-flow/db";
+import { EmptyState, Toolbar } from "@/components/page-kit";
 import { SettingsSection } from "@/app/w/[slug]/settings/section";
 import { ServiceMore } from "@/app/w/[slug]/settings/services-settings";
 import { ServicesSettings } from "@/app/w/[slug]/settings/services-settings";
@@ -123,26 +124,28 @@ function TierControls({ setup }: { setup: CapacitySetup }) {
       setError(r.error);
     });
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-2">
-        {setup.canEdit && (
-          <Button type="button" size="sm" disabled={pending} onClick={() => run(() => addTierAction(setup.workspaceId))}>
-            + Add a tier
-          </Button>
-        )}
-        {setup.canEdit && setup.tiers.length > 3 && last && (
-          <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => run(() => removeTierAction(last.id))}>
-            Remove {last.key}
-          </Button>
-        )}
-        <span className="text-xs text-fg-2">A new tier starts as a copy of the last one. Tiers are shared by both departments.</span>
-      </div>
+    <div className="flex flex-col gap-2">
+      <Toolbar label="Tiers">
+        <span className="text-sm text-fg-2">A new tier starts as a copy of the last one. Tiers are shared by both departments.</span>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {setup.canEdit && setup.tiers.length > 3 && last && (
+            <Button type="button" variant="outline" disabled={pending} onClick={() => run(() => removeTierAction(last.id))}>
+              Remove {last.key}
+            </Button>
+          )}
+          {setup.canEdit && (
+            <Button type="button" disabled={pending} onClick={() => run(() => addTierAction(setup.workspaceId))}>
+              + Add a tier
+            </Button>
+          )}
+        </div>
+      </Toolbar>
       {error && (
         <p role="alert" className="text-crit">
           {error}
         </p>
       )}
-      {setup.tiers.length === 0 && <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">No tiers yet. Add the first one, then fill in what a client of the tier gets.</p>}
+      {setup.tiers.length === 0 && <EmptyState>No tiers yet. Add the first one, then fill in what a client of the tier gets.</EmptyState>}
     </div>
   );
 }
@@ -328,7 +331,11 @@ function NamedClients({ setup, data, roster }: { setup: CapacitySetup; data: Wor
       title="Named clients"
       description={`Blank = use the tier's value. Hand-holding is unplanned time each month: reassurance, extra calls, same-day turnarounds. Any tier can have named clients. ${clientsRuleSentence(clientSources(data.processes, data.services, data.clientGroups))}`}
     >
-      {setup.canEdit && <AddNamedClient setup={setup} />}
+      {setup.canEdit && (
+        <Toolbar label="Add a named client">
+          <AddNamedClient setup={setup} />
+        </Toolbar>
+      )}
       <Table>
         <TableHeader>
           <TableRow>

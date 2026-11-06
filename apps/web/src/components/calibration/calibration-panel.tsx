@@ -14,7 +14,7 @@ import { PERSON_TIME_KINDS, personValues, type ImportKind } from "@transpera-flo
 import { ImportWizard, type ImportReady } from "@/components/calibration/import-wizard";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { SectionCard } from "@/components/page-kit";
 import { NativeSelect } from "@/components/ui/native-select";
 import { groupByPerson, initiallyTickedFactor, selectableFactor, type PersonTimesSetup } from "@/lib/calibration/person-times";
 import { factorWords } from "@/lib/people";
@@ -169,14 +169,11 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
 
   return (
     <div className="flex flex-col gap-6">
-      <Card role="region" aria-labelledby="cal-process-heading">
-        <CardHeader>
-          <h2 id="cal-process-heading" className="font-heading text-base font-medium">
-            1. Choose the process
-          </h2>
-          <CardDescription>The log is read against this process&apos;s steps, by their names.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-2">
+      <SectionCard
+ id="cal-process"
+ title={<>1. Choose the process</>}
+ description={<>The log is read against this process&apos;s steps, by their names.</>}
+>
           <label className="flex max-w-md flex-col gap-1">
             <HelpLabel
               label="Process"
@@ -202,20 +199,14 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
               This process has a draft. The log is compared with the draft, and changes you apply are added to it.
             </p>
           )}
-        </CardContent>
-      </Card>
+        </SectionCard>
 
-      <Card role="region" aria-labelledby="cal-log-heading">
-        <CardHeader>
-          <h2 id="cal-log-heading" className="font-heading text-base font-medium">
-            2. Add the log
-          </h2>
-          <CardDescription>
-            A stage history (one row for each item at each step it went through), deals from your CRM, or time logs: a CSV file, or rows pasted from a
-            spreadsheet. It is read in your browser. Only its name, its columns and counts are kept, not the rows.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      <SectionCard
+ id="cal-add"
+ title={<>2. Add the log</>}
+ description={<>A stage history (one row for each item at each step it went through), deals from your CRM, or time logs: a CSV file, or rows pasted from a
+            spreadsheet. It is read in your browser. Only its name, its columns and counts are kept, not the rows.</>}
+>
           <ImportWizard
             id="cal-log"
             kinds={KINDS}
@@ -231,23 +222,18 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
               Measuring…
             </p>
           )}
-        </CardContent>
-      </Card>
+        </SectionCard>
 
       {read && <LogSummary read={read} />}
 
       {read?.result && (
-        <Card role="region" aria-labelledby="cal-diff-heading">
-          <CardHeader>
-            <h2 id="cal-diff-heading" className="font-heading text-base font-medium">
-              3. Check the changes
-            </h2>
-            <CardDescription>
-              What the log measured, beside what {process.name} has now. Tick the ones to apply. Values you entered or measured before are never
-              ticked for you. Fewer than {read.result.minSample} items is too few to measure, so nothing is proposed.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-6">
+        <SectionCard
+ id="cal-diff"
+ title={<>3. Check the changes</>}
+ description={<>What the log measured, beside what {process.name} has now. Tick the ones to apply. Values you entered or measured before are never
+              ticked for you. Fewer than {read.result.minSample} items is too few to measure, so nothing is proposed.</>}
+ contentClassName="gap-6"
+>
             {groups.map((g) => (
               <ProposalGroup
                 key={g.kind}
@@ -318,18 +304,14 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
                 )}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </SectionCard>
       )}
 
       {props.history.length > 0 && (
-        <Card role="region" aria-labelledby="cal-history-heading">
-          <CardHeader>
-            <h2 id="cal-history-heading" className="font-heading text-base font-medium">
-              Earlier logs for {process.name}
-            </h2>
-          </CardHeader>
-          <CardContent>
+        <SectionCard
+ id="cal-history"
+ title={<>Earlier logs for {process.name}</>}
+>
             <ul className="flex flex-col divide-y divide-line text-sm">
               {props.history.map((h) => (
                 <li key={h.id} className="flex flex-wrap justify-between gap-x-4 gap-y-1 py-2">
@@ -342,8 +324,7 @@ export function CalibrationPanel(props: CalibrationPanelProps) {
                 </li>
               ))}
             </ul>
-          </CardContent>
-        </Card>
+          </SectionCard>
       )}
     </div>
   );

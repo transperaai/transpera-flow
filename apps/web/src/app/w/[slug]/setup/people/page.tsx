@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { loadCapacitySetup } from "@transpera-flow/db";
-import { Page } from "@/components/shell/page";
+import { SettingsPage } from "@/components/settings/settings-page";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { PeopleAndRoles } from "@/components/setup/people-roles";
 import { loadWorkspaceSettings } from "@/lib/data";
@@ -14,7 +14,7 @@ export default async function SetupPeoplePage(props: PageProps<"/w/[slug]/setup/
   const setup = await loadCapacitySetup(await getDb(), data.workspace.id);
   if (!setup) notFound();
   return (
-    <Page
+    <SettingsPage
       title="People & roles"
       eyebrow="Set up"
       description="Who works here, their hours, their team time and their portfolio. Portfolios are named clients plus a count per tier. Agency admins and the Owner can change this; everyone can read it."
@@ -22,6 +22,6 @@ export default async function SetupPeoplePage(props: PageProps<"/w/[slug]/setup/
     >
       <PhoneNotice />
       <PeopleAndRoles setup={setup} data={data} />
-    </Page>
+    </SettingsPage>
   );
 }

@@ -1,10 +1,11 @@
+import { Users } from "lucide-react";
 import { notFound } from "next/navigation";
+import { EmptyState, SectionCard } from "@/components/page-kit";
 import { Help } from "@/components/help";
-import { Page } from "@/components/shell/page";
+import { SettingsPage } from "@/components/settings/settings-page";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { selectablePeople } from "@/lib/access";
@@ -60,7 +61,7 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
   }
 
   return (
-    <Page
+    <SettingsPage
       title="Access"
       eyebrow="Company"
       description="People get in by signing in with Google. Nobody is emailed. Changes apply on their next page load."
@@ -79,16 +80,15 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
 
         {signInView && <WhoCanSignIn slug={slug} view={signInView} />}
 
-        <Card role="region" aria-labelledby="members-heading">
-          <CardHeader>
-            <h2 id="members-heading" className="font-heading text-base font-medium">
-              People in this workspace
-            </h2>
-            <CardDescription>
-              Everyone who can sign in is added to every workspace, as an Agency admin or a Viewer, the next time they sign in. Change who can sign in, and as what, in the list above.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+        <div role="region" aria-labelledby="members-heading">
+        <SectionCard
+          id="members"
+          title="People in this workspace"
+          description="Everyone who can sign in is added to every workspace, as an Agency admin or a Viewer, the next time they sign in. Change who can sign in, and as what, in the list above."
+        >
+          {members.length === 0 ? (
+            <EmptyState icon={Users}>Nobody has signed in yet.</EmptyState>
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -108,13 +108,6 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {members.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-muted-foreground">
-                      Nobody has signed in yet.
-                    </TableCell>
-                  </TableRow>
-                )}
                 {members.map((m) => {
                   const you = m.userId === userId;
                   return (
@@ -143,9 +136,10 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
                 })}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
+          )}
+        </SectionCard>
+        </div>
       </PhoneReadOnly>
-    </Page>
+    </SettingsPage>
   );
 }

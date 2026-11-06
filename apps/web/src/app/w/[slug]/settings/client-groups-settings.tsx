@@ -5,6 +5,7 @@ import type { ClientGroupRow, ServiceRow } from "@transpera-flow/db";
 import { NumberField } from "@/components/fields";
 import { Help, type HelpProps } from "@/components/help";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EmptyState } from "@/components/page-kit";
 import { SettingsSection } from "./section";
 import type { WorkspaceSettingsData } from "@/lib/data";
 import { newGroupDefaults, MAX_GROUP_COUNT, type ClientGroupField } from "@/lib/client-groups";
@@ -89,7 +90,7 @@ export function ClientGroupsSettings({ data, onlyServiceIds, benchmark = true }:
       description="Clients are counted per service rather than named. The simulation creates unnamed clients from these numbers, so late work still affects health and churn."
     >
       {services.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">Add a service above, then count its clients here.</p>
+        <EmptyState>Add a service above, then count its clients here.</EmptyState>
       ) : (
         <div className="overflow-x-auto">
           <Table>

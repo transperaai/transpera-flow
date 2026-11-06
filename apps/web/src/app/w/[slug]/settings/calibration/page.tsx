@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { CalibrationPanel } from "@/components/calibration/calibration-panel";
 import { createProcess } from "@/app/w/[slug]/process-actions";
 import { NotPublished } from "@/components/shell/not-published";
-import { Page } from "@/components/shell/page";
+import { SettingsPage } from "@/components/settings/settings-page";
 import { buttonVariants } from "@/components/ui/button";
 import { canEditWorkspace } from "@/lib/access-data";
 import { ClientCalibrationPanel } from "@/components/calibration/client-calibration-panel";
@@ -38,12 +38,12 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
   ]);
   const mode = canEdit ? "live" : "readonly";
   return (
-    <Page
+    <SettingsPage
       title="Historical data"
       eyebrow="Company"
       description="Import past data, check it, compare it with the model, and apply the changes you choose."
       actions={
-        <Link href={`/w/${slug}/settings`} className={buttonVariants({ variant: "outline", size: "sm" })}>
+        <Link href={`/w/${slug}/settings`} className={buttonVariants({ variant: "outline" })}>
           Settings
         </Link>
       }
@@ -85,6 +85,6 @@ export default async function CalibrationPage(props: PageProps<"/w/[slug]/settin
       <OtherImportsPanel mode={mode} workspaceId={workspaceId} leadSources={leadSources} previous={imports.previous} />
       <ImportsHistory imports={imports.imports} leadSources={leadSources} />
       </PhoneReadOnly>
-    </Page>
+    </SettingsPage>
   );
 }

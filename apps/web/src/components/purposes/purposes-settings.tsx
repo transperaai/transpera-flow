@@ -17,7 +17,8 @@ import {
   type PurposeCategory,
 } from "@transpera-flow/db";
 import { Help } from "@/components/help";
-import { Page } from "@/components/shell/page";
+import { SectionCard } from "@/components/page-kit";
+import { SettingsPage } from "@/components/settings/settings-page";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { ConfirmDialog } from "@/components/sandbox/scenario-bar";
 import { Button } from "@/components/ui/button";
@@ -141,7 +142,7 @@ export function PurposesSettings({
   };
 
   return (
-    <Page
+    <SettingsPage
       title="Purposes"
       eyebrow="Settings"
       description="What the work of each step achieves. A step's purpose is set in the editor; Automatic uses the process: sales pipelines are Winning work up to and including the step that decides the sale, and everything after it, and client work, move the client's job forward."
@@ -150,10 +151,10 @@ export function PurposesSettings({
           <span role="status" aria-live="polite" className="text-xs text-muted-foreground" data-save-status>
             {status.kind === "saving" ? "Saving…" : status.kind === "saved" ? "Saved" : dirty && canEdit ? "Not saved yet" : ""}
           </span>
-          <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry disabled={!canEdit || same(list, DEFAULT_PURPOSES as PurposeCategory[])} onClick={reset}>
+          <Button variant="outline" className={EDIT_ONLY} data-edit-entry disabled={!canEdit || same(list, DEFAULT_PURPOSES as PurposeCategory[])} onClick={reset}>
             Reset to the defaults
           </Button>
-          <Button size="sm" className={EDIT_ONLY} data-edit-entry disabled={!canEdit || !dirty || problem !== null || status.kind === "saving"} onClick={() => void submit(base)}>
+          <Button className={EDIT_ONLY} data-edit-entry disabled={!canEdit || !dirty || problem !== null || status.kind === "saving"} onClick={() => void submit(base)}>
             Save
           </Button>
         </>
@@ -203,6 +204,7 @@ export function PurposesSettings({
             {problem}
           </p>
         )}
+        <SectionCard id="categories" title="Categories" description="The order here is the order in the Sandbox's charts and tables.">
         <ol className="flex flex-col gap-2" data-purposes-list>
           {list.map((c, i) => {
             const n = use[c.key] ?? 0;
@@ -270,9 +272,10 @@ export function PurposesSettings({
             />
           </span>
         </div>
+        </SectionCard>
         {children}
       </PhoneReadOnly>
       {confirm ? <ConfirmDialog title={confirm.title} description={confirm.description} confirm={confirm.confirm} cancel="Cancel" destructive onConfirm={confirm.onConfirm} onCancel={() => setConfirm(null)} /> : null}
-    </Page>
+    </SettingsPage>
   );
 }

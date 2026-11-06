@@ -14,7 +14,7 @@ import type { ImportKind } from "@transpera-flow/db/csv-import";
 import { ImportWizard, type ImportReady } from "@/components/calibration/import-wizard";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { SectionCard } from "@/components/page-kit";
 import { Input } from "@/components/ui/input";
 import { progressText, type ChurnJob } from "@/lib/calibration/backsolve";
 import { CHECK_LABELS, CHECK_ORDER, CHURN_HELP, localDateText, applySummary, formatAsOf, formatChurn, formatCheckValue, formatMultiplier, initiallySelected, selectable } from "@/lib/calibration/client-view";
@@ -195,18 +195,14 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
   const noGroupsAtAll = services.length > 0 && services.every((s) => !s.group);
 
   return (
-    <Card role="region" aria-labelledby="cc-heading">
-      <CardHeader>
-        <h2 id="cc-heading" className="font-heading text-base font-medium">
-          Clients and servicing work
-        </h2>
-        <CardDescription>
-          Add a clients file to measure each service&apos;s normal churn, and a servicing log to check how late work, response times and onboarding in the
+    <SectionCard
+ id="cc"
+ title={<>Clients and servicing work</>}
+ description={<>Add a clients file to measure each service&apos;s normal churn, and a servicing log to check how late work, response times and onboarding in the
           simulation compare with what happened. Both are read in your browser. Only their names, columns and the results are kept: never the rows or
-          client ids.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-6">
+          client ids.</>}
+ contentClassName="gap-6"
+>
         <div className="flex flex-col gap-6">
           <div className="flex min-w-0 flex-col gap-3">
             <h3 className="flex items-center text-sm font-semibold">
@@ -406,8 +402,7 @@ export function ClientCalibrationPanel(props: ClientCalibrationPanelProps) {
             </ul>
           </section>
         )}
-      </CardContent>
-    </Card>
+      </SectionCard>
   );
 }
 

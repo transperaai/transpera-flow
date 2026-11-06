@@ -7,6 +7,7 @@
 
 import { Fragment, useState } from "react";
 import { formatRamp, missingForCapacity, sourceLabel, type CapacitySetup, type SetupPerson, type SetupRole } from "@transpera-flow/db";
+import { Toolbar } from "@/components/page-kit";
 import { SettingsSection } from "@/app/w/[slug]/settings/section";
 import { AddRole, RoleMore } from "@/app/w/[slug]/settings/roles-settings";
 import { AddPerson, PersonMore } from "@/app/w/[slug]/settings/people-settings";
@@ -45,7 +46,11 @@ function RolesTable({ setup, data }: { setup: CapacitySetup; data: WorkspaceSett
   const noUnit = new Set(missing.filter((m) => m.kind === "shared_role_unit").map((m) => m.id));
   return (
     <SettingsSection id="roles" title="Roles" description="Kinds of work. Steps, people and client assignments name roles. A role that is in use can't be removed; make it inactive to hide it from pickers.">
-      {canEdit && <AddRole workspaceId={setup.workspaceId} />}
+      {canEdit && (
+        <Toolbar label="Add a role">
+          <AddRole workspaceId={setup.workspaceId} />
+        </Toolbar>
+      )}
       <Table>
         <TableHeader>
           <TableRow>
@@ -217,7 +222,11 @@ function PeopleTable({ setup, data }: { setup: CapacitySetup; data: WorkspaceSet
       title="People"
       description={showSalary ? "Salary counts toward DLER, directors and managers included. Contractors don't." : "Your record. Agency admins see the whole team."}
     >
-      {canEdit && <AddPerson data={data} />}
+      {canEdit && (
+        <Toolbar label="Add a person">
+          <AddPerson data={data} />
+        </Toolbar>
+      )}
       <Table>
         <TableHeader>
           <TableRow>

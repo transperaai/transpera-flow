@@ -6,6 +6,7 @@ import { NumberField, TextField } from "@/components/fields";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/page-kit";
 import { SettingsSection } from "./section";
 import type { WorkspaceSettingsData } from "@/lib/data";
 import {
@@ -87,10 +88,10 @@ export function DemandSettings({ data }: { data: WorkspaceSettingsData }) {
       <h3 className="mb-2 font-semibold">Lead sources</h3>
       {canEdit && <AddLeadSource workspaceId={data.workspace.id} />}
       {leadSources.length === 0 ? (
-        <p className="mb-6 rounded-lg border border-dashed border-line p-4 text-fg-2">
+        <EmptyState className="mb-6">
           No lead sources yet. Until you add one, simulations use {formatNumber(data.workspace.settings.leads_per_week, 2)}{" "}
           leads a week.
-        </p>
+        </EmptyState>
       ) : (
         <ul className="mb-6 flex flex-col divide-y divide-line border-y border-line">
           {leadSources.map((src) => (

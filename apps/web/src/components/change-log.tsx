@@ -1,4 +1,6 @@
+import { History } from "lucide-react";
 import type { CompanyModel } from "@transpera-flow/db";
+import { EmptyState, SectionCard } from "@/components/page-kit";
 import { describeAuditEntry, type AuditEntry } from "@/lib/change-log/audit";
 
 const when = (iso: string) =>
@@ -7,17 +9,17 @@ const when = (iso: string) =>
 /** Recent company-model writes from the audit log (owners and agency admins): Settings -> Change log. */
 export function ChangeLog({ entries, model, people, stepNames }: { entries: AuditEntry[]; model: CompanyModel; people: Record<string, string>; stepNames: Record<string, string> }) {
   return (
-    <section aria-labelledby="changes-heading">
-      <h2 id="changes-heading" className="mb-1 text-base font-bold">
-        Recent changes to the company model
-      </h2>
-      <p className="mb-2 text-fg-2">Every change to settings, services, people, clients and demand, made in the app. Only Agency admins and the Owner see this log.</p>
+    <SectionCard
+      id="changes"
+      title="Recent changes to the company model"
+      description="Every change to settings, services, people, clients and demand, made in the app. Only Agency admins and the Owner see this log."
+    >
       {entries.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">No changes yet.</p>
+        <EmptyState icon={History}>No changes yet.</EmptyState>
       ) : (
-        <ul className="flex flex-col divide-y divide-line rounded-lg border border-line bg-panel shadow-xs">
+        <ul className="-mx-2 flex flex-col divide-y divide-line">
           {entries.map((e) => (
-            <li key={e.id} className="flex flex-wrap gap-x-3 px-3 py-1.5 text-sm">
+            <li key={e.id} className="flex flex-wrap gap-x-3 px-2 py-2 text-sm">
               <span className="w-36 shrink-0 text-xs text-fg-3 tabular-nums">{when(e.created_at)}</span>
               <span className="w-48 shrink-0 truncate text-xs text-fg-2">
                 {e.actor_kind === "mcp" ? `Claude (API token of ${people[e.actor_id ?? ""] ?? "a user"})` : (people[e.actor_id ?? ""] ?? "Someone")}
@@ -28,6 +30,6 @@ export function ChangeLog({ entries, model, people, stepNames }: { entries: Audi
           ))}
         </ul>
       )}
-    </section>
+    </SectionCard>
   );
 }

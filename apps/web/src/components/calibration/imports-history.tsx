@@ -1,10 +1,11 @@
+import { FileUp } from "lucide-react";
 // Settings → Historical data, "Imports" (issue #40, C1): every file imported here, newest first: its kind, name, rows and date, the
 // columns that were matched, and what a leads or invoices file said. Earlier imports stay listed when a kind is imported again, and
 // their columns are offered next time; their rows are never kept. Everyone in the workspace sees it, and no one is named (#30).
 
 import { IMPORT_KINDS, type ImportDetails } from "@transpera-flow/db/csv-import";
 import { Help } from "@/components/help";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { EmptyState, SectionCard } from "@/components/page-kit";
 import type { ImportRecord } from "@/lib/calibration/import-data";
 import { formatNumber, formatPercent } from "@/lib/format";
 
@@ -41,20 +42,17 @@ function summaryText(details: ImportDetails | null, names: Map<string, string>):
 export function ImportsHistory({ imports, leadSources }: ImportsHistoryProps) {
   const names = new Map(leadSources.map((s) => [s.id, s.name]));
   return (
-    <Card role="region" aria-labelledby="imports-heading">
-      <CardHeader>
-        <h2 id="imports-heading" className="flex items-center font-heading text-base font-medium">
-          Imports
+    <SectionCard
+ id="imports"
+ title={<>Imports
           <Help
             label="Imports"
             description="Every file imported here, newest first. Importing a kind again adds a record and the earlier ones stay listed. Their columns are offered again next time. The rows are never kept, so an earlier import can't be run again."
             example="Importing deals again in March lists both files; the March import starts from the columns you chose in February."
-          />
-        </h2>
-      </CardHeader>
-      <CardContent>
+          /></>}
+>
         {imports.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing imported yet.</p>
+          <EmptyState icon={FileUp}>Nothing imported yet.</EmptyState>
         ) : (
           <ul className="flex flex-col divide-y divide-line text-sm">
             {imports.map((r) => {
@@ -76,7 +74,6 @@ export function ImportsHistory({ imports, leadSources }: ImportsHistoryProps) {
             })}
           </ul>
         )}
-      </CardContent>
-    </Card>
+      </SectionCard>
   );
 }
