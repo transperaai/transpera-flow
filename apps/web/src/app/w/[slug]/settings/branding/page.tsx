@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BrandingSettings } from "@/components/branding/branding-settings";
-import { Page } from "@/components/shell/page";
+import { SettingsPage } from "@/components/settings/settings-page";
 import { buttonVariants } from "@/components/ui/button";
 import { canManageWorkspace } from "@/lib/access-data";
 import { logoUrl, readBranding } from "@/lib/branding/branding";
@@ -21,12 +21,12 @@ export default async function BrandingSettingsRoute(props: PageProps<"/w/[slug]/
   const branding = readBranding(head.branding);
   const logoSha = await loadLogoSha(head.id);
   return (
-    <Page
+    <SettingsPage
       title="Branding"
       eyebrow="Settings"
       description="Make this workspace look like the client's: a logo and an accent colour. Changes save as you go."
       actions={
-        <Link href={`/w/${slug}/settings`} className={buttonVariants({ variant: "outline", size: "sm" })}>
+        <Link href={`/w/${slug}/settings`} className={buttonVariants({ variant: "outline" })}>
           Back to settings
         </Link>
       }
@@ -42,6 +42,6 @@ export default async function BrandingSettingsRoute(props: PageProps<"/w/[slug]/
         saveAccent={saveBrandAccent}
         removeLogo={removeWorkspaceLogo}
       />
-    </Page>
+    </SettingsPage>
   );
 }

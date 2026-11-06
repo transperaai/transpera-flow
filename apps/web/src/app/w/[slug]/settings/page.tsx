@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Page } from "@/components/shell/page";
+import { LinkRows } from "@/components/settings/link-rows";
+import { SettingsPage } from "@/components/settings/settings-page";
+import { SectionCard } from "@/components/page-kit";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
-import { buttonVariants } from "@/components/ui/button";
 import { loadLiveProcess, loadWorkspaceSettings } from "@/lib/data";
 import { loadLatestChecks } from "@/lib/calibration/client-data";
 import { ChurnDriversSettings } from "./churn-drivers-settings";
@@ -24,30 +24,23 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
   if (!data) notFound();
   const history = await loadLatestChecks(data.workspace.id);
   return (
-    <Page
+    <SettingsPage
       title="Settings"
       eyebrow="Company"
-      actions={
-        <>
-          <Link href={`/w/${slug}/settings/branding`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            Branding
-          </Link>
-          <Link href={`/w/${slug}/settings/purposes`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            Purposes
-          </Link>
-          <Link href={`/w/${slug}/settings/calibration`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            Historical data
-          </Link>
-          {data.canManage && (
-            <Link href={`/w/${slug}/settings/changes`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-              Change log
-            </Link>
-          )}
-        </>
-      }
       description="Changes save as you go. If someone else changes the same field at the same time, you'll be asked which value to keep."
     >
       <PhoneNotice />
+      <SectionCard id="more-settings" title="More settings" description="The rest of Settings has a page each.">
+        <LinkRows
+          label="Settings pages"
+          items={[
+            { href: `/w/${slug}/settings/branding`, title: "Branding", description: "A logo and an accent colour that make this workspace look like the client's." },
+            { href: `/w/${slug}/settings/purposes`, title: "Purposes", description: "The categories a step's \"What it achieves\" is chosen from." },
+            { href: `/w/${slug}/settings/calibration`, title: "Historical data", description: "Import past data, check it against the model and apply the changes you choose." },
+            ...(data.canManage ? [{ href: `/w/${slug}/settings/changes`, title: "Change log", description: "Who changed the company model, and what they changed." }] : []),
+          ]}
+        />
+      </SectionCard>
       <WorkspaceDetails
         workspaceId={data.workspace.id}
         name={data.workspace.name}
@@ -60,25 +53,18 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
       />
       <SimulationSettings data={data} />
       <SettingsSection id="services" title="Services, clients, roles and people" description="These moved to Set up, where the capacity figures' inputs are keyed in.">
-        <ul className="flex flex-col gap-1">
-          <li>
-            <Link href={`/w/${slug}/setup/clients`} className="text-accent underline-offset-4 hover:underline">
-              Tiers &amp; clients
-            </Link>
-            : services (pricing, entry process, servicing steps, path tags), tiers, counted clients, named clients and the client health benchmark.
-          </li>
-          <li>
-            <Link href={`/w/${slug}/setup/people`} className="text-accent underline-offset-4 hover:underline">
-              People &amp; roles
-            </Link>
-            : roles, shared teams, people (hours, leave, skills, dates, per-person times), salaries and portfolios.
-          </li>
-        </ul>
+        <LinkRows
+          label="Set up pages"
+          items={[
+            { href: `/w/${slug}/setup/clients`, title: "Tiers & clients", description: "Services (pricing, entry process, servicing steps, path tags), tiers, counted clients, named clients and the client health benchmark." },
+            { href: `/w/${slug}/setup/people`, title: "People & roles", description: "Roles, shared teams, people (hours, leave, skills, dates, per-person times), salaries and portfolios." },
+          ]}
+        />
       </SettingsSection>
       <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} history={history} />
       <HealthSettings data={data} />
       <DemandSettings data={data} />
       <MarketSettings data={data} />
-    </Page>
+    </SettingsPage>
   );
 }

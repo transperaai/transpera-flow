@@ -1,6 +1,8 @@
+import { Lock } from "lucide-react";
 import { notFound } from "next/navigation";
+import { EmptyState } from "@/components/page-kit";
 import { ChangeLog } from "@/components/change-log";
-import { Page } from "@/components/shell/page";
+import { SettingsPage } from "@/components/settings/settings-page";
 import { loadChangeLogPage } from "@/lib/company-data";
 
 /**
@@ -12,12 +14,12 @@ export default async function ChangeLogPage(props: PageProps<"/w/[slug]/settings
   const data = await loadChangeLogPage(slug);
   if (!data) notFound();
   return (
-    <Page title="Change log" eyebrow="Company" description="Who changed the company model, and what they changed.">
+    <SettingsPage title="Change log" eyebrow="Company" description="Who changed the company model, and what they changed.">
       {data.changes ? (
         <ChangeLog entries={data.changes} model={data.model} people={data.people} stepNames={data.stepNames} />
       ) : (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">Only Agency admins and the Owner can read the change log.</p>
+        <EmptyState icon={Lock}>Only Agency admins and the Owner can read the change log.</EmptyState>
       )}
-    </Page>
+    </SettingsPage>
   );
 }

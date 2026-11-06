@@ -7,6 +7,7 @@ import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { EmptyState, Toolbar } from "@/components/page-kit";
 import { SettingsSection } from "./section";
 import type { WorkspaceSettingsData } from "@/lib/data";
 import { mapOutcome, type SaveOutcome, type Saver } from "@/lib/fields/field-controller";
@@ -55,17 +56,19 @@ export function ServicesSettings({ data, tierServiceIds = new Set<string>() }: {
     <SettingsSection id="other-services" title={tierServiceIds.size ? "Other services" : "Services"} description={<>{tierServiceIds.size ? "Services that aren't a tier of a department. " : ""}What you sell. Each new lead is given a service from the mix, follows its path tags, and is priced by it
           when won.</>}>
       {canEdit ? (
-        <AddService workspaceId={data.workspace.id} />
+        <Toolbar label="Add a service">
+          <AddService workspaceId={data.workspace.id} />
+        </Toolbar>
       ) : (
-        <p className="mb-3 text-fg-2">You can view services here; Agency admins can change them.</p>
+        <p className="text-sm text-fg-2">You can view services here; Agency admins can change them.</p>
       )}
       {services.length === 0 && tierServiceIds.size > 0 ? (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">Every service is a tier of a department: edit them on the tier tables above.</p>
+        <EmptyState>Every service is a tier of a department: edit them on the tier tables above.</EmptyState>
       ) : services.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">
+        <EmptyState>
           No services yet. Until you add one, every win is priced at the workspace&apos;s retainer of{" "}
           {formatCurrency(data.workspace.settings.retainer, currency)} a month.
-        </p>
+        </EmptyState>
       ) : (
         <>
           {!mix && (

@@ -21,7 +21,7 @@ import {
 import { ImportWizard, type ImportReady } from "@/components/calibration/import-wizard";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { SectionCard } from "@/components/page-kit";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { recordDataset } from "@/app/w/[slug]/settings/calibration/actions";
@@ -86,17 +86,12 @@ export function OtherImportsPanel(props: OtherImportsPanelProps) {
   };
 
   return (
-    <Card role="region" aria-labelledby="co-heading">
-      <CardHeader>
-        <h2 id="co-heading" className="font-heading text-base font-medium">
-          Leads and invoices
-        </h2>
-        <CardDescription>
-          A leads file shows how many leads a week each lead source brings, beside what Settings has. An invoices file shows counts. Both are checks only: nothing
-          in the model changes. They are read in your browser. Only the file&apos;s name, its columns and counts are kept, not the rows.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+    <SectionCard
+ id="co"
+ title={<>Leads and invoices</>}
+ description={<>A leads file shows how many leads a week each lead source brings, beside what Settings has. An invoices file shows counts. Both are checks only: nothing
+          in the model changes. They are read in your browser. Only the file&apos;s name, its columns and counts are kept, not the rows.</>}
+>
         <ImportWizard
           id="cal-other"
           kinds={KINDS}
@@ -134,8 +129,7 @@ export function OtherImportsPanel(props: OtherImportsPanelProps) {
             {done.message}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </SectionCard>
   );
 }
 
