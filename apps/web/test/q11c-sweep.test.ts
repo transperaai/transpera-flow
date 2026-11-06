@@ -89,7 +89,7 @@ async function open(o: { call: string; arg: object; width?: number; scheme?: "li
   };
   await page.setContent(`<style>${css}</style><div id="root"></div>`);
   await page.evaluate(polyfill);
-  await page.evaluate(([w, d]) => ((window.workerScripts = w as never), (window.q11Data = d as never)), [workers, data] as const);
+  await page.evaluate(([w, d]) => ((window.workerScripts = w as never), (window.q11cData = d as never)), [workers, data] as const);
   await page.addScriptTag({ content: script });
   await page.evaluate(([call, arg]) => (window as never as Record<string, (a: unknown) => void>)[call as string]!(arg), [o.call, o.arg] as const);
   await page.waitForSelector(o.ready, { timeout: 120_000 });
@@ -110,24 +110,97 @@ const WIDTHS = [
 
 /** Every page this package touches: the name its screenshots have, what to mount and what shows it is drawn. */
 const PAGES = (): { name: string; call: string; arg: object; ready: string }[] => [
-  { name: "solutions-list", call: "mountSolutions", arg: { editor: true }, ready: "[data-solutions-list]" },
-  { name: "solutions-empty", call: "mountSolutions", arg: { editor: true, empty: true }, ready: "[data-solutions-list]" },
-  { name: "solution-page", call: "mountSolution", arg: { id: vettingSolutionId, editor: true }, ready: "[data-measure]" },
-  { name: "blocks-library", call: "mountBlocks", arg: { mode: "demo" }, ready: "[data-block]" },
-  { name: "blocks-empty", call: "mountBlocks", arg: { mode: "readonly" }, ready: "h1" },
-  { name: "history-process", call: "mountHistory", arg: { editor: true }, ready: "[data-version]" },
-  { name: "history-company", call: "mountHistory", arg: { editor: true, company: true }, ready: "[data-version]" },
-  { name: "issue-6", call: "mountIssue", arg: { number: 6, editor: true }, ready: "[data-testid=issue-header]" },
-  { name: "other-improvements-empty", call: "mountOther", arg: {}, ready: "[data-testid=solutions-empty]" },
-  { name: "sources", call: "mountSources", arg: { editor: true }, ready: "[data-source-row]" },
+  { name: "solutions-list", call: "q11cMountSolutions", arg: { editor: true }, ready: "[data-solutions-list]" },
+  { name: "solutions-empty", call: "q11cMountSolutions", arg: { editor: true, empty: true }, ready: "[data-solutions-list]" },
+  { name: "solution-page", call: "q11cMountSolution", arg: { id: vettingSolutionId, editor: true }, ready: "[data-measure]" },
+  { name: "blocks-library", call: "q11cMountBlocks", arg: { mode: "demo" }, ready: "[data-block]" },
+  { name: "blocks-empty", call: "q11cMountBlocks", arg: { mode: "readonly" }, ready: "h1" },
+  { name: "history-process", call: "q11cMountHistory", arg: { editor: true }, ready: "[data-version]" },
+  { name: "history-company", call: "q11cMountHistory", arg: { editor: true, company: true }, ready: "[data-version]" },
+  { name: "issue-6", call: "q11cMountIssue", arg: { number: 6, editor: true }, ready: "[data-testid=issue-header]" },
+  { name: "other-improvements-empty", call: "q11cMountOther", arg: {}, ready: "[data-testid=solutions-empty]" },
+  { name: "sources", call: "q11cMountSources", arg: { editor: true }, ready: "[data-source-row]" },
 ];
 
-describe("debug", () => {
-  it("solution page", async () => {
-    const { page, errors } = await open({ call: "mountSolution", arg: { id: vettingSolutionId, editor: true }, ready: "[data-solution-page]" });
-    await page.waitForTimeout(25000);
-    (await import("node:fs")).writeFileSync("/tmp/dbg.txt", JSON.stringify(errors) + (await page.locator("body").innerText()).slice(0, 4000));
-  }, 200_000);
+
+const pageOf = (name: string, o: { editor?: boolean; width?: number; scheme?: "light" | "dark" } = {}) => {
+  const p = PAGES().find((x) => x.name === name)!;
+  return open({ call: p.call, arg: { ...p.arg, ...(o.editor === undefined ? {} : { editor: o.editor }) }, width: o.width, scheme: o.scheme, ready: p.ready });
+};
+
+describe("Solutions list", () => {
+  it("has a header card, a toolbar and a card per solution with its status pill", async () => {
+    const { page, errors } = await pageOf("solutions-list");
+    const header = page.locator("[data-testid=solutions-header]");
+    expect(await header.locator("h1").innerText()).toBe("Solutions");
+    expect(await header.locator("[data-solutions-count]").innerText()).toBe("3 solutions");
+    expect(await header.locator("[data-page-actions]").getByText("✎ New solution").count()).toBe(1);
+    expect(await page.locator("[role=toolbar] [data-toolbar-search]").count()).toBe(1);
+    expect(await page.locator("[data-filter=status]").count()).toBe(1);
+    expect(await page.locator("[data-filter=process]").count()).toBe(1);
+    const cards = page.locator("[data-testid=solution-card]");
+    expect(await cards.count()).toBe(3);
+    const pills = await cards.evaluateAll((els) => els.map((e) => e.querySelector("[data-status]")?.getAttribute("data-status")));
+    expect(pills).not.toContain(undefined);
+    expect(pills).toContain("works");
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 300_000);
+
+  it("filters by status, by process and by search, and says so when nothing matches", async () => {
+    const { page } = await pageOf("solutions-list");
+    await page.locator("[data-filter=status]").click();
+    await page.locator("[data-filter-menu=status] [data-option=works]").check();
+    await page.keyboard.press("Escape");
+    expect(await page.locator("[data-testid=solution-card]").count()).toBe(1);
+    expect(await page.locator("[data-testid=solution-card]").innerText()).toContain("Vetting by a second person");
+    await page.locator("[data-clear-filters]").click();
+    expect(await page.locator("[data-testid=solution-card]").count()).toBe(3);
+    await page.getByRole("searchbox", { name: "Search solutions" }).fill("budget");
+    expect(await page.locator("[data-testid=solution-card]").count()).toBe(1);
+    await page.getByRole("searchbox", { name: "Search solutions" }).fill("zzzz");
+    expect(await page.locator("[data-testid=solutions-empty][data-filtered]").innerText()).toContain("No solutions match these filters.");
+    await page.locator("[data-testid=solutions-empty] [data-clear-filters]").click();
+    expect(await page.locator("[data-testid=solution-card]").count()).toBe(3);
+    await page.locator("[data-filter=process]").click();
+    const first = page.locator("[data-filter-menu=process] input[type=checkbox]").first();
+    await first.check();
+    expect(await page.locator("[data-testid=solution-card]").count()).toBeLessThan(3);
+    await page.close();
+  }, 300_000);
+
+  it("a reader gets no New solution button, and a list with nothing in it gets an empty state, not a dashed box", async () => {
+    const reader = await pageOf("solutions-list", { editor: false });
+    expect(await reader.page.getByText("✎ New solution").count()).toBe(0);
+    await reader.page.close();
+    const { page } = await pageOf("solutions-empty");
+    const empty = page.locator("[data-testid=solutions-empty]");
+    expect(await empty.innerText()).toContain("No solutions yet");
+    expect(await empty.evaluate((e) => getComputedStyle(e).borderStyle)).not.toBe("dashed");
+    expect(await page.locator("[role=toolbar]").count()).toBe(0);
+    await page.close();
+  }, 300_000);
+});
+
+describe("Solution page", () => {
+  it("is a header and then section cards in reading order", async () => {
+    const { page, errors } = await pageOf("solution-page");
+    const ids = await page.locator("[data-solution-page] [id][data-section]").evaluateAll((els) => els.map((e) => e.id));
+    expect(ids).toEqual(["solves", "compare", "measures", "mrr", "stress", "notes"]);
+    expect(await page.locator("#solves [data-solves-card]").count()).toBe(1);
+    expect(await page.locator("#compare [data-map-side]").count()).toBe(2);
+    expect(await page.locator("#measures [data-measure]").count()).toBeGreaterThan(2);
+    expect(await page.locator("#notes [data-reminder]").innerText()).toContain("Solutions never change the live map");
+    for (const id of ids) expect(await page.locator(`#${id} [role=heading][aria-level="2"]`).count()).toBe(1);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 300_000);
+
+  it("shows the empty state, as a card, for a solution with no linked issue", async () => {
+    const { page } = await pageOf("solution-page");
+    expect(await page.locator("#solves [data-edit-entry] [data-link-issue]").innerText()).toBe("+ Link an issue");
+    await page.close();
+  }, 300_000);
 });
 
 describe("screenshots", () => {

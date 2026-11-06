@@ -7,7 +7,7 @@ import { HistoryPage } from "@/components/history/history-page";
 import { IssuePage } from "@/components/issues/issue-page";
 import { SolutionCards } from "@/components/solutions/solution-cards";
 import { SolutionPage } from "@/components/solutions/solution-page";
-import { NewSolutionButton, SolutionsList } from "@/components/solutions/solutions-list";
+import { SolutionsHeader, SolutionsList } from "@/components/solutions/solutions-list";
 import { Page } from "@/components/shell/page";
 import { SourcesPage } from "@/components/sources-page";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -18,7 +18,7 @@ declare global {
   interface Window {
     workerScripts: Record<string, string>;
     __serverActions?: { name: string; args: unknown[] }[];
-    q11Data: {
+    q11cData: {
       bundles: Record<string, ProcessBundle>;
       processes: { id: string; name: string }[];
       issues: IssueRow[];
@@ -27,13 +27,13 @@ declare global {
       sources: SourceRow[];
       workspaceId: string;
     };
-    mountSolutions: (o: { editor: boolean; empty?: boolean }) => void;
-    mountSolution: (o: { id: string; editor: boolean }) => void;
-    mountBlocks: (o: { mode: "live" | "readonly" | "demo"; empty?: boolean }) => void;
-    mountHistory: (o: { company?: boolean; editor?: boolean; empty?: boolean }) => void;
-    mountIssue: (o: { number: number; editor: boolean }) => void;
-    mountOther: () => void;
-    mountSources: (o: { editor: boolean }) => void;
+    q11cMountSolutions: (o: { editor: boolean; empty?: boolean }) => void;
+    q11cMountSolution: (o: { id: string; editor: boolean }) => void;
+    q11cMountBlocks: (o: { mode: "live" | "readonly" | "demo"; empty?: boolean }) => void;
+    q11cMountHistory: (o: { company?: boolean; editor?: boolean; empty?: boolean }) => void;
+    q11cMountIssue: (o: { number: number; editor: boolean }) => void;
+    q11cMountOther: () => void;
+    q11cMountSources: (o: { editor: boolean }) => void;
   }
 }
 
@@ -68,22 +68,18 @@ const versions = (n: number): VersionMeta[] =>
     };
   });
 
-window.mountSolutions = ({ editor, empty }) => {
-  const d = window.q11Data;
+window.q11cMountSolutions = ({ editor, empty }) => {
+  const d = window.q11cData;
   mount(
-    <Page
-      title="Solutions"
-      eyebrow="Improve"
-      description="Every solution that has been built and simulated. Each one says which issues it solves, and how it did against each issue's target. They never change the live map."
-      actions={editor ? <NewSolutionButton processes={d.processes} base="/w/example" /> : undefined}
-    >
+    <Page title="Solutions" hideHeader>
+      <SolutionsHeader count={empty ? 0 : d.solutions.solutions.length} canEdit={editor} processes={d.processes} base="/w/example" />
       <SolutionsList data={empty ? { solutions: [], links: [] } : d.solutions} issues={d.issues} processes={d.processes} base="/w/example" mode={editor ? "live" : "readonly"} viewerId={null} memberNames={{}} />
     </Page>,
   );
 };
 
-window.mountSolution = ({ id, editor }) => {
-  const d = window.q11Data;
+window.q11cMountSolution = ({ id, editor }) => {
+  const d = window.q11cData;
   const solution = d.solutions.solutions.find((s) => s.id === id)!;
   mount(
     <SolutionPage
@@ -101,10 +97,10 @@ window.mountSolution = ({ id, editor }) => {
   );
 };
 
-window.mountBlocks = ({ mode, empty }) =>
+window.q11cMountBlocks = ({ mode, empty }) =>
   mount(<BlockLibrary blocks={[]} mode={empty && mode === "demo" ? "readonly" : mode} newHref={mode === "readonly" ? null : "/w/example/p/x/edit?mode=block"} usage={{}} />);
 
-window.mountHistory = ({ company, editor, empty }) => {
+window.q11cMountHistory = ({ company, editor, empty }) => {
   const v = empty ? [] : versions(company ? 7 : 6);
   const actions = editor ? { restore: async () => ({ status: "error" as const, message: "" }), duplicate: async () => ({ status: "error" as const, message: "" }) } : undefined;
   mount(
@@ -120,8 +116,8 @@ window.mountHistory = ({ company, editor, empty }) => {
   );
 };
 
-window.mountIssue = ({ number, editor }) => {
-  const d = window.q11Data;
+window.q11cMountIssue = ({ number, editor }) => {
+  const d = window.q11cData;
   const issue = d.issues.find((i) => i.number === number)!;
   const processId = issue.links.find((l) => l.process_id)?.process_id ?? issue.process_id!;
   mount(
@@ -142,14 +138,14 @@ window.mountIssue = ({ number, editor }) => {
   );
 };
 
-window.mountOther = () =>
+window.q11cMountOther = () =>
   mount(
     <div className="max-w-xl">
       <SolutionCards data={{ solutions: [], links: [] }} issues={[]} processes={[]} base="/w/example" demo={false} canEdit from="/w/example" empty="Nothing else yet. Every solution here is for an issue above." />
     </div>,
   );
 
-window.mountSources = ({ editor }) => {
+window.q11cMountSources = ({ editor }) => {
   const bundle = demoBundle();
   mount(
     <Page title="Sources" eyebrow="Company" description="Your library of transcripts, notes and data. Search it, open one to read it, and link each to what it is evidence for.">
