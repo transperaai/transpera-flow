@@ -3,7 +3,7 @@
 # branch main). Never production, never the client's deployment.
 #   packages/db/scripts/neon-preview-example.sh --list               # workspaces on the preview: slug, name
 #   packages/db/scripts/neon-preview-example.sh --workspace <slug>   # load the example (refuses a non-empty workspace)
-#   packages/db/scripts/neon-preview-example.sh --workspace <slug> --add-issues   # add the example issues, change links and solutions
+#   packages/db/scripts/neon-preview-example.sh --workspace <slug> --add-issues   # add the example issues, change links, solutions and blocks
 #                                                                    # to a workspace the example filled (changes nothing if it has issues)
 # The connection URI comes from the Neon API (the agent proxy injects the key), is held only in this process's
 # environment, and is never printed or written to disk.
