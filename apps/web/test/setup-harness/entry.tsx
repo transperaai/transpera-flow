@@ -55,7 +55,7 @@ function service(dept: string, t: SetupTier, over: Partial<SetupService>): Setup
   };
 }
 
-function build(who: "owner" | "viewer", extraTiers: number) {
+export function build(who: "owner" | "viewer", extraTiers: number) {
   const tiers = [tier(1), tier(2), tier(3), ...Array.from({ length: extraTiers }, (_, i) => tier(4 + i))];
   const services: SetupService[] = [];
   for (const t of tiers) {
