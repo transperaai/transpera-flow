@@ -184,7 +184,9 @@ export async function addExampleBlocks(db: Queryable, workspaceId: string): Prom
         return { ...copy, id: ids.get(s.id as string)!, parent_step_id: target.id, entry_step_id: null, x: Number(s.x), y: Number(s.y) };
       });
       const inner = bundle.edges.map((e) => ({ ...e, id: randomUUID(), from_step_id: ids.get(e.from_step_id as string)!, to_step_id: ids.get(e.to_step_id as string)! }));
-      const copy = { steps: [...steps.filter((s) => s.id !== target.id), group, ...children], edges: [...edges, ...inner], entry_step_id: null };
+      // The group is wider than the step it replaces: what sits to its right moves along, so the map doesn't draw one over the other.
+      const rest = steps.filter((s) => s.id !== target.id).map((s) => (s.parent_step_id == null && Number(s.x) > Number(target.x) ? { ...s, x: Number(s.x) + 640 } : s));
+      const copy = { steps: [...rest, group, ...children], edges: [...edges, ...inner], entry_step_id: null };
       const saved = await one("select public.save_solution(p_workspace => $1, p_process => $2, p_base_revision => $3, p_name => $4, p_steps => $5::jsonb, p_changed => $6::jsonb, p_links => $7::jsonb) as solution", [
         workspaceId,
         processId,

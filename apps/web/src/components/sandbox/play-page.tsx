@@ -55,6 +55,8 @@ export interface PlayPageProps {
   canEdit: boolean;
   /** `/w/<slug>`. */
   base: string;
+  /** `?solution=<id>`: a solution to have picked as its process's map version when the page opens. */
+  initialSolutionId?: string | null;
 }
 
 /** The processes of the company model with their steps and solutions, in words. */
@@ -81,7 +83,11 @@ export function playProcesses(live: ProcessBundle, solutions: readonly SolutionR
   }));
 }
 
-export function PlayPage({ live, parts, company, setup, library, solutions, solutionLinks, issues, canEdit, base }: PlayPageProps) {
+export function PlayPage({ live, parts, company, setup, library, solutions, solutionLinks, issues, canEdit, base, initialSolutionId }: PlayPageProps) {
+  const initialSolution = useMemo(() => {
+    const s = initialSolutionId ? solutions.find((x) => x.id === initialSolutionId) : undefined;
+    return s ? { id: s.id, processId: s.process_id } : null;
+  }, [initialSolutionId, solutions]);
   const [start] = useState(() => todayIso());
   const processes = useMemo(() => playProcesses(live, solutions, solutionLinks, issues), [live, solutions, solutionLinks, issues]);
 
@@ -146,6 +152,7 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
       exportSlot={exportSlot}
       base={base}
       modelError={base0.error}
+      initialSolution={initialSolution}
     />
   );
 }

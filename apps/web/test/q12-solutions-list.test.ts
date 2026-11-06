@@ -118,3 +118,36 @@ describe("every solution is tied to an issue", () => {
     expect(src).toContain("startSolutionHref(");
   });
 });
+
+describe("the Solution page's three ways on (D44)", () => {
+  it("Try it in the Sandbox opens the Sandbox with the solution picked as its process's map version", () => {
+    expect(read("components/solutions/solution-page.tsx")).toContain("/sandbox?solution=${solution.id}");
+    expect(read("app/w/[slug]/sandbox/page.tsx")).toContain("initialSolutionId=");
+    // The pick is the Sandbox's own map-version state (E6), from the first month, and only for a solution the page lists.
+    const view = read("components/sandbox/play-view.tsx");
+    expect(view).toContain("versions: { [pick.processId]: { solution: pick.id, month: 0 } }");
+    expect(view).toContain("p.solutions.some((s) => s.id === pick.id)");
+  });
+
+  it("Open in editor starts solution mode from the solution's own copy, linked to its issue, measured against live", () => {
+    const page = read("components/editor/workspace-editor-page.tsx");
+    expect(page).toContain("bundleFromSolution(live, fromSolution)");
+    expect(page).toContain("s.process_id === live.process.id");
+    const view = read("components/editor/editor-view.tsx");
+    expect(view).toContain("const live = fromSolution ? initialLive : drafts.live;");
+    expect(read("components/solutions/solution-page.tsx")).toContain("&solution=${solution.id}");
+  });
+
+  it("Adopt asks first, opens a draft through adopt_solution, asks before replacing a draft with work in it, and never publishes", () => {
+    const action = read("app/w/[slug]/solution-page-actions.ts");
+    expect(action).toContain('rpc(db, "adopt_solution"');
+    expect(action).not.toContain('rpc(db, "publish');
+    const dialog = read("components/solutions/adopt-solution.tsx");
+    expect(dialog).toContain("Nothing goes live until you do.");
+    expect(dialog).toContain("Replace the draft");
+    expect(dialog).toContain("Keep the draft");
+    const migration = read("../../../packages/db/migrations/20270129000000_adopt_solution.sql");
+    expect(migration).toContain("public.can_edit_workspace(sol.workspace_id)");
+    expect(migration).not.toMatch(/status = 'published'|live_revision_id = /);
+  });
+});

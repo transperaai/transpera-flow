@@ -52,11 +52,18 @@ export interface PlayViewProps {
   base?: string;
   /** An error that stops a run being built (the company can't be simulated yet), in plain words. */
   modelError?: string | null;
+  /** A solution picked as its process's map version when the page opens (`?solution=<id>`, from "Try it in the Sandbox"), live from the first month. */
+  initialSolution?: { id: string; processId: string } | null;
 }
 
 export function PlayView(props: PlayViewProps) {
   const { setup, processes, startDate, today, prepare, canEdit, modelError } = props;
-  const [play, setPlay] = useState<PlayState>(defaultPlay);
+  const [play, setPlay] = useState<PlayState>(() => {
+    const start = defaultPlay();
+    const pick = props.initialSolution;
+    // Only a solution of a process this page lists can be picked (the select would have no option for it).
+    return pick && processes.some((p) => p.id === pick.processId && p.solutions.some((s) => s.id === pick.id)) ? { ...start, versions: { [pick.processId]: { solution: pick.id, month: 0 } } } : start;
+  });
   const [library, setLibrary] = useState(props.library);
   const [dialog, setDialog] = useState<{ existing: CapacityChangeRow | null } | null>(null);
   const months = useMemo(() => playMonths(startDate), [startDate]);

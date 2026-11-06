@@ -77,6 +77,7 @@ export function EditorView({
   issue = null,
   processEditorHref,
   blockEditorHref,
+  solutionSeed,
   tourDismissed = false,
   historyHref,
   library,
@@ -119,6 +120,8 @@ export function EditorView({
   /** Solution mode: where "Edit the process instead" (the process's draft) and "Save as a block" (block mode) go when a save is refused for want of an issue. */
   processEditorHref?: string;
   blockEditorHref?: string;
+  /** Solution mode opened from a solution's page ("Open in editor", `?solution=<id>`): the map starts as that solution's copy, not as live. */
+  solutionSeed?: { bundle: ProcessBundle; name: string };
   /** The process library (B12): the workspace's processes, where each sits (live links), and the templates. */
   library?: { processes: LibraryProcess[]; templates: LibraryTemplate[] };
 }) {
@@ -135,7 +138,9 @@ export function EditorView({
   // Block and solution modes edit a map of their own, in memory: never the process's live version or its draft. A block
   // starts empty; a solution starts as a copy of live.
   const scratch = blockMode || solutionMode;
-  const [seed] = useState(() => (blockMode ? blockScratch(initialLive) : initialLive));
+  // A solution opened from its own page starts as its copy; what is marked as changed, simulated and saved is still measured against live.
+  const fromSolution = solutionMode && solutionSeed !== undefined;
+  const [seed] = useState(() => (blockMode ? blockScratch(initialLive) : fromSolution ? solutionSeed!.bundle : initialLive));
   const [backend] = useState(() => (scratch ? connectScratch(seed) : connect(mode, seed)));
   const [session, drafts, state] = useDraftSession(seed, scratch ? null : initialDraft, () => backend, () => ({ at: new Date().toISOString(), by: userId }));
   const editor = session.editor;
@@ -143,7 +148,7 @@ export function EditorView({
   const hasDraft = !scratch && (drafts.draft !== null || drafts.opening);
   // What the map marks as new or changed: against the draft's live version, or the solution's copy of it.
   const marksChanges = hasDraft || solutionMode;
-  const live = drafts.live;
+  const live = fromSolution ? initialLive : drafts.live;
   const working = state.bundle;
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   // The written tour: opens the first time this user opens the Editor, and again from "Take the tour".
@@ -216,7 +221,7 @@ export function EditorView({
 
   // Solution mode: what the solution is called, the automatic verdict against the issue's target, and saving. Nothing is
   // written until then, and then only the solution's own rows: not live, not the draft.
-  const [solutionName, setSolutionName] = useState("");
+  const [solutionName, setSolutionName] = useState(() => (solutionSeed ? `Copy of ${solutionSeed.name}` : ""));
   // Where the map is looking, for the palette (new steps appear there).
   const viewRef = useRef<(() => ViewHint | null) | null>(null);
   const [solutionSaving, setSolutionSaving] = useState(false);

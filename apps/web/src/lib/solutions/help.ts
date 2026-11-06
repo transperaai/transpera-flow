@@ -25,7 +25,7 @@ export const SOLUTIONS_LIST_HELP = {
   },
 } as const;
 
-/** The Solution page's sections and controls. */
+/** The Solution page's sections and controls (descoped in Q12: the header's built-by and fixes, and the notes). */
 export const SOLUTION_PAGE_HELP = {
   built: {
     label: "Built by",
@@ -34,93 +34,13 @@ export const SOLUTION_PAGE_HELP = {
   },
   solves: {
     label: "Solves",
-    description: "A solution can solve more than one issue. Each issue is judged against its own target, with an automatic verdict from the simulation and your own verdict, which is the final call.",
-    example: "“AI lead qualifier” solves #15 (wait to first contact) and #17 (leads lost at Check fit).",
-  },
-  status: {
-    label: "Issue status",
-    description: "Where the issue stands now: Open, Testing solutions, Resolved or Won't fix. Linking a solution moves an Open issue to Testing solutions.",
-    example: "Testing solutions means at least one solution is being tried against it.",
-  },
-  target: {
-    label: "Target",
-    description: "What is measured to know the issue is fixed, and the goal it must reach. The automatic verdict checks the simulation against this goal.",
-    example: "Time to first contact, goal under 4 hours.",
-  },
-  automatic: {
-    label: "Automatic verdict",
-    description: "Pass or fail from simulating this solution 30 times against the issue's goal. “Not checked” means the goal is written in a way the simulation can't measure, so only your verdict counts.",
-    example: "Pass: the simulated wait at Check fit averaged 3.1 hours against under 4 hours.",
-  },
-  holds: {
-    label: "Holds in",
-    description: "The share of the simulated runs that meet the goal. A pass that holds in 95% of runs is far safer than one that holds in 55%.",
-    example: "Holds in 92% means 28 of 30 runs met the goal.",
-  },
-  yours: {
-    label: "Your verdict",
-    description: "Your own pass or fail, which is the final call. It is saved and written to the issue's history. Click the same button again to clear it.",
-    example: "The simulation says pass, but you know Sales won't follow the new step: mark it Fail.",
-  },
-  issueNote: {
-    label: "Your note on this issue",
-    description: "A line about why you gave this verdict. It is saved with the verdict, and the history records that you changed it.",
-    example: "Fine in a normal month, but nobody checks the new queue on Fridays.",
-  },
-  link: {
-    label: "Link an issue",
-    description: "Test this solution against another issue about the same process. It gets its own automatic verdict, and the issue moves to Testing solutions.",
-    example: "Link “AI lead qualifier” to “Too many leads go cold” to see whether it helps there too.",
+    description: "The issues this solution was built to fix. A solution can fix more than one. Open an issue to see how it is getting on.",
+    example: "“AI lead qualifier” fixes #15 (wait to first contact) and #17 (leads lost at Check fit).",
   },
   notes: {
     label: "Notes",
-    description: "Anything worth knowing about the solution as a whole: what you tried, what to watch, who agreed. They are saved when you leave the box.",
+    description: "Anything worth knowing about the solution as a whole: what you tried, what to watch, who agreed. Click the notes to edit them, then press Save.",
     example: "Needs the enrichment tool trial extended to 30 days.",
-  },
-  never: {
-    label: "Solutions never change the live map",
-    description: "A solution is its own copy. To make one real, open the process in the Editor, build the new version and publish it. Then resolve the issue with this solution.",
-    example: "Publishing Sales version 9 with the AI lead step, then marking issue #15 resolved by this solution.",
-  },
-  compare: {
-    label: "Live vs this solution",
-    description: "The two maps open and close together. Steps that are new or changed in the solution are marked on its map, and steps it removed show struck through. “Live” is the version of the process this solution was copied from, not whatever is live today, so the maps show exactly what the solution changed and match its automatic verdict. If the process has been published since, a note says so.",
-    example: "Open Check fit on one side and the same group opens on the other; the new AI step is marked on the right.",
-  },
-  compareSide: {
-    label: "Which map is which",
-    description: "Left is the process as it was when this solution was copied from it. Right is the same process with the solution's changes. Click a group's arrow on either map to open or close it on both.",
-    example: "Close Sales on the left and it closes on the right too.",
-  },
-  measures: {
-    label: "Measures",
-    description: "The same simulation run for live and for the solution, 30 times each, side by side. The last column says whether the solution is better or worse; a result inside the normal run-to-run spread is “About the same”.",
-    example: "Cycle time 12 days live, 9 days with the solution: better.",
-  },
-  measuresChange: {
-    label: "Better or worse",
-    description: "Better when the solution is clearly ahead of live across the runs, Worse when clearly behind, and About the same when the difference could be chance. A cost with no right answer (labour) is not rated.",
-    example: "Wins +1.2 is Better. New MRR −£300 is Worse.",
-  },
-  mrr: {
-    label: "MRR over time",
-    description: "Monthly recurring revenue month by month over the horizon you chose: live as a line with its 10 to 90% range, and with this solution as a dashed line. Each point comes from simulating that far ahead.",
-    example: "After 12 months the solution is £4k a month ahead of live.",
-  },
-  stress: {
-    label: "Market stress test",
-    description: "Does the solution still work if the market changes? It is run again under each market condition on its own (Stable, Soft, Downturn, Boom and any of your own from Settings), and each linked issue's goal is checked the same way as the automatic verdict. Pass means every issue it could check still meets its goal. Each named market replaces your market schedule for the whole run, so Stable is a flat market, not your schedule; the “Your schedule” row, when you have one, is the schedule month by month, which is what the automatic verdict under Solves was checked against.",
-    example: "Passes in Stable and Boom, fails in Downturn because first contact slips to 5 hours.",
-  },
-  stressResult: {
-    label: "Result under a market",
-    description: "Pass or fail for the issues this solution solves, with the market applied for the whole run. “Not checked” means no linked issue has a goal the simulation can measure.",
-    example: "Downturn: Fail. Stable: Pass.",
-  },
-  stressNumber: {
-    label: "Key number",
-    description: "The number each result rests on, checked against the issue's goal, then monthly recurring revenue at the end of the horizon for the solution against live in that market.",
-    example: "Wait at Check fit: 5.2 h on average, against under 4 hours. MRR £41k, live £38k.",
   },
 } as const;
 

@@ -11,6 +11,7 @@ import { NotPublished } from "@/components/shell/not-published";
 import { Page } from "@/components/shell/page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace } from "@/lib/access-data";
+import { isId } from "@/lib/sources/validate";
 import { loadLiveProcess, loadPublishState, loadWorkspaceIssues, loadWorkspaceSandboxScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /**
@@ -21,6 +22,7 @@ import { loadLiveProcess, loadPublishState, loadWorkspaceIssues, loadWorkspaceSa
  */
 export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/sandbox">) {
   const { slug } = await props.params;
+  const { solution: solutionParam } = await props.searchParams;
   const live = await loadLiveProcess(slug);
   if (!live) {
     // Nothing is published (a new client): there is nothing to run forward. No scenarios are loaded.
@@ -55,7 +57,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
     if (!setup) notFound();
     return (
       <Page title="Sandbox" width="max-w-6xl" hideHeader>
-        <PlayPage live={live} parts={parts} company={company} setup={setup} library={library} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} />
+        <PlayPage live={live} parts={parts} company={company} setup={setup} library={library} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} initialSolutionId={typeof solutionParam === "string" && isId(solutionParam) ? solutionParam : null} />
       </Page>
     );
   }
