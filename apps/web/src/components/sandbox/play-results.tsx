@@ -6,6 +6,7 @@
 
 import { useMemo } from "react";
 import { DLER_GOAL, verdict, type CapacitySetup, type VerdictLine } from "@transpera-flow/db";
+import { EmptyState, SectionCard } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import type { PlayRuns } from "@/lib/sandbox/use-play-runs";
@@ -34,10 +35,7 @@ export function PlayVerdict({ lines }: { lines: VerdictLine[] }) {
 export function PlayResults({ runs, setup, months, moved }: { runs: PlayRuns; setup: CapacitySetup; months: PlayMonths; moved: boolean }) {
   const { today, changed } = runs;
   const currency = setup.currency;
-  const lines = useMemo(
-    () => (today && changed ? verdict(today.outcome, changed.outcome, { monthNames: months.short, money: (v) => formatCurrency(v, currency) }) : null),
-    [today, changed, months.short, currency],
-  );
+  const lines = useMemo(() => (today && changed ? verdict(today.outcome, changed.outcome, { monthNames: months.short, money: (v) => formatCurrency(v, currency) }) : null), [today, changed, months.short, currency]);
 
   if (runs.status === "error") {
     return (
@@ -48,11 +46,12 @@ export function PlayResults({ runs, setup, months, moved }: { runs: PlayRuns; se
   }
   if (!today || !changed || !lines) {
     return (
-      <div role="status" aria-busy="true" data-running className="flex flex-col gap-3 rounded-token border border-line bg-panel p-4">
-        <p className="text-sm text-muted-foreground">Working out today&apos;s path over the next 12 months…</p>
-        <Skeleton className="h-5 w-3/4" />
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-40 w-full" />
+      <div role="status" aria-busy="true" data-running>
+        <SectionCard id="play-verdict" title="What happens" description="Working out today's path over the next 12 months…">
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-40 w-full" />
+        </SectionCard>
       </div>
     );
   }
@@ -81,30 +80,33 @@ export function PlayResults({ runs, setup, months, moved }: { runs: PlayRuns; se
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-play-results aria-busy={busy || undefined}>
-      <section className="flex flex-col gap-3 rounded-token border border-line bg-panel p-4" data-verdict aria-labelledby="play-verdict-h">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h2 id="play-verdict-h" className="font-heading text-lg font-semibold">
-            What happens
-          </h2>
-          <span className="text-xs text-muted-foreground" data-run-status>
-            {busy ? `Working it out (${runs.progress[0]} of ${runs.progress[1] || 1})…` : moved ? "This path against today's path" : "Today's path. Move a lever or swap a block to see a change."}
-          </span>
-        </div>
-        <PlayVerdict lines={lines} />
-        {(lostNow > 0.05 || lostThen > 0.05) && (
-          <p className="text-sm" data-price-loss>
-            <span className="font-semibold">Clients lost to the price rise: {formatNumber(lostNow, 1)}</span>
-            <span className="text-muted-foreground"> over the year ({formatNumber(lostThen, 1)} on today&apos;s path).</span>
-          </p>
-        )}
-        {runs.problems.length > 0 && (
-          <ul className="list-disc pl-5 text-xs text-muted-foreground" data-play-problems>
-            {runs.problems.map((p, i) => (
-              <li key={i}>{p.message}</li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <div data-verdict>
+        <SectionCard
+          id="play-verdict"
+          title="What happens"
+          description={
+            <span data-run-status>
+              {busy ? `Working it out (${runs.progress[0]} of ${runs.progress[1] || 1})…` : moved ? "This path against today's path" : "Today's path. Move a lever or swap a block to see a change."}
+            </span>
+          }
+          contentClassName="gap-3"
+        >
+          <PlayVerdict lines={lines} />
+          {(lostNow > 0.05 || lostThen > 0.05) && (
+            <p className="text-sm" data-price-loss>
+              <span className="font-semibold">Clients lost to the price rise: {formatNumber(lostNow, 1)}</span>
+              <span className="text-muted-foreground"> over the year ({formatNumber(lostThen, 1)} on today&apos;s path).</span>
+            </p>
+          )}
+          {runs.problems.length > 0 && (
+            <ul className="list-disc pl-5 text-xs text-muted-foreground" data-play-problems>
+              {runs.problems.map((p, i) => (
+                <li key={i}>{p.message}</li>
+              ))}
+            </ul>
+          )}
+        </SectionCard>
+      </div>
 
       <div className="grid min-w-0 gap-4 md:grid-cols-2" data-play-charts>
         <ChartCard title="Clients">
@@ -125,9 +127,7 @@ export function PlayResults({ runs, setup, months, moved }: { runs: PlayRuns; se
           {dlerKnown ? (
             <PlayChart title="DLER by department" months={months.short} series={dlerSeries} format={(v) => formatNumber(v, 1)} goal={{ value: DLER_GOAL, label: `Goal ${formatNumber(DLER_GOAL, 1)}` }} />
           ) : (
-            <p className="text-sm text-muted-foreground" data-dler-hidden>
-              DLER needs the salaries, which your role can&apos;t see.
-            </p>
+            <EmptyState data-dler-hidden>DLER needs the salaries, which your role can&apos;t see.</EmptyState>
           )}
         </ChartCard>
         <ChartCard title="How busy each team is">
@@ -140,9 +140,10 @@ export function PlayResults({ runs, setup, months, moved }: { runs: PlayRuns; se
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="flex min-w-0 flex-col gap-2 rounded-token border border-line bg-panel p-4" data-play-card={title}>
-      <h3 className="font-heading text-sm font-semibold">{title}</h3>
-      {children}
-    </section>
+    <div className="min-w-0" data-play-card={title}>
+      <SectionCard id={`play-card-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} title={title} className="h-full" contentClassName="gap-2">
+        {children}
+      </SectionCard>
+    </div>
   );
 }

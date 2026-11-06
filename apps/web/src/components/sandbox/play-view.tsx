@@ -8,6 +8,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { defaultPlay, monthKey, monthShort, playIsDefault, type CapacityChangeInput, type CapacityChangeRow, type CapacitySetup, type PlayState } from "@transpera-flow/db";
 import type { PreparedPlay } from "@transpera-flow/db/sandbox";
+import { MetaLine, PageHeader } from "@/components/page-kit";
 import { usePlayRuns, type PlayRuns } from "@/lib/sandbox/use-play-runs";
 import type { DeleteChangeResult, SaveChangeResult } from "@/app/w/[slug]/capacity-change-actions";
 import { PlayChangeDialog } from "./play-change-dialog";
@@ -66,18 +67,23 @@ export function PlayView(props: PlayViewProps) {
 
   return (
     <div className="flex min-w-0 flex-col gap-6" data-sandbox-play data-moved={moved ? "true" : "false"} data-run-ms={runs.changed ? Math.round(runs.changed.ms) : undefined}>
+      <PageHeader
+        label="Sandbox"
+        eyebrow={<span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Company</span>}
+        title="Sandbox"
+        meta={
+          <MetaLine>
+            <span data-play-note>Swap process blocks and pull the levers, then watch the next 12 months change. Nothing here is saved and nothing touches live data: the levers reset when you leave.</span>
+          </MetaLine>
+        }
+        actionsLabel="Sandbox actions"
+        actions={props.exportSlot?.({ runs, play })}
+      />
       {modelError && (
         <div role="alert" data-model-error className="rounded-token border border-crit bg-crit-soft p-3 text-sm">
           The company can&apos;t be simulated yet: {modelError}
         </div>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground" data-play-note>
-          Swap process blocks and pull the levers, then watch the next 12 months change. Nothing here is saved and nothing touches live data: the levers reset when you leave.
-        </p>
-        <div className="flex items-center gap-2">{props.exportSlot?.({ runs, play })}</div>
-      </div>
-
       <PlayProcesses
         play={play}
         setPlay={setPlay}

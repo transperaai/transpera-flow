@@ -6,6 +6,7 @@ import { SANDBOX_SCENARIOS_SHOWN } from "@/lib/sandbox/scenarios-shown";
 import { getDb } from "@/lib/auth/session";
 import { loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
 import { createProcess } from "@/app/w/[slug]/process-actions";
+import { PageHeader } from "@/components/page-kit";
 import { NotPublished } from "@/components/shell/not-published";
 import { Page } from "@/components/shell/page";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
@@ -27,7 +28,8 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
     if (!state) notFound();
     const canEdit = await canEditWorkspace(state.workspace.id);
     return (
-      <Page title="Sandbox" width="max-w-6xl">
+      <Page title="Sandbox" width="max-w-6xl" hideHeader>
+        <PageHeader label="Sandbox" eyebrow={<span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Company</span>} title="Sandbox" />
         <NotPublished
           what="The Sandbox runs the published processes forward month by month to show who gets too busy, and when, and lets you try changes before you make them."
           canEdit={canEdit}
@@ -52,7 +54,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
     ]);
     if (!setup) notFound();
     return (
-      <Page title="Sandbox" eyebrow="Company" description="Swap process blocks and pull the levers, then watch the next 12 months change. Nothing here touches live data." width="max-w-6xl">
+      <Page title="Sandbox" width="max-w-6xl" hideHeader>
         <PlayPage live={live} parts={parts} company={company} setup={setup} library={library} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} />
       </Page>
     );

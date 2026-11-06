@@ -8,21 +8,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import {
-  busyShares,
-  departmentCeiling,
-  limitedBy,
-  roomPulse,
-  departmentTime,
-  modelProcessOfStep,
-  dler,
-  perEmployee,
-  serviceLines,
-  todayModel,
-  wholeBusiness,
-  type CapacitySetup,
-  type DlerRow,
-} from "@transpera-flow/db";
+import { busyShares, departmentCeiling, limitedBy, roomPulse, departmentTime, modelProcessOfStep, dler, perEmployee, serviceLines, todayModel, wholeBusiness, type CapacitySetup, type DlerRow } from "@transpera-flow/db";
 import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
 import { BusyBar, Kpi, Section, TONE_TEXT } from "@/components/capacity/widgets";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -63,13 +49,7 @@ export function DepartmentCards({ setup, model, modelError = null, purposeNames 
 
   const result = runs.today.status === "done" ? runs.today.run.result : null;
   return (
-    <section className="flex min-w-0 flex-col gap-4" data-tier="departments" aria-labelledby="tier-departments">
-      <div className="flex flex-col gap-0.5">
-        <h2 id="tier-departments" className="font-heading text-lg leading-snug font-semibold tracking-tight">
-          Capacity by department
-        </h2>
-        <p className="text-sm text-muted-foreground">The capacity headline for each department. Each card opens the Capacity page with the detail.</p>
-      </div>
+    <div className="flex min-w-0 flex-col gap-6" data-tier="departments">
       {modelError && (
         <div role="alert" data-model-error className="rounded-token border border-crit bg-crit-soft p-3 text-sm">
           Who is at their line and who has room can&apos;t be worked out yet: {modelError}
@@ -82,9 +62,20 @@ export function DepartmentCards({ setup, model, modelError = null, purposeNames 
       )}
       <WholeBusinessRow setup={setup} base={base} />
       {departments.map((d) => (
-        <DepartmentCard key={d.id} setup={setup} departmentId={d.id} name={d.name} base={base} model={model} result={result} failed={!!modelError || runs.today.status === "error"} purposeNames={purposeNames} processOfStep={processOfStep} />
+        <DepartmentCard
+          key={d.id}
+          setup={setup}
+          departmentId={d.id}
+          name={d.name}
+          base={base}
+          model={model}
+          result={result}
+          failed={!!modelError || runs.today.status === "error"}
+          purposeNames={purposeNames}
+          processOfStep={processOfStep}
+        />
       ))}
-    </section>
+    </div>
   );
 }
 
@@ -92,16 +83,35 @@ export function DepartmentCards({ setup, model, modelError = null, purposeNames 
 
 function StartChecklist({ setup, base }: { setup: CapacitySetup; base: string }) {
   const items = [
-    { label: "Add roles", href: `${base}/setup/people#roles-heading`, done: setup.roles.length > 0 },
-    { label: "Add people", href: `${base}/setup/people#people-heading`, done: setup.people.length > 0 },
-    { label: "Add tiers and services", href: `${base}/setup/clients`, done: setup.services.some((s) => s.active && s.tier_id) },
-    { label: "Enter how many clients are in each tier", href: `${base}/setup/clients#clients-heading`, done: setup.tiers.some((t) => setup.services.some((s) => s.tier_id === t.id)) && setup.clients.length + setup.portfolio.length > 0 },
+    {
+      label: "Add roles",
+      href: `${base}/setup/people#roles-heading`,
+      done: setup.roles.length > 0,
+    },
+    {
+      label: "Add people",
+      href: `${base}/setup/people#people-heading`,
+      done: setup.people.length > 0,
+    },
+    {
+      label: "Add tiers and services",
+      href: `${base}/setup/clients`,
+      done: setup.services.some((s) => s.active && s.tier_id),
+    },
+    {
+      label: "Enter how many clients are in each tier",
+      href: `${base}/setup/clients#clients-heading`,
+      done: setup.tiers.some((t) => setup.services.some((s) => s.tier_id === t.id)) && setup.clients.length + setup.portfolio.length > 0,
+    },
   ];
   return (
-    <section data-no-tiers data-setup-checklist className="flex flex-col gap-2 rounded-token border border-dashed border-line p-5 text-sm">
-      <h2 className="font-heading text-base font-semibold">No tiers and services are set up yet.</h2>
-      <p className="text-muted-foreground">Capacity by department is worked out from each department&apos;s tiers, the clients in them and the people who look after them. To start:</p>
-      <ol className="flex flex-col gap-1">
+    <Section
+      title="No tiers and services are set up yet."
+      data-no-tiers
+      data-setup-checklist
+      description="Capacity by department is worked out from each department's tiers, the clients in them and the people who look after them. To start:"
+    >
+      <ol className="flex flex-col gap-1 text-sm">
         {items.map((i) => (
           <li key={i.label} className="flex items-center gap-2" data-done={i.done}>
             <span aria-hidden className={i.done ? "text-good" : "text-muted-foreground"}>
@@ -114,7 +124,7 @@ function StartChecklist({ setup, base }: { setup: CapacitySetup; base: string })
           </li>
         ))}
       </ol>
-    </section>
+    </Section>
   );
 }
 
@@ -201,7 +211,15 @@ function DepartmentCard({
         <Kpi label="Past their busy line" value={figures ? f0(figures.over.length) : pending("Past their busy line")} sub={figures?.lineNote} />
         <Kpi
           label="Room for more clients"
-          value={figures ? <span className={`text-lg ${TONE_TEXT[figures.pulse.tone]}`} data-room-status>{figures.pulse.status}</span> : pending("Room for more clients")}
+          value={
+            figures ? (
+              <span className={`text-lg ${TONE_TEXT[figures.pulse.tone]}`} data-room-status>
+                {figures.pulse.status}
+              </span>
+            ) : (
+              pending("Room for more clients")
+            )
+          }
           sub={
             figures ? (
               <>
@@ -264,7 +282,12 @@ function DepartmentCard({
                       <td className="py-1.5 pr-3">{t.name}</td>
                       <td className="w-[30%] py-1.5 pr-3">
                         <div className="h-2 rounded-full bg-panel-2" role="presentation">
-                          <i className="block h-full rounded-full bg-accent" style={{ width: `${(t.hours * 100) / figures.time.parts[0]!.hours}%` }} />
+                          <i
+                            className="block h-full rounded-full bg-accent"
+                            style={{
+                              width: `${(t.hours * 100) / figures.time.parts[0]!.hours}%`,
+                            }}
+                          />
                         </div>
                       </td>
                       <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">{f0(t.hours)} h</td>
@@ -292,7 +315,7 @@ function WholeBusinessRow({ setup, base }: { setup: CapacitySetup; base: string 
   const w = useMemo(() => wholeBusiness(setup), [setup]);
   const money = (v: number) => formatWholeCurrency(v, setup.currency);
   return (
-    <Section title="Whole business" data-whole-business>
+    <Section title="Whole business" data-whole-business description="The capacity headline for each department. Each card opens the Capacity page with the detail.">
       <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-2.5">
         <Kpi label="Clients" value={f0(w.unique)} sub={`${w.byDepartment.map((d) => `${f0(d.clients)} ${d.name}`).join(" + ")} − ${f0(w.both)} taking both`} />
         <Kpi label="Revenue per employee" value={w.revenuePerEmployee === null ? "—" : money(w.revenuePerEmployee)} sub={`a month, ${w.employees} people`} />

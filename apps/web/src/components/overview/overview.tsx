@@ -23,7 +23,7 @@ import type { ScreenMode } from "@/lib/mode";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { ExportMenu } from "@/components/export/export-menu";
 import { ratingOfRank } from "@/lib/map/rating";
@@ -31,7 +31,7 @@ import { ModelError, toEngineModel, workspacePurposes, type CapacitySetup, type 
 import { resolveMoney, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
-import { PageHeader } from "@/components/shell/page";
+import { EmptyState, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
 import { ShellHeader } from "@/components/shell/shell-header";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -105,7 +105,10 @@ export interface OverviewProps {
 }
 
 /** The company's engine model, the same object while it is unchanged. */
-function useCompanyModel(bundle: ProcessBundle): { model: EngineModel | null; error: string | null } {
+function useCompanyModel(bundle: ProcessBundle): {
+  model: EngineModel | null;
+  error: string | null;
+} {
   const resolved = useMemo(() => {
     try {
       return { model: toEngineModel(bundle, { purposes: true }), error: null };
@@ -120,39 +123,10 @@ function useCompanyModel(bundle: ProcessBundle): { model: EngineModel | null; er
 }
 
 /** A run is only shown for the model it was made from: the worker's last answer outlives a change of horizon by a moment. */
-const current = (result: SimulationResult | null, model: EngineModel | null): SimulationResult | null =>
-  result && model && Math.abs(result.H - model.horizonWeeks * model.hoursPerWeek) < 1e-6 ? result : null;
+const current = (result: SimulationResult | null, model: EngineModel | null): SimulationResult | null => (result && model && Math.abs(result.H - model.horizonWeeks * model.hoursPerWeek) < 1e-6 ? result : null);
 
-const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
-
-function Section({ id, title, description, action, children }: { id: string; title: string; description?: ReactNode; action?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="flex min-w-0 flex-col gap-3" data-tier={id} aria-labelledby={`tier-${id}`}>
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 id={`tier-${id}`} className={SECTION_TITLE}>
-            {title}
-          </h2>
-          {description && <div className="text-sm text-muted-foreground">{description}</div>}
-        </div>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function ChartCard({ id, title, note, wide = false, children }: { id: string; title: string; note?: ReactNode; wide?: boolean; children: ReactNode }) {
-  return (
-    <Card className={cn("min-w-0 gap-3 px-4 py-4", wide && "lg:col-span-2")} data-chart={id}>
-      <div className="flex flex-col gap-0.5">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        {note && <p className="text-xs text-muted-foreground">{note}</p>}
-      </div>
-      {children}
-    </Card>
-  );
-}
+/** Shown where a chart has nothing to draw until the company can be simulated. */
+const Unavailable = () => <EmptyState data-chart-unavailable>Nothing to show until the company can be simulated.</EmptyState>;
 
 export function Overview({
   workspaceName,
@@ -212,16 +186,25 @@ export function Overview({
     const built = forecastModel(live, 1, start);
     if (!built.model) return { model: null, monthStarts: null };
     const model: EngineModel = { ...built.model, horizonWeeks: weeks };
-    return { model, monthStarts: calendarMonthStarts(start, weeks, model.hoursPerWeek) };
+    return {
+      model,
+      monthStarts: calendarMonthStarts(start, weeks, model.hoursPerWeek),
+    };
   }, [live, start, weeks]);
   const horizonModel = error ? null : horizon.model;
 
   // The same model at the same length: one run serves both (its monthly numbers don't change the rest of it).
   const sameModel = useMemo(() => !!base && !!horizonModel && JSON.stringify(base) === JSON.stringify(horizonModel), [base, horizonModel]);
-  const horizonSim = useSimulation(horizonModel, 30, 1, { monthly: true, monthStarts: horizon.monthStarts });
+  const horizonSim = useSimulation(horizonModel, 30, 1, {
+    monthly: true,
+    monthStarts: horizon.monthStarts,
+  });
   const horizonResult = current(horizonSim.status === "done" ? horizonSim.run.result : null, horizonModel);
   // The shared run is kept as the base run, so picking another horizon afterwards doesn't simulate the base again.
-  const [shared, setShared] = useState<{ model: EngineModel; result: SimulationResult } | null>(null);
+  const [shared, setShared] = useState<{
+    model: EngineModel;
+    result: SimulationResult;
+  } | null>(null);
   if (sameModel && base && horizonResult && shared?.result !== horizonResult) setShared({ model: base, result: horizonResult });
   const haveBase = sameModel || (!!shared && shared.model === base);
   const baseSim = useSimulation(haveBase ? null : base);
@@ -250,7 +233,16 @@ export function Overview({
   const solutionsData = mode === "demo" ? inTab : (solutions ?? NO_SOLUTIONS_DATA);
 
   const groups = useMemo(
-    () => (facts ? groupByProcess({ parts, pipelineId: live.process.id, facts, issues: state.issues, solutions: solutionsData.solutions }) : null),
+    () =>
+      facts
+        ? groupByProcess({
+            parts,
+            pipelineId: live.process.id,
+            facts,
+            issues: state.issues,
+            solutions: solutionsData.solutions,
+          })
+        : null,
     [facts, parts, live.process.id, state.issues, solutionsData.solutions],
   );
 
@@ -259,7 +251,19 @@ export function Overview({
   const map = useMemo(() => companyMap(live, parts, expanded, company), [live, parts, expanded, company]);
   // Department lanes (Q4): Sales and whole business first, then each department; always on here.
   const departmentLanes = useMemo(
-    () => (laneInput ? { spec: { lanes: laneSpecs(laneInput), laneOf: laneOfProcesses(parts.map((p) => p.process), laneInput) }, always: true } : undefined),
+    () =>
+      laneInput
+        ? {
+            spec: {
+              lanes: laneSpecs(laneInput),
+              laneOf: laneOfProcesses(
+                parts.map((p) => p.process),
+                laneInput,
+              ),
+            },
+            always: true,
+          }
+        : undefined,
     [laneInput, parts],
   );
   // A pill with each process's category on its card (Q4, with Q3's labels).
@@ -278,7 +282,11 @@ export function Overview({
   useEffect(() => {
     if (mode !== "live" || error || !groups || !horizonModel || !horizonResult) return;
     if (weeks !== live.workspace.settings.horizon_weeks) return;
-    const numbers = headlineNumbers(horizonModel, horizonResult, groups.filter((g) => g.id !== COMPANY_GROUP));
+    const numbers = headlineNumbers(
+      horizonModel,
+      horizonResult,
+      groups.filter((g) => g.id !== COMPANY_GROUP),
+    );
     const revisionIds = parts.map((p) => p.revision.id).sort();
     const key = JSON.stringify([live.workspace.id, weeks, revisionIds, numbers]);
     if (recorded.current === key) return;
@@ -292,10 +300,7 @@ export function Overview({
 
   // The trends.
   const timeSplit = useMemo(() => (horizonModel && horizonResult ? timeSplitByProcess(horizonModel, horizonResult, parts) : null), [horizonModel, horizonResult, parts]);
-  const issuesByProcess = useMemo(
-    () => (groups ? groups.filter((g) => g.id !== COMPANY_GROUP || g.openIssues > 0).map((g) => ({ id: g.id, name: g.name, count: g.openIssues })) : null),
-    [groups],
-  );
+  const issuesByProcess = useMemo(() => (groups ? groups.filter((g) => g.id !== COMPANY_GROUP || g.openIssues > 0).map((g) => ({ id: g.id, name: g.name, count: g.openIssues })) : null), [groups]);
   const cutoffs = useMemo(() => toRatingConfig(rules, hoursPerWeek).rules.busy.cutoffs, [rules, hoursPerWeek]);
   // The Capacity page's "What to do" for this run, and each role's own line (Set up); without Set up the sentence is worked out from the rows.
   const advice = useMemo(
@@ -306,36 +311,37 @@ export function Overview({
   const teamLoad = useMemo(() => (horizonModel && horizonResult ? timelineData(horizonModel, horizonResult, live, start) : null), [horizonModel, horizonResult, live, start]);
 
   // "Last updated": the numbers are simulated each time the page opens, so this is when it opened.
-  const updated = useMemo(() => now.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }), [now]);
+  const updated = useMemo(
+    () =>
+      now.toLocaleString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    [now],
+  );
 
   return (
     <div>
       <ShellHeader title="Overview" />
-      <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-8 px-4 pb-14 pt-6 sm:px-6">
+      <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-6 px-4 pb-14 pt-6 sm:px-6">
         <PageHeader
-          eyebrow="Overview"
+          label="Overview"
+          eyebrow={<span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Overview</span>}
           title={workspaceName}
-          description={`Last updated ${updated} · ${parts.length} ${parts.length === 1 ? "process" : "processes"}`}
-        />
-
-        {error ? (
-          <Card className="px-4 py-3 text-sm" role="alert">
-            The company can&apos;t be simulated yet: {error}. The map below still works; fix this under{" "}
-            <Link href={processesHref} className="underline">
-              Processes
-            </Link>
-            .
-          </Card>
-        ) : null}
-
-        {capacity && <DepartmentCards setup={capacity.setup} model={capacityModel.model} modelError={capacityModel.error} purposeNames={purposeNames} processOfStep={processOfStep} base={capacity.base} />}
-
-        <Section
-          id="map"
-          title="Company map"
-          description="Every process in the business. Press play to watch the work move; expand a process in place, or click it to open its page."
-          action={
-            <div className="flex flex-wrap items-center gap-1.5">
+          meta={
+            <MetaLine>
+              <span>Last updated {updated}</span>
+              <span>
+                {parts.length} {parts.length === 1 ? "process" : "processes"}
+              </span>
+            </MetaLine>
+          }
+          actionsLabel="Company map"
+          actions={
+            <>
               {companyEditHref && (
                 <Link href={companyEditHref} data-edit-company-map data-edit-entry className={cn(buttonVariants({ size: "sm" }), "bg-edit text-edit-fg hover:bg-edit/90", EDIT_ONLY)}>
                   ✎ Edit company map
@@ -372,9 +378,23 @@ export function Overview({
                   <ArrowRight aria-hidden />
                 </Link>
               </Button>
-            </div>
+            </>
           }
-        >
+        />
+
+        {error ? (
+          <Card className="px-4 py-3 text-sm" role="alert">
+            The company can&apos;t be simulated yet: {error}. The map below still works; fix this under{" "}
+            <Link href={processesHref} className="underline">
+              Processes
+            </Link>
+            .
+          </Card>
+        ) : null}
+
+        {capacity && <DepartmentCards setup={capacity.setup} model={capacityModel.model} modelError={capacityModel.error} purposeNames={purposeNames} processOfStep={processOfStep} base={capacity.base} />}
+
+        <SectionCard id="company-map" section="company-map" title="Company map" description="Every process in the business. Press play to watch the work move; expand a process in place, or click it to open its page.">
           {viewingMapVersion !== null && (
             <div data-viewing-map-version className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-warn bg-warn-soft px-2.5 py-0.5 text-xs font-medium">Viewing version {viewingMapVersion} of the company map · read only</span>
@@ -383,7 +403,7 @@ export function Overview({
               </Link>
             </div>
           )}
-          <Card className="gap-0 overflow-hidden p-0" data-company-map>
+          <div className="overflow-hidden rounded-lg border" data-company-map>
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-3 py-2" data-map-controls>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} options={OVERVIEW_HORIZONS} />
@@ -419,48 +439,67 @@ export function Overview({
                 computing={horizonModel !== null && horizonSim.status === "running" && horizonSim.run === null}
               />
             ) : (
-              <p className="p-6 text-sm text-muted-foreground">No process has been published yet.</p>
+              <EmptyState>No process has been published yet.</EmptyState>
             )}
-          </Card>
-        </Section>
+          </div>
+        </SectionCard>
 
-        <Section id="trends" title="Trends" description={`Simulated over the next ${span} where a chart looks ahead; the issues are as recorded.`}>
-          <div className="grid gap-4 lg:grid-cols-2">
-            <ChartCard id="issues" title="Open issues" note="By rating, and by the process they are in.">
+        <div className="grid gap-6 lg:grid-cols-2" data-tier="trends">
+          <div data-chart="issues" className="min-w-0">
+            <SectionCard id="open-issues" section="issues" title="Open issues" description="By rating, and by the process they are in." className="min-w-0">
               <IssuesDonut byRating={open.byRating} byProcess={issuesByProcess ?? []} />
-            </ChartCard>
-            <ChartCard id="time-split" title="Time split by process" note={`Of the time work spends in each process over the next ${span}, the share someone is working on it.`}>
-              {timeSplit ? <TimeSplitChart rows={timeSplit} months={months} /> : error ? <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p> : chartLoading()}
-            </ChartCard>
-            <ChartCard id="time-achieves" title="What the time achieves" wide note={`The team's working time over the next ${span}, by what the steps achieve, as a share of the hours available. Hands-on against waiting is above.`}>
+            </SectionCard>
+          </div>
+          <div data-chart="time-split" className="min-w-0">
+            <SectionCard
+              id="time-split"
+              section="time-split"
+              title="Time split by process"
+              description={`Of the time work spends in each process over the next ${span}, the share someone is working on it.`}
+              className="min-w-0"
+            >
+              {timeSplit ? <TimeSplitChart rows={timeSplit} months={months} /> : error ? <Unavailable /> : chartLoading()}
+            </SectionCard>
+          </div>
+          <div data-chart="time-achieves" className="min-w-0 lg:col-span-2">
+            <SectionCard
+              id="time-achieves"
+              section="time-achieves"
+              title="What the time achieves"
+              description={`The team's working time over the next ${span}, by what the steps achieve, as a share of the hours available. Hands-on against waiting is above.`}
+              className="min-w-0"
+            >
               {horizonResult?.monthly ? (
                 <TimeAchieves monthly={horizonResult.monthly} hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek} start={start} categories={purposeCategories} sandboxHref={forecastHref} span={span} />
               ) : error ? (
-                <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p>
+                <Unavailable />
               ) : (
                 chartLoading()
               )}
-            </ChartCard>
-            <ChartCard
+            </SectionCard>
+          </div>
+          <div data-chart="team-load" className="min-w-0 lg:col-span-2">
+            <SectionCard
               id="team-load"
+              section="team-load"
               title="Team load by role"
-              wide
-              note={`What to do, then how busy each role is month by month over the next ${span}, with planned hires and leave.`}
+              description={`What to do, then how busy each role is month by month over the next ${span}, with planned hires and leave.`}
+              className="min-w-0"
             >
               {teamLoad ? (
                 teamLoad.roles.length ? (
                   <TeamLoad rows={teamLoad.roles} months={teamLoad.months} lines={roleLines} fallbackLine={cutoffs[1]} advice={advice} span={span} sandboxHref={forecastHref} />
                 ) : (
-                  <p className="text-sm text-muted-foreground">No role has any work in this run.</p>
+                  <EmptyState>No role has any work in this run.</EmptyState>
                 )
               ) : error ? (
-                <p className="text-sm text-muted-foreground">Nothing to show until the company can be simulated.</p>
+                <Unavailable />
               ) : (
                 <Skeleton className="h-[160px] w-full" aria-busy="true" />
               )}
-            </ChartCard>
+            </SectionCard>
           </div>
-        </Section>
+        </div>
       </div>
     </div>
   );

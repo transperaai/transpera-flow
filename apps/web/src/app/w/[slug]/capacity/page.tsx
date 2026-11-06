@@ -2,13 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { loadCapacitySetup } from "@transpera-flow/db";
 import { CapacityPage } from "@/components/capacity/capacity-page";
+import { CapacityHeader } from "@/components/capacity/capacity-view";
 import { NotPublished } from "@/components/shell/not-published";
 import { Page } from "@/components/shell/page";
 import { canEditWorkspace } from "@/lib/access-data";
 import { getDb } from "@/lib/auth/session";
 import { loadLiveProcess, loadPublishState } from "@/lib/data";
-
-const DESCRIPTION = "Are we at capacity, who has room, and how many more clients fit. \"Today\" is the current book of clients with nobody arriving or leaving.";
 
 /**
  * The Capacity page (capacity build P5), which replaces the People page: the service-line headline and DLER, room for more clients per
@@ -25,7 +24,8 @@ export default async function WorkspaceCapacityPage(props: PageProps<"/w/[slug]/
     if (!state) notFound();
     const canEdit = await canEditWorkspace(state.workspace.id);
     return (
-      <Page title="Capacity" eyebrow="Company" description={DESCRIPTION} width="max-w-6xl">
+      <Page title="Capacity" width="max-w-6xl" hideHeader>
+        <CapacityHeader />
         <NotPublished
           what="Capacity, and who has room for more clients, comes from a simulation of a published process."
           canEdit={canEdit}
@@ -46,7 +46,7 @@ export default async function WorkspaceCapacityPage(props: PageProps<"/w/[slug]/
   const setup = await loadCapacitySetup(await getDb(), bundle.workspace.id);
   if (!setup) notFound();
   return (
-    <Page title="Capacity" eyebrow="Company" description={DESCRIPTION} width="max-w-6xl">
+    <Page title="Capacity" width="max-w-6xl" hideHeader>
       <CapacityPage bundle={bundle} setup={setup} base={base} />
     </Page>
   );
