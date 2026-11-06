@@ -96,9 +96,11 @@ describe("Tiers & clients and People & roles, end to end", () => {
     expect(await a.savePersonRamp((await setup()).people[0]!.id, "40, 60, 80", "150")).toEqual(invalid);
     expect(await a.saveRampDefault(world.workspaceId, null, "30, 60")).toEqual({ status: "saved", value: "30, 60" });
     expect((await setup()).rampDefault).toEqual([0.3, 0.6]);
-    expect(await a.saveDlerIncludesLeadership(world.workspaceId, true, false)).toEqual({ status: "saved", value: false });
+    // The setting reads as false when unset (D48); the page has no control for it, the action still checks what it is given against what is stored.
     expect((await setup()).dlerIncludesLeadership).toBe(false);
-    expect(await a.saveDlerIncludesLeadership(world.workspaceId, true, true)).toEqual({ status: "conflict", theirs: false });
+    expect(await a.saveDlerIncludesLeadership(world.workspaceId, false, true)).toEqual({ status: "saved", value: true });
+    expect((await setup()).dlerIncludesLeadership).toBe(true);
+    expect(await a.saveDlerIncludesLeadership(world.workspaceId, false, false)).toEqual({ status: "conflict", theirs: true });
   });
 
   it("a Viewer can change nothing, and signed out nothing happens", async () => {

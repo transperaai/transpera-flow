@@ -8,7 +8,7 @@ import { BrandingSettings } from "@/components/branding/branding-settings";
 import { ChangeLog } from "@/components/change-log";
 import { PurposesSettings } from "@/components/purposes/purposes-settings";
 import { TiersAndClients } from "@/components/setup/tiers-clients";
-import { PeopleAndRoles } from "@/components/setup/people-roles";
+import { PeopleAndRoles, PeopleHeaderActions, peopleMeta } from "@/components/setup/people-roles";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { LinkRows } from "@/components/settings/link-rows";
 import { SectionCard } from "@/components/page-kit";
@@ -44,7 +44,7 @@ window.mountQ11b = (what) => {
     );
   } else if (what === "setup-people") {
     page = (
-      <SettingsPage title="People & roles" eyebrow="Set up" description="Who works here, their hours, their team time and their portfolio. Portfolios are named clients plus a count per tier. Agency admins and the Owner can change this; everyone can read it." width="max-w-6xl">
+      <SettingsPage title="People & roles" eyebrow="Set up" description={peopleMeta(setup)} actions={<PeopleHeaderActions setup={setup} data={data} />} width="max-w-6xl">
         <PhoneNotice />
         <PeopleAndRoles setup={setup} data={data} />
       </SettingsPage>

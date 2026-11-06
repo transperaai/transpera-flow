@@ -49,7 +49,7 @@ describe("loadCapacitySetup", () => {
     const person = owner.people.find((p) => p.id === maya)!;
     expect(person).toMatchObject({ salary_monthly: 9000, reserved_share: 0.25, label: "offshore", ramp: null });
     expect(owner.rampDefault).toEqual([0.4, 0.6, 0.8]);
-    expect(owner.dlerIncludesLeadership).toBe(true);
+    expect(owner.dlerIncludesLeadership).toBe(false); // D48: not counted unless set
     expect(owner.services.length).toBeGreaterThan(0);
     expect(owner.roles.every((r) => r.kind === "client_facing" && r.line === 0.85)).toBe(true);
 

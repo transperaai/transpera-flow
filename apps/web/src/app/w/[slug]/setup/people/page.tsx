@@ -2,11 +2,11 @@ import { notFound } from "next/navigation";
 import { loadCapacitySetup } from "@transpera-flow/db";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
-import { PeopleAndRoles } from "@/components/setup/people-roles";
+import { PeopleAndRoles, PeopleHeaderActions, peopleMeta } from "@/components/setup/people-roles";
 import { loadWorkspaceSettings } from "@/lib/data";
 import { getDb } from "@/lib/auth/session";
 
-/** Set up, People & roles (capacity build P1): roles with their kind and line, how the shared teams work, and the people with their portfolios. */
+/** Set up, People & roles (capacity build P1): people and roles as standard rows that open into a panel, how the shared teams work, and the workspace-wide defaults. */
 export default async function SetupPeoplePage(props: PageProps<"/w/[slug]/setup/people">) {
   const { slug } = await props.params;
   const data = await loadWorkspaceSettings(slug);
@@ -17,7 +17,8 @@ export default async function SetupPeoplePage(props: PageProps<"/w/[slug]/setup/
     <SettingsPage
       title="People & roles"
       eyebrow="Set up"
-      description="Who works here, their hours, their team time and their portfolio. Portfolios are named clients plus a count per tier. Agency admins and the Owner can change this; everyone can read it."
+      description={peopleMeta(setup)}
+      actions={<PeopleHeaderActions setup={setup} data={data} />}
       width="max-w-6xl"
     >
       <PhoneNotice />

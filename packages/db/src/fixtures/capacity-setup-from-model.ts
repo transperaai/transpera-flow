@@ -122,7 +122,7 @@ export function capacitySetupFromModel(model: EngineModel, options: { payHidden?
     portfolio,
     rampDefault: [0.4, 0.6, 0.8],
     rampDefaultProvenance: null,
-    dlerIncludesLeadership: options.dlerIncludesLeadership ?? true,
+    dlerIncludesLeadership: options.dlerIncludesLeadership ?? false,
     dlerProvenance: null,
     canEdit: options.canEdit ?? true,
     payHidden: hidden,

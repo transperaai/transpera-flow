@@ -75,18 +75,18 @@ export async function saveRampDefault(workspaceId: string, base: string | null, 
   return out;
 }
 
-/** Whether DLER counts leadership's salary (`settings.dler_includes_leadership`; unset means yes). */
+/** Whether DLER counts leadership's salary (`settings.dler_includes_leadership`; unset means no, D48; the Set up page no longer has this control). */
 export async function saveDlerIncludesLeadership(workspaceId: string, base: boolean, value: boolean): Promise<SaveOutcome<boolean>> {
   if (!isId(workspaceId) || typeof base !== "boolean" || typeof value !== "boolean") return invalid;
   if (!(await signedIn())) return signedOut;
-  // Unset reads as true, so a base of true matches an unset key too.
+  // Unset reads as false (D48), so a base of false matches an unset key too.
   const field = "settings.dler_includes_leadership";
   const db = await getDb();
   let stored: boolean;
   try {
     const row = await db.selectFrom("workspaces").select("settings").where("id", "=", workspaceId).executeTakeFirst();
     if (!row) return { status: "not_found" };
-    stored = (row.settings as Record<string, unknown>).dler_includes_leadership !== false;
+    stored = (row.settings as Record<string, unknown>).dler_includes_leadership === true;
   } catch {
     return { status: "error", message: "Couldn't save. Try again." };
   }
@@ -94,7 +94,7 @@ export async function saveDlerIncludesLeadership(workspaceId: string, base: bool
   const storedRaw = ((await db.selectFrom("workspaces").select("settings").where("id", "=", workspaceId).executeTakeFirst())?.settings as Record<string, unknown> | undefined)?.dler_includes_leadership;
   const out = await saveFields<Scalar>("workspaces", { id: workspaceId }, { [field]: (storedRaw ?? null) as Scalar }, { [field]: value });
   if (out.status === "saved") return { status: "saved", value };
-  if (out.status === "conflict") return { status: "conflict", theirs: out.theirs[field] !== false };
+  if (out.status === "conflict") return { status: "conflict", theirs: out.theirs[field] === true };
   if (out.status === "not_found") return { status: "not_found" };
   return out;
 }

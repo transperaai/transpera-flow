@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import { DEFAULT_AVAILABILITY_FLOOR } from "@transpera-flow/engine";
 import { ChecklistField, DateField, NumberField, TextField, ToggleField } from "@/components/fields";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { SettingsSection } from "./section";
@@ -98,10 +99,16 @@ export function SimulationSettings({ data }: { data: WorkspaceSettingsData }) {
   );
 }
 
-export function AddPerson({ data }: { data: WorkspaceSettingsData }) {
-  const [state, action, pending] = useActionState<ActionResult, FormData>(createPerson.bind(null, data.workspace.id), {});
+const NOT_SENT: ActionResult = {};
+
+/** `onAdded` runs once a person has been added (the Set up page closes its dialog); `className` replaces the form's spacing. */
+export function AddPerson({ data, onAdded, className }: { data: WorkspaceSettingsData; onAdded?: () => void; className?: string }) {
+  const [state, action, pending] = useActionState<ActionResult, FormData>(createPerson.bind(null, data.workspace.id), NOT_SENT);
+  useEffect(() => {
+    if (state !== NOT_SENT && !state.error) onAdded?.();
+  }, [state, onAdded]);
   return (
-    <form action={action} className="mb-4 flex flex-wrap items-end gap-2">
+    <form action={action} className={cn("flex flex-wrap items-end gap-2", className ?? "mb-4")}>
       <label className="flex flex-col gap-1">
         <HelpLabel label="Name" description="The person's name, as it appears across the app." example="Maya Collins" />
         <Input name="name" required maxLength={200} />
@@ -132,8 +139,14 @@ export function AddPerson({ data }: { data: WorkspaceSettingsData }) {
   );
 }
 
-/** Everything else about a person (the part of a row that opens): Set up shows it under "More". */
-export function PersonMore({ person: p, data, saveFactor }: { person: PersonDetail; data: WorkspaceSettingsData; saveFactor?: SaveFactor }) {
+/** Which part of a person the Set up panel asks for: its Basics, its Time group, or its More group. Without one, every field (the old layout). */
+export type PersonPart = "basics" | "time" | "more";
+
+/**
+ * Everything else about a person (the part of a row that opens). The Set up panel asks for one `part` at a time and sets `compact` for a
+ * single narrow column; hours a week is not in a part, because the panel keys it through Set up (which records its source).
+ */
+export function PersonMore({ person: p, data, saveFactor, part, compact }: { person: PersonDetail; data: WorkspaceSettingsData; saveFactor?: SaveFactor; part?: PersonPart; compact?: boolean }) {
   const roleIds = data.personRoles.filter((r) => r.person_id === p.id).map((r) => r.role_id);
   const skillIds = data.personSkills.filter((s) => s.person_id === p.id).map((s) => s.step_id);
   const leave = data.personLeave.filter((l) => l.person_id === p.id);
@@ -142,63 +155,84 @@ export function PersonMore({ person: p, data, saveFactor }: { person: PersonDeta
   const roleName = new Map(data.roles.map((r) => [r.id, r.name]));
   const factorsOn = data.workspace.settings.capacity_factor_enabled === true;
   const hasStoredFactors = data.personCapacityFactors.some((f) => f.person_id === p.id);
+  const show = (which: PersonPart) => part === undefined || part === which;
+  const grid = compact ? "grid gap-4 sm:grid-cols-2" : "grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2 lg:grid-cols-3";
+  const full = compact ? "sm:col-span-2" : "sm:col-span-2 lg:col-span-3";
 
   return (
-      <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2 lg:grid-cols-3">
-        <TextField label="Name" value={p.name} save={personSaver(p.id, "name")} disabled={disabled} help={{ description: "The person's name, as it appears across the app.", example: "Maya Collins" }} />
-        <TextField label="Email" type="email" value={p.email} save={personSaver(p.id, "email")} optional disabled={disabled} help={{ description: "Their work email. Optional, and not used by the simulation.", example: "maya@northbeam.example" }} />
-        <ToggleField
-          label="Status"
-          value={p.active}
-          save={personSaver(p.id, "active")}
-          onLabel="Active"
-          offLabel="Inactive: left out of simulations"
-          disabled={disabled} help={{ description: "Inactive people are left out of simulations, but their record is kept.", example: "Mark someone inactive when they leave. Past data stays; future runs no longer count their time." }} />
-        <NumberField
-          label="Working time (1 = full time)"
-          value={Number(p.fte)}
-          save={personSaver(p.id, "fte")}
-          min={0.05}
-          max={1.5}
-          step={0.1}
-          disabled={disabled} help={{ description: "How much of a full week they work: 1 is full time, 0.5 is half time. It sets how many hours they have each week, unless you type the hours yourself.", example: "At 0.8 with a 40-hour week, they have 32 hours a week." }} />
-        <NumberField
-          label="Capacity"
-          value={p.capacity_hours_week === null ? null : Number(p.capacity_hours_week)}
-          save={personSaver(p.id, "capacity_hours_week")}
-          optional
-          unit="h/week"
-          min={0.5}
-          max={80}
-          step={0.5}
-          placeholder={`${formatNumber(Number(p.fte) * hoursPerWeek, 1)} from working time`}
-          hint="Blank: working time × the workspace week."
-          disabled={disabled} help={{ description: "The hours they can work each week, when that isn't simply their working time times the working week. Leave blank to use working time.", example: "A full-time person who works four 7.5-hour days: enter 30." }} />
-        <NumberField
-          label="Cost rate"
-          value={p.cost_rate === null ? null : Number(p.cost_rate)}
-          save={personSaver(p.id, "cost_rate")}
-          optional
-          unit={`${data.workspace.settings.currency}/h`}
-          min={0}
-          step={1}
-          placeholder="Role default"
-          disabled={disabled} help={{ description: "What an hour of this person's time costs. Leave blank to use the role's rate. The simulation uses it to cost overtime.", example: "35 means each overtime hour costs 35." }} />
-        <DateField label="Start date" value={p.start_date} save={personSaver(p.id, "start_date")} disabled={disabled} help={{ description: "The first day they work here. Runs that start before it leave them out.", example: "A new hire starting on 3 November is not counted in runs that start in October." }} />
-        <DateField label="End date" value={p.end_date} save={personSaver(p.id, "end_date")} disabled={disabled} help={{ description: "Their last day. Runs that start after it leave them out. Leave blank if they are staying.", example: "Someone leaving at the end of March: enter 31 March." }} />
-        <TextField label="Notes" value={p.notes} save={personSaver(p.id, "notes")} optional multiline disabled={disabled} help={{ description: "Anything worth remembering about this person's time. Not used by the simulation.", example: "Does school pick-ups on Fridays, so unavailable after 2pm." }} />
+      <div className={grid} data-person-part={part}>
+        {show("basics") && (
+          <>
+            <TextField label="Name" value={p.name} save={personSaver(p.id, "name")} disabled={disabled} help={{ description: "The person's name, as it appears across the app.", example: "Maya Collins" }} />
+            <TextField label="Email" type="email" value={p.email} save={personSaver(p.id, "email")} optional disabled={disabled} help={{ description: "Their work email. Optional, and not used by the simulation.", example: "maya@northbeam.example" }} />
+            <ToggleField
+              label="Status"
+              value={p.active}
+              save={personSaver(p.id, "active")}
+              onLabel="Active"
+              offLabel="Inactive: left out of simulations"
+              disabled={disabled} help={{ description: "Inactive people are left out of simulations, but their record is kept.", example: "Mark someone inactive when they leave. Past data stays; future runs no longer count their time." }} />
+            <NumberField
+              label="Working time (1 = full time)"
+              value={Number(p.fte)}
+              save={personSaver(p.id, "fte")}
+              min={0.05}
+              max={1.5}
+              step={0.1}
+              disabled={disabled} help={{ description: "How much of a full week they work: 1 is full time, 0.5 is half time. It sets how many hours they have each week, unless you type the hours yourself.", example: "At 0.8 with a 40-hour week, they have 32 hours a week." }} />
+          </>
+        )}
+        {part === undefined && (
+          <NumberField
+            label="Capacity"
+            value={p.capacity_hours_week === null ? null : Number(p.capacity_hours_week)}
+            save={personSaver(p.id, "capacity_hours_week")}
+            optional
+            unit="h/week"
+            min={0.5}
+            max={80}
+            step={0.5}
+            placeholder={`${formatNumber(Number(p.fte) * hoursPerWeek, 1)} from working time`}
+            hint="Blank: working time × the workspace week."
+            disabled={disabled} help={{ description: "The hours they can work each week, when that isn't simply their working time times the working week. Leave blank to use working time.", example: "A full-time person who works four 7.5-hour days: enter 30." }} />
+        )}
+        {show("basics") && (
+          <NumberField
+            label="Cost rate"
+            value={p.cost_rate === null ? null : Number(p.cost_rate)}
+            save={personSaver(p.id, "cost_rate")}
+            optional
+            unit={`${data.workspace.settings.currency}/h`}
+            min={0}
+            step={1}
+            placeholder="Role default"
+            disabled={disabled} help={{ description: "What an hour of this person's time costs. Leave blank to use the role's rate. The simulation uses it to cost overtime.", example: "35 means each overtime hour costs 35." }} />
+        )}
+        {show("time") && (
+          <>
+            <DateField label="Start date" value={p.start_date} save={personSaver(p.id, "start_date")} disabled={disabled} help={{ description: "The first day they work here. Runs that start before it leave them out.", example: "A new hire starting on 3 November is not counted in runs that start in October." }} />
+            <DateField label="End date" value={p.end_date} save={personSaver(p.id, "end_date")} disabled={disabled} help={{ description: "Their last day. Runs that start after it leave them out. Leave blank if they are staying.", example: "Someone leaving at the end of March: enter 31 March." }} />
+          </>
+        )}
+        {show("more") && (
+          <div className={full}>
+            <TextField label="Notes" value={p.notes} save={personSaver(p.id, "notes")} optional multiline disabled={disabled} help={{ description: "Anything worth remembering about this person's time. Not used by the simulation.", example: "Does school pick-ups on Fridays, so unavailable after 2pm." }} />
+          </div>
+        )}
 
-        <div className="sm:col-span-2 lg:col-span-3">
-          <ChecklistField
-            label="Roles"
-            value={roleIds}
-            save={(base, next) => savePersonSet(p.id, p.workspace_id, "roles", [...base], [...next])}
-            options={selectableRoles(data.roles, roleIds).map((r) => ({ id: r.id, label: r.name }))}
-            emptyLabel="no roles"
-            disabled={disabled} help={{ description: "The kinds of work they do. A step that needs a role can be done by anyone who has it.", example: "Tick Strategist and Account manager if Maya does both." }} />
-        </div>
-        {data.steps.length > 0 && (
-          <div className="sm:col-span-2 lg:col-span-3">
+        {show("basics") && (
+          <div className={full}>
+            <ChecklistField
+              label="Roles"
+              value={roleIds}
+              save={(base, next) => savePersonSet(p.id, p.workspace_id, "roles", [...base], [...next])}
+              options={selectableRoles(data.roles, roleIds).map((r) => ({ id: r.id, label: r.name }))}
+              emptyLabel="no roles"
+              disabled={disabled} help={{ description: "The kinds of work they do. A step that needs a role can be done by anyone who has it.", example: "Tick Strategist and Account manager if Maya does both." }} />
+          </div>
+        )}
+        {show("more") && data.steps.length > 0 && (
+          <div className={full}>
             <ChecklistField
               label="Skills: steps they can do"
               value={skillIds}
@@ -213,18 +247,21 @@ export function PersonMore({ person: p, data, saveFactor }: { person: PersonDeta
               disabled={disabled} help={{ description: "Limit this person to particular steps within their roles. If nothing is ticked, they can do every step of their roles.", example: "Tick only Kickoff and strategy if Tom does kickoffs but not audits." }} />
           </div>
         )}
-        {factorsOn ? (
-          <div className="sm:col-span-2 lg:col-span-3">
-            <CapacityFactors person={p} data={data} saveFactor={saveFactor} />
+        {show("more") &&
+          (factorsOn ? (
+            <div className={full}>
+              <CapacityFactors person={p} data={data} saveFactor={saveFactor} />
+            </div>
+          ) : hasStoredFactors ? (
+            <p className={cn("text-fg-3", full)} data-factors-off>
+              Per-person times are off, so these aren&apos;t used.
+            </p>
+          ) : null)}
+        {show("time") && (
+          <div className={full}>
+            <Leave personId={p.id} workspaceId={p.workspace_id} leave={leave} disabled={disabled} />
           </div>
-        ) : hasStoredFactors ? (
-          <p className="text-fg-3 sm:col-span-2 lg:col-span-3" data-factors-off>
-            Per-person times are off, so these aren&apos;t used.
-          </p>
-        ) : null}
-        <div className="sm:col-span-2 lg:col-span-3">
-          <Leave personId={p.id} workspaceId={p.workspace_id} leave={leave} disabled={disabled} />
-        </div>
+        )}
       </div>
   );
 }

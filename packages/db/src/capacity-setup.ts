@@ -212,7 +212,7 @@ export interface CapacitySetup {
   /** `settings.ramp_default`, or the built-in default. */
   rampDefault: number[];
   rampDefaultProvenance: unknown;
-  /** `settings.dler_includes_leadership`; true when never set. */
+  /** `settings.dler_includes_leadership`; false when never set (D48: directors and managers are not counted in DLER). */
   dlerIncludesLeadership: boolean;
   dlerProvenance: unknown;
   /** Whether the viewer may change anything here (Owner and Agency admins). */
@@ -381,7 +381,7 @@ export async function loadCapacitySetup(db: Db, workspaceId: string): Promise<Ca
     portfolio: portfolio.map((r) => ({ ...r, provenance: prov(r.provenance) })),
     rampDefault: numList(settings.ramp_default) ?? [...DEFAULT_RAMP],
     rampDefaultProvenance: wsProv["settings.ramp_default"] ?? null,
-    dlerIncludesLeadership: settings.dler_includes_leadership !== false,
+    dlerIncludesLeadership: settings.dler_includes_leadership === true,
     dlerProvenance: wsProv["settings.dler_includes_leadership"] ?? null,
     canEdit: canEdit === true,
     payHidden: hidden,

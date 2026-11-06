@@ -121,7 +121,7 @@ describe("the Editor and the Settings", () => {
     for (const file of ["tiers-clients", "people-roles"]) expect(read(`components/setup/${file}.tsx`), file).toContain("setup.canEdit");
     // Pay: the salary column only exists for whoever can see pay.
     expect(read("components/setup/people-roles.tsx")).toContain("const showSalary = !setup.payHidden;");
-    expect(read("components/setup/people-roles.tsx")).toMatch(/\{showSalary && \(\s*<HeadHelp/);
+    expect(read("components/setup/people-roles.tsx")).toMatch(/\{showSalary && \(\s*<ColHead/);
     // The actions need a signed-in user and run through row-level security.
     expect(read(PAGE("setup").replace("/page.tsx", "/actions.ts"))).toContain("if (!(await signedIn())) return");
   });
