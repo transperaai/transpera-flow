@@ -433,7 +433,7 @@ describe("a backup round-trips the new tables and columns", () => {
     const t1 = await addTier(users.owner!, src);
     const t2 = await addTier(users.owner!, src);
     await q("update tiers set both_count = 5 where id = $1", [t2]);
-    await q("update services set words = 1500, links = 5, tech_hours = 5, meetings = 1, adhoc_chance = 0.7, adhoc_requests = 4, price = 4500, price_rise_churn = 0.75 where tier_id = $1 and department_id = $2", [t2, org]);
+    await q("update services set words = 1500, links = 5, tech_hours = 5, meetings = 1, adhoc_chance = 0.7, adhoc_requests = 4, price = 4500, price_rise_churn = 0.75, client_total = 40 where tier_id = $1 and department_id = $2", [t2, org]);
     await q("update services set channels = 1.5, builds = 3, creative_sets = 1 where tier_id = $1 and department_id = $2", [t2, perf]);
     const svc = (await q("select id from services where tier_id = $1 and department_id = $2", [t2, org]))[0]!.id as string;
     const role = (await q("insert into roles (workspace_id, name, department_id, kind, line, rule_of_thumb, unit) values ($1, 'SEO Manager', $2, 'client_facing', 0.8, 10, 'tasks') returning id", [src, org]))[0]!.id as string;
@@ -469,6 +469,9 @@ describe("a backup round-trips the new tables and columns", () => {
     expect(
       (await q("select name, words::float8 as words, links::float8 as links, tech_hours::float8 as tech, meetings::float8 as meetings, adhoc_chance::float8 as chance, adhoc_requests::float8 as requests, price::float8 as price, price_rise_churn::float8 as rise, provenance from services where department_id = $1 and tier_id = $2", [orgDst, t2Dst]))[0],
     ).toMatchObject({ name: "SEO Tier 2", words: 1500, links: 5, tech: 5, meetings: 1, chance: 0.7, requests: 4, price: 4500, rise: 0.75 });
+    // Q13: the typed tier total is in the backup and comes back, with the tier that has none still null.
+    expect((await q("select client_total, provenance #>> '{client_total,source}' as source from services where department_id = $1 and tier_id = $2", [orgDst, t2Dst]))[0]).toEqual({ client_total: 40, source: "entered" });
+    expect((await q("select count(*)::int as n from services where workspace_id = $1 and client_total is not null", [dst]))[0]!.n).toBe(1);
     expect((await q("select channels::float8 as channels, builds::float8 as builds, creative_sets::float8 as sets from services where department_id = $1 and tier_id = $2", [await departmentOf(dst, "Performance"), t2Dst]))[0]).toEqual({ channels: 1.5, builds: 3, sets: 1 });
     expect((await q("select provenance from services where department_id = $1 and tier_id = $2", [orgDst, t2Dst]))[0]!.provenance).toMatchObject({ words: { source: "entered" } });
     expect(await q("select name, kind, line::float8 as line, rule_of_thumb, unit, department_id from roles where workspace_id = $1", [dst])).toEqual([{ name: "SEO Manager", kind: "client_facing", line: 0.8, rule_of_thumb: 10, unit: "tasks", department_id: orgDst }]);

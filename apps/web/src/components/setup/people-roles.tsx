@@ -6,7 +6,7 @@
 // Per-person times (how fast one person is) stay under "More" on the person, never in a column: they are never ranked or compared.
 
 import { Fragment, useState } from "react";
-import { formatRamp, missingForCapacity, sourceLabel, type CapacitySetup, type SetupPerson, type SetupRole } from "@transpera-flow/db";
+import { formatRamp, missingForCapacity, sourceLabel, tierDiscrepancies, type CapacitySetup, type SetupPerson, type SetupRole } from "@transpera-flow/db";
 import { Toolbar } from "@/components/page-kit";
 import { SettingsSection } from "@/app/w/[slug]/settings/section";
 import { AddRole, RoleMore } from "@/app/w/[slug]/settings/roles-settings";
@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import type { WorkspaceSettingsData } from "@/lib/data";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
-import { HeadHelp, Marks, NumberCell, Note, SelectCell, TextCell } from "./cells";
+import { DiscrepancyPill, HeadHelp, Marks, NumberCell, Note, SelectCell, TextCell } from "./cells";
 
 type Scalar = string | number | boolean | null;
 
@@ -287,12 +287,48 @@ function PeopleTable({ setup, data }: { setup: CapacitySetup; data: WorkspaceSet
               )}
             </Fragment>
           ))}
+          {people.length > 0 && setup.tiers.length > 0 && <PortfolioTotals setup={setup} salaryCol={showSalary} />}
         </TableBody>
       </Table>
       <Note>
         Also on each person, under More: email, start and end dates, leave, skills (steps they can do), per-person times, overtime cap. Ramp-up for new starters (90 days to about 80%) and the offshore / contractor label are here. Roles marked as leadership (under More) aren&apos;t in clients or revenue per employee.
       </Note>
     </SettingsSection>
+  );
+}
+
+/**
+ * The total of each tier's portfolio column, with the tier's discrepancy pill beside it (Q13): only for a tier service whose total is typed in.
+ * The columns span both departments, so a pill names its department in the tooltip.
+ */
+function PortfolioTotals({ setup, salaryCol }: { setup: CapacitySetup; salaryCol: boolean }) {
+  const discrepancies = tierDiscrepancies(setup);
+  const deptName = new Map(setup.departments.map((d) => [d.id, d.name]));
+  // Name, Role, Hours a week, Team time, (Salary), Serves tiers: the label sits under the first of these.
+  const lead = 5 + (salaryCol ? 1 : 0);
+  return (
+    <TableRow data-portfolio-totals>
+      <TableCell colSpan={lead} className="text-right text-xs font-medium text-fg-2">
+        Clients in portfolios, by tier
+      </TableCell>
+      {setup.tiers.map((t) => {
+        const ids = new Set(setup.services.filter((s) => s.tier_id === t.id && s.active).map((s) => s.id));
+        const total = setup.portfolio.filter((r) => ids.has(r.service_id)).reduce((sum, r) => sum + r.client_count, 0);
+        return (
+          <TableCell key={t.id} className="align-top">
+            <div className="flex flex-col items-end tabular-nums" data-portfolio-total={t.key}>
+              <b>{total}</b>
+              {discrepancies
+                .filter((d) => d.tierId === t.id)
+                .map((d) => (
+                  <DiscrepancyPill key={d.serviceId} discrepancy={d} prefix={deptName.get(d.departmentId)} />
+                ))}
+            </div>
+          </TableCell>
+        );
+      })}
+      <TableCell colSpan={3} />
+    </TableRow>
   );
 }
 
