@@ -9,7 +9,7 @@
 import { ChevronRight, Users } from "lucide-react";
 import Link from "next/link";
 import { useState, type KeyboardEvent, type ReactNode } from "react";
-import { missingForCapacity, type CapacitySetup, type SetupPerson, type SetupRole } from "@transpera-flow/db";
+import { missingForCapacity, tierDiscrepancies, type CapacitySetup, type SetupPerson, type SetupRole } from "@transpera-flow/db";
 import { ClearFilters, EmptyState, FilterMenu, Toolbar, ToolbarSearch } from "@/components/page-kit";
 import { SettingsSection } from "@/app/w/[slug]/settings/section";
 import { AddRole, RoleMore } from "@/app/w/[slug]/settings/roles-settings";
@@ -27,7 +27,7 @@ import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
 import { formatWholeCurrency } from "@/lib/format";
 import { EDIT_ONLY } from "@/lib/phone";
 import { cn } from "@/lib/utils";
-import { Marks, Note } from "./cells";
+import { DiscrepancyPill, Marks, Note } from "./cells";
 
 type Scalar = string | number | boolean | null;
 
@@ -203,6 +203,7 @@ function PeopleList({ setup, data }: { setup: CapacitySetup; data: WorkspaceSett
       phoneWrap={false}
       description={showSalary ? "Salary counts toward DLER. Directors, managers and contractors don't count. Click a person for everything about them." : "Your record. Agency admins see the whole team."}
     >
+      {all.length > 0 && setup.tiers.length > 0 && <PortfolioTotals setup={setup} />}
       {all.length > 0 && (
         <Toolbar label="Filter the people">
           <ToolbarSearch value={search} onChange={setSearch} label="Search people" placeholder="Search people" />
@@ -294,6 +295,34 @@ function PeopleList({ setup, data }: { setup: CapacitySetup; data: WorkspaceSett
         {person && <PersonPanel key={person.id} setup={setup} data={data} person={person} showSalary={showSalary} noSalary={noSalary.has(person.id)} noClients={noClients.has(person.id)} placeholderHours={hoursPerWeek * person.fte} />}
       </Panel>
     </SettingsSection>
+  );
+}
+
+/**
+ * The total of each tier's portfolios, with the tier's discrepancy pill beside it (Q13): only for a tier service whose total is typed in.
+ * One compact line above the list. A pill names its department in the tooltip, because a tier spans both departments.
+ */
+function PortfolioTotals({ setup }: { setup: CapacitySetup }) {
+  const discrepancies = tierDiscrepancies(setup);
+  const deptName = new Map(setup.departments.map((d) => [d.id, d.name]));
+  return (
+    <div data-portfolio-totals className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
+      <span className="text-xs font-medium text-fg-2">Clients in portfolios, by tier</span>
+      {setup.tiers.map((t) => {
+        const ids = new Set(setup.services.filter((s) => s.tier_id === t.id && s.active).map((s) => s.id));
+        const total = setup.portfolio.filter((r) => ids.has(r.service_id)).reduce((sum, r) => sum + r.client_count, 0);
+        return (
+          <span key={t.id} className="flex items-center gap-1.5 tabular-nums" data-portfolio-total={t.key}>
+            {t.key} <b>{total}</b>
+            {discrepancies
+              .filter((d) => d.tierId === t.id)
+              .map((d) => (
+                <DiscrepancyPill key={d.serviceId} discrepancy={d} prefix={deptName.get(d.departmentId)} />
+              ))}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 

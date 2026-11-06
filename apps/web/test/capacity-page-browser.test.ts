@@ -44,7 +44,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-type Options = { payHidden?: boolean; noTiers?: boolean; missingWords?: boolean; badModel?: boolean };
+type Options = { payHidden?: boolean; noTiers?: boolean; missingWords?: boolean; badModel?: boolean; tierTotal?: "over" | "unassigned" };
 
 async function mount(options: Options = {}, width = 1440, scheme: "light" | "dark" = "light"): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: scheme });
@@ -149,6 +149,21 @@ describe("Capacity page", { timeout: 180_000 }, () => {
     expect(await page.locator("[data-room]").count()).toBe(0);
     expect(errors).toEqual([]);
     await page.close();
+  });
+
+  it("lists a tier whose portfolios and named clients pass its typed total as a warning, and clients nobody holds as a note (Q13)", async () => {
+    const over = await mount({ tierTotal: "over" });
+    await over.page.waitForSelector("[data-attention]");
+    const warn = await text(over.page, "[data-attention]");
+    expect(warn).toMatch(/Organic \(SEO\) T1: Portfolios and named clients add up to \d+, but the tier has 0 \(\d+ too many\)\. The model counts the portfolios as they are\./);
+    expect(await over.page.locator("[data-attention] a").evaluateAll((as) => as.map((a) => a.textContent))).toContain("Check it →");
+    await over.page.close();
+    const note = await mount({ tierTotal: "unassigned" });
+    await note.page.waitForSelector("[data-attention-note-only], [data-attention-notes]");
+    // Only a note: no "not worked out yet" warning card on its account, and the sentence is the note's.
+    expect(await note.page.locator("[data-attention]").count()).toBe(0);
+    expect(await text(note.page, "[data-attention-note-only]")).toMatch(/Note: Organic \(SEO\) T1: \d+ clients aren't in anyone's portfolio\./);
+    await note.page.close();
   });
 
   it("lists what is missing and the engine's problems, with where to fix each, and still shows the widgets", async () => {

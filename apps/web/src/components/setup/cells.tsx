@@ -9,7 +9,7 @@ import { NumberField, SelectField, TextField, type FieldHelp } from "@/component
 import { Help } from "@/components/help";
 import { TableHead } from "@/components/ui/table";
 import type { Saver } from "@/lib/fields/field-controller";
-import { sourceLabel } from "@transpera-flow/db";
+import { sourceLabel, type TierDiscrepancy } from "@transpera-flow/db";
 
 /** A column heading with its (i): a plain-English line and an example. */
 export function HeadHelp({ children, help, align = "right", className }: { children: ReactNode; help: FieldHelp & { label?: string }; align?: "left" | "right"; className?: string }) {
@@ -101,6 +101,26 @@ export function SelectCell({
   if (canEdit) return <SelectField label={label} value={value} save={save} options={options} noneLabel={noneLabel} />;
   const shown = options.find((o) => o.value === value)?.label;
   return <span aria-label={label}>{shown ?? noneLabel ?? "–"}</span>;
+}
+
+/**
+ * A tier's discrepancy (Q13) as a small pill: "over" (named clients and portfolios add up to more than the typed total) is a warning,
+ * "unassigned" (clients in nobody's portfolio) a muted note. The full sentence is the tooltip and is also there for screen readers.
+ */
+export function DiscrepancyPill({ discrepancy: d, prefix }: { discrepancy: TierDiscrepancy; prefix?: string }) {
+  const short = d.kind === "over" ? `${d.amount} too many` : `${d.amount} unassigned`;
+  const message = prefix ? `${prefix}: ${d.message}` : d.message;
+  return (
+    <span
+      data-discrepancy={d.kind}
+      data-service={d.serviceId}
+      title={message}
+      className={`mt-0.5 inline-flex w-fit cursor-help items-center whitespace-nowrap rounded-full px-1.5 py-px text-2xs font-medium ${d.kind === "over" ? "bg-warn-soft text-warn" : "bg-panel-2 text-fg-2"}`}
+    >
+      {short}
+      <span className="sr-only">. {message}</span>
+    </span>
+  );
 }
 
 /** The notes under a table (the prototype's). */
