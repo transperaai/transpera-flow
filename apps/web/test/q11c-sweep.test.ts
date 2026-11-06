@@ -36,7 +36,6 @@ let css: string;
 let workers: Record<string, string>;
 let data: unknown;
 let vettingSolutionId = "";
-let adQaSolutionId = "";
 
 beforeAll(async () => {
   tdb = await createTestDb({ supabaseDefaultPrivileges: true });
@@ -57,7 +56,6 @@ beforeAll(async () => {
   for (const i of issues) events[i.id] = await loadIssueEvents(db, ws, i.id);
   const [solutions, links] = await Promise.all([loadSolutions(db, ws), loadSolutionIssues(db, ws)]);
   vettingSolutionId = solutions.find((s) => s.name === "Vetting by a second person")!.id;
-  adQaSolutionId = solutions.find((s) => s.name === "Ad QA only on new campaigns")!.id;
   data = {
     bundles,
     processes: (await tdb.client.query("select id, name from processes where workspace_id = $1 and not is_company", [ws])).rows,
@@ -99,7 +97,6 @@ async function open(o: { call: string; arg: object; width?: number; scheme?: "li
 }
 
 
-const calls = (page: Page) => page.evaluate(() => window.__serverActions ?? []);
 
 
 const WIDTHS = [

@@ -22,12 +22,6 @@ import { EDIT_ONLY } from "@/lib/phone";
 /** "Used in 2 solutions": the solutions whose map holds a group put in from this block (lib/blocks/usage.ts). */
 export const usageText = (n: number) => `Used in ${n} ${n === 1 ? "solution" : "solutions"}`;
 
-const NEW_BLOCK_HELP = {
-  label: "New block",
-  description: "Opens the Editor on an empty map. Build a few steps, name the block, and save it to the library to reuse it.",
-  example: "Build “Client sign-off” once (send the summary, chase, record the decision), then insert it into any process.",
-};
-
 const NEW_BLOCK_LINK = cn(buttonVariants(), "bg-edit text-edit-fg hover:bg-edit/90");
 
 export function BlockLibrary({ blocks, mode, newHref, usage = {} }: { blocks: BlockRow[]; mode: "live" | "readonly" | "demo"; newHref: string | null; usage?: Record<string, number> }) {
@@ -54,7 +48,11 @@ export function BlockLibrary({ blocks, mode, newHref, usage = {} }: { blocks: Bl
               <Link href={newHref} className={NEW_BLOCK_LINK}>
                 ✎ New block
               </Link>
-              <Help {...NEW_BLOCK_HELP} />
+              <Help
+                label="New block"
+                description="Opens the Editor on an empty map. Build a few steps, name the block, and save it to the library to reuse it."
+                example="Build “Client sign-off” once (send the summary, chase, record the decision), then insert it into any process."
+              />
             </span>
           ) : undefined
         }
