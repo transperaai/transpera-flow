@@ -307,6 +307,8 @@ export function historyText(e: Pick<IssueEventRow, "kind" | "detail">, names: Om
     }
     case "reopened":
       return "Reopened.";
+    case "solution_status":
+      return `Solution ${d.solution ? `“${d.solution}”` : "a solution"} went from ${SOLUTION_STATUS_WORDS[d.from ?? ""] ?? d.from} to ${SOLUTION_STATUS_WORDS[d.to ?? ""] ?? d.to}.`;
     default: {
       const parts: string[] = [];
       const sv = d.solution_verdict;
@@ -342,4 +344,100 @@ export function historyLines(events: readonly IssueEventRow[], names: HistoryNam
   return [...events]
     .sort((a, b) => a.seq - b.seq)
     .map((e) => ({ id: e.id, when: shortDate(e.at, now), who: names.who(e.actor), text: historyText(e, names) }));
+}
+
+// ---------------------------------------------------------------------------
+// The history as a timeline (Q10): newest first, an icon per kind and one plain line
+// ---------------------------------------------------------------------------
+
+/** What an entry is about, for its icon. */
+export type TimelineKind = "created" | "edited" | "status" | "linked" | "solution" | "resolved" | "reopened";
+
+export interface TimelineLine {
+  id: string;
+  kind: TimelineKind;
+  when: string;
+  who: string;
+  text: string;
+}
+
+/** The explanation under the History heading. */
+export const HISTORY_FOLD = "Written automatically when the issue is created, edited, changes status, gains or loses a link, a solution is judged, or it's resolved.";
+
+const SOLUTION_STATUS_WORDS: Record<string, string> = { idea: "Idea", testing: "Testing", works: "Works", doesnt_work: "Doesn't work", adopted: "Adopted" };
+
+/** One history entry as one plain line with the kind that picks its icon: "Status: Open → Testing solutions", "Linked step Domain vetting". */
+export function timelineLine(e: Pick<IssueEventRow, "kind" | "detail">, names: Omit<HistoryNames, "who">): { kind: TimelineKind; text: string } {
+  const d = e.detail as {
+    acknowledged?: boolean;
+    migrated?: boolean;
+    from?: string;
+    to?: string;
+    how?: ResolveHow;
+    note?: string;
+    solution?: string;
+    solution_verdict?: { solution?: string; verdict?: "pass" | "fail" | null; was?: "pass" | "fail" | null; notes_changed?: boolean };
+    solution_deleted?: { solution?: string };
+    fields?: string[];
+    linked?: LinkedDetail;
+  };
+  const shown = (s: string | undefined) => (s && (ISSUE_STATUSES as readonly string[]).includes(s) ? STATUS_LABELS[s as IssueStatus] : s);
+  const quoted = (s: string | undefined) => (s ? `“${s}”` : "a solution");
+  const stepName = (s: { step_id: string | null }) => (s.step_id ? (names.step(s.step_id) ?? "a step") : "the whole process");
+  switch (e.kind) {
+    case "created":
+      return { kind: "created", text: d.migrated ? "Logged (from the old register)" : d.acknowledged ? "Acknowledged from an insight" : "Logged" };
+    case "solution_status":
+      return { kind: "solution", text: `Solution ${quoted(d.solution)}: ${SOLUTION_STATUS_WORDS[d.from ?? ""] ?? d.from} → ${SOLUTION_STATUS_WORDS[d.to ?? ""] ?? d.to}` };
+    case "solution_tested": {
+      const parts = [d.solution ? `Tried solution ${quoted(d.solution)}` : "Started testing solutions"];
+      if (d.solution && d.from && d.to && d.from !== d.to) parts.push(`Status: ${shown(d.from)} → ${shown(d.to)}`);
+      return { kind: "solution", text: parts.join(". ") };
+    }
+    case "resolved": {
+      const how = d.how ? ` ${d.how === "solution" && d.solution ? `by solution “${d.solution}”` : RESOLVE_HOW_BAR[d.how]}` : "";
+      return { kind: "resolved", text: `${d.to === "wont_fix" ? "Marked Won't fix" : "Resolved"}${how}${d.note ? `: “${d.note}”` : ""}` };
+    }
+    case "reopened":
+      return { kind: "reopened", text: "Reopened" };
+    default: {
+      const parts: string[] = [];
+      let kind: TimelineKind = "edited";
+      const sv = d.solution_verdict;
+      if (sv) {
+        kind = "solution";
+        if (sv.verdict !== sv.was) parts.push(sv.verdict ? `Your verdict on ${quoted(sv.solution)}: ${sv.verdict === "pass" ? "Pass" : "Fail"}` : `Cleared your verdict on ${quoted(sv.solution)}`);
+        if (sv.notes_changed) parts.push(`Updated your note on ${quoted(sv.solution)}`);
+      }
+      if (d.solution_deleted) {
+        kind = "solution";
+        parts.push(`Deleted solution ${quoted(d.solution_deleted.solution)}`);
+      }
+      if (d.fields?.length) parts.push(`Edited ${list(d.fields.map((f) => FIELD_WORDS[f] ?? f))}`);
+      const l = d.linked;
+      const linked: string[] = [];
+      if (l?.steps?.added?.length) linked.push(`Linked step ${list(l.steps.added.map(stepName))}`);
+      if (l?.steps?.removed?.length) linked.push(`Unlinked step ${list(l.steps.removed.map(stepName))}`);
+      if (l?.owners?.added?.length) linked.push(`Added owner ${list(l.owners.added.map((p) => names.person(p) ?? "someone"))}`);
+      if (l?.owners?.removed?.length) linked.push(`Removed owner ${list(l.owners.removed.map((p) => names.person(p) ?? "someone"))}`);
+      if (l?.sources?.added?.length) linked.push(`Linked source ${list(l.sources.added.map((s) => names.source(s) ?? "a source"))}`);
+      if (l?.sources?.removed?.length) linked.push(`Unlinked source ${list(l.sources.removed.map((s) => names.source(s) ?? "a source"))}`);
+      if (linked.length) {
+        parts.push(...linked);
+        if (kind === "edited") kind = "linked";
+      }
+      if (d.from && d.to) {
+        parts.push(`Status: ${shown(d.from)} → ${shown(d.to)}`);
+        if (kind === "edited") kind = "status";
+      }
+      return { kind, text: parts.length ? parts.join(". ") : "Edited" };
+    }
+  }
+}
+
+/** The history newest first, as timeline lines. */
+export function timelineLines(events: readonly IssueEventRow[], names: HistoryNames, now?: Date): TimelineLine[] {
+  return [...events]
+    .sort((a, b) => b.seq - a.seq)
+    .map((e) => ({ id: e.id, when: shortDate(e.at, now), who: names.who(e.actor), ...timelineLine(e, names) }));
 }

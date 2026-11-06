@@ -56,6 +56,7 @@ export const DEMO_FORECAST_SOLUTION: SolutionRow = (() => {
     base_revision_id: NORTHBEAM_REVISION_ID,
     name: "Faster PPC campaign setup",
     notes: "",
+    status: "testing",
     steps: { ...copy, steps },
     changed_step_ids: [northbeamStepIds.ppc],
     lever_changes: [],

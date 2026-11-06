@@ -12,7 +12,7 @@ import { RATING_LABELS, detectBrokenScenarios, ratingOfStored, resolveMoney, typ
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help } from "@/components/help";
 import { LIST_HELP } from "@/lib/issues/help";
-import { StatusPill } from "@/components/issues/status-pill";
+import { IssueStatusPill } from "@/components/issues/status-pill";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -20,7 +20,7 @@ import { emptyDraft, issueFormOptions, toSaveInput } from "@/lib/issues/draft";
 import { DEFAULT_LIST_STATE, LISTED_STATUSES, NO_SOLUTIONS, RATINGS_WORST_FIRST, UNASSIGNED, facetCounts, filtersOn, isOpenIssue, issueHref, listIssues, listQuery, ownersOf, parseListState, processesOf, shortDate, visibleIssues, type ListState } from "@/lib/issues/pages";
 import { STATUS_LABELS } from "@/lib/issues/register";
 import { STATUS_TONE } from "@/components/issues/status-pill";
-import { ClearFilters, FilterMenu, ListToolbar, ToolbarSearch, type FilterOption } from "@/components/shell/list-toolbar";
+import { ClearFilters, FilterMenu, Toolbar, ToolbarSearch, type FilterOption } from "@/components/page-kit";
 import { NO_SOLUTIONS_DATA, solutionSummaries, type SolutionsData } from "@/lib/solutions/cards";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { perceptionGapDetections } from "@/lib/issues/perception";
@@ -132,7 +132,7 @@ export function IssuesPage({
 
   return (
     <div className="flex flex-col gap-4">
-      <ListToolbar>
+      <Toolbar>
         <ToolbarSearch value={search} onChange={onSearch} label="Search issues" placeholder="Search issues" />
         <FilterMenu name="Status" options={statusOptions} selected={filters.status} onChange={(status) => setFilter({ ...filters, status: LISTED_STATUSES.filter((s) => status.includes(s)) })} help={<Help {...LIST_HELP.show} />} />
         <FilterMenu name="Owner" options={ownerOptions} selected={filters.owners} onChange={(owners) => setFilter({ ...filters, owners })} help={<Help {...LIST_HELP.owner} />} />
@@ -147,7 +147,7 @@ export function IssuesPage({
             <Help {...LIST_HELP.newIssue} />
           </span>
         )}
-      </ListToolbar>
+      </Toolbar>
 
       {state.error && (
         <p role="alert" className="text-sm text-destructive">
@@ -209,7 +209,7 @@ export function IssuesPage({
                     <td className="max-w-56 px-3 py-2.5 text-xs text-fg-2">{touched.join(", ") || "—"}</td>
                     <td className="px-3 py-2.5 text-xs">{owners.join(", ") || <span className="text-muted-foreground">No owner</span>}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
-                      <StatusPill status={i.status} />
+                      <IssueStatusPill status={i.status} />
                       {i.resolved_at && !isOpenIssue(i) && <div className="text-xs text-muted-foreground">{shortDate(i.resolved_at)}</div>}
                     </td>
                     <td className="px-3 py-2.5 text-xs whitespace-nowrap" data-solutions>

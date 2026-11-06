@@ -1,6 +1,6 @@
 import type { IssueStatus } from "@transpera-flow/db";
+import { StatusPill, StatusPillMenu, type PillOption } from "@/components/page-kit/status-pill";
 import { statusLabel } from "@/lib/issues/pages";
-import { cn } from "@/lib/utils";
 
 /** The theme token each status is drawn in: its own colour, so a list reads at a glance. */
 export const STATUS_TONE: Record<IssueStatus, string> = {
@@ -11,20 +11,19 @@ export const STATUS_TONE: Record<IssueStatus, string> = {
   dismissed: "line-2",
 };
 
-/**
- * An issue's status as a pill: a dot in the status's colour on a soft tint of it, with the words in the normal text colour so it reads in
- * light and dark. The one pill the Issues list, the Issue page and the Solution page share.
- */
-export function StatusPill({ status, className }: { status: IssueStatus; className?: string }) {
-  const tone = STATUS_TONE[status];
-  return (
-    <span
-      data-status={status}
-      className={cn("inline-flex h-5 items-center gap-1.5 rounded-full px-2 text-xs font-medium whitespace-nowrap text-foreground", className)}
-      style={{ background: `color-mix(in srgb, var(--${tone}) 18%, transparent)` }}
-    >
-      <i aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: `var(--${tone})` }} />
-      {statusLabel(status)}
-    </span>
-  );
+/** An issue's status as a pill (the page kit's `StatusPill` in the status's colour). */
+export function IssueStatusPill({ status, className }: { status: IssueStatus; className?: string }) {
+  return <StatusPill value={status} label={statusLabel(status)} tone={STATUS_TONE[status]} className={className} />;
+}
+
+/** The statuses a person can set on an issue, in the order the dropdown lists them. */
+export const ISSUE_STATUS_OPTIONS: readonly PillOption<IssueStatus>[] = (["open", "testing", "resolved", "wont_fix"] as const).map((s) => ({
+  value: s,
+  label: statusLabel(s),
+  tone: STATUS_TONE[s],
+}));
+
+/** An issue's status as a dropdown pill: choosing one calls `onChange` at once. */
+export function IssueStatusMenu({ status, onChange, disabled }: { status: IssueStatus; onChange: (s: IssueStatus) => void; disabled?: boolean }) {
+  return <StatusPillMenu name="Status" value={status} options={ISSUE_STATUS_OPTIONS} onChange={onChange} disabled={disabled} />;
 }

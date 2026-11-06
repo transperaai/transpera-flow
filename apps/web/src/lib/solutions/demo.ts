@@ -25,6 +25,7 @@ export function addDemoSolution(input: SolutionInput): { solution: SolutionRow; 
     base_revision_id: input.baseRevisionId,
     name: input.name,
     notes: "",
+    status: "testing",
     steps: structuredClone(input.copy),
     changed_step_ids: [...input.changedStepIds],
     lever_changes: structuredClone(input.levers),
@@ -110,6 +111,12 @@ export function removeDemoSolution(solutionId: string): void {
     solutions: state.solutions.filter((s) => s.id !== solutionId),
     links: state.links.filter((l) => l.solution_id !== solutionId),
   };
+  emit();
+}
+
+/** A solution's status, in this tab (Q10). */
+export function setDemoStatus(solutionId: string, status: SolutionRow["status"]): void {
+  state = { ...state, solutions: state.solutions.map((s) => (s.id === solutionId ? { ...s, status, updated_at: new Date().toISOString() } : s)) };
   emit();
 }
 

@@ -1,6 +1,7 @@
 "use server";
 
-import type { SolutionIssueRow } from "@transpera-flow/db";
+import { isSolutionStatus, type SolutionIssueRow, type SolutionStatus } from "@transpera-flow/db";
+import { saveField } from "@/lib/fields/server";
 import { MAX_NOTES } from "@/lib/solutions/cards";
 import { isId } from "@/lib/sources/validate";
 import { pgCode } from "@/app/action-db";
@@ -74,7 +75,23 @@ export async function deleteSolution(workspaceId: unknown, solutionId: unknown):
   return { status: "ok" };
 }
 
-export type NotesResult = { status: "ok"; notes: string } | { status: "error"; message: string };
+export type StatusResult = { status: "ok"; value: SolutionStatus } | { status: "conflict"; theirs: SolutionStatus } | { status: "error"; message: string };
+
+/**
+ * A solution's status (Q10, D43), saved at once if it is still `base` (the per-field save). The database logs the change on the history of
+ * each issue the solution is linked to (`solution_status_logged`). Anyone who can't edit the workspace changes nothing, and is told so.
+ */
+export async function saveSolutionStatus(solutionId: unknown, base: unknown, next: unknown): Promise<StatusResult> {
+  if (!isId(solutionId) || !isSolutionStatus(base) || !isSolutionStatus(next)) return invalid;
+  if (!(await getSessionUser())) return signedOut;
+  const r = await saveField<string>("solutions", { id: solutionId }, "status", base, next);
+  if (r.status === "saved" && isSolutionStatus(r.value)) return { status: "ok", value: r.value };
+  if (r.status === "conflict" && isSolutionStatus(r.theirs)) return { status: "conflict", theirs: r.theirs };
+  if (r.status === "error") return { status: "error", message: r.message };
+  return forbidden;
+}
+
+export type NotesResult ={ status: "ok"; notes: string } | { status: "error"; message: string };
 
 /** The notes on a solution as a whole (not on one issue). */
 export async function saveSolutionNotes(workspaceId: unknown, solutionId: unknown, notes: unknown): Promise<NotesResult> {

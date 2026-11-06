@@ -24,6 +24,7 @@ const sol = (id: string, extra: Partial<SolutionRow> = {}): SolutionRow => ({
   base_revision_id: "r",
   name: `Solution ${id}`,
   notes: "",
+  status: "testing",
   steps: { steps: [], edges: [], entry_step_id: null },
   changed_step_ids: [],
   lever_changes: [],

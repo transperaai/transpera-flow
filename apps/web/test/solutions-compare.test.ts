@@ -29,6 +29,7 @@ const solution: SolutionRow = {
   base_revision_id: base.revision.id,
   name: "Faster audit",
   notes: "",
+  status: "testing",
   steps: solutionCopy(edited),
   changed_step_ids: [ids.audit],
   lever_changes: [],

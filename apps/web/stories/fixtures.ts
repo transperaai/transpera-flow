@@ -88,6 +88,7 @@ const solution = (id: string, extra: Partial<SolutionRow> = {}): SolutionRow => 
     base_revision_id: live.revision.id,
     name: `Solution ${id}`,
     notes: "",
+    status: "testing",
     steps: solutionCopy(live),
     changed_step_ids: [northbeamStepIds.audit],
     lever_changes: [],

@@ -856,6 +856,12 @@ export interface BlockRow {
 /** How a solution did against an issue's target, or what the user decided. */
 export type SolutionVerdict = "pass" | "fail";
 
+/** Where a solution stands (Q10, D43): a person's call, shown as a pill. The per-issue verdicts stay under it as detail. */
+export const SOLUTION_STATUSES = ["idea", "testing", "works", "doesnt_work", "adopted"] as const;
+export type SolutionStatus = (typeof SOLUTION_STATUSES)[number];
+export const SOLUTION_STATUS_LABELS: Record<SolutionStatus, string> = { idea: "Idea", testing: "Testing", works: "Works", doesnt_work: "Doesn't work", adopted: "Adopted" };
+export const isSolutionStatus = (v: unknown): v is SolutionStatus => typeof v === "string" && (SOLUTION_STATUSES as readonly string[]).includes(v);
+
 /** A separate copy of a process with changed steps, plus optional lever changes (A49, D25). Never a draft: drafts stay single (D18). */
 export interface SolutionRow {
   id: string;
@@ -866,6 +872,7 @@ export interface SolutionRow {
   base_revision_id: string;
   name: string;
   notes: string;
+  status: SolutionStatus;
   /** The whole map as the solution has it (the same shape as a block's bundle). */
   steps: BlockBundle;
   /** Stable ids of the steps it added or changed against the base revision. */
@@ -961,7 +968,7 @@ export interface IssueLinkRef {
 export type ResolveHow = "solution" | "process_change" | "not_a_problem";
 export const RESOLVE_HOWS = ["solution", "process_change", "not_a_problem"] as const satisfies readonly ResolveHow[];
 
-export type IssueEventKind = "created" | "edited" | "solution_tested" | "resolved" | "reopened";
+export type IssueEventKind = "created" | "edited" | "solution_tested" | "resolved" | "reopened" | "solution_status";
 /** Logged by hand, detected by a stored run (reserved), or promoted from a detection. */
 export type IssueSource = "manual" | "detected" | "promoted";
 

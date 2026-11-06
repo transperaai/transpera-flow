@@ -50,6 +50,7 @@ describe("with Supabase's default table privileges", () => {
       { table_name: "solution_issues", column_name: "user_verdict" },
       { table_name: "solutions", column_name: "name" },
       { table_name: "solutions", column_name: "notes" },
+      { table_name: "solutions", column_name: "status" },
     ]);
   });
 
