@@ -11,11 +11,7 @@ export default async function WorkspaceSourcesPage(props: PageProps<"/w/[slug]/s
   if (!data) notFound();
   const canEdit = await canEditWorkspace(data.workspace.id);
   return (
-    <Page
-      title="Sources"
-      eyebrow="Company"
-      description="Your library of transcripts, notes and data. Search it, open one to read it, and link each to what it is evidence for. Cite one for a step's value from the step's inspector."
-    >
+    <Page title="Sources" hideHeader>
       <SourcesPage
         workspaceId={data.workspace.id}
         sources={data.sources}

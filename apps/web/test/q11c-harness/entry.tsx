@@ -49,7 +49,7 @@ window.Worker = class extends NativeWorker {
 const mount = (node: React.ReactNode) =>
   createRoot(document.getElementById("root")!).render(
     <SidebarProvider>
-      <div className="mx-auto max-w-6xl p-4">{node}</div>
+      <div className="mx-auto w-full min-w-0 max-w-6xl p-4">{node}</div>
     </SidebarProvider>,
   );
 
@@ -148,7 +148,7 @@ window.q11cMountOther = () =>
 window.q11cMountSources = ({ editor }) => {
   const bundle = demoBundle();
   mount(
-    <Page title="Sources" eyebrow="Company" description="Your library of transcripts, notes and data. Search it, open one to read it, and link each to what it is evidence for.">
+    <Page title="Sources" hideHeader>
       <SourcesPage
         workspaceId={bundle.workspace.id}
         memory={demoPageSources()}

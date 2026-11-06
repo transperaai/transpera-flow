@@ -310,6 +310,36 @@ describe("Other improvements", () => {
   }, 300_000);
 });
 
+describe("Sources page", () => {
+  it("has a header card with Add source, and the library in a section card", async () => {
+    const { page, errors } = await pageOf("sources");
+    const header = page.locator("[data-testid=sources-header]");
+    expect(await header.locator("h1").innerText()).toBe("Sources");
+    expect(await header.locator("[data-page-actions]").getByRole("button", { name: "+ Add source" }).count()).toBe(1);
+    expect(await page.locator("#library [role=heading][aria-level='2']").innerText()).toBe("Library");
+    expect(await page.locator("#library [data-source-row]").count()).toBeGreaterThan(2);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 300_000);
+
+  it("a reader has no Add source button", async () => {
+    const { page } = await pageOf("sources", { editor: false });
+    expect(await page.getByRole("button", { name: "+ Add source" }).count()).toBe(0);
+    await page.close();
+  }, 300_000);
+});
+
+describe("nothing scrolls sideways at 400 px", () => {
+  it("on every page of this package", async () => {
+    for (const p of PAGES()) {
+      const { page } = await pageOf(p.name, { width: 400 });
+      const widths = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, view: document.documentElement.clientWidth }));
+      expect(widths.page, p.name).toBeLessThanOrEqual(widths.view);
+      await page.close();
+    }
+  }, 900_000);
+});
+
 describe("screenshots", () => {
   it.skipIf(!shots)("saves the screenshots", async () => {
     mkdirSync(shots!, { recursive: true });
