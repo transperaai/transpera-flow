@@ -26,6 +26,8 @@ import {
   type PersonBusy,
 } from "@transpera-flow/db";
 import { capacityProblems, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
+import { MetaLine, PageHeader } from "@/components/page-kit";
+import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
 import { useCapacityRuns, type PhaseState } from "@/lib/sim/use-capacity-runs";
@@ -58,6 +60,32 @@ function fixHref(base: string, where: string): string {
 }
 const missingHref = (base: string, m: MissingItem): string => (m.kind === "tier_deliverable" ? `${base}/setup/clients` : `${base}/setup/people`);
 
+export const CAPACITY_DESCRIPTION = 'Are we at capacity, who has room, and how many more clients fit. "Today" is the current book of clients with nobody arriving or leaving.';
+
+/** The Capacity page's header: the title, one sentence saying what the page answers, and the way on to the Sandbox. */
+export function CapacityHeader({ base }: { base?: string }) {
+  return (
+    <PageHeader
+      label="Capacity"
+      eyebrow={<span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Company</span>}
+      title="Capacity"
+      meta={
+        <MetaLine>
+          <span>{CAPACITY_DESCRIPTION}</span>
+        </MetaLine>
+      }
+      actionsLabel="Capacity actions"
+      actions={
+        base ? (
+          <Link href={`${base}/sandbox`} className={buttonVariants({ variant: "outline", size: "sm" })} data-sandbox-link>
+            Try changes in the Sandbox
+          </Link>
+        ) : undefined
+      }
+    />
+  );
+}
+
 export function CapacityView(props: CapacityViewProps) {
   const { setup, model, year, base } = props;
   const hasTiers = setup.services.some((s) => s.active && s.department_id && s.tier_id);
@@ -68,16 +96,15 @@ export function CapacityView(props: CapacityViewProps) {
 
   if (!hasTiers) {
     return (
-      <div className="flex flex-col gap-4">
-        <div data-no-tiers className="rounded-token border border-dashed border-line p-6 text-sm text-muted-foreground">
-          <p className="font-medium text-fg">No tiers and services are set up yet.</p>
-          <p>Capacity is worked out from each department&apos;s tiers, the clients in them and the people who look after them.</p>
-          <p className="mt-3">
-            <Link href={`${base}/setup/clients`} className="font-medium text-accent hover:underline">
+      <div className="flex min-w-0 flex-col gap-6">
+        <CapacityHeader base={base} />
+        <Section title="No tiers and services are set up yet." data-no-tiers description="Capacity is worked out from each department's tiers, the clients in them and the people who look after them.">
+          <div>
+            <Link href={`${base}/setup/clients`} className={buttonVariants({ variant: "outline", size: "sm" })}>
               Set up tiers and clients →
             </Link>
-          </p>
-        </div>
+          </div>
+        </Section>
       </div>
     );
   }
@@ -90,6 +117,7 @@ export function CapacityView(props: CapacityViewProps) {
       data-today-ms={runs.today.status === "done" ? Math.round(runs.today.run.durationMs) : undefined}
       data-year-ms={runs.year.status === "done" ? Math.round(runs.year.run.durationMs) : undefined}
     >
+      <CapacityHeader base={base} />
       {props.modelError && (
         <div data-model-error role="alert" className="rounded-token border border-crit bg-crit-soft p-3 text-sm">
           {props.modelError}
@@ -102,11 +130,7 @@ export function CapacityView(props: CapacityViewProps) {
           The simulation could not run: {runs.today.error}
         </div>
       )}
-      {!todayRun || !model ? (
-        <RunningCard what="Working out who has room, from a simulation of today's clients…" />
-      ) : (
-        <TodaySections {...props} model={model} result={todayRun} missing={missing} />
-      )}
+      {!todayRun || !model ? <RunningCard what="Working out who has room, from a simulation of today's clients…" /> : <TodaySections {...props} model={model} result={todayRun} missing={missing} />}
       <NextTwelve {...props} phase={runs.year} />
     </div>
   );
@@ -114,11 +138,12 @@ export function CapacityView(props: CapacityViewProps) {
 
 function RunningCard({ what }: { what: string }) {
   return (
-    <div role="status" aria-busy="true" data-running className="flex flex-col gap-3 rounded-token border border-line bg-panel p-4">
-      <p className="text-sm text-muted-foreground">{what}</p>
-      <Skeleton className="h-6 w-2/3" />
-      <Skeleton className="h-3.5 w-full" />
-      <Skeleton className="h-24 w-full" />
+    <div role="status" aria-busy="true" data-running>
+      <Section title="Working it out" description={what}>
+        <Skeleton className="h-6 w-2/3" />
+        <Skeleton className="h-3.5 w-full" />
+        <Skeleton className="h-24 w-full" />
+      </Section>
     </div>
   );
 }
@@ -128,10 +153,13 @@ function RunningCard({ what }: { what: string }) {
 function Attention({ base, problems, missing }: { base: string; problems: ReturnType<typeof capacityProblems>; missing: MissingItem[] }) {
   if (!problems.length && !missing.length) return null;
   return (
-    <section data-attention className="flex flex-col gap-2 rounded-token border border-warn bg-warn-soft p-4 text-sm">
-      <h2 className="font-heading text-base font-semibold">Some figures below are not worked out yet</h2>
-      <p className="text-muted-foreground">Fix these in Set up and the figures fill in. Where a value is missing the page leaves it out rather than guess.</p>
-      <ul className="flex list-disc flex-col gap-1 pl-5">
+    <Section
+      title="Some figures below are not worked out yet"
+      data-attention
+      className="[&_[data-slot=card]]:bg-warn-soft"
+      description="Fix these in Set up and the figures fill in. Where a value is missing the page leaves it out rather than guess."
+    >
+      <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
         {problems.map((p, i) => (
           <li key={`p${i}`}>
             {p.message}{" "}
@@ -149,7 +177,7 @@ function Attention({ base, problems, missing }: { base: string; problems: Return
           </li>
         ))}
       </ul>
-    </section>
+    </Section>
   );
 }
 
@@ -165,14 +193,16 @@ function Headline({ setup }: { setup: CapacitySetup }) {
     />
   );
   return (
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-2.5" data-headline>
-      {lines.byDepartment.map((dep) => (
-        <Kpi key={dep.id} label={`Clients with ${dep.name} services`} value={f0(dep.clients)} sub="named and counted" />
-      ))}
-      <Kpi label="Clients taking both" value={f0(lines.both)} sub={`${f0(lines.unique)} clients in all`} />
-      {d.departments.map((row) => dlerKpi(`DLER ${row.name}`, row))}
-      {dlerKpi("DLER whole business", d.whole)}
-    </div>
+    <Section title="Clients and DLER" description="Who we serve, and what the people serving them cost against what they earn.">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-2.5" data-headline>
+        {lines.byDepartment.map((dep) => (
+          <Kpi key={dep.id} label={`Clients with ${dep.name} services`} value={f0(dep.clients)} sub="named and counted" />
+        ))}
+        <Kpi label="Clients taking both" value={f0(lines.both)} sub={`${f0(lines.unique)} clients in all`} />
+        {d.departments.map((row) => dlerKpi(`DLER ${row.name}`, row))}
+        {dlerKpi("DLER whole business", d.whole)}
+      </div>
+    </Section>
   );
 }
 
@@ -202,13 +232,10 @@ function TodaySections(props: CapacityViewProps & { model: EngineModel; result: 
 }
 
 function Room({ name, ceiling, people }: { name: string; ceiling: DepartmentCeiling; people: PersonBusy[] }) {
-  const chips = people
-    .map((p) => ({ p, room: ceiling.perPerson[p.id]?.canTake ?? 0 }))
-    .sort((a, b) => b.room - a.room);
+  const chips = people.map((p) => ({ p, room: ceiling.perPerson[p.id]?.canTake ?? 0 })).sort((a, b) => b.room - a.room);
   const pulse = roomPulse(ceiling.room, ceiling.clients);
   return (
-    <section className="flex min-w-0 flex-col gap-1 rounded-token border border-line bg-panel p-4" data-room={name}>
-      <h2 className="font-heading text-base font-semibold tracking-tight">{name}: room for more clients</h2>
+    <Section title={`${name}: room for more clients`} data-room={name}>
       <p className="text-base leading-snug" data-room-sentence>
         <span className={cn("font-semibold", TONE_TEXT[pulse.tone])} data-room-status>
           {pulse.status}.
@@ -223,16 +250,13 @@ function Room({ name, ceiling, people }: { name: string; ceiling: DepartmentCeil
           </>
         )}
       </p>
-      <p className="mb-3 text-xs text-muted-foreground">
-        {f0(ceiling.clients)} clients today. A rough guide from the simulation, not a promise.
-      </p>
+      <p className="-mt-1 text-xs text-muted-foreground">{f0(ceiling.clients)} clients today. A rough guide from the simulation, not a promise.</p>
       <RoomGauge clients={ceiling.clients} limits={ceiling.limits} room={ceiling.room} />
-      <h3 className="mt-4 mb-2 text-sm font-semibold">Who can take the next client</h3>
+      <h3 className="mt-1 text-sm font-semibold">Who can take the next client</h3>
       <div className="flex flex-wrap gap-1.5" data-chips>
         {chips.map(({ p, room }) => (
           <Chip key={p.id} tone={room >= 1 ? "ok" : "bad"}>
-            {p.name}{" "}
-            <b>{room >= 1 ? `+${Math.floor(room)} more` : Math.abs(room) < 0.5 ? "at the line" : `${Math.ceil(-room)} over`}</b>
+            {p.name} <b>{room >= 1 ? `+${Math.floor(room)} more` : Math.abs(room) < 0.5 ? "at the line" : `${Math.ceil(-room)} over`}</b>
           </Chip>
         ))}
         {chips.length === 0 && <span className="text-sm text-muted-foreground">Nobody looks after clients in this department yet.</span>}
@@ -241,7 +265,7 @@ function Room({ name, ceiling, people }: { name: string; ceiling: DepartmentCeil
         works="Each manager's ceiling is how many clients of their current mix they could hold before reaching their line, from the simulation's busy share. The department ceiling adds those up, then checks each shared team (content, links, tech, implementers): how many clients could it serve at its own line? The lowest figure is the ceiling. The marks on the bar are each of those limits."
         tells="whether the department can take on work, which team stops it, and who should get the next client."
       />
-    </section>
+    </Section>
   );
 }
 
@@ -334,7 +358,9 @@ function SharedTeams({ setup, model, result, busy, missing }: { setup: CapacityS
             <div key={t.id} className="flex min-w-0 flex-col gap-1.5 rounded-token border border-line p-3" data-team={t.name}>
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold">{t.name}</h3>
-                <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", tone === "bad" ? "bg-crit-soft text-crit" : tone === "warn" ? "bg-warn-soft text-warn" : "bg-good-soft text-good")}>{formatPercent(t.busy)}</span>
+                <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", tone === "bad" ? "bg-crit-soft text-crit" : tone === "warn" ? "bg-warn-soft text-warn" : "bg-good-soft text-good")}>
+                  {formatPercent(t.busy)}
+                </span>
               </div>
               <p className="text-xs text-muted-foreground">{members.map((m) => m.name).join(", ")}</p>
               {perHour && unit ? (
@@ -355,7 +381,10 @@ function SharedTeams({ setup, model, result, busy, missing }: { setup: CapacityS
           );
         })}
       </div>
-      <How works="Each shared team's busy share comes from the simulation: the work its steps put on it, queued for its people. The hours at the line are the team's capacity at its line, which is what it could do before it is stretched." tells="whether a team that serves everyone is close to being the limit. Once a rate is entered the hours turn into the team's own unit." />
+      <How
+        works="Each shared team's busy share comes from the simulation: the work its steps put on it, queued for its people. The hours at the line are the team's capacity at its line, which is what it could do before it is stretched."
+        tells="whether a team that serves everyone is close to being the limit. Once a rate is entered the hours turn into the team's own unit."
+      />
     </Section>
   );
 }
@@ -388,11 +417,7 @@ function Bottleneck({ setup, model, result, base, stepProcess }: { setup: Capaci
         ))}
         .
       </p>
-      {b.next.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Next most stretched: {b.next.map((x) => `${x.name} ${formatPercent(x.busy)}`).join(" · ")}
-        </p>
-      )}
+      {b.next.length > 0 && <p className="text-xs text-muted-foreground">Next most stretched: {b.next.map((x) => `${x.name} ${formatPercent(x.busy)}`).join(" · ")}</p>}
       <How
         works="Ranks everyone by how far they are over (or under) their own line, using the simulation's busy share, and shows the process steps that take the most of the top person's month. Each step links to its place in the process."
         tells="who to take work from first, and which steps would free the most time if they were quicker."
@@ -440,7 +465,13 @@ function Leaver({ setup, model, result, people }: { setup: CapacitySetup; model:
                 If <b>{who.name}</b> leaves, the {who.roleName.toLowerCase()} shares their work.
               </>
             )}{" "}
-            {res.goOver.length ? <span className="font-semibold text-crit">{res.goOver.map(nameOf).join(", ")} {res.goOver.length === 1 ? "goes" : "go"} over their line.</span> : "Nobody new goes over their line."}
+            {res.goOver.length ? (
+              <span className="font-semibold text-crit">
+                {res.goOver.map(nameOf).join(", ")} {res.goOver.length === 1 ? "goes" : "go"} over their line.
+              </span>
+            ) : (
+              "Nobody new goes over their line."
+            )}
             {res.unplaced > 0 && <span className="text-crit"> {res.unplaced} clients have nobody who serves their tier.</span>}
           </p>
           <div className="grid gap-2" data-dumbbells>
@@ -558,8 +589,15 @@ function NextTwelve({ setup, year, phase, startDate }: CapacityViewProps & { pha
             <ul className="flex list-disc flex-col gap-1 pl-5 text-sm" data-todo>
               {over.map((a) => (
                 <li key={a.roleId}>
-                  <b>{a.name}:</b> {a.overFrom === 0 ? "over the line now" : <>over the line from <b>{monthName(a.overFrom!)}</b></>}.{" "}
-                  {a.hireBy! <= 0 ? <span className="font-semibold text-crit">Start hiring now.</span> : `Start hiring by ${monthName(a.hireBy!)}.`}
+                  <b>{a.name}:</b>{" "}
+                  {a.overFrom === 0 ? (
+                    "over the line now"
+                  ) : (
+                    <>
+                      over the line from <b>{monthName(a.overFrom!)}</b>
+                    </>
+                  )}
+                  . {a.hireBy! <= 0 ? <span className="font-semibold text-crit">Start hiring now.</span> : `Start hiring by ${monthName(a.hireBy!)}.`}
                 </li>
               ))}
             </ul>
