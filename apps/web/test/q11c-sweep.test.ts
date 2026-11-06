@@ -114,8 +114,9 @@ const PAGES = (): { name: string; call: string; arg: object; ready: string }[] =
   { name: "solutions-empty", call: "q11cMountSolutions", arg: { editor: true, empty: true }, ready: "[data-solutions-list]" },
   { name: "solution-page", call: "q11cMountSolution", arg: { id: vettingSolutionId, editor: true }, ready: "[data-measure]" },
   { name: "blocks-library", call: "q11cMountBlocks", arg: { mode: "demo" }, ready: "[data-block]" },
-  { name: "blocks-empty", call: "q11cMountBlocks", arg: { mode: "readonly" }, ready: "h1" },
+  { name: "blocks-empty", call: "q11cMountBlocks", arg: { mode: "readonly" }, ready: "[data-testid=blocks-empty]" },
   { name: "history-process", call: "q11cMountHistory", arg: { editor: true }, ready: "[data-version]" },
+  { name: "history-empty", call: "q11cMountHistory", arg: { editor: true, empty: true }, ready: "[data-empty=versions]" },
   { name: "history-company", call: "q11cMountHistory", arg: { editor: true, company: true }, ready: "[data-version]" },
   { name: "issue-6", call: "q11cMountIssue", arg: { number: 6, editor: true }, ready: "[data-testid=issue-header]" },
   { name: "other-improvements-empty", call: "q11cMountOther", arg: {}, ready: "[data-testid=solutions-empty]" },
@@ -199,6 +200,68 @@ describe("Solution page", () => {
   it("shows the empty state, as a card, for a solution with no linked issue", async () => {
     const { page } = await pageOf("solution-page");
     expect(await page.locator("#solves [data-edit-entry] [data-link-issue]").innerText()).toBe("+ Link an issue");
+    await page.close();
+  }, 300_000);
+});
+
+describe("Block library", () => {
+  it("has a header card and a section card per block with its map, steps and usage", async () => {
+    const { page, errors } = await pageOf("blocks-library");
+    const header = page.locator("[data-testid=blocks-header]");
+    expect(await header.locator("h1").innerText()).toBe("Block library");
+    expect(await header.locator("[data-page-actions]").getByText("✎ New block").count()).toBe(1);
+    const cards = page.locator("li[data-block]");
+    expect(await cards.count()).toBeGreaterThan(1);
+    expect(await header.locator("[data-blocks-count]").innerText()).toBe(`${await cards.count()} blocks`);
+    const first = cards.first();
+    expect(await first.locator("[role=heading][aria-level='2']").count()).toBe(1);
+    expect(await first.locator("[data-used-in]").innerText()).toMatch(/^Used in \d+ solutions?$/);
+    expect(await first.locator("[data-block-steps]").count()).toBe(1);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 300_000);
+
+  it("a reader with no blocks sees an empty state and no New block button", async () => {
+    const { page } = await pageOf("blocks-empty");
+    expect(await page.locator("[data-testid=blocks-empty]").innerText()).toContain("No blocks yet");
+    expect(await page.getByText("✎ New block").count()).toBe(0);
+    expect(await page.locator("[data-testid=blocks-header] [data-meta-line]").innerText()).toContain("You can look at the library but not change it.");
+    await page.close();
+  }, 300_000);
+});
+
+describe("History pages", () => {
+  it("the process history is a header card and a Versions card of rows", async () => {
+    const { page, errors } = await pageOf("history-process");
+    expect(await page.locator("[data-testid=history-header] h1").innerText()).toBe("Sales history");
+    expect(await page.locator("[data-testid=history-header] [data-meta-line]").innerText()).toMatch(/^6 versions\s*·\s*Live is version 6$/);
+    expect(await page.locator("#versions [role=heading][aria-level='2']").innerText()).toBe("Versions");
+    const rows = page.locator("#versions li[data-version]");
+    expect(await rows.count()).toBe(6);
+    expect(await rows.first().locator("[data-status]").count()).toBe(0);
+    expect(await rows.first().innerText()).toContain("Live");
+    expect(await rows.first().getByRole("link", { name: "View" }).count()).toBe(0);
+    expect(await rows.nth(1).getByRole("link", { name: "View" }).getAttribute("href")).toBe("/w/example/p/x?version=5");
+    expect(await rows.nth(1).getByRole("button", { name: "Restore" }).count()).toBe(1);
+    expect(await rows.nth(1).getByRole("button", { name: "Duplicate" }).count()).toBe(1);
+    expect(await rows.nth(3).innerText()).toContain("Claude (MCP)");
+    expect(await rows.last().innerText()).toContain("First version");
+    expect(await page.locator("#versions table").count()).toBe(0);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 300_000);
+
+  it("the company map history keeps what-changed and the Version help", async () => {
+    const { page } = await pageOf("history-company");
+    expect(await page.locator("[data-testid=history-header] h1").innerText()).toBe("Company map history");
+    expect(await page.locator("#versions li[data-version]").count()).toBe(7);
+    expect(await page.locator("#versions [data-what-changed]").count()).toBe(7);
+    await page.close();
+  }, 300_000);
+
+  it("a process never published gets an empty state", async () => {
+    const { page } = await pageOf("history-empty");
+    expect(await page.locator("[data-empty=versions]").innerText()).toContain("hasn't been published yet");
     await page.close();
   }, 300_000);
 });

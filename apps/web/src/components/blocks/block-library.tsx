@@ -9,7 +9,7 @@ import { Layers } from "lucide-react";
 import type { BlockRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { buttonVariants } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { EmptyState, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
 import { Page } from "@/components/shell/page";
 import { isGroup } from "@transpera-flow/db";
 import { SplitBar, SplitLegend } from "@/components/split-bar";
@@ -22,49 +22,80 @@ import { EDIT_ONLY } from "@/lib/phone";
 /** "Used in 2 solutions": the solutions whose map holds a group put in from this block (lib/blocks/usage.ts). */
 export const usageText = (n: number) => `Used in ${n} ${n === 1 ? "solution" : "solutions"}`;
 
+const NEW_BLOCK_HELP = {
+  label: "New block",
+  description: "Opens the Editor on an empty map. Build a few steps, name the block, and save it to the library to reuse it.",
+  example: "Build “Client sign-off” once (send the summary, chase, record the decision), then insert it into any process.",
+};
+
+const NEW_BLOCK_LINK = cn(buttonVariants(), "bg-edit text-edit-fg hover:bg-edit/90");
+
 export function BlockLibrary({ blocks, mode, newHref, usage = {} }: { blocks: BlockRow[]; mode: "live" | "readonly" | "demo"; newHref: string | null; usage?: Record<string, number> }) {
   const demo = useDemoBlocks();
   const list = mode === "demo" ? demo : blocks;
   return (
-    <Page
-      title="Block library"
-      eyebrow="Improve"
-      description="Saved bundles of steps. Drop one into a solution, or into a process in the Editor."
-      actions={
-        newHref ? (
-          <span className={`inline-flex items-center ${EDIT_ONLY}`} data-edit-entry>
-            <Link href={newHref} className={cn(buttonVariants({ variant: "outline" }), "border-edit bg-edit text-edit-fg hover:bg-edit/90 hover:text-edit-fg dark:border-edit dark:bg-edit dark:hover:bg-edit/90")}>
-              ✎ New block
-            </Link>
-            <Help
-              label="New block"
-              description="Opens the Editor on an empty map. Build a few steps, name the block, and save it to the library to reuse it."
-              example="Build “Client sign-off” once (send the summary, chase, record the decision), then insert it into any process."
-            />
-          </span>
-        ) : undefined
-      }
-    >
-      {mode === "readonly" && <p className="text-xs text-muted-foreground">You can look at the library but not change it. Ask an Agency admin to add blocks.</p>}
+    <Page title="Block library" hideHeader>
+      <PageHeader
+        label="Block library"
+        testId="blocks-header"
+        eyebrow={<span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Improve</span>}
+        title="Block library"
+        meta={
+          <MetaLine>
+            <span>Saved bundles of steps. Drop one into a solution, or into a process in the Editor.</span>
+            <span data-blocks-count>{list.length === 1 ? "1 block" : `${list.length} blocks`}</span>
+            {mode === "readonly" ? <span>You can look at the library but not change it. Ask an Agency admin to add blocks.</span> : ""}
+          </MetaLine>
+        }
+        actionsLabel="Block library actions"
+        actions={
+          newHref ? (
+            <span className={`inline-flex items-center ${EDIT_ONLY}`} data-edit-entry>
+              <Link href={newHref} className={NEW_BLOCK_LINK}>
+                ✎ New block
+              </Link>
+              <Help {...NEW_BLOCK_HELP} />
+            </span>
+          ) : undefined
+        }
+      />
       {list.length === 0 ? (
-        <Card className="items-center gap-2 p-8 text-center">
-          <Layers aria-hidden className="size-6 text-muted-foreground" />
-          <p className="text-sm font-medium">No blocks yet</p>
-          <p className="max-w-md text-sm text-muted-foreground">
-            In the Editor, select a group and press “Save this group as a block”, or press “New block” to build one from scratch.
-          </p>
-        </Card>
+        <EmptyState
+          icon={Layers}
+          data-testid="blocks-empty"
+          action={
+            newHref ? (
+              <span className={`inline-flex items-center ${EDIT_ONLY}`} data-edit-entry>
+                <Link href={newHref} className={NEW_BLOCK_LINK}>
+                  ✎ New block
+                </Link>
+              </span>
+            ) : undefined
+          }
+        >
+          No blocks yet. In the Editor, select a group and press “Save this group as a block”, or press “New block” to build one from scratch.
+        </EmptyState>
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="Blocks">
           {list.map((b) => {
             const block = readBlock(b.steps);
             const steps = blockStepCount(block);
             return (
-              <li key={b.id}>
-                <Card className="h-full" data-block={b.id}>
-                  <div className="flex flex-col gap-2 px-(--card-spacing)">
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <span className="flex items-center text-xs text-muted-foreground">
+              <li key={b.id} className="min-w-0" data-block={b.id}>
+                <SectionCard
+                  id={`block-${b.id}`}
+                  className="h-full"
+                  title={b.name}
+                  contentClassName="gap-3"
+                >
+                  <div className="flex flex-col gap-1">
+                    {b.description && <p className="text-sm text-fg-2">{b.description}</p>}
+                    <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-fg-2">
+                      <span>
+                        {steps} {steps === 1 ? "step" : "steps"}
+                      </span>
+                      <span aria-hidden>·</span>
+                      <span className="flex items-center">
                         <span data-used-in={b.id}>{usageText(usage[b.id] ?? 0)}</span>
                         <Help
                           label="Used in"
@@ -72,18 +103,13 @@ export function BlockLibrary({ blocks, mode, newHref, usage = {} }: { blocks: Bl
                           example="Once “Client sign-off” sits in two solutions, this reads “Used in 2 solutions”."
                         />
                       </span>
-                    </div>
-                    <h2 className="font-heading text-base font-semibold">{b.name}</h2>
-                    {b.description && <p className="text-xs text-muted-foreground">{b.description}</p>}
-                    <p className="text-xs text-fg-2">
-                      {steps} {steps === 1 ? "step" : "steps"}
                     </p>
                   </div>
-                  <div className="overflow-x-auto px-(--card-spacing)">
+                  <div className="overflow-x-auto">
                     <BlockMap block={block} label={`Map of ${b.name}: ${steps} ${steps === 1 ? "step" : "steps"}`} />
                   </div>
                   <BlockSteps block={block} />
-                </Card>
+                </SectionCard>
               </li>
             );
           })}
@@ -99,7 +125,7 @@ export function BlockSteps({ block }: { block: ReturnType<typeof readBlock> }) {
   if (!steps.length) return null;
   const withSplit = steps.some((s) => s.split);
   return (
-    <div className="flex flex-col gap-1.5 px-(--card-spacing)" data-block-steps>
+    <div className="flex flex-col gap-1.5" data-block-steps>
       <ul className="flex flex-col gap-1.5">
         {steps.map((s) => (
           <li key={s.id} className="grid grid-cols-[minmax(0,1fr)_7rem] items-center gap-x-3 text-xs" data-block-step>
