@@ -266,6 +266,50 @@ describe("History pages", () => {
   }, 300_000);
 });
 
+describe("Issue page, the right column and the map card", () => {
+  it("Target, Linked to and Sources are section cards with the kit's title", async () => {
+    const { page, errors } = await pageOf("issue-6");
+    for (const [id, title] of [["target", "Target"], ["linked", "Linked to"], ["sources", "Sources"]] as const) {
+      const card = page.locator(`aside #${id}[data-section=${id}]`);
+      expect((await card.locator("[role=heading][aria-level='2']").innerText()).startsWith(title)).toBe(true);
+      expect(await card.locator(".uppercase").count()).toBe(0);
+    }
+    expect(await page.locator("aside [data-section=sources] [data-edit-entry]").count()).toBeGreaterThan(0);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 300_000);
+
+  it("a short map's card is cut to the map, with no band of empty space, and moving the map lifts the cut", async () => {
+    const { page } = await pageOf("issue-6");
+    const host = page.locator("#where [data-map-cut]");
+    await host.waitFor();
+    const box = (await host.boundingBox())!;
+    expect(box.height).toBeLessThan(250);
+    const gap = await host.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const bottoms = [...el.querySelectorAll(".react-flow__node")].map((n) => n.getBoundingClientRect().bottom);
+      return { gap: r.bottom - Math.max(...bottoms), top: Math.min(...[...el.querySelectorAll(".react-flow__node")].map((n) => n.getBoundingClientRect().top)) - r.top };
+    });
+    expect(gap.gap).toBeGreaterThanOrEqual(0);
+    expect(gap.gap).toBeLessThan(40);
+    await host.hover();
+    await page.mouse.wheel(0, 10);
+    await page.waitForFunction(() => !document.querySelector("#where [data-map-cut]"));
+    await page.close();
+  }, 300_000);
+});
+
+describe("Other improvements", () => {
+  it("nothing else yet is an empty state, not a dashed box", async () => {
+    const { page } = await pageOf("other-improvements-empty");
+    const empty = page.locator("[data-testid=solutions-empty]");
+    expect(await empty.innerText()).toBe("Nothing else yet. Every solution here is for an issue above.");
+    expect(await empty.evaluate((e) => getComputedStyle(e).borderStyle)).not.toBe("dashed");
+    expect(await empty.locator("svg").count()).toBe(1);
+    await page.close();
+  }, 300_000);
+});
+
 describe("screenshots", () => {
   it.skipIf(!shots)("saves the screenshots", async () => {
     mkdirSync(shots!, { recursive: true });
