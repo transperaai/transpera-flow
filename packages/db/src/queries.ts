@@ -250,7 +250,7 @@ export async function loadCapacityInputs(db: Db, workspaceId: string): Promise<C
     db.selectFrom("tiers").select(["id", "key", "sort"]).where("workspace_id", "=", workspaceId).orderBy("sort").orderBy("key").execute(),
     db
       .selectFrom("services")
-      .select(["id", "department_id", "tier_id", "words", "links", "tech_hours", "meetings", "builds", "creative_sets", "channels", "adhoc_chance", "adhoc_requests"])
+      .select(["id", "department_id", "tier_id", "words", "links", "tech_hours", "meetings", "builds", "creative_sets", "channels", "adhoc_chance", "adhoc_requests", "client_total"])
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
       .execute(),
@@ -283,6 +283,7 @@ export async function loadCapacityInputs(db: Db, workspaceId: string): Promise<C
       ...deliverables(s),
       adhoc_chance: n(s.adhoc_chance),
       adhoc_requests: n(s.adhoc_requests),
+      ...(s.client_total !== null && s.client_total !== undefined ? { client_total: Number(s.client_total) } : {}),
     })),
     clients: clients.map((c) => ({
       id: c.id,

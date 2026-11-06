@@ -58,7 +58,7 @@ function fixHref(base: string, where: string): string {
   if (where.startsWith("steps") || where.startsWith("changes")) return `${base}/processes`;
   return `${base}/setup/clients`;
 }
-const missingHref = (base: string, m: MissingItem): string => (m.kind === "tier_deliverable" ? `${base}/setup/clients` : `${base}/setup/people`);
+const missingHref = (base: string, m: MissingItem): string => (m.kind === "tier_deliverable" || m.kind === "tier_total_over" || m.kind === "tier_total_unassigned" ? `${base}/setup/clients` : `${base}/setup/people`);
 
 export const CAPACITY_DESCRIPTION = 'Are we at capacity, who has room, and how many more clients fit. "Today" is the current book of clients with nobody arriving or leaving.';
 
@@ -151,7 +151,29 @@ function RunningCard({ what }: { what: string }) {
 // ---------------------------------------------------------------------------------------------------------------------
 
 function Attention({ base, problems, missing }: { base: string; problems: ReturnType<typeof capacityProblems>; missing: MissingItem[] }) {
-  if (!problems.length && !missing.length) return null;
+  // A tier whose typed total the portfolios don't match: "over" is a warning in the list, "unassigned" only a note beneath it (Q13).
+  const notes = missing.filter((m) => m.severity === "note");
+  const needs = missing.filter((m) => m.severity !== "note");
+  if (!problems.length && !needs.length && !notes.length) return null;
+  const noteList = notes.length > 0 && (
+    <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-fg-2" data-attention-notes>
+      {notes.map((m) => (
+        <li key={`${m.kind}-${m.id}`}>
+          Note: {m.label}{" "}
+          <Link href={missingHref(base, m)} className="whitespace-nowrap font-medium text-accent hover:underline">
+            Tiers &amp; clients →
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+  if (!problems.length && !needs.length) {
+    return (
+      <Section title="Notes on the client counts" data-attention-note-only description="For information. The figures below use the counts as they are.">
+        {noteList}
+      </Section>
+    );
+  }
   return (
     <Section
       title="Some figures below are not worked out yet"
@@ -168,15 +190,16 @@ function Attention({ base, problems, missing }: { base: string; problems: Return
             </Link>
           </li>
         ))}
-        {missing.map((m) => (
+        {needs.map((m) => (
           <li key={`${m.kind}-${m.id}-${m.field ?? ""}`}>
             {m.label}{" "}
             <Link href={missingHref(base, m)} className="whitespace-nowrap font-medium text-accent hover:underline">
-              Enter it →
+              {m.severity === "warning" ? "Check it →" : "Enter it →"}
             </Link>
           </li>
         ))}
       </ul>
+      {noteList}
     </Section>
   );
 }

@@ -13,7 +13,7 @@ import { CapacityView } from "@/components/capacity/capacity-view";
 declare global {
   interface Window {
     workerScripts: Record<string, string>;
-    mountCapacity: (options?: { payHidden?: boolean; noTiers?: boolean; missingWords?: boolean; badModel?: boolean }) => void;
+    mountCapacity: (options?: { payHidden?: boolean; noTiers?: boolean; missingWords?: boolean; badModel?: boolean; tierTotal?: "over" | "unassigned" }) => void;
   }
 }
 
@@ -27,11 +27,13 @@ window.Worker = class extends NativeWorker {
   }
 } as typeof Worker;
 
-window.mountCapacity = ({ payHidden, noTiers, missingWords, badModel } = {}) => {
+window.mountCapacity = ({ payHidden, noTiers, missingWords, badModel, tierTotal } = {}) => {
   const model = capacityModel();
   const setup = capacitySetupFromModel(model, { payHidden });
   if (noTiers) setup.services = [];
   if (missingWords) setup.services[0]!.words = null;
+  // Q13: a typed total of 0 is below whatever the first tier service holds; 5000 is above it.
+  if (tierTotal) setup.services[0]!.client_total = tierTotal === "over" ? 0 : 5000;
   if (badModel) model.changes![0]!.adoption = 3;
   // Every servicing step belongs to its process, which the page links to.
   const stepProcess: Record<string, string> = {};

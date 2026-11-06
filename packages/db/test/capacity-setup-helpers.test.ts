@@ -9,6 +9,7 @@ import {
   setupFieldRule,
   sourceLabel,
   tierCount,
+  tierDiscrepancies,
   tierFieldsFor,
   uniqueClients,
   type CapacitySetup,
@@ -24,7 +25,7 @@ import {
 const svc = (id: string, department_id: string | null, tier_id: string | null, extra: Partial<SetupService> = {}): SetupService => ({
   id, name: id, active: true, department_id, tier_id, pricing_model: "retainer", price: 0, price_low: null, price_high: null, margin: 0, tenure_months: 12,
   churn_monthly_base: 0, churn_health_sensitivity: 3, mix_share: 1, entry_process_id: null, path_tags: [], words: null, links: null, tech_hours: null, meetings: null,
-  builds: null, creative_sets: null, channels: null, adhoc_chance: null, adhoc_requests: null, price_rise_churn: 0.5, provenance: {}, ...extra,
+  builds: null, creative_sets: null, channels: null, adhoc_chance: null, adhoc_requests: null, price_rise_churn: 0.5, client_total: null, provenance: {}, ...extra,
 });
 const client = (id: string, service_ids: string[], extra: Partial<SetupClient> = {}): SetupClient => ({
   id, name: id, active: true, mrr: 0, start_date: null, health: null, notes: null, provenance: {}, service_ids, assignments: {}, channels: null, hand_holding_hours: null,
@@ -228,6 +229,65 @@ describe("sourceLabel", () => {
     expect(sourceLabel({ words: { source: "interview" } }, "words")).toBe("From an interview");
     expect(sourceLabel({ words: { source: "calculator" } }, "words")).toBe("From the calculator");
     expect(sourceLabel({ words: { source: "measured" } }, "words")).toBe("Measured");
+  });
+});
+
+// Q13: a typed total per tier, and the check that the portfolios and named clients add up to it.
+describe("a typed tier total", () => {
+  const T1 = "org-t1";
+  const base = (total: number | null, held: number, named = 2) => ({
+    services: [svc(T1, "org", "t1", { client_total: total })],
+    clients: Array.from({ length: named }, (_, i) => client(`n${i}`, [T1])),
+    portfolio: held ? [{ service_id: T1, client_count: held }] : [],
+    groups: [{ service_id: T1, client_count: 9 }],
+  });
+
+  it("tierCount is the total when it is typed, ignoring the group's counted clients; unset is worked out as before", () => {
+    expect(tierCount(T1, base(40, 28))).toBe(40);
+    expect(tierCount(T1, base(null, 28))).toBe(2 + 28 + 9);
+    // No services passed (older callers): worked out.
+    const { services: _s, ...noServices } = base(40, 28);
+    expect(tierCount(T1, noServices)).toBe(2 + 28 + 9);
+  });
+
+  it("'over': named + portfolios more than the total counts as named + portfolios", () => {
+    expect(tierCount(T1, base(40, 44))).toBe(46);
+  });
+
+  it("'over' says how many too many, in words", () => {
+    const [d, ...rest] = tierDiscrepancies(base(40, 44));
+    expect(rest).toEqual([]);
+    expect(d).toMatchObject({ kind: "over", total: 40, named: 2, held: 44, amount: 6 });
+    expect(d!.message).toBe("Portfolios and named clients add up to 46, but the tier has 40 (6 too many). The model counts the portfolios as they are.");
+  });
+
+  it("'unassigned' says how many are in nobody's portfolio, in words (singular too)", () => {
+    expect(tierDiscrepancies(base(40, 26))[0]).toMatchObject({ kind: "unassigned", amount: 12, message: "12 clients aren't in anyone's portfolio." });
+    expect(tierDiscrepancies(base(40, 37))[0]!.message).toBe("1 client isn't in anyone's portfolio.");
+  });
+
+  it("no discrepancy when it matches, when no total is typed, or for a service that isn't a tier", () => {
+    expect(tierDiscrepancies(base(40, 38))).toEqual([]);
+    expect(tierDiscrepancies(base(null, 99))).toEqual([]);
+    expect(tierDiscrepancies({ ...base(40, 99), services: [svc(T1, null, null, { client_total: 40 })] })).toEqual([]);
+    expect(tierDiscrepancies({ ...base(40, 99), services: [svc(T1, "org", "t1", { client_total: 40, active: false })] })).toEqual([]);
+  });
+
+  it("missingForCapacity lists 'over' as a warning and 'unassigned' as a note, in the tier's words", () => {
+    const setup = {
+      departments: [{ id: "org", name: "Organic (SEO)", sort: 1 }],
+      tiers: [{ id: "t1", key: "T1", name: "Tier 1", sort: 1, both_count: 0, provenance: {} }],
+      roles: [],
+      people: [],
+      ...base(40, 44),
+    };
+    // The portfolio rows here carry only what the count reads (no person or provenance).
+    const only = (s: typeof setup) => missingForCapacity(s as unknown as Parameters<typeof missingForCapacity>[0]).filter((m) => m.kind.startsWith("tier_total"));
+    expect(only(setup)).toEqual([
+      { kind: "tier_total_over", severity: "warning", id: T1, label: "Organic (SEO) T1: Portfolios and named clients add up to 46, but the tier has 40 (6 too many). The model counts the portfolios as they are." },
+    ]);
+    expect(only({ ...setup, ...base(40, 26) })).toEqual([{ kind: "tier_total_unassigned", severity: "note", id: T1, label: "Organic (SEO) T1: 12 clients aren't in anyone's portfolio." }]);
+    expect(only({ ...setup, ...base(null, 26) })).toEqual([]);
   });
 });
 

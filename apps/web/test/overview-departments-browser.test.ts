@@ -137,14 +137,14 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
     });
   }
 
-  it("DLER follows the leadership switch", async () => {
-    const { page, errors } = await mount({ dlerIncludesLeadership: false });
+  it("DLER leaves directors out by default (D48), and counts them when the setting is passed on", async () => {
+    const { page, errors } = await mount({ dlerIncludesLeadership: true });
     await done(page);
-    const off = capacitySetupFromModel(model, { dlerIncludesLeadership: false });
-    const on = dler(setup).whole.ratio!.toFixed(1);
-    const without = dler(off).whole.ratio!.toFixed(1);
-    expect(without).not.toBe(on);
-    expect(await page.locator("[data-whole-business]").innerText()).toContain(without);
+    const on = capacitySetupFromModel(model, { dlerIncludesLeadership: true });
+    const withLeaders = dler(on).whole.ratio!.toFixed(1);
+    const without = dler(setup).whole.ratio!.toFixed(1); // the default
+    expect(without).not.toBe(withLeaders);
+    expect(await page.locator("[data-whole-business]").innerText()).toContain(withLeaders);
     expect(errors).toEqual([]);
     await page.close();
   });

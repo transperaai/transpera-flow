@@ -136,6 +136,44 @@ describe("counted clients and portfolios", () => {
     expect(m.activeClients).toBe(18 + 10 + 4);
   });
 
+  // Q13: a typed tier total. Larkspur's named clients: how many are on S1 (active, started by the run's start)?
+  const namedOnS1 = (base.clients ?? []).filter((c) => c.active && !(c.start_date && c.start_date > START) && (base.clientServices ?? []).some((cs) => cs.client_id === c.id && cs.service_id === S1)).length;
+
+  it("a typed total makes the counted remainder total - named - portfolios (the engine gets the portfolios plus that)", () => {
+    const portfolio = [{ person_id: P1, service_id: S1, client_count: 3 }, { person_id: P2, service_id: S1, client_count: 2 }];
+    const total = namedOnS1 + 5 + 12;
+    const m = model(tiered({ portfolio, services: [svc(S1, T1, { client_total: total }), svc(S2, T2), svc(S3, null)] }));
+    expect(m.clientGroups![S1]!.count).toBe(5 + 12);
+    // Named clients stay named; with the 5 held, the tier's clients in the model add up to the typed total.
+    expect(namedOnS1 + m.clientGroups![S1]!.count).toBe(total);
+  });
+
+  it("a typed total overrides the group's counted clients, which are what the remainder replaces", () => {
+    const m = model({ ...tiered({ services: [svc(S1, T1, { client_total: namedOnS1 + 7 }), svc(S2, T2), svc(S3, null)] }), clientGroups: [group(S1, 5)] });
+    expect(m.clientGroups![S1]!.count).toBe(7);
+    // The group's own fee, churn and tenure still apply.
+    expect(m.clientGroups![S1]).toMatchObject({ fee: 4500, churnMonthly: 0.02, stayMonths: 40, health: 75 });
+  });
+
+  it("'over': named + portfolios more than the total uses the portfolios as they are, with no negative remainder", () => {
+    const portfolio = [{ person_id: P1, service_id: S1, client_count: 4 }];
+    const m = model(tiered({ portfolio, services: [svc(S1, T1, { client_total: 1 }), svc(S2, T2), svc(S3, null)] }));
+    expect(m.clientGroups![S1]!.count).toBe(4);
+  });
+
+  it("a typed total with no portfolio or group still makes a group of the remainder", () => {
+    const m = model(tiered({ services: [svc(S1, T1, { client_total: namedOnS1 + 9 }), svc(S2, T2), svc(S3, null)] }));
+    expect(m.clientGroups![S1]!.count).toBe(9);
+  });
+
+  it("an unset total (absent or null) leaves the model exactly as it was", () => {
+    const portfolio = [{ person_id: P1, service_id: S1, client_count: 3 }];
+    const without = model({ ...tiered({ portfolio }), clientGroups: [group(S1, 5)] });
+    const nulled = model({ ...tiered({ portfolio, services: [svc(S1, T1, { client_total: null }), svc(S2, T2), svc(S3, null)] }), clientGroups: [group(S1, 5)] });
+    expect(nulled).toEqual(without);
+    expect(without.clientGroups![S1]!.count).toBe(8);
+  });
+
   it("without any counted client there are no groups and no mix", () => {
     const m = model(tiered());
     expect(m.clientGroups).toBeUndefined();

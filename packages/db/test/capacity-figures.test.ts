@@ -273,7 +273,8 @@ describe("dler (D40: the average of each client-facing person's DLER)", () => {
     expect(org.retainers).toBe(20000);
     expect(res.whole.ratio).toBeCloseTo((DEE + ANN + BO + 0) / 4, 10);
   });
-  test("leadership out: the director leaves the average", () => {
+  test("leadership out (the default, D48): the director leaves the average", () => {
+    expect(dler(capacitySetupFromModel(tinyModel())).whole.ratio).toBeCloseTo((ANN + BO + 0) / 3, 10);
     const org = dler(capacitySetupFromModel(tinyModel(), { dlerIncludesLeadership: false })).departments.find((d) => d.departmentId === "org")!;
     expect(org.people).toBe(3);
     expect(org.ratio).toBeCloseTo((ANN + BO + 0) / 3, 10);
@@ -432,7 +433,7 @@ describe("on the engine's own results (capacityModel, 4 replications)", () => {
 });
 
 describe("the Overview's figures (P6)", () => {
-  test("whole business: unique clients, revenue per employee over everyone but contractors and leaders, DLER over all salaries", () => {
+  test("whole business: unique clients, revenue per employee over everyone but contractors and leaders, DLER without the director (D48)", () => {
     const setup = capacitySetupFromModel(tinyModel());
     setup.tiers[0]!.both_count = 3;
     const w = wholeBusiness(setup);
@@ -441,7 +442,7 @@ describe("the Overview's figures (P6)", () => {
     // Ann, Bo and Cy are the employees; Dee leads and the freelancer is a contractor.
     expect(w.employees).toBe(3);
     expect(w.revenuePerEmployee).toBeCloseTo(20000 / 3, 10);
-    expect(w.dler.ratio).toBeCloseTo((4000 / 12500 + 10000 / 7500 + 6000 / 7500 + 0) / 4, 10);
+    expect(w.dler.ratio).toBeCloseTo((10000 / 7500 + 6000 / 7500 + 0) / 3, 10);
   });
   test("DLER follows the leadership switch; per-employee does not", () => {
     const withLead = wholeBusiness(capacitySetupFromModel(tinyModel(), { dlerIncludesLeadership: true }));

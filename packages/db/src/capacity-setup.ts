@@ -117,6 +117,8 @@ export interface SetupService {
   adhoc_chance: number | null;
   adhoc_requests: number | null;
   price_rise_churn: number;
+  /** The tier's total clients, typed in (Q13); null: worked out from named clients, portfolios and the group's counted clients. */
+  client_total: number | null;
   provenance: Prov;
 }
 export interface SetupGroup {
@@ -210,7 +212,7 @@ export interface CapacitySetup {
   /** `settings.ramp_default`, or the built-in default. */
   rampDefault: number[];
   rampDefaultProvenance: unknown;
-  /** `settings.dler_includes_leadership`; true when never set. */
+  /** `settings.dler_includes_leadership`; false when never set (D48: directors and managers are not counted in DLER). */
   dlerIncludesLeadership: boolean;
   dlerProvenance: unknown;
   /** Whether the viewer may change anything here (Owner and Agency admins). */
@@ -240,7 +242,7 @@ export async function loadCapacitySetup(db: Db, workspaceId: string): Promise<Ca
       .select([
         "id", "name", "active", "department_id", "tier_id", "pricing_model", "price", "price_low", "price_high", "margin", "tenure_months", "churn_monthly_base",
         "churn_health_sensitivity", "mix_share", "entry_process_id", "path_tags", "words", "links", "tech_hours", "meetings", "builds", "creative_sets", "channels",
-        "adhoc_chance", "adhoc_requests", "price_rise_churn", "provenance",
+        "adhoc_chance", "adhoc_requests", "price_rise_churn", "client_total", "provenance",
       ])
       .where("workspace_id", "=", workspaceId)
       .orderBy("created_at")
@@ -321,6 +323,7 @@ export async function loadCapacitySetup(db: Db, workspaceId: string): Promise<Ca
       adhoc_chance: num(s.adhoc_chance),
       adhoc_requests: num(s.adhoc_requests),
       price_rise_churn: Number(s.price_rise_churn),
+      client_total: num(s.client_total),
       provenance: prov(s.provenance),
     })),
     groups: groups.map((g) => ({ ...g, provenance: prov(g.provenance) })),
@@ -378,7 +381,7 @@ export async function loadCapacitySetup(db: Db, workspaceId: string): Promise<Ca
     portfolio: portfolio.map((r) => ({ ...r, provenance: prov(r.provenance) })),
     rampDefault: numList(settings.ramp_default) ?? [...DEFAULT_RAMP],
     rampDefaultProvenance: wsProv["settings.ramp_default"] ?? null,
-    dlerIncludesLeadership: settings.dler_includes_leadership !== false,
+    dlerIncludesLeadership: settings.dler_includes_leadership === true,
     dlerProvenance: wsProv["settings.dler_includes_leadership"] ?? null,
     canEdit: canEdit === true,
     payHidden: hidden,
@@ -453,6 +456,7 @@ export const SETUP_FIELDS = {
     adhoc_chance: share(true),
     adhoc_requests: count(true),
     price_rise_churn: n(0, 10),
+    client_total: n(0, 100_000, true, true),
   },
   clients: {
     name: text(200),
@@ -543,22 +547,77 @@ export function formatRamp(ramp: readonly number[] | null): string | null {
 
 /** The rows the counts are made from (a subset of `CapacitySetup`). */
 export interface CountData {
-  services: Pick<SetupService, "id" | "department_id" | "tier_id" | "active">[];
+  services: (Pick<SetupService, "id" | "department_id" | "tier_id" | "active"> & { client_total?: number | null })[];
   tiers: Pick<SetupTier, "id" | "both_count">[];
   groups: Pick<SetupGroup, "service_id" | "client_count">[];
   clients: Pick<SetupClient, "active" | "service_ids">[];
   portfolio: Pick<SetupPortfolioRow, "service_id" | "client_count">[];
 }
 
-/**
- * A service's (a tier of a department's) client count: the active named clients on it, plus the sum of everyone's portfolio for it,
- * plus its group's count. `client_groups.client_count` is "counted clients nobody's portfolio holds yet".
- */
-export function tierCount(serviceId: string, data: Pick<CountData, "groups" | "clients" | "portfolio">): number {
+/** The active named clients on a service, and everyone's portfolio count for it. */
+function namedAndHeld(serviceId: string, data: Pick<CountData, "clients" | "portfolio">): { named: number; held: number } {
   const named = data.clients.filter((c) => c.active && c.service_ids.includes(serviceId)).length;
   const held = data.portfolio.filter((r) => r.service_id === serviceId).reduce((s, r) => s + r.client_count, 0);
+  return { named, held };
+}
+
+/**
+ * A service's (a tier of a department's) client count. With no typed total: the active named clients on it, plus the sum of everyone's
+ * portfolio for it, plus its group's count (`client_groups.client_count` is "counted clients nobody's portfolio holds yet"). With a typed
+ * total (Q13, `services.client_total`) the count is that total, so the counted clients nobody holds are `total - named - portfolios`;
+ * when named + portfolios already exceed the total ("over"), the count is named + portfolios (no negative remainder).
+ */
+export function tierCount(serviceId: string, data: Pick<CountData, "groups" | "clients" | "portfolio"> & { services?: readonly { id: string; client_total?: number | null }[] }): number {
+  const { named, held } = namedAndHeld(serviceId, data);
+  const total = data.services?.find((s) => s.id === serviceId)?.client_total;
+  if (total !== null && total !== undefined) return Math.max(total, named + held);
   const rest = data.groups.filter((g) => g.service_id === serviceId).reduce((s, g) => s + g.client_count, 0);
   return named + held + rest;
+}
+
+export type TierDiscrepancyKind = "over" | "unassigned";
+export interface TierDiscrepancy {
+  kind: TierDiscrepancyKind;
+  /** The tier service. */
+  serviceId: string;
+  tierId: string;
+  departmentId: string;
+  total: number;
+  named: number;
+  held: number;
+  /** Over: how many too many. Unassigned: how many are in nobody's portfolio. */
+  amount: number;
+  /** Plain words, the sentence shown on the tier row. */
+  message: string;
+}
+
+/**
+ * The wording of a tier's discrepancy (Q13). "Over": named clients and portfolios add up to more than the tier's typed total; the
+ * model counts the portfolios as they are (no negative remainder), and the sentence says so. "Unassigned": the total is more than
+ * named + portfolios, so some counted clients are in nobody's portfolio (informational, not an error).
+ */
+export function discrepancyMessage(kind: TierDiscrepancyKind, p: { total: number; named: number; held: number; amount: number }): string {
+  if (kind === "over") {
+    return `Portfolios and named clients add up to ${p.named + p.held}, but the tier has ${p.total} (${p.amount} too many). The model counts the portfolios as they are.`;
+  }
+  return p.amount === 1 ? "1 client isn't in anyone's portfolio." : `${p.amount} clients aren't in anyone's portfolio.`;
+}
+
+/** For each active tier service with a typed total: "over" or "unassigned" when named + portfolios differ from it. No total, or a match: nothing. */
+export function tierDiscrepancies(data: Pick<CountData, "clients" | "portfolio" | "services">): TierDiscrepancy[] {
+  const out: TierDiscrepancy[] = [];
+  for (const s of data.services) {
+    if (!s.active || !s.department_id || !s.tier_id) continue;
+    const total = s.client_total;
+    if (total === null || total === undefined) continue;
+    const { named, held } = namedAndHeld(s.id, data);
+    const diff = named + held - total;
+    if (diff === 0) continue;
+    const kind: TierDiscrepancyKind = diff > 0 ? "over" : "unassigned";
+    const amount = Math.abs(diff);
+    out.push({ kind, serviceId: s.id, tierId: s.tier_id, departmentId: s.department_id, total, named, held, amount, message: discrepancyMessage(kind, { total, named, held, amount }) });
+  }
+  return out;
 }
 
 export interface UniqueClients {
@@ -584,9 +643,11 @@ export function uniqueClients(data: CountData): UniqueClients {
   return { byDepartment, both, unique: total - both };
 }
 
-export type MissingKind = "tier_deliverable" | "client_facing_portfolio" | "shared_role_unit" | "shared_role_rate" | "person_salary";
+export type MissingKind = "tier_deliverable" | "client_facing_portfolio" | "shared_role_unit" | "shared_role_rate" | "person_salary" | "tier_total_over" | "tier_total_unassigned";
 export interface MissingItem {
   kind: MissingKind;
+  /** `warning`: needs a look (a tier's portfolios add up to more than its total). `note`: for information (clients in nobody's portfolio). Absent: something not entered. */
+  severity?: "warning" | "note";
   /** The row it is about: a service, person or role id. */
   id: string;
   /** The column, for a deliverable. */
@@ -618,6 +679,13 @@ export function missingForCapacity(
     for (const field of tierFieldsFor(dept.name)) {
       if (s[field] === null) out.push({ kind: "tier_deliverable", id: s.id, field, label: `${dept.name} ${tier.key}: ${FIELD_WORDS[field]}` });
     }
+  }
+  // A typed tier total that the portfolios and named clients don't add up to (Q13): "over" is a warning, "unassigned" a note.
+  for (const d of tierDiscrepancies(data)) {
+    const dept = deptOf.get(d.departmentId);
+    const tier = tierOf.get(d.tierId);
+    if (!dept || !tier) continue;
+    out.push({ kind: d.kind === "over" ? "tier_total_over" : "tier_total_unassigned", severity: d.kind === "over" ? "warning" : "note", id: d.serviceId, label: `${dept.name} ${tier.key}: ${d.message}` });
   }
   const roleOf = new Map(data.roles.map((r) => [r.id, r]));
   for (const p of data.people) {

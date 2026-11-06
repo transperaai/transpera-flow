@@ -437,7 +437,7 @@ export function personFees(setup: CapacitySetup): Map<string, number> {
  * DLER (D40, amending D9 and D24): the average of each client-facing person's DLER. A person's DLER is the monthly retainers of the
  * clients they manage (`personFees`) ÷ their monthly salary. A department's is the mean over its client-facing people; the whole business's is
  * the mean over all of them. People with no salary entered and contractors are left out; directors are in only when
- * `dler_includes_leadership` is on. Where pay is hidden the ratios are null.
+ * `dler_includes_leadership` is on (D48: off unless set). Where pay is hidden the ratios are null.
  *
  * `retainers` (the Sandbox): the retainers a month each department takes in a month of a run, in place of today's. A department's pool is
  * shared among its people in proportion to the fees they manage today (a hire or anyone with none takes the department's average share),

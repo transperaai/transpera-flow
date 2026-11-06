@@ -12,8 +12,8 @@
 -- Returns `{status: 'ok', revision_id, number, replaced_draft}`, `{status: 'draft_exists', number}` or `{status: 'not_found'}`. An archived
 -- process is refused with a plain message (as `open_draft` does).
 --
--- Preflight: `select count(*) from public.schema_migrations where version >= '20270129000000';` expect 0.
--- ROLLBACK: `drop function public.adopt_solution(uuid, boolean); delete from public.schema_migrations where version = '20270129000000';`
+-- Preflight: `select count(*) from public.schema_migrations where version >= '20270132000000';` expect 0.
+-- ROLLBACK: `drop function public.adopt_solution(uuid, boolean); delete from public.schema_migrations where version = '20270132000000';`
 
 create or replace function public.adopt_solution(p_solution uuid, p_replace boolean default false) returns jsonb
 language plpgsql

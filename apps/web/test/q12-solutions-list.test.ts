@@ -146,7 +146,7 @@ describe("the Solution page's three ways on (D44)", () => {
     expect(dialog).toContain("Nothing goes live until you do.");
     expect(dialog).toContain("Replace the draft");
     expect(dialog).toContain("Keep the draft");
-    const migration = read("../../../packages/db/migrations/20270129000000_adopt_solution.sql");
+    const migration = read("../../../packages/db/migrations/20270132000000_adopt_solution.sql");
     expect(migration).toContain("public.can_edit_workspace(sol.workspace_id)");
     expect(migration).not.toMatch(/status = 'published'|live_revision_id = /);
   });

@@ -595,6 +595,10 @@ export interface Services {
   channels: Numeric | null;
   churn_health_sensitivity: Generated<Numeric>;
   churn_monthly_base: Generated<Numeric>;
+  /**
+   * Q13: the tier's total clients, typed in. Null: worked out (named clients + portfolios + the group's counted clients).
+   */
+  client_total: number | null;
   created_at: Generated<string>;
   created_by: Generated<string | null>;
   creative_sets: Numeric | null;

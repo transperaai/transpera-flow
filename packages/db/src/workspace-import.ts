@@ -120,7 +120,7 @@ export const IMPORT_COLUMNS = {
   services: cols(
     "services", "id", "name", "active", "churn_health_sensitivity", "churn_monthly_base", "entry_process_id", "fallback_ongoing_load", "margin", "mix_share",
     "path_tags", "price", "price_high", "price_low", "pricing_model", "tenure_months", "provenance", "created_at",
-    "department_id", "tier_id", "words", "links", "tech_hours", "meetings", "builds", "creative_sets", "channels", "adhoc_chance", "adhoc_requests", "price_rise_churn",
+    "department_id", "tier_id", "words", "links", "tech_hours", "meetings", "builds", "creative_sets", "channels", "adhoc_chance", "adhoc_requests", "price_rise_churn", "client_total",
   ),
   service_servicing: cols("service_servicing", "id", "process_id", "service_id", "recurrence", "sla_hours", "provenance", "created_at"),
   client_groups: cols("client_groups", "id", "service_id", "client_count", "churn_monthly", "fee", "starting_health", "stay_months", "provenance", "created_at"),

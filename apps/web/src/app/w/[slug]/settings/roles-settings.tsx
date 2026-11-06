@@ -1,11 +1,12 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import type { RoleRow } from "@transpera-flow/db";
 import { TextField, ToggleField } from "@/components/fields";
 import { HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
 import { inUse, type RoleField, type RoleUsage } from "@/lib/roles";
 import { createRole, removeRole, saveRoleField, type ActionResult } from "./actions";
@@ -20,10 +21,16 @@ const roleSaver =
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-export function AddRole({ workspaceId }: { workspaceId: string }) {
-  const [state, action, pending] = useActionState<ActionResult, FormData>(createRole.bind(null, workspaceId), {});
+const NOT_SENT: ActionResult = {};
+
+/** `onAdded` runs once a role has been added (the Set up page closes its dialog); `className` replaces the form's spacing. */
+export function AddRole({ workspaceId, onAdded, className }: { workspaceId: string; onAdded?: () => void; className?: string }) {
+  const [state, action, pending] = useActionState<ActionResult, FormData>(createRole.bind(null, workspaceId), NOT_SENT);
+  useEffect(() => {
+    if (state !== NOT_SENT && !state.error) onAdded?.();
+  }, [state, onAdded]);
   return (
-    <form action={action} className="mb-4 flex flex-wrap items-end gap-2">
+    <form action={action} className={cn("flex flex-wrap items-end gap-2", className ?? "mb-4")}>
       <label className="flex min-w-0 flex-col gap-1">
         <HelpLabel label="Name" description="The kind of work, as your team says it. Steps, people and clients name roles." example="Strategist" />
         <Input name="name" required maxLength={200} />
@@ -41,11 +48,11 @@ export function AddRole({ workspaceId }: { workspaceId: string }) {
 }
 
 /** What else a role has (the part of a row that opens): Set up shows it under "More". */
-export function RoleMore({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" | "color" | "active" | "leadership">; usage: RoleUsage; canEdit: boolean }) {
+export function RoleMore({ role, usage, canEdit, hideName }: { role: Pick<RoleRow, "id" | "name" | "color" | "active" | "leadership">; usage: RoleUsage; canEdit: boolean; /** The Set up panel shows the name at the top. */ hideName?: boolean }) {
   const disabled = !canEdit;
   return (
     <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2">
-        <TextField label="Name" value={role.name} save={roleSaver(role.id, "name")} disabled={disabled} help={{ description: "The kind of work, as your team says it. Steps and people name roles.", example: "Strategist" }} />
+        {!hideName && <TextField label="Name" value={role.name} save={roleSaver(role.id, "name")} disabled={disabled} help={{ description: "The kind of work, as your team says it. Steps and people name roles.", example: "Strategist" }} />}
         <ToggleField
           label="Status"
           value={role.active}
@@ -61,7 +68,7 @@ export function RoleMore({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | 
             onLabel="Leadership: left out of clients per employee and revenue per employee"
             offLabel="Not leadership: counted in clients per employee and revenue per employee"
             disabled={disabled}
-            help={{ description: "Leadership roles are left out of the clients-per-employee and revenue-per-employee figures. Whether their salaries count in DLER is a separate setting under People.", example: "Founder, Head of Client Services." }}
+            help={{ description: "Leadership roles are left out of the clients-per-employee and revenue-per-employee figures. Their salaries are not counted in DLER either.", example: "Founder, Head of Client Services." }}
           />
         )}
         <p className="text-fg-2 sm:col-span-2">

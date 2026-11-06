@@ -10,6 +10,7 @@ import { Fragment, useState, useTransition } from "react";
 import {
   missingForCapacity,
   tierCount,
+  tierDiscrepancies,
   tierFieldsFor,
   type CapacitySetup,
   type SetupClient,
@@ -23,8 +24,7 @@ import type { ClientRow, ClientAssignmentRow, ClientServiceRow } from "@transper
 import { EmptyState, Toolbar } from "@/components/page-kit";
 import { SettingsSection } from "@/app/w/[slug]/settings/section";
 import { ServiceMore } from "@/app/w/[slug]/settings/services-settings";
-import { ServicesSettings } from "@/app/w/[slug]/settings/services-settings";
-import { ClientHealthBenchmark, ClientGroupsSettings, GroupFields } from "@/app/w/[slug]/settings/client-groups-settings";
+import { GroupFields } from "@/app/w/[slug]/settings/client-groups-settings";
 import { ClientMore, type ClientOps, type ClientsSettingsProps } from "@/app/w/[slug]/settings/clients-settings";
 import { saveClientAssignment, saveClientField, saveClientServices } from "@/app/w/[slug]/settings/client-actions";
 import { addNamedClient, addTierAction, removeTierAction, saveClientLookedAfter, saveSetupField } from "@/app/w/[slug]/setup/actions";
@@ -36,7 +36,7 @@ import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components
 import type { WorkspaceSettingsData } from "@/lib/data";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
 import { clientSources, clientsRuleSentence } from "@/lib/clients";
-import { HeadHelp, NumberCell, Note, TextCell } from "./cells";
+import { DiscrepancyPill, HeadHelp, NumberCell, Note, TextCell } from "./cells";
 
 type Scalar = string | number | boolean | null;
 
@@ -92,8 +92,8 @@ function moreProps(setup: CapacitySetup, data: WorkspaceSettingsData, roster: Pr
 }
 
 export function TiersAndClients({ setup, data, roster }: Props) {
-  const { canEdit } = setup;
   const tierServiceIds = new Set(setup.services.filter((s) => s.tier_id).map((s) => s.id));
+  const otherServices = data.services.filter((s) => s.active && !tierServiceIds.has(s.id)).length;
   return (
     <div className="flex min-w-0 flex-col gap-6" data-setup="clients">
       <TierControls setup={setup} />
@@ -102,14 +102,14 @@ export function TiersAndClients({ setup, data, roster }: Props) {
       ))}
       <BothServices setup={setup} />
       <NamedClients setup={setup} data={data} roster={roster} />
-      <SettingsSection id="other-services" title="Other services and the client health benchmark" description="Services that aren't on a tier, the clients counted for them, and the benchmark client health is compared with.">
-        <div className="flex flex-col gap-6">
-          <ServicesSettings data={data} tierServiceIds={tierServiceIds} />
-          <ClientGroupsSettings data={data} onlyServiceIds={new Set(data.services.filter((s) => !tierServiceIds.has(s.id)).map((s) => s.id))} benchmark={false} />
-          <ClientHealthBenchmark data={data} />
-        </div>
-        {!canEdit && <p className="text-xs text-fg-2">Agency admins and the Owner can change these.</p>}
-      </SettingsSection>
+      {/* D46: services that aren't tiers, and D47: the client health benchmark, are not edited here. Their data, code and engine behaviour are untouched. */}
+      {otherServices > 0 && (
+        <p className="px-1 text-sm text-fg-3" data-other-services>
+          {otherServices === 1
+            ? "This workspace also has 1 other service (projects or hourly work) that isn't a tier. It still counts in the simulation."
+            : `This workspace also has ${otherServices} other services (projects or hourly work) that aren't tiers. They still count in the simulation.`}
+        </p>
+      )}
     </div>
   );
 }
@@ -157,6 +157,7 @@ function serviceOf(setup: CapacitySetup, deptId: string, tierId: string): SetupS
 function DepartmentTable({ setup, data, department }: { setup: CapacitySetup; data: WorkspaceSettingsData; department: SetupDepartment }) {
   const fields = tierFieldsFor(department.name);
   const missing = new Set(missingForCapacity(setup, { salariesVisible: !setup.payHidden }).filter((m) => m.kind === "tier_deliverable").map((m) => `${m.id}:${m.field}`));
+  const discrepancies = tierDiscrepancies(setup);
   const [open, setOpen] = useState<string | null>(null);
   const tiers = setup.tiers;
   const namedOn = (id: string) => setup.clients.filter((c) => c.active && c.service_ids.includes(id)).length;
@@ -169,7 +170,7 @@ function DepartmentTable({ setup, data, department }: { setup: CapacitySetup; da
             <HeadHelp align="left" help={{ label: "Tier", description: "A level of service. The same tiers apply to both departments; each department has its own numbers for a tier.", example: "T1 gets the most effort and T3 the least." }}>
               Tier
             </HeadHelp>
-            <HeadHelp help={{ label: "Clients", description: "How many clients the tier has: the named clients on it, plus everyone's portfolio count, plus counted clients nobody's portfolio holds yet.", example: "Organic T2: 27 clients, the sum of the portfolios of everyone who looks after T2." }}>
+            <HeadHelp help={{ label: "Clients", description: "How many clients the tier has in total. Type it in, or leave it blank and it is worked out: the named clients on it, plus everyone's portfolio count, plus counted clients nobody's portfolio holds yet. When it is typed, a warning shows if the portfolios and named clients add up to a different number.", example: "Organic T2: 40 clients, of which 28 are in people's portfolios and 12 aren't in anyone's yet." }}>
               Clients
             </HeadHelp>
             <HeadHelp help={FIELD_HELP.fee}>Fee a month</HeadHelp>
@@ -209,9 +210,26 @@ function DepartmentTable({ setup, data, department }: { setup: CapacitySetup; da
                     <b>{t.key}</b>
                     <div className="text-xs text-fg-3">{i === 0 ? "Most effort" : i === tiers.length - 1 && tiers.length > 1 ? "Least effort" : ""}</div>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums" data-tier-count={svc.id}>
-                    {tierCount(svc.id, setup)}
-                    {named > 0 && <div className="text-xs text-fg-3">{named} named</div>}
+                  <TableCell>
+                    <div className="flex flex-col items-end tabular-nums" data-tier-count={svc.id} data-count={tierCount(svc.id, setup)}>
+                      <NumberCell
+                        label={`${department.name} ${t.key}: Clients`}
+                        value={svc.client_total}
+                        save={saver("services", key, "client_total")}
+                        canEdit={setup.canEdit}
+                        min={0}
+                        max={100000}
+                        step={1}
+                        digits={0}
+                        placeholder={String(tierCount(svc.id, setup))}
+                        provenance={svc.provenance}
+                        column="client_total"
+                      />
+                      {named > 0 && <div className="text-xs text-fg-3">{named} named</div>}
+                      {discrepancies.filter((d) => d.serviceId === svc.id).map((d) => (
+                        <DiscrepancyPill key={d.kind} discrepancy={d} />
+                      ))}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <NumberCell label={`${department.name} ${t.key}: Fee a month`} value={svc.price} save={saver("services", key, "price")} canEdit={setup.canEdit} optional={false} min={0} step={FIELD_HELP.fee.step} provenance={svc.provenance} column="price" digits={0} />
@@ -257,6 +275,11 @@ function DepartmentTable({ setup, data, department }: { setup: CapacitySetup; da
                         <NumberCell label={`${department.name} ${t.key}: Price-rise churn`} value={svc.price_rise_churn} save={saver("services", key, "price_rise_churn")} canEdit={setup.canEdit} optional={false} min={0} max={10} step={0.1} provenance={svc.provenance} column="price_rise_churn" help={{ description: "Extra churn for each 10% price rise, lasting 3 months, as a share of normal churn.", example: "0.5: a 10% rise lifts churn by half for 3 months (churn x 1.5)." }} />
                       </div>
                       <div className="grid gap-4">
+                        {svc.client_total !== null && (
+                          <p className="text-xs text-fg-2" data-total-note>
+                            This tier&apos;s total is typed in, so the counted clients nobody holds are worked out from it (total less named clients and portfolios). The number below is not used while it is set.
+                          </p>
+                        )}
                         <GroupFields service={dataSvc} data={data} />
                       </div>
                       <ServiceMore service={dataSvc} data={data} removable={false} />
@@ -269,7 +292,7 @@ function DepartmentTable({ setup, data, department }: { setup: CapacitySetup; da
         </TableBody>
       </Table>
       <Note>
-        Ad hoc: <b>chance of ad hoc</b> is the share of the tier&apos;s clients who send any requests in a month; <b>requests if they ask</b> is how many those clients send. The size of each request is the step&apos;s time (Processes). Client counts are the sum of everyone&apos;s portfolio (People &amp; roles).
+        Ad hoc: <b>chance of ad hoc</b> is the share of the tier&apos;s clients who send any requests in a month; <b>requests if they ask</b> is how many those clients send. The size of each request is the step&apos;s time (Processes). A tier&apos;s clients are typed in, or left blank and worked out from the named clients and everyone&apos;s portfolio (People &amp; roles); a typed total is checked against them.
       </Note>
     </SettingsSection>
   );
@@ -315,6 +338,7 @@ type ClientView = SetupClient & { departmentId: string | null; tierId: string | 
 function NamedClients({ setup, data, roster }: { setup: CapacitySetup; data: WorkspaceSettingsData; roster: Props["roster"] }) {
   const [showInactive, setShowInactive] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  const [shown, setShown] = useState(setup.clients.length > 0);
   const tierService = new Map(setup.services.filter((s) => s.tier_id).map((s) => [s.id, s]));
   const view = (c: SetupClient): ClientView => {
     const primary = c.service_ids.find((id) => tierService.has(id)) ?? null;
@@ -329,8 +353,14 @@ function NamedClients({ setup, data, roster }: { setup: CapacitySetup; data: Wor
     <SettingsSection
       id="clients"
       title="Named clients"
-      description={`Blank = use the tier's value. Hand-holding is unplanned time each month: reassurance, extra calls, same-day turnarounds. Any tier can have named clients. ${clientsRuleSentence(clientSources(data.processes, data.services, data.clientGroups))}`}
+      description={`Name a client only when it behaves differently from its tier: its own fee, channels, hand-holding or ad hoc. Blank = use the tier's value. Hand-holding is unplanned time each month: reassurance, extra calls, same-day turnarounds. ${clientsRuleSentence(clientSources(data.processes, data.services, data.clientGroups))}`}
     >
+      {/* D45: optional, so folded away until it is wanted. Open to start with when the workspace already has named clients. */}
+      <Button type="button" variant="outline" size="sm" className="self-start" aria-expanded={shown} aria-controls="named-clients-body" onClick={() => setShown((s) => !s)} data-named-toggle>
+        {shown ? "Hide named clients" : setup.clients.length > 0 ? `Show named clients (${setup.clients.length})` : "Show named clients"}
+      </Button>
+      {shown && (
+      <div id="named-clients-body" className="flex flex-col gap-3" data-named-body>
       {setup.canEdit && (
         <Toolbar label="Add a named client">
           <AddNamedClient setup={setup} />
@@ -403,6 +433,8 @@ function NamedClients({ setup, data, roster }: { setup: CapacitySetup; data: Wor
       <Note>
         &quot;Also takes&quot; counts the client in both service lines; the client also appears in the other department&apos;s tier count. Later (not v1): bespoke recurring tasks per client, such as weekly localisation work.
       </Note>
+      </div>
+      )}
     </SettingsSection>
   );
 }
