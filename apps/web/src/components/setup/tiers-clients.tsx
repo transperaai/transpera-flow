@@ -292,7 +292,7 @@ function DepartmentTable({ setup, data, department }: { setup: CapacitySetup; da
         </TableBody>
       </Table>
       <Note>
-        Ad hoc: <b>chance of ad hoc</b> is the share of the tier&apos;s clients who send any requests in a month; <b>requests if they ask</b> is how many those clients send. The size of each request is the step&apos;s time (Processes). Client counts are the sum of everyone&apos;s portfolio (People &amp; roles).
+        Ad hoc: <b>chance of ad hoc</b> is the share of the tier&apos;s clients who send any requests in a month; <b>requests if they ask</b> is how many those clients send. The size of each request is the step&apos;s time (Processes). A tier&apos;s clients are typed in, or left blank and worked out from the named clients and everyone&apos;s portfolio (People &amp; roles); a typed total is checked against them.
       </Note>
     </SettingsSection>
   );

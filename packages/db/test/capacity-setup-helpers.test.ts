@@ -281,7 +281,8 @@ describe("a typed tier total", () => {
       people: [],
       ...base(40, 44),
     };
-    const only = (s: typeof setup) => missingForCapacity(s).filter((m) => m.kind.startsWith("tier_total"));
+    // The portfolio rows here carry only what the count reads (no person or provenance).
+    const only = (s: typeof setup) => missingForCapacity(s as unknown as Parameters<typeof missingForCapacity>[0]).filter((m) => m.kind.startsWith("tier_total"));
     expect(only(setup)).toEqual([
       { kind: "tier_total_over", severity: "warning", id: T1, label: "Organic (SEO) T1: Portfolios and named clients add up to 46, but the tier has 40 (6 too many). The model counts the portfolios as they are." },
     ]);
