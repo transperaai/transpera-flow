@@ -26,7 +26,6 @@ import { LinkedSources, useSourceLinking } from "@/components/sources/linking-co
 import { StepIssueBadges } from "@/components/step-issue-badges";
 import { TagPill } from "@/components/tag-pill";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -51,7 +50,6 @@ const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((
   loading: () => <MapSkeleton height={256} />,
 });
 
-const EYEBROW = "flex items-center text-2xs font-semibold tracking-wider text-muted-foreground uppercase";
 
 const KIND_ICON: Record<TimelineKind, LucideIcon> = {
   created: CirclePlus,
@@ -433,77 +431,106 @@ export function IssuePage(props: IssuePageProps) {
           </SectionCard>
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-4">
-          <Card className="gap-2 px-4 py-3" data-section="target">
-            <span className={EYEBROW}>
-              Target
-              <Help {...ISSUE_PAGE_HELP.target} />
-            </span>
+        <aside className="flex min-w-0 flex-col gap-5">
+          <SectionCard
+            id="target"
+            section="target"
+            title={
+              <span className="flex items-center">
+                Target
+                <Help {...ISSUE_PAGE_HELP.target} />
+              </span>
+            }
+            contentClassName="gap-2"
+          >
             {issue.target_measure || issue.target_now || issue.target_goal ? (
               <>
                 <b>{issue.target_measure || "Not named yet"}</b>
                 <dl className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-                  <dt className="text-xs text-muted-foreground">Now</dt>
+                  <dt className="text-xs text-fg-2">Now</dt>
                   <dd className="font-mono">{issue.target_now || "—"}</dd>
-                  <dt className="text-xs text-muted-foreground">Goal</dt>
+                  <dt className="text-xs text-fg-2">Goal</dt>
                   <dd className="font-mono">{issue.target_goal || "—"}</dd>
                 </dl>
-                <span className="text-xs text-muted-foreground">Solutions get an automatic pass or fail against this. You make the final call.</span>
+                <span className="text-xs text-fg-2">Solutions get an automatic pass or fail against this. You make the final call.</span>
               </>
             ) : (
-              <span className="text-sm text-muted-foreground">No target yet. Edit the issue to add one.</span>
+              <span className="text-sm text-fg-2">No target yet. Edit the issue to add one.</span>
             )}
-          </Card>
+          </SectionCard>
 
-          <Card className="gap-2 px-4 py-3" data-section="linked">
-            <span className={EYEBROW}>
-              Linked to
-              <Help {...ISSUE_PAGE_HELP.linked} />
-            </span>
+          <SectionCard
+            id="linked"
+            section="linked"
+            title={
+              <span className="flex items-center">
+                Linked to
+                <Help {...ISSUE_PAGE_HELP.linked} />
+              </span>
+            }
+          >
             <div className="flex flex-wrap gap-1.5">
               <Chip>Process: {processName.get(processIdOf) ?? bundle.process.name}</Chip>
               {stepIds.map((id) => (
                 <Chip key={id}>Step: {stepName.get(id) ?? "A step"}</Chip>
               ))}
             </div>
-          </Card>
+          </SectionCard>
 
-          <Card className="gap-2 px-4 py-3" data-section="sources">
-            {sourceLinking ? (
+          {sourceLinking ? (
+            <SectionCard
+              id="sources"
+              section="sources"
+              title={
+                <span className="flex items-center">
+                  Sources
+                  <Help {...ISSUE_PAGE_HELP.sources} />
+                </span>
+              }
+            >
               <LinkedSources
                 target={{ kind: "issue", issueId: issue.id }}
                 label={issue.number ? `Issue #${issue.number}` : `Issue: ${issue.title}`}
                 empty="None yet"
+                hideTitle
                 className="flex flex-col gap-2"
               />
-            ) : (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <span className={EYEBROW}>
-                    Sources
-                    <Help {...ISSUE_PAGE_HELP.sources} />
+            </SectionCard>
+          ) : (
+            <SectionCard
+              id="sources"
+              section="sources"
+              title={
+                <span className="flex items-center">
+                  Sources
+                  <Help {...ISSUE_PAGE_HELP.sources} />
+                </span>
+              }
+              actionIsEdit
+              actionClassName={EDIT_ONLY}
+              action={
+                canEdit ? (
+                  <span className="flex items-center">
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setLinking(true)}>
+                      + Link
+                    </Button>
+                    <Help {...ISSUE_PAGE_HELP.link} />
                   </span>
-                  {canEdit && (
-                    <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
-                      <Button type="button" size="sm" variant="ghost" onClick={() => setLinking(true)}>
-                        + Link
-                      </Button>
-                      <Help {...ISSUE_PAGE_HELP.link} />
-                    </span>
-                  )}
-                </div>
-                {issue.source_ids.length ? (
-                  issue.source_ids.map((id) => (
-                    <div key={id} className="text-sm font-medium">
-                      {sourceTitle.get(id) ?? "A source"}
-                    </div>
-                  ))
-                ) : (
-                  <span className="text-sm text-muted-foreground">None yet</span>
-                )}
-              </>
-            )}
-          </Card>
+                ) : undefined
+              }
+              contentClassName="gap-2"
+            >
+              {issue.source_ids.length ? (
+                issue.source_ids.map((id) => (
+                  <div key={id} className="text-sm font-medium">
+                    {sourceTitle.get(id) ?? "A source"}
+                  </div>
+                ))
+              ) : (
+                <span className="text-sm text-fg-2">None yet</span>
+              )}
+            </SectionCard>
+          )}
         </aside>
       </div>
 
@@ -689,17 +716,51 @@ function OwnersEditor({
 function MapWithBadges({ badges, onOpen, children }: { badges: Record<string, StepBadge>; onOpen: (stepId: string) => void; children: ReactNode }) {
   const host = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
+  // A short map is fitted to a panel that is never shorter than 16rem, which leaves a band of empty card under it. Until someone moves the
+  // map, the card is cut to the lowest step plus a little room. (Moving or zooming the map lifts the cut, so nothing is ever hidden.)
+  const [cut, setCut] = useState<number | null>(null);
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    const check = () => setReady(!!el.querySelector("[data-process-map]"));
+    let moved = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const measure = () => {
+      if (moved) return;
+      const nodes = el.querySelectorAll(".react-flow__node");
+      if (!nodes.length) return;
+      const top = el.getBoundingClientRect().top;
+      let bottom = 0;
+      nodes.forEach((n) => (bottom = Math.max(bottom, n.getBoundingClientRect().bottom)));
+      setCut(Math.ceil(bottom - top + 20));
+    };
+    const check = () => {
+      setReady(!!el.querySelector("[data-process-map]"));
+      clearTimeout(timer);
+      timer = setTimeout(measure, 450);
+    };
+    const lift = () => {
+      moved = true;
+      setCut(null);
+    };
     check();
     const observer = new MutationObserver(check);
     observer.observe(el, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    const resize = new ResizeObserver(check);
+    resize.observe(el);
+    el.addEventListener("pointerdown", lift);
+    el.addEventListener("wheel", lift, { passive: true });
+    el.addEventListener("keydown", lift);
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+      resize.disconnect();
+      el.removeEventListener("pointerdown", lift);
+      el.removeEventListener("wheel", lift);
+      el.removeEventListener("keydown", lift);
+    };
   }, []);
   return (
-    <div ref={host} className="min-w-0 overflow-hidden rounded-token border bg-card">
+    <div ref={host} className="min-w-0 overflow-hidden rounded-token border bg-card" style={cut ? { maxHeight: cut } : undefined} data-map-cut={cut ?? undefined}>
       {children}
       {ready && <StepIssueBadges badges={badges} onOpen={onOpen} />}
     </div>

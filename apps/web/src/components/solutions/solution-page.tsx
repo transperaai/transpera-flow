@@ -7,21 +7,21 @@
 
 import { isReadOnly, type ScreenMode } from "@/lib/mode";
 import Link from "next/link";
+import { FlaskConical, GitCompare } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bundleForProcess, type IssueRow, type ProcessBundle, type SolutionIssueRow, type SolutionRow, type SolutionVerdict } from "@transpera-flow/db";
 import { IssueStatusPill } from "@/components/issues/status-pill";
-import { HEADER_PILL, MetaLine, PageHeader } from "@/components/page-kit";
+import { EmptyState, HEADER_PILL, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
 import { SolutionStatusMenu } from "@/components/solutions/status-menu";
 import { TagPill } from "@/components/tag-pill";
 import { Help, HelpLabel } from "@/components/help";
 import { VerdictWord } from "@/components/solutions/solution-cards";
 import { SolutionCompare } from "@/components/solutions/solution-compare";
-import { LinkedSources } from "@/components/sources/linking-context";
+import { LINKED_SOURCES_HELP, LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { demoMarket } from "@/lib/market-demo";
 import { demoBundle } from "@/lib/sources/demo";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
@@ -36,8 +36,8 @@ import { SOLUTION_PAGE_HELP, newOnProcessHelp } from "@/lib/solutions/help";
 import { solutionEditorHref } from "@/lib/solutions/links";
 import { EDIT_ONLY } from "@/lib/phone";
 import { useIsPhone } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
 
-const CARD_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
 const EYEBROW = "flex items-center text-2xs font-semibold tracking-wider text-muted-foreground uppercase";
 
 export interface SolutionPageProps {
@@ -88,6 +88,7 @@ export function SolutionPage(props: SolutionPageProps) {
   const demoConditions = useDemoConditions(mode === "demo");
   const [error, setError] = useState<string | null>(null);
   const [linking, setLinking] = useState(false);
+  const sourceLinking = useSourceLinking();
 
   if (!solution) {
     return (
@@ -174,7 +175,7 @@ export function SolutionPage(props: SolutionPageProps) {
               <span className="flex items-center">
                 <Link
                   href={solutionEditorHref(base, solution.process_id, { from: `${base}/solutions/${solution.id}` })}
-                  className="inline-flex h-9 items-center rounded-md bg-edit px-3 text-sm font-medium text-edit-fg hover:opacity-90"
+                  className={cn(buttonVariants(), "bg-edit text-edit-fg hover:bg-edit/90")}
                   data-new-on-process
                 >
                   ✎ New solution on {processName}
@@ -192,28 +193,33 @@ export function SolutionPage(props: SolutionPageProps) {
         </p>
       )}
 
-      <section className="flex flex-col gap-2" data-section="solves">
-        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-          <div>
-            <h2 className={`${CARD_TITLE} flex items-center`}>
-              Solves
-              <Help {...SOLUTION_PAGE_HELP.solves} />
-            </h2>
-            <p className="text-sm text-muted-foreground">A solution can solve more than one issue. Each is judged against its own target.</p>
-          </div>
-          {canEdit && (
-            <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
+      <SectionCard
+        id="solves"
+        section="solves"
+        title={
+          <span className="flex items-center">
+            Solves
+            <Help {...SOLUTION_PAGE_HELP.solves} />
+          </span>
+        }
+        description="A solution can solve more than one issue. Each is judged against its own target."
+        actionIsEdit
+        actionClassName={EDIT_ONLY}
+        action={
+          canEdit ? (
+            <span className="flex items-center">
               <Button type="button" size="sm" variant="outline" onClick={() => setLinking(true)} data-link-issue>
                 + Link an issue
               </Button>
               <Help {...SOLUTION_PAGE_HELP.link} />
             </span>
-          )}
-        </div>
+          ) : undefined
+        }
+      >
         {links.length === 0 ? (
-          <Card className="px-4 py-6 text-sm text-muted-foreground" data-empty="solves">
+          <EmptyState icon={FlaskConical} data-empty="solves">
             Not linked to an issue yet.{canEdit ? " Use + Link an issue to test it against one." : ""}
-          </Card>
+          </EmptyState>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
             {links.map((l) => (
@@ -229,49 +235,53 @@ export function SolutionPage(props: SolutionPageProps) {
             ))}
           </div>
         )}
-      </section>
+      </SectionCard>
 
       {compareBase ? (
         <SolutionCompare key={solution.id} base={compareBase} solution={solution} links={links} issues={issues} movedOn={props.movedOn} marketConditions={demoConditions} />
       ) : (
-        <p className="text-sm text-muted-foreground" data-compare-unavailable>
-          The comparison with live isn&apos;t available: the process this solution was copied from can&apos;t be loaded.
-        </p>
+        <SectionCard id="compare" section="compare" title="Live vs this solution">
+          <EmptyState icon={GitCompare} data-compare-unavailable>
+            The comparison with live isn&apos;t available: the process this solution was copied from can&apos;t be loaded.
+          </EmptyState>
+        </SectionCard>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <NotesCard
-          key={solution.id}
-          notes={solution.notes}
-          canEdit={canEdit}
-          onSave={async (notes) => {
-            setError(null);
-            if (mode === "demo") {
-              setDemoNotes(solution.id, notes);
-              return true;
-            }
-            const r = await saveSolutionNotes(workspaceId, solution.id, notes);
-            if (r.status === "error") {
-              setError(r.message);
-              return false;
-            }
-            setLocal((d) => ({ ...d, solutions: d.solutions.map((s): SolutionRow => (s.id === solution.id ? { ...s, notes: r.notes } : s)) }));
+      <NotesCard
+        key={solution.id}
+        notes={solution.notes}
+        canEdit={canEdit}
+        onSave={async (notes) => {
+          setError(null);
+          if (mode === "demo") {
+            setDemoNotes(solution.id, notes);
             return true;
-          }}
-        />
-        <div className="rounded-token border border-line bg-panel-2 px-4 py-3 text-sm" data-reminder>
-          <span className="flex items-center font-semibold">
-            Solutions never change the live map
-            <Help {...SOLUTION_PAGE_HELP.never} />
-          </span>
-          <p className="mt-1 text-muted-foreground">To make one real, open the process in the Editor, build the new version and publish it.</p>
-        </div>
-      </div>
+          }
+          const r = await saveSolutionNotes(workspaceId, solution.id, notes);
+          if (r.status === "error") {
+            setError(r.message);
+            return false;
+          }
+          setLocal((d) => ({ ...d, solutions: d.solutions.map((s): SolutionRow => (s.id === solution.id ? { ...s, notes: r.notes } : s)) }));
+          return true;
+        }}
+      />
 
       {/* Where the page loads source links (a workspace, and the demo), the sources that back this solution up, with "+ Link". */}
-      <Card className="gap-2 px-4 py-3 empty:hidden" data-section="sources">
-        <LinkedSources target={{ kind: "solution", solutionId: solution.id }} label={`Solution: ${solution.name}`} empty="None linked yet." className="flex flex-col gap-2" />
-      </Card>
+      {sourceLinking && (
+        <SectionCard
+          id="sources"
+          section="sources"
+          title={
+            <span className="flex items-center">
+              Sources
+              <Help {...LINKED_SOURCES_HELP.sources} />
+            </span>
+          }
+        >
+          <LinkedSources target={{ kind: "solution", solutionId: solution.id }} label={`Solution: ${solution.name}`} empty="None linked yet." hideTitle className="flex flex-col gap-2" />
+        </SectionCard>
+      )}
 
       <LinkIssueDialog
         open={linking}
@@ -321,7 +331,7 @@ function SolvesCard({
   const target = issue ? [issue.target_measure, issue.target_goal].filter(Boolean).join(" ") : "";
   const press = (v: SolutionVerdict) => void onVerdict(link.user_verdict === v ? null : v);
   return (
-    <Card className="gap-2 p-3" data-testid="solves-card" data-solves-card={link.issue_id}>
+    <div className="flex flex-col gap-2 rounded-lg bg-muted/40 p-3" data-testid="solves-card" data-solves-card={link.issue_id}>
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
         {issue ? (
           <Link href={issueHref(base, issue)} className="min-w-0 font-semibold hover:underline">
@@ -402,7 +412,7 @@ function SolvesCard({
           />
         </label>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -413,36 +423,44 @@ function NotesCard({ notes, canEdit, onSave }: { notes: string; canEdit: boolean
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
   return (
-    <Card className="gap-2 px-4 py-3" data-section="notes">
-      <label className="flex flex-col gap-1">
-        <span className={EYEBROW}>
+    <SectionCard
+      id="notes"
+      section="notes"
+      title={
+        <span className="flex items-center">
           Notes
           <Help {...SOLUTION_PAGE_HELP.notes} />
         </span>
-        <Textarea
-          value={text}
-          maxLength={MAX_NOTES}
-          disabled={!canEdit || isPhone}
-          rows={4}
-          aria-label="Notes"
-          placeholder={canEdit ? "Anything worth knowing" : "No notes"}
-          onChange={(e) => {
-            setText(e.target.value);
-            setSaved(false);
-          }}
-          onBlur={() => {
-            if (text === notes) return;
-            void onSave(text).then((ok) => {
-              setSaved(ok);
-              if (ok) timer.current = setTimeout(() => setSaved(false), 2500);
-            });
-          }}
-        />
-      </label>
-      <span className="h-4 text-xs text-muted-foreground" role="status">
+      }
+    >
+      <Textarea
+        value={text}
+        maxLength={MAX_NOTES}
+        disabled={!canEdit || isPhone}
+        rows={4}
+        aria-label="Notes"
+        placeholder={canEdit ? "Anything worth knowing" : "No notes"}
+        onChange={(e) => {
+          setText(e.target.value);
+          setSaved(false);
+        }}
+        onBlur={() => {
+          if (text === notes) return;
+          void onSave(text).then((ok) => {
+            setSaved(ok);
+            if (ok) timer.current = setTimeout(() => setSaved(false), 2500);
+          });
+        }}
+      />
+      <span className="-mt-2 h-4 text-xs text-fg-2" role="status">
         {saved ? "Saved" : ""}
       </span>
-    </Card>
+      <p className="flex flex-wrap items-center text-xs text-fg-2" data-reminder>
+        <span className="font-semibold">Solutions never change the live map</span>
+        <Help {...SOLUTION_PAGE_HELP.never} />
+        <span className="basis-full">To make one real, open the process in the Editor, build the new version and publish it.</span>
+      </p>
+    </SectionCard>
   );
 }
 

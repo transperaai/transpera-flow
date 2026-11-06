@@ -7,7 +7,11 @@
 import Link from "next/link";
 import type { IssueRow, SolutionIssueRow, SolutionRow, SolutionVerdict } from "@transpera-flow/db";
 import { Help } from "@/components/help";
+import { FlaskConical } from "lucide-react";
+import { EmptyState, StatusPill } from "@/components/page-kit";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { SOLUTION_STATUS_OPTIONS } from "@/lib/solutions/status";
 import { issueHref } from "@/lib/issues/pages";
 import { SOLUTIONS_LIST_HELP, newOnProcessHelp } from "@/lib/solutions/help";
 import { builtBy, builtDate, changesLine, effectiveVerdict, linksOf, solutionHref, VERDICT_WORDS, type SolutionsData } from "@/lib/solutions/cards";
@@ -60,9 +64,9 @@ export function SolutionCards({
   const processName = new Map(processes.map((p) => [p.id, p.name]));
   if (data.solutions.length === 0) {
     return (
-      <p className="rounded-token border border-dashed border-line p-4 text-sm text-fg-2" data-testid="solutions-empty">
+      <EmptyState icon={FlaskConical} data-testid="solutions-empty">
         {empty ?? "No solutions yet. Build one from an issue, or start one here."}
-      </p>
+      </EmptyState>
     );
   }
   return (
@@ -110,12 +114,14 @@ function SolutionCard({
   memberNames?: Readonly<Record<string, string>>;
   from: string;
 }) {
+  const status = SOLUTION_STATUS_OPTIONS.find((o) => o.value === s.status);
   return (
     <Card className="h-full gap-2 p-3" data-testid="solution-card" data-solution={s.id}>
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <span className="text-xs text-muted-foreground">
           {builtBy(s.created_by, viewerId, demo, memberNames)} · {builtDate(s)}
         </span>
+        {status && <StatusPill label={status.label} tone={status.tone} value={s.status} />}
       </div>
       <h3 className="font-heading text-base leading-snug font-semibold">
         <Link href={solutionHref(base, s.id)} className="hover:underline">
@@ -162,19 +168,16 @@ function SolutionCard({
       </div>
       <div className="mt-auto flex flex-wrap items-center gap-2 pt-1">
         <span className="flex items-center">
-          <Link href={solutionHref(base, s.id)} className="inline-flex h-8 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90">
-            Open
-          </Link>
+          <Button asChild>
+            <Link href={solutionHref(base, s.id)}>Open</Link>
+          </Button>
           <Help {...SOLUTIONS_LIST_HELP.open} />
         </span>
         {canEdit && (
           <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
-            <Link
-              href={solutionEditorHref(base, s.process_id, { from })}
-              className="inline-flex h-8 items-center rounded-md border border-border px-3 text-sm font-medium hover:bg-muted"
-            >
-              ✎ New solution on {processName}
-            </Link>
+            <Button asChild variant="outline">
+              <Link href={solutionEditorHref(base, s.process_id, { from })}>✎ New solution on {processName}</Link>
+            </Button>
             <Help {...newOnProcessHelp(processName)} />
           </span>
         )}

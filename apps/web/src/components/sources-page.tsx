@@ -23,7 +23,9 @@ import { SourceDialog, type SourceSubmission } from "@/components/sources/source
 import { SourcesLibrary } from "@/components/sources/sources-library";
 import { DEFAULT_QUERY, PAGE_SIZE, excerptOf, filterSources, toListRow, type LibraryQuery } from "@/lib/sources/library";
 import { liveLibraryBackend, memoryLibraryBackend, type LibraryBackend } from "@/lib/sources/library-backend";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { FileText } from "lucide-react";
+import { EmptyState, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Saver } from "@/lib/fields/field-controller";
 import { useDemoSolutions } from "@/lib/solutions/demo";
@@ -46,7 +48,6 @@ const SOURCE_HELP = {
 
 
 const button = buttonVariants({ variant: "outline", size: "sm" });
-const primary = buttonVariants({ size: "sm" });
 const kindOptions = SOURCE_KINDS.map((k) => ({ value: k, label: SOURCE_KIND_LABELS[k] }));
 
 const FIELD_NAMES: Record<string, string> = {
@@ -230,22 +231,38 @@ export function SourcesPage({
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-fg-2">
-          {canEdit ? "Agency admins add sources and link them." : "You can read the sources here; Agency admins can add and change them."}
-          {unlinkedCount > 0 && (
-            <span className="ml-1 font-semibold text-fg" data-unlinked-count={unlinkedCount}>
-              {unlinkedCount === 1 ? "1 source isn't linked to anything yet." : `${unlinkedCount} sources aren't linked to anything yet.`}
+    <div className="flex flex-col gap-5">
+      <PageHeader
+        label="Sources"
+        testId="sources-header"
+        eyebrow={<span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Company</span>}
+        title="Sources"
+        meta={
+          <MetaLine>
+            <span>
+              Your library of transcripts, notes and data. Search it, open one to read it, and link each to what it is evidence for. Cite one for a step&apos;s value from the step&apos;s inspector.
             </span>
-          )}
-        </p>
-        {canEdit && (
-          <button type="button" className={`${primary} ${EDIT_ONLY}`} data-edit-entry onClick={() => setDialog({ source: null })}>
-            + Add source
-          </button>
-        )}
-      </div>
+          </MetaLine>
+        }
+        below={
+          <p className="text-sm text-fg-2">
+            {canEdit ? "Agency admins add sources and link them." : "You can read the sources here; Agency admins can add and change them."}
+            {unlinkedCount > 0 && (
+              <span className="ml-1 font-semibold text-fg" data-unlinked-count={unlinkedCount}>
+                {unlinkedCount === 1 ? "1 source isn't linked to anything yet." : `${unlinkedCount} sources aren't linked to anything yet.`}
+              </span>
+            )}
+          </p>
+        }
+        actionsLabel="Sources actions"
+        actions={
+          canEdit ? (
+            <Button type="button" className={EDIT_ONLY} data-edit-entry onClick={() => setDialog({ source: null })}>
+              + Add source
+            </Button>
+          ) : undefined
+        }
+      />
       <p role="status" aria-live="polite" className={status ? "text-xs text-fg-2" : "sr-only"}>
         {status}
       </p>
@@ -257,27 +274,28 @@ export function SourcesPage({
           </button>
         </p>
       )}
-      {totalAll === 0 ? (
-        <p data-no-sources className="rounded-lg border border-dashed border-line p-4 text-fg-2">
-          No sources yet. Add the audit&apos;s transcripts and notes and link each one to what it is evidence for (a process, a step, an
-          insight, an issue or a solution), or let Claude add them through the MCP server, so every number can be traced to what someone said.
-        </p>
-      ) : (
-        <SourcesLibrary
-          rows={rows}
-          total={total}
-          query={query}
-          onQuery={setQuery}
-          loading={loading}
-          loadError={loadError}
-          onMore={() => void run(query, rows.length)}
-          links={links}
-          targets={targets}
-          citations={Object.fromEntries(Object.entries(citations).map(([id, list]) => [id, list.length]))}
-          openId={opened?.row.id ?? null}
-          onOpen={(id) => void open(id)}
-        />
-      )}
+      <SectionCard id="library" section="library" title="Library">
+        {totalAll === 0 ? (
+          <EmptyState icon={FileText} data-no-sources>
+            No sources yet. Add the audit&apos;s transcripts and notes and link each one to what it is evidence for (a process, a step, an insight, an issue or a solution), or let Claude add them through the MCP server, so every number can be traced to what someone said.
+          </EmptyState>
+        ) : (
+          <SourcesLibrary
+            rows={rows}
+            total={total}
+            query={query}
+            onQuery={setQuery}
+            loading={loading}
+            loadError={loadError}
+            onMore={() => void run(query, rows.length)}
+            links={links}
+            targets={targets}
+            citations={Object.fromEntries(Object.entries(citations).map(([id, list]) => [id, list.length]))}
+            openId={opened?.row.id ?? null}
+            onOpen={(id) => void open(id)}
+          />
+        )}
+      </SectionCard>
       <Sheet open={opened !== null} onOpenChange={(o) => !o && setOpened(null)}>
         <SheetContent side="right" className="gap-0 overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl" aria-describedby={undefined} data-source-panel>
           {opened && (

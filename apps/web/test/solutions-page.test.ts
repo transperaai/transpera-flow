@@ -258,7 +258,7 @@ describe("(i) help on every control", () => {
     expect(page).not.toMatch(/data-slice="2"|Coming next/);
     expect(page).toContain("<SolutionCompare");
     const compare = read("components/solutions/solution-compare.tsx");
-    for (const id of ["compare", "measures", "mrr", "stress"]) expect(compare).toContain(`data-section="${id}"`);
+    for (const id of ["compare", "measures", "mrr", "stress"]) expect(compare).toContain(`section="${id}"`);
     // Shared open state between the two maps, and the simulations in workers rather than in a Server Action.
     expect(compare).toMatch(/expanded=\{expanded\}/);
     expect(compare).toMatch(/onExpandedChange=\{setExpanded\}/);

@@ -13,7 +13,7 @@ import { HorizonPicker } from "@/components/horizon-picker";
 import { MrrChart } from "@/components/overview/charts";
 import { useEngineModel } from "@/lib/sim/use-engine-model";
 import { VerdictWord } from "@/components/solutions/solution-cards";
-import { Card } from "@/components/ui/card";
+import { SectionCard } from "@/components/page-kit";
 import { MapSkeleton } from "@/components/map/map-placeholder";
 import { Skeleton } from "@/components/ui/skeleton";
 import { horizonWeeks, monthsForWeeks } from "@/lib/horizon";
@@ -32,8 +32,6 @@ const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((
   ssr: false,
   loading: () => <MapSkeleton height={256} />,
 });
-
-const CARD_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
 
 export interface SolutionCompareProps {
   /** The version of the process the solution was copied from, with the workspace's roles, people and market. */
@@ -78,8 +76,8 @@ export function SolutionCompare({ base, solution, links, issues, movedOn, market
           The measures, the chart and the stress test below show their own loading. */}
       <MapsSection comparison={comparison} notes={notes} />
 
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2" data-section="horizon">
-        <p className="text-sm text-muted-foreground">The measures, the revenue chart and the stress test look this far ahead.</p>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl bg-card px-4 py-2.5 ring-1 ring-foreground/10" data-section="horizon">
+        <p className="text-sm text-fg-2">The measures, the revenue chart and the stress test look this far ahead.</p>
         <span className="flex items-center">
           <HorizonPicker weeks={liveBuilt.model?.horizonWeeks ?? solvedBuilt.model?.horizonWeeks ?? 13} onChange={setMonths} />
         </span>
@@ -90,11 +88,16 @@ export function SolutionCompare({ base, solution, links, issues, movedOn, market
         </p>
       )}
 
-      <section className="flex flex-col gap-2" data-section="measures">
-        <h2 className={`${CARD_TITLE} flex items-center`}>
-          Measures
-          <Help {...SOLUTION_PAGE_HELP.measures} />
-        </h2>
+      <SectionCard
+        id="measures"
+        section="measures"
+        title={
+          <span className="flex items-center">
+            Measures
+            <Help {...SOLUTION_PAGE_HELP.measures} />
+          </span>
+        }
+      >
         <MeasuresTable
           live={liveSim.status === "done" ? liveSim.run.result : null}
           solution={solvedSim.status === "done" ? solvedSim.run.result : null}
@@ -104,26 +107,34 @@ export function SolutionCompare({ base, solution, links, issues, movedOn, market
           hoursPerWeek={live.model?.hoursPerWeek ?? 40}
           currency={currency}
         />
-      </section>
+      </SectionCard>
 
-      <section className="flex flex-col gap-2" data-section="mrr">
-        <h2 className={`${CARD_TITLE} flex items-center`}>
-          MRR over time
-          <Help {...SOLUTION_PAGE_HELP.mrr} />
-        </h2>
+      <SectionCard
+        id="mrr"
+        section="mrr"
+        title={
+          <span className="flex items-center">
+            MRR over time
+            <Help {...SOLUTION_PAGE_HELP.mrr} />
+          </span>
+        }
+      >
         <MrrCompare live={live.model} solved={solved.model} blocked={error} currency={currency} />
-      </section>
+      </SectionCard>
 
-      <section className="flex flex-col gap-2" data-section="stress">
-        <div>
-          <h2 className={`${CARD_TITLE} flex items-center`}>
+      <SectionCard
+        id="stress"
+        section="stress"
+        title={
+          <span className="flex items-center">
             Market stress test
             <Help {...SOLUTION_PAGE_HELP.stress} />
-          </h2>
-          <p className="text-sm text-muted-foreground">Does it still work under different market conditions?</p>
-        </div>
+          </span>
+        }
+        description="Does it still work under different market conditions?"
+      >
         <StressTable comparison={comparison} liveModel={live.model} solvedModel={solved.model} blocked={error} links={links} issues={issues} solution={solution} marketConditions={marketConditions} currency={currency} />
-      </section>
+      </SectionCard>
     </div>
   );
 }
@@ -132,22 +143,29 @@ function MapsSection({ comparison, notes }: { comparison: ReturnType<typeof comp
   // One set of open groups for both maps: open or close a group on either and it follows on the other.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(comparison.open);
   return (
-    <section className="flex flex-col gap-2" data-section="compare">
-      <div>
-        <h2 className={`${CARD_TITLE} flex items-center`}>
+    <SectionCard
+      id="compare"
+      section="compare"
+      title={
+        <span className="flex items-center">
           Live vs this solution
           <Help {...SOLUTION_PAGE_HELP.compare} />
-        </h2>
-        <p className="text-sm text-muted-foreground">
+        </span>
+      }
+      description={
+        <>
           The two maps open and close together. New or changed steps are marked on the solution&apos;s map.
           <Help {...SOLUTION_PAGE_HELP.compareSide} />
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground" data-diff-key>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-1">
+        <p className="text-xs text-fg-2" data-diff-key>
           <span aria-hidden className="mr-1 inline-block h-2.5 w-4 border border-dashed border-edit align-middle" />
           new or changed · <s>removed</s>. The maps open on what changed; Fit shows the whole process.
         </p>
         {notes.map((n) => (
-          <p key={n} className="mt-1 text-xs text-muted-foreground" data-compare-note>
+          <p key={n} className="text-xs text-fg-2" data-compare-note>
             {n}
           </p>
         ))}
@@ -179,7 +197,7 @@ function MapsSection({ comparison, notes }: { comparison: ReturnType<typeof comp
           </div>
         ))}
       </div>
-    </section>
+    </SectionCard>
   );
 }
 
@@ -207,7 +225,7 @@ function MeasuresTable({
   if (failed) return <p className="text-sm text-muted-foreground">The measures couldn&apos;t be worked out.</p>;
   if (!rows) return <Skeleton className="h-40 w-full" aria-busy="true" />;
   return (
-    <Card className="overflow-x-auto p-0" data-measures>
+    <div className="overflow-x-auto rounded-lg border" data-measures>
       <table className="w-full min-w-[26rem] text-left text-sm">
         <caption className="sr-only">Measures for live and for the solution, with whether the solution is better or worse</caption>
         <thead>
@@ -244,7 +262,7 @@ function MeasuresTable({
           ))}
         </tbody>
       </table>
-    </Card>
+    </div>
   );
 }
 
@@ -259,7 +277,7 @@ function MrrCompare({ live, solved, blocked, currency }: { live: ReturnType<type
   const solvedSeries = solved && solvedRuns.status === "done" ? mrrSeries(solved, marks, solvedRuns.runs) : null;
   const failed = liveRuns.status === "error" || solvedRuns.status === "error";
   return (
-    <Card className="gap-3 px-4 py-4" data-chart="mrr-compare">
+    <div className="flex flex-col gap-3" data-chart="mrr-compare">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <h3 className="text-sm font-semibold">MRR over {horizonMonths} {horizonMonths === 1 ? "month" : "months"}</h3>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -274,7 +292,7 @@ function MrrCompare({ live, solved, blocked, currency }: { live: ReturnType<type
         </div>
       </div>
       {blocked ? <p className="text-sm text-muted-foreground">No chart: the solution can&apos;t be simulated.</p> : liveSeries && solvedSeries ? <MrrChart points={liveSeries} compare={solvedSeries} horizonMonths={horizonMonths} currency={currency} /> : failed ? <p className="text-sm text-muted-foreground">The revenue projection couldn&apos;t be worked out.</p> : <Skeleton className="h-[244px] w-full" aria-busy="true" />}
-    </Card>
+    </div>
   );
 }
 
@@ -307,7 +325,7 @@ function StressTable({
   const byKey = new Map(stress.rows.map((r) => [r.key, r]));
   const money = (v: number) => formatCurrency(v, currency);
   return (
-    <Card className="overflow-x-auto p-0" data-stress>
+    <div className="overflow-x-auto rounded-lg border" data-stress>
       <table className="w-full min-w-[30rem] text-left text-sm">
         <caption className="sr-only">Result and key number for the solution under each market condition</caption>
         <thead>
@@ -373,6 +391,6 @@ function StressTable({
           The stress test couldn&apos;t finish: {stress.error}
         </p>
       )}
-    </Card>
+    </div>
   );
 }

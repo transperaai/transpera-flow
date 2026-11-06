@@ -62,7 +62,8 @@ describe("screens whose controls come in as props that are undefined without can
   });
 
   it("Solutions: New solution only with canEdit, and Delete solution and New solution on the solution page too", () => {
-    expect(read(PAGE("solutions"))).toContain("actions={canEdit ? <NewSolutionButton");
+    expect(read("components/solutions/solutions-list.tsx")).toContain("actions={canEdit ? <NewSolutionButton");
+    expect(read(PAGE("solutions"))).toContain("canEdit={canEdit}");
     const page = read("components/solutions/solution-page.tsx");
     expect(page).toContain('const canEdit = !isReadOnly(mode);');
     // On a phone the whole block is hidden too (issue #44): the class carries EDIT_ONLY.

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { CompanyHistoryView } from "@/components/history/company-history-view";
 import { HistoryView } from "@/components/history/history-view";
 import type { VersionActions, VersionLinks } from "@/components/history/version-dialogs";
+import { MetaLine, PageHeader } from "@/components/page-kit";
 import { ShellHeader } from "@/components/shell/shell-header";
 import type { VersionMeta } from "@/lib/history/versions";
 
@@ -34,10 +35,18 @@ export function HistoryPage({
     <div>
       <ShellHeader title={company ? "Company map history" : "Process history"} />
       <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-5 px-4 pt-6 pb-12 sm:px-6">
-        <header className="flex flex-col gap-1">
-          {nav}
-          <h2 className="font-heading text-2xl leading-tight font-semibold tracking-tight">{company ? "Company map history" : "Process history"}</h2>
-        </header>
+        <PageHeader
+          label={company ? "Company map history" : "Process history"}
+          testId="history-header"
+          eyebrow={nav}
+          title={company ? "Company map history" : `${processName} history`}
+          meta={
+            <MetaLine>
+              <span data-versions-count>{versions.length === 1 ? "1 version" : `${versions.length} versions`}</span>
+              {versions.find((v) => v.live) ? <span>Live is version {versions.find((v) => v.live)!.number}</span> : ""}
+            </MetaLine>
+          }
+        />
         {company ? (
           <CompanyHistoryView versions={versions} actions={actions} links={links} note={note} viewBase={viewBase} />
         ) : (
