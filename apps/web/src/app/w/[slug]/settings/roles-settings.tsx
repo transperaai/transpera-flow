@@ -68,7 +68,7 @@ export function RoleMore({ role, usage, canEdit, hideName }: { role: Pick<RoleRo
             onLabel="Leadership: left out of clients per employee and revenue per employee"
             offLabel="Not leadership: counted in clients per employee and revenue per employee"
             disabled={disabled}
-            help={{ description: "Leadership roles are left out of the clients-per-employee and revenue-per-employee figures. Whether their salaries count in DLER is a separate setting under People.", example: "Founder, Head of Client Services." }}
+            help={{ description: "Leadership roles are left out of the clients-per-employee and revenue-per-employee figures. Their salaries are not counted in DLER either.", example: "Founder, Head of Client Services." }}
           />
         )}
         <p className="text-fg-2 sm:col-span-2">

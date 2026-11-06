@@ -36,6 +36,12 @@ const field =
   (base, next) =>
     saveSetupField(table, key, name, base, next) as Promise<SaveOutcome<T>>;
 
+/** Opening a panel or dialog lands focus on it, not on the first (i) inside (Escape would then close only that tip). */
+const focusPanel = (e: Event) => {
+  e.preventDefault();
+  (e.currentTarget as HTMLElement).focus();
+};
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** The words of the page header's meta line ("27 people · 10 roles"). */
@@ -48,7 +54,7 @@ const HELP = {
   department: { label: "Department", description: "The service line their role works in. It is read from the role, so change the role to change it.", example: "SEO Director: Organic (SEO)." },
   hours: { label: "Hours a week", description: "The hours they can work in a week. Blank: working time times the workspace week.", example: "38 for a full week." },
   teamTime: { label: "Team time", description: "The share of their hours kept for leading, mentoring and reviews. The rest is available for client work.", example: "Laura 35%: about 13 of her 38 hours go on leading the team." },
-  salary: { label: "Salary a month", description: "What they cost each month. DLER (direct labour expense ratio) counts salaries, directors and managers included; contractors are not counted.", example: "SEO Manager: 7,500 a month." },
+  salary: { label: "Salary a month", description: "What they cost each month. DLER (direct labour expense ratio) counts salaries; directors, managers and contractors are not counted.", example: "SEO Manager: 7,500 a month." },
   label: { label: "Label", description: "Contractor or offshore. Contractors aren't in DLER; offshore people are labelled in reports.", example: "Tonie: offshore." },
   servesTiers: { label: "Serves tiers", description: "The tiers this person can look after. New clients are placed with someone who serves the tier. Nothing ticked: every tier.", example: "Karl serves T1, T2 and T3; Khaselyn only T3." },
   named: { label: "Named clients", description: "Named clients this person looks after, from the Tiers & clients page. Read only.", example: "Laura: Harbourline Group, Meridian Finance." },
@@ -83,7 +89,7 @@ export function PeopleHeaderActions({ setup, data }: { setup: CapacitySetup; dat
             + Add person
           </Button>
         </DialogTrigger>
-        <DialogContent>
+        <DialogContent onOpenAutoFocus={focusPanel}>
           <DialogHeader>
             <DialogTitle>Add a person</DialogTitle>
             <DialogDescription>Their name and, if you know it, their role. Everything else is in their panel.</DialogDescription>
@@ -97,7 +103,7 @@ export function PeopleHeaderActions({ setup, data }: { setup: CapacitySetup; dat
             + Add role
           </Button>
         </DialogTrigger>
-        <DialogContent>
+        <DialogContent onOpenAutoFocus={focusPanel}>
           <DialogHeader>
             <DialogTitle>Add a role</DialogTitle>
             <DialogDescription>A kind of work. Its kind, department and line are in its panel.</DialogDescription>
@@ -126,10 +132,10 @@ const HEAD = "px-3 pb-1";
 const LINE = "rounded-lg bg-muted/40 px-3 py-2.5 text-left transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none cursor-pointer";
 // A phone: name, role, chevron. A tablet drops the department and the label; a desktop shows every column. `minmax(0, ...)` lets text shrink.
 const PEOPLE_COLS = {
-  pay: "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1rem] sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_4rem_4rem_5.5rem_1rem] xl:grid-cols-[minmax(0,2.2fr)_minmax(0,1.6fr)_minmax(0,1.3fr)_4.5rem_4.5rem_6rem_6rem_1rem]",
-  noPay: "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1rem] sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_4rem_4rem_1rem] xl:grid-cols-[minmax(0,2.2fr)_minmax(0,1.6fr)_minmax(0,1.3fr)_4.5rem_4.5rem_6rem_1rem]",
+  pay: "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1rem] sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_5rem_5rem_6rem_1rem] xl:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.2fr)_7rem_5.5rem_7.5rem_6rem_1rem]",
+  noPay: "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1rem] sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_5rem_5rem_1rem] xl:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.2fr)_7rem_5.5rem_6rem_1rem]",
 };
-const ROLE_COLS = "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1rem] sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.3fr)_4.5rem_4.5rem_1rem]";
+const ROLE_COLS = "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1rem] sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.3fr)_6.5rem_5rem_1rem]";
 
 const onKey = (open: () => void) => (e: KeyboardEvent) => {
   if (e.key === "Enter" || e.key === " ") {
@@ -195,7 +201,7 @@ function PeopleList({ setup, data }: { setup: CapacitySetup; data: WorkspaceSett
       id="people"
       title="People"
       phoneWrap={false}
-      description={showSalary ? "Salary counts toward DLER, directors and managers included. Contractors don't. Click a person for everything about them." : "Your record. Agency admins see the whole team."}
+      description={showSalary ? "Salary counts toward DLER. Directors, managers and contractors don't count. Click a person for everything about them." : "Your record. Agency admins see the whole team."}
     >
       {all.length > 0 && (
         <Toolbar label="Filter the people">
@@ -295,7 +301,7 @@ function PeopleList({ setup, data }: { setup: CapacitySetup; data: WorkspaceSett
 function Panel({ open, onClose, testId, children }: { open: boolean; onClose: () => void; testId: string; children: ReactNode }) {
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
-      <SheetContent side="right" className="gap-0 overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl" aria-describedby={undefined} data-panel={testId}>
+      <SheetContent side="right" className="gap-0 overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl" aria-describedby={undefined} data-panel={testId} onOpenAutoFocus={focusPanel}>
         <PhoneReadOnly notice={false}>{children}</PhoneReadOnly>
       </SheetContent>
     </Sheet>
