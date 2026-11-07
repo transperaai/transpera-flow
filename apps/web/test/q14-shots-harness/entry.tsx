@@ -4,7 +4,8 @@
 import { createRoot } from "react-dom/client";
 import { capacitySetupFromModel } from "@transpera-flow/db";
 import { capacityModel } from "@transpera-flow/engine";
-import { PeopleAndRoles, PeopleHeaderActions, peopleMeta } from "@/components/setup/people-roles";
+import { PeopleAndRoles, PeopleHeaderActions } from "@/components/setup/people-roles";
+import { peopleMeta } from "@/lib/setup/people-meta";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { SidebarProvider } from "@/components/ui/sidebar";

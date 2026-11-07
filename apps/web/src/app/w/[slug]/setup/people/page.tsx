@@ -2,7 +2,8 @@ import { notFound } from "next/navigation";
 import { loadCapacitySetup } from "@transpera-flow/db";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
-import { PeopleAndRoles, PeopleHeaderActions, peopleMeta } from "@/components/setup/people-roles";
+import { PeopleAndRoles, PeopleHeaderActions } from "@/components/setup/people-roles";
+import { peopleMeta } from "@/lib/setup/people-meta";
 import { loadWorkspaceSettings } from "@/lib/data";
 import { getDb } from "@/lib/auth/session";
 

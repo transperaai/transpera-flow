@@ -42,10 +42,8 @@ const focusPanel = (e: Event) => {
   (e.currentTarget as HTMLElement).focus();
 };
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** The words of the page header's meta line ("27 people · 10 roles"). */
-export const peopleMeta = (setup: CapacitySetup) => [plural(setup.people.length, "person", "people"), plural(setup.roles.length, "role")];
 
 // What each column / field is, in plain words (the (i) beside a column heading and beside the same field in the panel).
 const HELP = {
