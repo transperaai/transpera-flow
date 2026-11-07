@@ -77,6 +77,8 @@ export interface ViewHint {
   sizes?: ReadonlyMap<string, Size>;
   /** Places the map draws something that is not a step of the draft (the ghosts of steps the draft removed, drawn where they are live), kept clear too. */
   occupied?: readonly { x: number; y: number; width: number; height: number }[];
+  /** Pan the map, keeping its zoom, so this point (map coordinates) is at the centre: for something new placed off screen. */
+  panTo?: (x: number, y: number) => void;
 }
 export type ViewRef = { current: (() => ViewHint | null) | null };
 

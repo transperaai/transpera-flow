@@ -182,6 +182,43 @@ describe("inserting a block after the selection", () => {
     expect(note).toBeUndefined();
   });
 
+  it("lands in view, at the free spot nearest the view's centre, with nothing selected", () => {
+    const b = flat();
+    // A view well away from the steps (they run along the top), so "the end of the top level" would be off screen.
+    const visible = { left: -2000, top: 1200, right: -800, bottom: 1900 };
+    const view = { x: (visible.left + visible.right) / 2, y: (visible.top + visible.bottom) / 2, visible };
+    const { edit, id, reveal } = insertBlock(b, null, sales(), "Sales conversation", null, view)!;
+    const after = applyEdit(b, edit);
+    const group = stepOf(after, id);
+    const size = openGroupSize(after.steps, id, "all");
+    const [x, y] = [Number(group.x), Number(group.y)];
+    expect(x >= visible.left && y >= visible.top && x + size.width <= visible.right && y + size.height <= visible.bottom).toBe(true);
+    // Centred on the view, as nothing is in the way there.
+    expect(Math.abs(x + size.width / 2 - view.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(y + size.height / 2 - view.y)).toBeLessThanOrEqual(1);
+    expect(reveal).toBeUndefined();
+    // Without a view it still goes at the end of the top level, to the right of every step.
+    const blind = insertBlock(b, null, sales(), "X")!;
+    const end = stepOf(applyEdit(b, blind.edit), blind.id);
+    expect(Number(end.x)).toBeGreaterThan(Math.max(...b.steps.filter((s) => !s.parent_step_id).map((s) => Number(s.x))));
+  });
+
+  it("keeps a block after the selected step, and asks the map to pan to it when that is off screen", () => {
+    const b = flat();
+    const plain = insertBlock(b, ids.audit, sales(), "Sales conversation")!;
+    const placed = stepOf(applyEdit(b, plain.edit), plain.id);
+    // A view far from the selected step: the block still goes after it, and the map is asked to pan there.
+    const away = { x: -5000, y: -5000, visible: { left: -5600, top: -5400, right: -4400, bottom: -4600 } };
+    const far = insertBlock(b, ids.audit, sales(), "Sales conversation", null, away)!;
+    const there = stepOf(applyEdit(b, far.edit), far.id);
+    expect([Number(there.x), Number(there.y)]).toEqual([Number(placed.x), Number(placed.y)]);
+    const size = openGroupSize(applyEdit(b, far.edit).steps, far.id, "all");
+    expect(far.reveal).toEqual({ x: Math.round(Number(there.x) + size.width / 2), y: Math.round(Number(there.y) + size.height / 2) });
+    // A view that already shows it: no pan.
+    const wide = { x: 0, y: 0, visible: { left: -10000, top: -10000, right: 10000, bottom: 10000 } };
+    expect(insertBlock(b, ids.audit, sales(), "Sales conversation", null, wide)!.reveal).toBeUndefined();
+  });
+
   it("joins a step with nothing after it, and leaves a step with branches or an end step to be connected by hand", () => {
     const b = flat();
     const leaf = b.steps.find((s) => s.kind !== "end" && s.kind !== "group" && !from(b, s.id).length);

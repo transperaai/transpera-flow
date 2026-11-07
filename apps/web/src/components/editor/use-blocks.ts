@@ -1,7 +1,7 @@
 "use client";
 
 // The Editor's side of the block library (issue #116): the blocks to list, saving a group (or the whole map, in block mode)
-// as a block, and putting a block into the map after the selection or in place of it.
+// as a block, and putting a block into the map after the selection (or where the person is looking) or in place of it.
 
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
 import type { BlockRow, ProcessBundle } from "@transpera-flow/db";
@@ -11,6 +11,7 @@ import { blockFromGroup, insertBlock, readBlock, replaceProblem, replaceWithBloc
 import { addDemoBlock, updateDemoBlock, useDemoBlocks } from "@/lib/blocks/demo";
 import type { BlockInput, SaveBlockResult } from "@/lib/blocks/save";
 import type { ProcessEditor } from "@/lib/editor/editor";
+import type { ViewRef } from "@/lib/editor/groups";
 
 export interface BlockTools {
   /** The library, as the Editor lists it. */
@@ -40,6 +41,7 @@ export function useBlockTools({
   selected,
   setSelection,
   processName,
+  viewRef,
 }: {
   mode: "live" | "demo";
   workspaceId: string;
@@ -50,6 +52,8 @@ export function useBlockTools({
   selected: Selection;
   setSelection: Dispatch<SetStateAction<Selection>>;
   processName: string;
+  /** What the map is showing: a block put in with nothing selected lands there, and one put in off screen is panned to. */
+  viewRef?: ViewRef;
 }): BlockTools {
   const demo = useDemoBlocks();
   const [added, setAdded] = useState<BlockRow[]>([]);
@@ -93,13 +97,17 @@ export function useBlockTools({
   const insert = (block: BlockRow) => {
     let id: string | null = null;
     let said: string | undefined;
+    let reveal: { x: number; y: number } | undefined;
+    const view = viewRef?.current?.() ?? null;
     const ran = editor.run((b) => {
-      const made = insertBlock(b, only, readBlock(block.steps), block.name, block.id);
+      const made = insertBlock(b, only, readBlock(block.steps), block.name, block.id, view);
       id = made?.id ?? null;
       said = made?.note;
+      reveal = made?.reveal;
       return made?.edit ?? null;
     });
     if (!ran || !id) return setNote({ kind: "place", tone: "problem", text: `${block.name} has no steps to insert.` });
+    if (reveal) view?.panTo?.(reveal.x, reveal.y);
     setNote({ kind: "place", tone: said ? "problem" : "ok", text: said ?? `Inserted ${block.name}.` });
     setSelection({ steps: [id], edges: [] });
   };

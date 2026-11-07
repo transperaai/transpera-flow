@@ -1132,7 +1132,8 @@ function Canvas({
           const size = measured.get(ghostId(c.live!.id)) ?? (c.live!.kind === "start" || c.live!.kind === "end" ? TERMINAL_SIZE : CARD_SIZE);
           return { x: Number(c.live!.x), y: Number(c.live!.y), width: size.width, height: size.height };
         });
-      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, visible: { left: from.x, top: from.y, right: to.x, bottom: to.y }, sizes: measured, occupied };
+      const panTo = (x: number, y: number) => void flow.setCenter(x, y, { zoom: flow.getViewport().zoom, duration: 200 });
+      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, visible: { left: from.x, top: from.y, right: to.x, bottom: to.y }, sizes: measured, occupied, panTo };
     };
     return () => {
       viewRef.current = null;

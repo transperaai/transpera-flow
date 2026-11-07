@@ -8,7 +8,7 @@
 import { ancestorsOf, isGroup, STEP_PURPOSE_KEY, type BlockBundle, type BlockEdge, type BlockStep, type EdgeRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
 import { GROUP_PADDING, openGroupSize } from "@/lib/map/groups";
 import { deleteSteps, newId, newStepRow } from "@/lib/editor/commands";
-import { edgeRow, groupRow } from "@/lib/editor/groups";
+import { edgeRow, groupRow, nearestFreeSpot, type ViewHint } from "@/lib/editor/groups";
 import { applyEdit, type Edit, type Op, type RowChange } from "@/lib/editor/ops";
 
 /** The key in a group's `provenance` that names the library block it was made from (capacity P8). */
@@ -263,10 +263,21 @@ const stepOf = (bundle: ProcessBundle, id: string | null) => (id ? bundle.steps.
  * Put a block into the process after the selected step or group, in the same group as it (so inside a nested group, the
  * block lands inside it). It arrives as a new group named after the block, joined in like `addAfter` does: a selected step
  * with nothing after it leads to the block, one with a single next step now leads to the block, which leads on to that
- * step. A step with branches, or an end step, gets the block placed beside it, unconnected. With nothing selected it goes
- * at the end of the top level. The new steps are new rows, so they show as added.
+ * step. A step with branches, or an end step, gets the block placed beside it, unconnected. The new steps are new rows, so
+ * they show as added.
+ *
+ * `view` is what the person is looking at, as for `addAfter`. With nothing selected the block's box goes at the free spot
+ * nearest the view's centre (else, with no view, at the end of the top level). With a step selected it still goes after
+ * that step; if that is off screen, `reveal` is the centre of the new box, in map coordinates, for the map to pan to.
  */
-export function insertBlock(bundle: ProcessBundle, selectedId: string | null, block: BlockBundle, name: string, blockId: string | null = null): { edit: Edit; id: string; note?: string } | null {
+export function insertBlock(
+  bundle: ProcessBundle,
+  selectedId: string | null,
+  block: BlockBundle,
+  name: string,
+  blockId: string | null = null,
+  view?: ViewHint | null,
+): { edit: Edit; id: string; note?: string; reveal?: { x: number; y: number } } | null {
   if (blockProblem(block)) return null;
   const sel = stepOf(bundle, selectedId);
   const parent = sel ? (sel.parent_step_id ?? null) : null;
@@ -277,8 +288,10 @@ export function insertBlock(bundle: ProcessBundle, selectedId: string | null, bl
   const y0 = sel ? Number(sel.y) + (branches ? 120 : 0) : siblings.length ? Number(siblings[siblings.length - 1]!.y) : 0;
   // Build it once to measure the box it needs, then put the group where that box fits.
   const probe = materialize(bundle, block, name, parent, 0, 0, blockId);
-  const at = freeSpotFor(bundle, parent, x0, y0, openGroupSize([probe.group, ...probe.steps], probe.group.id, "all"));
+  const size = openGroupSize([probe.group, ...probe.steps], probe.group.id, "all");
+  const at = !sel && view ? nearestFreeSpot(bundle, view, size) : freeSpotFor(bundle, parent, x0, y0, size);
   const made = { ...probe, group: { ...probe.group, x: at.x, y: at.y } };
+  const reveal = sel && view ? offScreen(bundle, parent, at, size, view) : null;
 
   const ops: Op[] = [];
   const rows = [made.group, ...made.steps];
@@ -293,7 +306,25 @@ export function insertBlock(bundle: ProcessBundle, selectedId: string | null, bl
     ops.push({ kind: "insert", steps: rows, edges: made.edges });
   }
   const note = sel && branches ? `${sel.name} has branches: connect the block yourself.` : sel?.kind === "end" ? `${sel.name} is an end step, so nothing leads on from it: connect the block yourself.` : undefined;
-  return { edit: { label: `Inserted ${made.group.name}`, ops }, id: made.group.id, ...(note ? { note } : {}) };
+  return { edit: { label: `Inserted ${made.group.name}`, ops }, id: made.group.id, ...(note ? { note } : {}), ...(reveal ? { reveal } : {}) };
+}
+
+/**
+ * The centre of a box at `at` (relative to the group `parent`, as a step's place is) in map coordinates, if any of it is
+ * outside what the view shows; else null.
+ */
+function offScreen(bundle: ProcessBundle, parent: string | null, at: { x: number; y: number }, size: { width: number; height: number }, view: ViewHint): { x: number; y: number } | null {
+  const v = view.visible;
+  if (!v) return null;
+  // A step inside a group sits relative to the group's corner, and that group relative to its own.
+  let x = at.x;
+  let y = at.y;
+  for (let g = stepOf(bundle, parent); g; g = stepOf(bundle, g.parent_step_id ?? null)) {
+    x += Number(g.x);
+    y += Number(g.y);
+  }
+  const inside = x >= v.left && y >= v.top && x + size.width <= v.right && y + size.height <= v.bottom;
+  return inside ? null : { x: Math.round(x + size.width / 2), y: Math.round(y + size.height / 2) };
 }
 
 /** Why the selection can't be replaced by a block, or null. */
