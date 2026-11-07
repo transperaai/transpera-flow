@@ -120,10 +120,9 @@ P1 alone; then P4, P6, P7, P8 in parallel.
   brief in `docs/plans/capacity/`. The preview alias `transpera-flow-next.vercel.app` follows this branch.
 - **Not yet on the handover branch:** the QA work since [transperaai/transpera-flow#255](https://github.com/transperaai/transpera-flow/pull/255).
   One PR brings it across when Austin wants.
-- **Preview database** (Neon `main`): every migration up to `20270132000000_adopt_solution.sql`. Example agency 2
+- **Preview database** (Neon `main`): every migration up to `20270134000000_map_drives_run.sql`. Example agency 2
   (`example-agency-2`) holds the made-up agency, 8 issues, 4 solutions and 4 blocks, for QA.
-- **Decisions:** D1–D50 are in `docs/plans/client-requirements.md`. D51 (the company map drives the run) is decided, and
-  phase 2 writes it.
+- **Decisions:** D1–D51 are in `docs/plans/client-requirements.md` (D51: the company map drives the run; D50 amended).
 - **`main` and production:** untouched, on Supabase (see the 31 Oct section for why).
 - **Last full check** on the integration branch: lint, typecheck, db, web and the build all green. The engine passes on
   a quiet machine. Timing tests flake under load; re-run them alone.
@@ -160,13 +159,15 @@ P1 alone; then P4, P6, P7, P8 in parallel.
   existing ones without telling the other chat.
 
 **Chat A: open items.**
-1. **Q17 phase 2: the company map drives the run.**
-   - Design: `docs/adr/0023-company-map-drives-the-run.md`. The orchestrator approved it: build it as written.
-   - The `map_drives_run` flag (migration `20270134000000`) with its publish trigger.
-   - The small engine change for "Win new clients" through a handed-to process, with no bump if no golden moves.
-   - A fork follows its first line, with a visible note on the map.
-   - Write D51 and amend D50 (no one-process scope).
-   - Brief: `docs/plans/capacity/q17-company-map-run-brief.md`.
+1. **Q17 phase 2: done (7 Nov), [transperaai/transpera-flow#283](https://github.com/transperaai/transpera-flow/pull/283).**
+   - The company map drives the run (ADR 0023, accepted).
+   - **Migration on the preview.** `20270134000000` is applied there. Every preview company map is system-made, so all
+     have `map_drives_run = true`: their map run is today's run.
+   - **Goldens.** None moved, and `ENGINE_VERSION` is unchanged.
+   - **Follow-ups:**
+     - Tick the second Neon check in `docs/supabase-notes.md`: a person's publish flips the flag. Do it on a QA
+       workspace when one is next published.
+     - A browser check of the Sandbox's Company map notes, which Chat B can fold into Sandbox QA.
 2. **Get Joe's deployment ready:** his own Neon database and Vercel project (`docs/new-client.md`), `capacity:starter`,
    and his Owner sign-in. Confirm with Austin before creating anything.
 3. **Production cutover** to Neon (runbook `packages/db/scripts/copy-from-supabase/README.md`), with Austin present. Then
