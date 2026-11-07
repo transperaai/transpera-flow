@@ -79,7 +79,10 @@ export function EditorBar({
   onTour,
   historyHref,
   history,
+  problems = null,
 }: {
+  /** What stops the process simulating, as one line ("2 things to fix before this can simulate") that jumps to the first (editor brainstorm, item 4). */
+  problems?: { line: string; onJump: () => void; canJump: boolean } | null;
   mode: EditorMode;
   /** What is being edited: the process's name. */
   subject: string;
@@ -304,6 +307,21 @@ export function EditorBar({
       </div>
       <p className="border-b border-line bg-edit-soft px-4 py-1.5 text-[12.5px]" role="note">
         {mode === "solution" && issue ? SOLUTION_FOR_ISSUE.hint : company ? COMPANY_HINT : mode === "block" && blockForm?.editing ? BLOCK_EDIT_HINT : info.hint}
+        {problems && (
+          <button
+            type="button"
+            data-problems-line
+            disabled={!problems.canJump}
+            onClick={problems.onJump}
+            title={problems.canJump ? "Show the first one" : undefined}
+            className="mr-2 inline-flex items-center gap-1.5 rounded-full border border-crit bg-panel px-2 py-0.5 font-semibold text-crit enabled:hover:bg-crit-soft"
+          >
+            <span aria-hidden className="inline-flex size-4 items-center justify-center rounded-full bg-crit text-[10px] font-bold text-crit-fg">
+              !
+            </span>
+            {problems.line}
+          </button>
+        )}
         {onTour && (
           <button type="button" className="ml-2 font-semibold underline" onClick={onTour} data-take-tour>
             Take the tour

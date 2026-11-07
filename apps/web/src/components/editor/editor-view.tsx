@@ -11,12 +11,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { retiredSteps, isUnpublished, type BlockBundle, type BlockRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
+import { retiredSteps, isUnpublished, workspacePurposes, type BlockBundle, type BlockRow, type ProcessBundle, type PurposeCategory, type ScenarioRow } from "@transpera-flow/db";
 import { createSolution } from "@/app/w/[slug]/solution-actions";
+import { addPurpose } from "@/app/w/[slug]/settings/actions";
 import { createLibraryProcess } from "@/app/w/[slug]/library-actions";
 import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
-import { blockFromSteps, bundleFromBlock } from "@/lib/blocks/blocks";
+import { blockFromSteps, bundleFromBlock, turnIntoSteps, turnIntoStepsProblem } from "@/lib/blocks/blocks";
+import { firstProblem, nodeProblems, problemsLine } from "@/lib/editor/problems";
+import type { PurposeTools } from "@/components/step-inspector";
 import { parseBlockInput } from "@/lib/blocks/save";
 import { newStepRow } from "@/lib/editor/commands";
 import type { ViewHint } from "@/lib/editor/groups";
@@ -68,9 +71,8 @@ export function EditorView({
   editorMode = "draft",
   scenarios = [],
   blocks = [],
-  sources = [],
   userId = null,
-  sourcesHref,
+  canAddPurpose,
   settingsHref,
   exitHref,
   horizonMonths = null,
@@ -102,14 +104,16 @@ export function EditorView({
   scenarios?: ScenarioRow[];
   /** The workspace's block library (the demo keeps its own). */
   blocks?: BlockRow[];
-  /** Kept for the sources a step cites (issue #21). */
-  sources?: SourceRow[];
   userId?: string | null;
+  /**
+   * "+ New purpose…" on a step's "What it achieves": the signed-in person can edit the workspace's purposes (the Editor only opens for those who
+   * can edit the workspace). Default: in a workspace yes, on the demo no (nothing there to save to).
+   */
+  canAddPurpose?: boolean;
   /** The database says this person has already dismissed the Editor's written tour. */
   tourDismissed?: boolean;
   /** The History page of what is being edited, for the bar's History button. */
   historyHref?: string;
-  sourcesHref?: string;
   /** The workspace's Settings page, which "Missing for simulation" links to for incoming volume. */
   settingsHref?: string;
   /** Where Exit editor goes. */
@@ -188,6 +192,83 @@ export function EditorView({
     const edges = new Set(working.edges.map((e) => e.id));
     return { steps: selection.steps.filter((id) => steps.has(id)), edges: selection.edges.filter((id) => edges.has(id)) };
   }, [working, selection]);
+
+  // A branch of a decision, picked on its line or its row or its "Go back to" node, is the decision in the panel with that branch's fields in
+  // focus (the keys and the map keep the line selected, so Delete takes the line, not the decision).
+  const { inspected, branchFocus } = useMemo(() => {
+    const only = !company && selected.steps.length === 0 && selected.edges.length === 1 ? working.edges.find((e) => e.id === selected.edges[0]) : undefined;
+    const from = only && working.steps.find((s) => s.id === only.from_step_id);
+    return from?.kind === "decision" ? { inspected: { steps: [from.id], edges: [] as string[] }, branchFocus: only!.id } : { inspected: selected, branchFocus: null };
+  }, [company, selected, working.edges, working.steps]);
+  // A branch just added is put in focus even though the line isn't selected.
+  const pickKey = `${selection.steps.join(",")}|${selection.edges.join(",")}`;
+  const [freshBranch, setFreshBranch] = useState<{ key: string; id: string } | null>(null);
+  const focusBranch = useCallback((edgeId: string | null) => setFreshBranch(edgeId ? { key: pickKey, id: edgeId } : null), [pickKey]);
+  const addedBranch = freshBranch && freshBranch.key === pickKey ? freshBranch.id : null;
+
+  // What stops the process simulating, by step and by line: the red marks on the map, and the bar's line that jumps to the first.
+  const problems = useMemo(() => (company ? null : nodeProblems(working)), [company, working]);
+  const problemLine = problems ? problemsLine(problems.total) : null;
+  const jumpToProblem = () => {
+    const first = problems ? firstProblem(working, problems) : null;
+    if (first?.kind === "step") setSelection({ steps: [first.id], edges: [] });
+    else if (first) setSelection({ steps: [], edges: [first.id] });
+  };
+
+  // Purposes: the workspace's list as loaded, plus any added here (a purpose is saved to the workspace at once, so the step can take it).
+  const [storedPurposes, setStoredPurposes] = useState<PurposeCategory[] | null>(() => working.workspace.settings.purposes ?? null);
+  const purposeTools = useMemo<PurposeTools>(() => {
+    const settings = { ...working.workspace.settings, purposes: storedPurposes };
+    const list = workspacePurposes(settings);
+    const workspaceId = working.workspace.id;
+    const may = canAddPurpose ?? mode === "live";
+    return {
+      list,
+      settings,
+      adder: may
+        ? {
+            count: list.length,
+            add: async (input) => {
+              const out = await addPurpose(workspaceId, storedPurposes, input);
+              if (out.status === "saved") {
+                setStoredPurposes(out.purposes);
+                return { ok: true, key: out.key };
+              }
+              if (out.status === "conflict") {
+                // Someone else changed the list meanwhile: show theirs, and the person can add theirs again.
+                setStoredPurposes(out.theirs);
+                return { ok: false, message: "Someone else just changed the purposes. The list is up to date now: add yours again." };
+              }
+              return { ok: false, message: out.status === "error" ? out.message : "That purpose couldn't be added." };
+            },
+          }
+        : null,
+    };
+  }, [working.workspace.settings, working.workspace.id, storedPurposes, canAddPurpose, mode]);
+
+  // "Turn into steps" on a step that holds a linked process: copy its steps in, cut the link.
+  const [turnNote, setTurnNote] = useState<string | null>(null);
+  const partOf = useCallback((holderId: string) => working.otherProcesses?.find((p) => p.process.id === working.steps.find((s) => s.id === holderId)?.child_process_id), [working.otherProcesses, working.steps]);
+  const turnInto = useMemo(
+    () => ({
+      problem: (holderId: string) => turnIntoStepsProblem(working, holderId, partOf(holderId)),
+      said: turnNote,
+      run: (holderId: string) => {
+        let made: string | null = null;
+        let said: string | null = null;
+        editor.run((b) => {
+          const part = b.otherProcesses?.find((p) => p.process.id === b.steps.find((s) => s.id === holderId)?.child_process_id);
+          const r = turnIntoSteps(b, holderId, part);
+          if (!r) said = turnIntoStepsProblem(b, holderId, part) ?? "That couldn't be turned into steps.";
+          made = r?.id ?? null;
+          return r?.edit ?? null;
+        });
+        setTurnNote(said);
+        setSelection(made ? { steps: [made], edges: [] } : { steps: [holderId], edges: [] });
+      },
+    }),
+    [working, partOf, turnNote, editor],
+  );
 
   const { commands, inspectFocus, clearInspectFocus } = useEditCommands({ editor, bundle: working, selected, setSelection });
   // Where the map is looking, for the palette (new steps appear there).
@@ -391,6 +472,7 @@ export function EditorView({
         unresolved={unresolved}
         breaks={breaks}
         company={company}
+        problems={problemLine ? { line: problemLine, onJump: jumpToProblem, canJump: !!problems && !!firstProblem(working, problems) } : null}
         onTour={tour.start}
         historyHref={historyHref}
         history={{ undoLabel: state.undoLabel, redoLabel: state.redoLabel, onUndo: () => editor.undo(), onRedo: () => editor.redo() }}
@@ -407,7 +489,7 @@ export function EditorView({
       />
       <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[264px_minmax(0,1fr)_320px] lg:grid-rows-[minmax(0,1fr)]">
         <aside aria-label="Palette" className="flex flex-col gap-4 border-b border-line bg-panel p-3.5 lg:overflow-y-auto lg:border-r lg:border-b-0">
-          <Palette bundle={working} editor={editor} selected={selected} setSelection={setSelection} blocks={blockTools} company={company} viewRef={viewRef} library={libraryProps} />
+          <Palette bundle={working} editor={editor} selected={inspected} setSelection={setSelection} blocks={blockTools} company={company} viewRef={viewRef} library={libraryProps} />
           {solutionMode && <IssueArea issue={issue} steps={[...live.steps, ...working.steps]} present={new Set(working.steps.map((s) => s.id))} onSelect={select} />}
           {mode === "demo" && (
             <p role="note" className="text-xs text-muted-foreground">
@@ -445,6 +527,9 @@ export function EditorView({
               onRestore={restore}
               savedLabel={scratch ? "Edited" : hasDraft ? "Saved to draft" : "Saved"}
               hideAdd
+              problems={problems}
+              branchNodes={!company}
+              onTurnIntoSteps={turnInto.run}
               viewRef={viewRef}
               // Nothing to play until Simulate has run.
               showPlayback={!company && !stale && !!pair?.draft.result}
@@ -455,13 +540,15 @@ export function EditorView({
           <Inspector
             bundle={working}
             editor={editor}
-            selected={selected}
+            selected={inspected}
             setSelection={setSelection}
             inspectFocus={inspectFocus}
             onFocused={clearInspectFocus}
-            sources={sources}
             stamp={stamp}
-            sourcesHref={sourcesHref}
+            purposes={purposeTools}
+            branchFocus={branchFocus ?? addedBranch}
+            onFocusBranch={focusBranch}
+            turnInto={turnInto}
             blocks={blockTools}
             company={company}
             tierSetup={tierSetup}

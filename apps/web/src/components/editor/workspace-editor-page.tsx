@@ -85,11 +85,9 @@ export async function WorkspaceEditorPage({
       issue={issueRow && issueAboutProcess(issueRow, live.process.id) ? solutionIssueOf(issueRow, live.process.id, live.steps) : null}
       scenarios={scenarios}
       blocks={blocks}
-      sources={sources}
       userId={viewer?.userId ?? null}
       tourDismissed={tourDismissed}
       historyHref={`/w/${slug}/p/${processId}/history`}
-      sourcesHref={`/w/${slug}/sources`}
       settingsHref={`/w/${slug}/settings`}
       exitHref={exit}
       solutionSeed={fromSolution ? { bundle: bundleFromSolution(live, fromSolution), name: fromSolution.name } : undefined}

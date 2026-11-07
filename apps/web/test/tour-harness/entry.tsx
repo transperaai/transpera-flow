@@ -5,7 +5,7 @@
 import { createRoot } from "react-dom/client";
 import { defaultCompanyPart, northbeamBundle, partOf, type ProcessBundle, type ProcessPart } from "@transpera-flow/db";
 import { EditorView } from "@/components/editor/editor-view";
-import { demoBundle, demoSources } from "@/lib/sources/demo";
+import { demoBundle } from "@/lib/sources/demo";
 
 export interface TourHarnessOptions {
   /** The company map (B11) instead of a process. */
@@ -43,7 +43,6 @@ window.mountEditor = (options) => {
       draft={null}
       mode="demo"
       editorMode={options.editorMode ?? "draft"}
-      sources={demoSources()}
       userId={options.userId ?? null}
       tourDismissed={options.dismissed ?? false}
       historyHref="/history"

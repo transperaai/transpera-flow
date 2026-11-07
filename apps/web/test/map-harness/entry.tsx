@@ -220,7 +220,6 @@ function Harness({ options }: { options: HarnessOptions }) {
             setSelection={setSelection}
             inspectFocus={null}
             onFocused={() => undefined}
-            sources={[]}
             stamp={() => ({ at: "2026-10-05T00:00:00Z", by: null }) as never}
             draft={null}
             blocks={NO_BLOCKS}
