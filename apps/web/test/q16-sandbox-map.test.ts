@@ -46,6 +46,7 @@ beforeAll(async () => {
   tdb = await createTestDb({ seed: false });
   const admin = await createUser(tdb, "admin@q16.example.com", { agency_admin: true });
   const ws = (await tdb.client.query("insert into workspaces (name, slug) values ('Example agency', 'q16') returning id")).rows[0].id as string;
+  await tdb.client.query("update workspaces set settings = coalesce(settings, '{}'::jsonb) || '{\"currency\":\"GBP\"}'::jsonb where id = $1", [ws]);
   await tdb.client.query("begin");
   await loadCapacityExample(tdb.client, ws, "2026-11-02");
   const added = await addExampleIssues(tdb.client, ws);
@@ -85,7 +86,11 @@ async function mount(o: { width?: number; scheme?: "light" | "dark"; solution?: 
   await page.addScriptTag({ content: script });
   await page.evaluate(([d, opt]) => window.mountQ16(d as Q16Data, opt as { solution?: string }), [data, { solution: o.solution }] as const);
   await page.waitForSelector("[data-company-map] .react-flow__node-group", { timeout: 120_000 });
-  await page.waitForSelector("[data-verdict-line]", { timeout: 120_000 });
+  await page.waitForSelector("[data-verdict-line]", { timeout: 60_000 }).catch(async (e: Error) => {
+    // Say what the page shows instead of a bare timeout.
+    const seen = await page.evaluate(() => [document.querySelector("[data-model-error]")?.textContent, document.querySelector("[data-run-error]")?.textContent, document.querySelector("[data-run-status]")?.textContent].join(" | "), []).catch(() => "");
+    throw new Error(`${e.message}\n${seen}\n${errors.join("\n")}`);
+  });
   // Every card measured and the map framed.
   await page.waitForTimeout(700);
   return { page, errors };
@@ -110,7 +115,7 @@ describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
     const { page, errors } = await mount();
     expect(await page.locator("[data-play-map] [data-lane]").count()).toBeGreaterThan(1);
     expect(await page.locator("[data-play-map] [data-process-tag]").count()).toBeGreaterThan(1);
-    expect(await page.locator("[data-play-map] h2").first().innerText()).toBe("Company map");
+    expect(await page.locator("[data-play-map] [role=heading]").first().innerText()).toBe("Company map");
     expect(await page.locator("[data-version-summary]").innerText()).toBe("All processes on today's map. Click a process to load another version.");
     expect(await page.locator("[data-play-processes], [data-step-row], [data-block], [data-version]").count()).toBe(0);
     const body = await page.locator("body").innerText();
@@ -201,7 +206,10 @@ describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
       await page.locator(`[data-version-option="${solution.id}"]`).click();
       await page.keyboard.press("Escape");
       await settled(page);
-      await page.evaluate(() => document.fonts.ready);
+      await page.waitForSelector("[data-verdict-line]", { timeout: 120_000 });
+      await page.evaluate(() => (window.scrollTo(0, 0), document.querySelector("[data-play-levers-column]")?.scrollTo(0, 0), document.fonts.ready));
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+      await page.waitForTimeout(500);
       await page.screenshot({ path: `${shots}/sandbox-swapped-${scheme}-${width}.png`, fullPage: true });
       await page.close();
     }

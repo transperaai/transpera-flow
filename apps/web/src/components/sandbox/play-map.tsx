@@ -32,6 +32,16 @@ export function versionBadges(play: PlayState, processes: readonly PlayProcess[]
   return out;
 }
 
+type Rect = { left: number; top: number; width: number; height: number };
+
+/** Where a card of the map is on screen (the map itself when the card isn't drawn). */
+function cardRect(cardId: string | null): Rect {
+  const host = document.querySelector<HTMLElement>("[data-company-map]");
+  const el = (cardId ? host?.querySelector<HTMLElement>(`[data-id="${CSS.escape(cardId)}"]`) : null) ?? host;
+  const r = el?.getBoundingClientRect();
+  return r ? { left: r.left, top: r.top, width: r.width, height: r.height } : { left: 0, top: 0, width: 0, height: 0 };
+}
+
 export function PlayMapCard({
   play,
   setPlay,
@@ -50,26 +60,38 @@ export function PlayMapCard({
   header?: ReactNode;
 }) {
   const badges = versionBadges(play, processes);
-  const [open, setOpen] = useState<{ processId: string; rect: { left: number; top: number; width: number; height: number } } | null>(null);
+  const [open, setOpen] = useState<{ processId: string; rect: Rect } | null>(null);
 
-  // The popover sits beside a card that moves with the page: close it when the page scrolls or resizes.
+  // Where the last press on the map was: the popover opens at that point (the card may be partly out of the map's frame). From the keyboard there is
+  // no press, so it opens beside the card.
+  const [pressed] = useState<{ at: { x: number; y: number } | null }>(() => ({ at: null }));
+  useEffect(() => {
+    let forget: ReturnType<typeof setTimeout> | undefined;
+    const note = (e: PointerEvent) => {
+      pressed.at = { x: e.clientX, y: e.clientY };
+      clearTimeout(forget);
+      forget = setTimeout(() => (pressed.at = null), 1500);
+    };
+    window.addEventListener("pointerdown", note, true);
+    return () => {
+      clearTimeout(forget);
+      window.removeEventListener("pointerdown", note, true);
+    };
+  }, [pressed]);
+
+  // The popover is placed in the window, so it goes when the window is resized.
   useEffect(() => {
     if (!open) return;
     const close = () => setOpen(null);
-    window.addEventListener("scroll", close, { passive: true });
     window.addEventListener("resize", close);
-    return () => {
-      window.removeEventListener("scroll", close);
-      window.removeEventListener("resize", close);
-    };
+    return () => window.removeEventListener("resize", close);
   }, [open]);
 
   const onProcess = (processId: string, cardId?: string) => {
     if (!processes.some((p) => p.id === processId)) return;
-    const host = document.querySelector<HTMLElement>("[data-company-map]");
-    const el = (cardId ? host?.querySelector<HTMLElement>(`[data-id="${CSS.escape(cardId)}"]`) : null) ?? host;
-    const r = el?.getBoundingClientRect();
-    setOpen({ processId, rect: r ? { left: r.left, top: r.top, width: r.width, height: r.height } : { left: 0, top: 0, width: 0, height: 0 } });
+    const p = pressed.at;
+    const rect = p ? { left: p.x, top: p.y, width: 1, height: 1 } : cardRect(cardId ?? null);
+    setOpen({ processId, rect });
   };
 
   const choose = (processId: string, solution: string | null) => {
@@ -131,7 +153,7 @@ export function PlayMapCard({
           <PopoverAnchor asChild>
             <span aria-hidden className="pointer-events-none fixed" style={{ left: open.rect.left, top: open.rect.top, width: open.rect.width, height: open.rect.height }} />
           </PopoverAnchor>
-          <PopoverContent side="right" align="start" collisionPadding={12} className="w-80 gap-3 p-3" data-version-popover={pick.id} aria-label={`Version of ${pick.name}`}>
+          <PopoverContent side="bottom" align="start" collisionPadding={12} className="w-[min(20rem,calc(100vw-1.5rem))] gap-3 p-3" data-version-popover={pick.id} aria-label={`Version of ${pick.name}`}>
             <div className="font-heading text-sm font-semibold">{pick.name}</div>
             <div role="radiogroup" aria-label="Version" className="flex flex-col gap-1">
               {[{ id: null as string | null, name: "Today", status: null as (typeof pick.solutions)[number]["status"] | null }, ...pick.solutions.map((s) => ({ id: s.id as string | null, name: s.name, status: s.status }))].map((o) => {
