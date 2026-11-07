@@ -1,7 +1,7 @@
 "use client";
 
-// The free-play Sandbox (capacity build P7, docs/plans/capacity/p7-sandbox-brief.md; decisions D28 to D38): the company's processes on top (the map, a map
-// version per process, a block per step), the levers on the left, the results on the right. Nothing is saved: the levers are this component's state and reset
+// The free-play Sandbox (capacity build P7, docs/plans/capacity/p7-sandbox-brief.md; decisions D28 to D38; Q16): the company map on top (click a process to
+// load another version of it), the levers on the left (automations among them), the results on the right. Nothing is saved: the levers are this component's state and reset
 // when you leave the page. Every lever change re-runs in the worker (debounced), against today's path, and the verdict and four charts follow.
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -13,7 +13,7 @@ import { usePlayRuns, type PlayRuns } from "@/lib/sandbox/use-play-runs";
 import type { DeleteChangeResult, SaveChangeResult } from "@/app/w/[slug]/capacity-change-actions";
 import { PlayChangeDialog } from "./play-change-dialog";
 import { PlayLevers } from "./play-levers";
-import { PlayProcesses } from "./play-processes";
+import { PlayMapCard, type PlayMapApi } from "./play-map";
 import { PlayResults } from "./play-results";
 import type { PlayMonths, PlayProcess } from "./play-types";
 
@@ -40,8 +40,8 @@ export interface PlayViewProps {
   /** Today's path, ready to run, and the way to prepare a run for the levers as they stand. */
   today: PreparedPlay;
   prepare: (play: PlayState, library: readonly CapacityChangeRow[]) => PreparedPlay;
-  /** The company map with its play controls, when the page has it. */
-  map?: (runs: PlayRuns) => ReactNode;
+  /** The company map, drawn by the page: the run playing on it, the new-version badges and a click on a process (which opens its version popover). */
+  map?: (runs: PlayRuns, api: PlayMapApi) => ReactNode;
   /** Agency admins and the Owner: add, edit and remove changes. */
   canEdit: boolean;
   saveChange?: (id: string | null, input: CapacityChangeInput) => Promise<SaveChangeResult>;
@@ -80,7 +80,7 @@ export function PlayView(props: PlayViewProps) {
         title="Sandbox"
         meta={
           <MetaLine>
-            <span data-play-note>Swap process blocks and pull the levers, then watch the next 12 months change. Nothing here is saved and nothing touches live data: the levers reset when you leave.</span>
+            <span data-play-note>Load another map for a process, switch automations on and pull the levers, then watch the next 12 months change. Nothing here is saved and nothing touches live data: the levers reset when you leave.</span>
           </MetaLine>
         }
         actionsLabel="Sandbox actions"
@@ -91,20 +91,23 @@ export function PlayView(props: PlayViewProps) {
           The company can&apos;t be simulated yet: {modelError}
         </div>
       )}
-      <PlayProcesses
-        play={play}
-        setPlay={setPlay}
-        processes={processes}
-        library={library}
-        months={months}
-        map={props.map?.(runs)}
-        canEdit={canEdit}
-        onAddChange={() => setDialog({ existing: null })}
-        onEditChange={(c) => setDialog({ existing: c })}
-      />
+      <PlayMapCard play={play} setPlay={setPlay} processes={processes} months={months} canvas={props.map ? (api) => props.map!(runs, api) : undefined} />
 
       <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
-        <PlayLevers play={play} setPlay={setPlay} setup={setup} months={months} expectedWinsPerMonth={expectedWins} />
+        <div className="min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto" data-play-levers-column>
+          <PlayLevers
+            play={play}
+            setPlay={setPlay}
+            setup={setup}
+            months={months}
+            expectedWinsPerMonth={expectedWins}
+            library={library}
+            processes={processes}
+            canEdit={canEdit}
+            onAddChange={() => setDialog({ existing: null })}
+            onEditChange={(c) => setDialog({ existing: c })}
+          />
+        </div>
         <PlayResults runs={runs} setup={setup} months={months} moved={moved} />
       </div>
 

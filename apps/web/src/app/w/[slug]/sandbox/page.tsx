@@ -5,6 +5,7 @@ import { SandboxView } from "@/components/sandbox/sandbox-view";
 import { SANDBOX_SCENARIOS_SHOWN } from "@/lib/sandbox/scenarios-shown";
 import { getDb } from "@/lib/auth/session";
 import { loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
+import { loadDepartmentLaneInput } from "@/lib/overview/lanes-data";
 import { createProcess } from "@/app/w/[slug]/process-actions";
 import { PageHeader } from "@/components/page-kit";
 import { NotPublished } from "@/components/shell/not-published";
@@ -15,7 +16,7 @@ import { isId } from "@/lib/sources/validate";
 import { loadLiveProcess, loadPublishState, loadWorkspaceIssues, loadWorkspaceSandboxScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /**
- * The Sandbox (capacity build P7, D38): free play. The company's processes on top (the map, a map version per process, a block per step), the levers on
+ * The Sandbox (capacity build P7, D38): free play. The company map on top (click a process to load another version of it), the levers on
  * the left and the results on the right: a verdict and four charts against today's path. Nothing is saved; the levers reset when you leave. Everyone who
  * can read the workspace plays; Agency admins and the Owner also add, edit and remove the list of changes. Stored scenarios stay in the database, and
  * the old scenario page is behind SANDBOX_SCENARIOS_SHOWN.
@@ -45,7 +46,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
   const ws = live.workspace.id;
   if (!SANDBOX_SCENARIOS_SHOWN) {
     const db = await getDb();
-    const [setup, library, parts, company, issues, canEdit, solutions] = await Promise.all([
+    const [setup, library, parts, company, issues, canEdit, solutions, laneInput] = await Promise.all([
       loadCapacitySetup(db, ws),
       loadCapacityChanges(db, ws),
       loadLiveParts(ws),
@@ -53,11 +54,12 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
       loadWorkspaceIssues(ws),
       canEditWorkspace(ws),
       loadWorkspaceSolutions(ws),
+      loadDepartmentLaneInput(ws),
     ]);
     if (!setup) notFound();
     return (
       <Page title="Sandbox" width="max-w-6xl" hideHeader>
-        <PlayPage live={live} parts={parts} company={company} setup={setup} library={library} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} initialSolutionId={typeof solutionParam === "string" && isId(solutionParam) ? solutionParam : null} />
+        <PlayPage live={live} parts={parts} company={company} setup={setup} library={library} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} laneInput={laneInput} initialSolutionId={typeof solutionParam === "string" && isId(solutionParam) ? solutionParam : null} />
       </Page>
     );
   }

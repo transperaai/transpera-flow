@@ -7,8 +7,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundleHarness } from "./build-harness";
 
 // The free-play Sandbox in a real browser, with its simulations in a real Web Worker (./play-harness/entry.tsx), on the engine fixture `capacityModel()` and
-// the Set up data that agrees with it (made-up data): the three parts (processes on top, levers left, results right), the verdict and four charts against
-// today's path (dashed), a lever that moves the verdict, a block swapped in, a price rise with "Clients react", Reset levers, the levers resetting when the
+// the Set up data that agrees with it (made-up data): the three parts (company map on top, levers left, results right), the verdict and four charts against
+// today's path (dashed), a lever that moves the verdict, an automation switched on, a map version picked from a process's popover (badge, chip, reset to
+// today), a price rise with "Clients react", Reset levers, the levers resetting when the
 // page is left (unmounted and opened again), no save, scenario or compare UI, the changes list (add, edit, remove) for an admin and not for a Viewer, pay
 // hidden, and a phone, where the page never scrolls sideways. With PLAY_SHOTS=<dir> it also saves the screenshots (light and dark, 1440 and 400 px).
 
@@ -75,28 +76,31 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
       const { page, errors } = await mount({}, width);
       await ready(page);
 
-      // 1. Company processes on top; 2. levers; 3. results.
-      expect(await page.locator("[data-play-processes]").count()).toBe(1);
+      // 1. Company map on top; 2. levers; 3. results.
+      expect(await page.locator("[data-play-map]").count()).toBe(1);
       expect(await page.locator("[data-play-levers]").count()).toBe(1);
       expect(await page.locator("[data-play-results]").count()).toBe(1);
       const top = await page.evaluate(() => {
-        const p = document.querySelector("[data-play-processes]")!.getBoundingClientRect().top;
+        const p = document.querySelector("[data-play-map]")!.getBoundingClientRect().top;
         const l = document.querySelector("[data-play-levers]")!.getBoundingClientRect().top;
         return p < l;
       });
       expect(top).toBe(true);
 
       // Every group of levers the brief lists, and Reset.
-      for (const g of ["market", "add", "lose", "price", "people"]) expect(await page.locator(`[data-lever-group="${g}"]`).count(), g).toBe(1);
-      expect(await text(page, "[data-play-levers]")).toMatch(/Win new clients[\s\S]*Lose clients[\s\S]*Prices[\s\S]*People/);
+      for (const g of ["market", "add", "lose", "price", "people", "automation"]) expect(await page.locator(`[data-lever-group="${g}"]`).count(), g).toBe(1);
+      expect(await text(page, "[data-play-levers]")).toMatch(/Win new clients[\s\S]*Lose clients[\s\S]*Prices[\s\S]*People[\s\S]*Automation and augmentation/);
       expect(await page.locator("[data-play-reset]").count()).toBe(1);
       expect(await page.locator('[data-lever="priceReaction"] option').allInnerTexts()).toEqual(["Barely", "Normally", "Strongly"]);
 
-      // Per process: a map version and, for the steps a change acts on, a block picker. "Today" is the first version.
-      expect(await page.locator("[data-process]").count()).toBeGreaterThanOrEqual(6);
-      expect(await page.locator("[data-version-row] select").first().locator("option").first().innerText()).toBe("Today");
-      expect(await page.locator("[data-block]").first().locator("option").first().innerText()).toBe("As today");
-      expect(await text(page, "[data-swapped-count]")).toBe("As today");
+      // The map is a card per process, with one line above it; the per-process cards, step pickers and "No solutions" lines are gone.
+      expect(await page.locator("[data-company-map] [data-id]").count()).toBeGreaterThanOrEqual(6);
+      expect(await text(page, "[data-version-summary]")).toBe("All processes on today's map. Click a process to load another version.");
+      for (const gone of [/No solutions for this process/, /No blocks yet/, /Company processes/]) expect(await page.locator("body").innerText(), String(gone)).not.toMatch(gone);
+      expect(await page.locator("[data-block], [data-step-row], [data-version]").count()).toBe(0);
+      // Automations are a lever group: a switch and a muted line naming the steps each acts on.
+      expect(await page.locator("[data-automation-switch]").count()).toBeGreaterThan(5);
+      expect(await text(page, "[data-automation-steps]")).toMatch(/^(Automation|Augmentation), acts on .+/);
 
       // The verdict: the prototype's sentences, then four charts with a dashed "Today's path".
       const first = await verdictFirst(page);
@@ -170,44 +174,68 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     await page.close();
   });
 
-  it("a block swapped into a step is counted, runs from its month, and 'As today' takes it out", async () => {
+  it("an automation switched on runs from its month, and switching it off puts today's path back", async () => {
     const { page, errors } = await mount();
     await ready(page);
-    const row = page.locator("[data-step-row]").first();
-    const step = (await row.getAttribute("data-step-row"))!;
-    const options = await page.locator(`[data-block="${step}"] option`).allInnerTexts();
-    expect(options[0]).toBe("As today");
-    expect(options.length).toBeGreaterThan(1);
-    await page.locator(`[data-block="${step}"]`).selectOption({ index: 1 });
-    expect(await row.getAttribute("data-swapped")).toBe("true");
-    expect(await text(page, "[data-swapped-count]")).toBe("1 block swapped");
-    await page.locator(`[data-block-month="${step}"]`).selectOption("3");
+    const row = page.locator("[data-automation]").first();
+    const id = (await row.getAttribute("data-automation"))!;
+    expect(await row.getAttribute("data-on")).toBe("false");
+    expect(await page.locator(`[data-lever="automation:${id}"]`).count()).toBe(0);
+    await page.locator(`[data-automation-switch="${id}"]`).click();
+    expect(await row.getAttribute("data-on")).toBe("true");
+    await page.locator(`[data-lever="automation:${id}"]`).selectOption("3");
     await settled(page);
     expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("true");
-    await page.locator(`[data-block="${step}"]`).selectOption("");
-    expect(await row.getAttribute("data-swapped")).toBeNull();
-    expect(await text(page, "[data-swapped-count]")).toBe("As today");
+    await page.locator(`[data-automation-switch="${id}"]`).click();
+    expect(await row.getAttribute("data-on")).toBe("false");
+    await settled(page);
     expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("false");
     expect(errors).toEqual([]);
     await page.close();
   });
 
-  it("a map version per process: today's map or a solution from a chosen month, with the issue it fixes", async () => {
+  it("clicking a process on the map picks its version: a badge, a chip and the run using it; Reset to today takes it back", async () => {
     const { page, errors } = await mount();
     await ready(page);
-    const select = page.locator("[data-version]").first();
-    const options = await select.locator("option").allInnerTexts();
-    expect(options[0]).toBe("Today");
-    expect(options[1]).toMatch(/^Faster .+ \(fixes: Reporting takes too long\)$/);
-    const id = (await select.getAttribute("data-version"))!;
+    const card = page.locator("[data-company-map] [data-id]").first();
+    const id = (await card.getAttribute("data-id"))!;
+    await card.click();
+    const popover = page.locator(`[data-version-popover="${id}"]`);
+    await popover.waitFor();
+    // "Today", then each map made for the process with its status pill; the month is off until a map is picked.
+    expect(await popover.locator("[data-version-option]").first().getAttribute("data-version-option")).toBe("today");
+    expect(await popover.locator(`[data-version-option="sol-${id}"]`).innerText()).toMatch(/^Faster .+\s+Testing$/);
+    expect(await popover.locator(`[data-version-option="sol-${id}"] [data-status]`).getAttribute("data-status")).toBe("testing");
     expect(await page.locator(`[data-version-month="${id}"]`).isDisabled()).toBe(true);
-    await select.selectOption({ index: 1 });
+    await popover.locator(`[data-version-option="sol-${id}"]`).click();
     expect(await page.locator(`[data-version-month="${id}"]`).isDisabled()).toBe(false);
     await page.locator(`[data-version-month="${id}"]`).selectOption("4");
-    expect(await text(page, "[data-swapped-count]")).toBe("1 map version");
+    await page.keyboard.press("Escape");
+
+    expect(await card.getAttribute("data-new-version")).toBe("true");
+    expect(await page.locator(`[data-id="${id}"] ~ [data-version-badge], [data-version-badge]`).first().innerText()).toMatch(/^New version: Faster /);
+    expect(await text(page, "[data-version-summary]")).toMatch(/^1 process on new versions\s+.+: Faster .+ from \w{3}\s*✕\s*Reset to today$/);
+    expect(await page.locator(`[data-version-chip="${id}"]`).count()).toBe(1);
     await settled(page);
+    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("true");
     expect(await page.locator("[data-run-error]").count()).toBe(0);
     expect(await page.locator("[data-verdict-line]").count()).toBeGreaterThanOrEqual(2);
+
+    // The chip's cross takes the one process back; Reset to today takes them all.
+    await page.locator(`[data-version-remove="${id}"]`).click();
+    expect(await page.locator("[data-version-chip]").count()).toBe(0);
+    expect(await card.getAttribute("data-new-version")).toBeNull();
+    const second = page.locator("[data-company-map] [data-id]").nth(1);
+    for (const c of [card, second]) {
+      await c.click();
+      await page.locator("[data-version-popover] [data-version-option]").nth(1).click();
+      await page.keyboard.press("Escape");
+    }
+    expect(await text(page, "[data-version-summary]")).toMatch(/^2 processes on new versions/);
+    await page.locator("[data-versions-reset]").click();
+    expect(await text(page, "[data-version-summary]")).toBe("All processes on today's map. Click a process to load another version.");
+    await settled(page);
+    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("false");
     expect(errors).toEqual([]);
     await page.close();
   });
@@ -254,6 +282,9 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     await ready(admin.page);
     const n = await admin.page.locator("[data-changes-list] li").count();
     expect(n).toBeGreaterThan(5);
+    // Add and Edit are behind the group's Manage button.
+    expect(await admin.page.locator("[data-change-add]").count()).toBe(0);
+    await admin.page.locator("[data-changes-manage]").click();
     await admin.page.locator("[data-change-add]").click();
     await admin.page.locator("[data-change-name]").fill("Auto QA");
     await admin.page.locator("[data-change-save]").click();
@@ -286,6 +317,7 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
 
     const viewer = await mount({ viewer: true });
     await ready(viewer.page);
+    expect(await viewer.page.locator("[data-changes-manage]").count()).toBe(0);
     expect(await viewer.page.locator("[data-change-add]").count()).toBe(0);
     expect(await viewer.page.getByRole("button", { name: /^Edit / }).count()).toBe(0);
     // A Viewer still plays: the levers work.
@@ -311,13 +343,18 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     mkdirSync(shots!, { recursive: true });
     for (const scheme of ["light", "dark"] as const) {
       for (const width of [1440, 400]) {
+        const shotPopover = true;
         const { page } = await mount({}, width, scheme);
         await ready(page);
         await page.locator('[data-lever="add:org"]').fill("2");
         await page.locator('[data-lever="add:perf"]').fill("1");
         await page.locator('[data-lever="addMonths"]').selectOption("6");
-        const step = (await page.locator("[data-step-row]").first().getAttribute("data-step-row"))!;
-        await page.locator(`[data-block="${step}"]`).selectOption({ index: 1 });
+        await page.locator("[data-automation-switch]").first().click();
+        const card = page.locator("[data-company-map] [data-id]").first();
+        await card.click();
+        await page.locator("[data-version-popover] [data-version-option]").nth(1).click();
+        if (shotPopover) await page.screenshot({ path: `${shots}/sandbox-popover-${scheme}-${width}.png`, fullPage: false });
+        await page.keyboard.press("Escape");
         await page.locator('[data-lever="price"] input').fill("8");
         await settled(page);
         await page.evaluate(() => document.fonts.ready);

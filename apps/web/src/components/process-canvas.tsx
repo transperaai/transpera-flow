@@ -187,6 +187,8 @@ type GroupNodeData = {
   lit: boolean | null;
   /** The process's category as a small pill (the company map; Q4), or null. */
   tag: string | null;
+  /** The Sandbox's "New version: <name>" on a process that runs a new map version: a pill under the card and an accent outline. */
+  badge: string | null;
 };
 
 type StepFlowNode = Node<StepNodeData, "step">;
@@ -465,6 +467,15 @@ function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
   );
 }
 
+/** "New version: <name>" on a process card in the Sandbox's company map. */
+function VersionBadge({ text, className }: { text: string; className?: string }) {
+  return (
+    <span data-version-badge title={text} className={`inline-block max-w-[11rem] truncate rounded-full border border-accent bg-panel px-2 text-[10.5px] leading-4 font-semibold text-accent ${className ?? ""}`}>
+      {text}
+    </span>
+  );
+}
+
 function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
   const { step, open, expandable, roll, warning, editable } = data;
   const { toggleGroup, handoffs } = useContext(CanvasContext);
@@ -486,8 +497,9 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
   if (open) {
     return (
       <div
-        className={`relative h-full w-full rounded-token border-2 border-dashed bg-panel-2/40 ${changeClass(data)} ${data.lit ? "!border-solid !border-accent" : ""} ${selected ? selectedRing : "border-line-2"}`}
+        className={`relative h-full w-full rounded-token border-2 border-dashed bg-panel-2/40 ${changeClass(data)} ${data.lit || data.badge ? "!border-solid !border-accent" : ""} ${selected ? selectedRing : "border-line-2"}`}
         data-group="open"
+        data-new-version={data.badge ? "true" : undefined}
         data-lit={data.lit ?? undefined}
       >
         <Handle type="target" position={Position.Left} className={handleClass(editable)} />
@@ -500,6 +512,7 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
               Group · {roll.steps} {roll.steps === 1 ? "step" : "steps"}
             </p>
             {data.tag && <TagPill tag={data.tag} className="mt-1" />}
+            {data.badge && <VersionBadge text={data.badge} className="mt-1" />}
           </div>
           {toggle}
         </div>
@@ -511,9 +524,10 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
   const colours = tileColours(data.rating, false);
   return (
     <div
-      className={`${tileClass} w-48 border-2 border-dashed px-2.5 pt-2 pb-2 ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
-      style={{ background: colours.background, borderColor: colours.borderColor }}
+      className={`${tileClass} w-48 border-2 border-dashed px-2.5 pt-2 pb-2 ${changeClass(data)} ${litClass(data.lit)} ${data.badge ? "outline-2 outline-offset-1 outline-accent" : ""} ${selected ? selectedRing : ""}`}
+      style={{ background: colours.background, borderColor: data.badge ? "var(--accent)" : colours.borderColor }}
       data-group="closed"
+      data-new-version={data.badge ? "true" : undefined}
       data-rating={data.rating ?? "none"}
       data-lit={data.lit ?? undefined}
     >
@@ -538,6 +552,7 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
         <span>{expandable ? "Group" : handoffs ? "Process" : "Child process"}</span>
         {toggle}
       </div>
+      {data.badge && <VersionBadge text={data.badge} className="absolute -bottom-3 left-2 shadow-token" />}
       {warning && <Warning text={warning} />}
       <Handle type="source" position={Position.Right} className={handleClass(editable)} />
     </div>
@@ -938,6 +953,8 @@ interface CanvasProps {
   departmentLanes?: { spec: BandSpec; always?: boolean };
   /** A small pill of text on a process card, by the card's step id: the process's category on the company map (Q4). */
   cardTags?: ReadonlyMap<string, string>;
+  /** The Sandbox (Q16): "New version: <name>" on the cards of processes that run another map version, by the card's step id; they get an accent outline. */
+  cardBadges?: ReadonlyMap<string, string>;
   /**
    * `fill`: as tall as the space it is given (the editor). `auto`: as tall as the map needs, from 16 to 40 rem,
    * so a small map doesn't sit in a tall empty panel. Default `auto` when read-only, `fill` when editable.
@@ -1018,6 +1035,7 @@ function Canvas({
   defaultLanes = false,
   departmentLanes,
   cardTags,
+  cardBadges,
   height: heightProp,
   onStepClick,
   stepDetail = true,
@@ -1203,6 +1221,7 @@ function Canvas({
             // An open group is a box around its steps: it can be outlined but never fades.
             lit: lit ? (open ? lit.has(step.id) || null : lit.has(step.id)) : null,
             tag: cardTags?.get(step.id) ?? null,
+            badge: cardBadges?.get(step.id) ?? null,
           };
           return {
             id: step.id,
@@ -1310,7 +1329,7 @@ function Canvas({
         };
       });
     return [...ghosts, ...drafted];
-  }, [bundle, result, selection.steps, dragging, measured, warnings, editable, order, layout, editing, editingId, nodeCache, playback.pulsing, diff, drawn, lit, openIssues, rating, handoffs, cardTags]);
+  }, [bundle, result, selection.steps, dragging, measured, warnings, editable, order, layout, editing, editingId, nodeCache, playback.pulsing, diff, drawn, lit, openIssues, rating, handoffs, cardTags, cardBadges]);
 
   const edges = useMemo(() => {
     const selected = new Set(selection.edges);
