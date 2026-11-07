@@ -35,7 +35,7 @@ describe("applyCapacityStarter", () => {
       const p = s.provenance as Record<string, { source: string }>;
       for (const col of ["price", "churn_monthly_base", "meetings", "adhoc_chance", "adhoc_requests", "price_rise_churn", "mix_share"]) expect(p[col]?.source, col).toBe("estimate");
     }
-    const roles = await q("select name, kind, line::float8 as line, rule_of_thumb, unit, (select name from departments d where d.id = r.department_id) as department, provenance from roles r where workspace_id = $1 order by name", [ws]);
+    const roles = await q("select name, kind, line::float8 as line, rule_of_thumb, unit, (select name from departments d where d.id = r.department_id) as department, provenance from roles r where workspace_id = $1 order by name collate \"C\"", [ws]);
     expect(roles).toHaveLength(9);
     expect(roles.map((r) => [r.name, r.department, r.kind, r.line, r.rule_of_thumb, r.unit])).toEqual(
       [...STARTER_ROLES].sort((a, b) => (a.name < b.name ? -1 : 1)).map((r) => [r.name, r.department, r.kind, r.line, r.rule, r.unit]),
