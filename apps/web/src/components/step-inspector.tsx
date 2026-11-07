@@ -284,7 +284,7 @@ export function StepInspector({
           {step.kind === "group"
             ? "A group is a box of steps. It has no hours, role or rework of its own: the steps inside it do the work, and the numbers are the same whether it is open or closed on the map."
             : placed && company
-              ? "This card is a process placed on the company map. Moving it, or joining it to another with a handoff line, changes only this map: the process itself is never edited here. Open its page to change it."
+              ? "This card is a process placed on the company map. The process itself is never edited here. Having it on the map is what the Sandbox simulates, and joining a pipeline to another with a handoff line sends each won client on into it. Open its page to change the process."
               : "This step is a link to another process, with its own page and versions. The numbers are those of its steps, and changes to it show here. The process itself is never edited here."}
         </p>
       ) : null}

@@ -88,7 +88,7 @@ export function Palette({
             The company map
             <Help
               label="The company map"
-              description="Each card is a process, placed here as a link: moving it or joining it to another changes only this map, never the process. Draw a line from one card's right edge to another's left edge to show a handoff, then click the line to give it a label."
+              description="Each card is a process, placed here as a link: the process itself is never edited here. Which processes are on the map is what the Sandbox simulates, and joining one pipeline to another sends each won client on into it. Draw a line from one card's right edge to another's left edge, then click the line to give it a label."
               example="Draw a line from “Sales” to “Onboarding” and label it “Signed contract”."
             />
           </h2>

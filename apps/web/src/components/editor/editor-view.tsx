@@ -131,7 +131,7 @@ export function EditorView({
   library?: { processes: LibraryProcess[]; templates: LibraryTemplate[]; /** Makes a process for the library; default in a workspace is the server action (a harness stands in). */ onCreate?: LibraryCreate };
 }) {
   const router = useRouter();
-  // The company map (B11): a picture of the business. Cards are moved and joined by handoff lines; nothing is simulated.
+  // The company map (B11): the processes of the business as cards, moved and joined by handoff lines. It is not run from here (the Sandbox runs the company from it), so no Simulate or problems.
   const company = initialLive.process.is_company === true;
   const stamp = useCallback(() => ({ at: new Date().toISOString(), by: userId }), [userId]);
   const blockMode = editorMode === "block";

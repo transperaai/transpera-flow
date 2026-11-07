@@ -82,7 +82,7 @@ const STEPS: Record<string, TourStep> = {
 
 const ORDER: Record<TourVariant, string[]> = {
   process: ["palette", "canvas", "problems", "inspector", "draft", "simulate", "publish", "history"],
-  // The company map is a picture of the business: nothing to simulate and no assumptions to check, so the tour is shorter.
+  // The company map is not run from the Editor (the Sandbox runs the company from it) and has no problems to fix, so the tour is shorter.
   company: ["palette", "canvas", "inspector", "draft", "publishCompany", "historyCompany"],
 };
 

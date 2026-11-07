@@ -19,7 +19,7 @@ export async function saveRun(input: unknown): Promise<SaveRunResult> {
 
   const process = await db.selectFrom("processes").select(["id", "workspace_id", "is_company"]).where("id", "=", run.processId).executeTakeFirst().catch(() => undefined);
   if (!process) return { status: "error", message: "That process isn't available." };
-  if (process.is_company) return { status: "error", message: "The company map can't be simulated: it is a picture of the business, not a process." };
+  if (process.is_company) return { status: "error", message: "The company map can't be run on its own here: try it in the Sandbox, where the whole company is simulated from it." };
   const workspace = await db
     .selectFrom("workspaces")
     .select(["id", "name", "slug", "settings", "provenance"])

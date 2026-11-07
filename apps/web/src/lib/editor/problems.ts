@@ -76,7 +76,7 @@ function pin(bundle: ProcessBundle, message: string, out: NodeProblems): boolean
 
 export function nodeProblems(bundle: ProcessBundle): NodeProblems {
   const out: NodeProblems = { steps: new Map(), edges: new Map(), process: [], total: 0 };
-  // The company map is a picture of the business: nothing on it is simulated, so nothing on it is a problem (as the editor treats it).
+  // The company map is not simulated from the editor (the Sandbox runs the company from it), and its lines have no shares to add up, so nothing on it is a problem (as the editor treats it).
   if (bundle.process.is_company) return out;
 
   for (const [id, message] of stepWarnings(bundle)) add(out.steps, id, message);

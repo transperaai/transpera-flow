@@ -812,7 +812,7 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
   );
 }
 
-/** A handoff line's label and removal, on the company map: no share or tag, the lines are pictures. */
+/** A handoff line's label and removal, on the company map: no share or tag: a hand-off takes every won client. */
 function HandoffEditor({ editor, edgeId, label }: { editor: ProcessEditor; edgeId: string; label: string | null }) {
   const [text, setText] = useState(label ?? "");
   // Take the stored value when it changes (a save, an undo), without remounting under the cursor.
