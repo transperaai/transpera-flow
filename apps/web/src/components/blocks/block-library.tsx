@@ -1,15 +1,16 @@
 "use client";
 
 // The Block library page (issue #116, as a list in Q15): one row for each saved block, like the Processes page. A row opens in place
-// to the block's map (read-only) and its steps with their split bars; "Edit" opens the Editor on the block, and the menu renames,
+// to the block's map (read-only, the same canvas as an opened row on Processes); "Edit" opens the Editor on the block, and the menu renames,
 // copies or deletes it. "+ New block" opens the Editor in block mode on an empty map. On the demo the blocks live in this tab
 // (lib/blocks/demo.ts), so a block saved from the Editor shows here at once.
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useMemo, useState } from "react";
 import { ChevronRight, Copy, Layers, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import { isGroup, type BlockRow } from "@transpera-flow/db";
+import { isGroup, type BlockRow, type ProcessBundle } from "@transpera-flow/db";
 import { deleteBlock, duplicateBlock, renameBlock, type BlockOpResult } from "@/app/w/[slug]/block-actions";
 import { Help } from "@/components/help";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -18,8 +19,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ClearFilters, EmptyState, FilterMenu, MetaLine, PageHeader, Toolbar, ToolbarSearch, type FilterOption } from "@/components/page-kit";
+import { MapSkeleton } from "@/components/map/map-placeholder";
 import { Page } from "@/components/shell/page";
-import { readBlock } from "@/lib/blocks/blocks";
+import { Skeleton } from "@/components/ui/skeleton";
+import { bundleFromBlock, readBlock } from "@/lib/blocks/blocks";
 import { duplicateDemoBlock, removeDemoBlock, renameDemoBlock, useDemoBlocks } from "@/lib/blocks/demo";
 import { blockListRow, blockUsers, filterBlockRows, formatBlockTime, relativeDate, usedInSentence, type BlockListRow } from "@/lib/blocks/rows";
 import { MAX_NAME } from "@/lib/blocks/save";
@@ -27,7 +30,15 @@ import { EDIT_ONLY } from "@/lib/phone";
 import { solutionHref } from "@/lib/solutions/cards";
 import { cn } from "@/lib/utils";
 import { BlockMap } from "./block-map";
-import { BlockSteps } from "./block-steps";
+
+// The map is heavy and only needed once a row is opened (as on the Processes page).
+const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((m) => m.ProcessCanvas), {
+  ssr: false,
+  loading: () => <MapSkeleton height={256} />,
+});
+
+/** The process that lends its roles and people to every block's map: not asked for until a row is opened, then kept for all rows. */
+type Base = { state: "idle" } | { state: "loading" } | { state: "error" } | { state: "none" } | { state: "ready"; bundle: ProcessBundle };
 
 const NEW_BLOCK_LINK = cn(buttonVariants(), "bg-edit text-edit-fg hover:bg-edit/90");
 const MAX_PILLS = 3;
@@ -50,6 +61,9 @@ export function BlockLibrary({
   solutionsBase = "",
   users = {},
   roles = [],
+  slug = "",
+  baseProcessId = null,
+  openBase = null,
 }: {
   blocks: BlockRow[];
   mode: "live" | "readonly" | "demo";
@@ -64,6 +78,12 @@ export function BlockLibrary({
   /** The solutions that use each block, by block id (lib/blocks/rows.ts `blockUsers`). */
   users?: ReturnType<typeof blockUsers>;
   roles?: BlockRole[];
+  /** The workspace's slug, for `openBase`. */
+  slug?: string;
+  /** The process whose live bundle draws the maps (the workspace's first); null: no process, so the small picture of the steps is drawn instead. */
+  baseProcessId?: string | null;
+  /** Loads that bundle (a Server Action; the browser harness stubs it). */
+  openBase?: ((slug: string, processId: string) => Promise<ProcessBundle | null>) | null;
 }) {
   const router = useRouter();
   const demo = useDemoBlocks();
@@ -76,6 +96,18 @@ export function BlockLibrary({
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [dialog, setDialog] = useState<DialogState>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [base, setBase] = useState<Base>({ state: "idle" });
+  const wantsBase = !!baseProcessId && !!openBase;
+  // The first row to open loads the base for every row.
+  const loadBase = () => {
+    // A failed load is tried again the next time a row opens ("Close the row and open it again").
+    if (!wantsBase || (base.state !== "idle" && base.state !== "error")) return;
+    setBase({ state: "loading" });
+    openBase!(slug, baseProcessId!).then(
+      (bundle) => setBase(bundle ? { state: "ready", bundle } : { state: "none" }),
+      () => setBase({ state: "error" }),
+    );
+  };
 
   const roleOptions: FilterOption[] = useMemo(
     () =>
@@ -90,12 +122,14 @@ export function BlockLibrary({
     setSearch("");
     setRoleIds([]);
   };
-  const toggle = (id: string) =>
+  const toggle = (id: string) => {
+    if (!open.has(id)) loadBase();
     setOpen((prev) => {
       const next = new Set(prev);
       if (!next.delete(id)) next.add(id);
       return next;
     });
+  };
   const editHref = (id: string) => (editBase ? `${editBase}?mode=block&block=${id}&from=${encodeURIComponent(libraryHref)}` : null);
 
   const done = (message: string) => {
@@ -340,7 +374,7 @@ export function BlockLibrary({
                         {isOpen && (
                           <tr id={panel} className="border-b bg-muted/20" data-block-panel={r.id}>
                             <td colSpan={9} className="p-3 sm:p-4">
-                              <BlockCard block={list.find((b) => b.id === r.id)!} />
+                              <BlockCard block={list.find((b) => b.id === r.id)!} base={wantsBase ? base : { state: "none" }} />
                             </td>
                           </tr>
                         )}
@@ -408,15 +442,28 @@ function UsedIn({ row, base }: { row: BlockListRow; base: string }) {
   );
 }
 
-function BlockCard({ block }: { block: BlockRow }) {
-  const bundle = readBlock(block.steps);
+function BlockCard({ block, base }: { block: BlockRow; base: Base }) {
+  const bundle = useMemo(() => readBlock(block.steps), [block.steps]);
   const steps = bundle.steps.filter((s) => !isGroup(s)).length;
+  const map = useMemo(() => (base.state === "ready" ? bundleFromBlock(base.bundle, bundle, block.name) : null), [base, bundle, block.name]);
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="overflow-x-auto rounded-token border bg-card p-2">
-        <BlockMap block={bundle} label={`Map of ${block.name}: ${steps} ${steps === 1 ? "step" : "steps"}`} />
-      </div>
-      <BlockSteps block={bundle} />
+      {bundle.steps.length === 0 || base.state === "none" ? (
+        // No steps to draw, or no process to draw them on: the small picture (which says "No steps in this block yet.").
+        <div className="overflow-x-auto rounded-token border bg-card p-2">
+          <BlockMap block={bundle} label={`Map of ${block.name}: ${steps} ${steps === 1 ? "step" : "steps"}`} />
+        </div>
+      ) : base.state === "error" ? (
+        <p role="alert" className="text-sm text-destructive">
+          Couldn&apos;t load the map. Close the row and open it again.
+        </p>
+      ) : map ? (
+        <div className="min-w-0 overflow-hidden rounded-token border bg-card" data-block-canvas>
+          <ProcessCanvas bundle={map} showPlayback={false} showLanes={false} height="auto" legend zoomControls />
+        </div>
+      ) : (
+        <Skeleton className="h-64 w-full" role="status" aria-label="Loading the map" />
+      )}
     </div>
   );
 }
