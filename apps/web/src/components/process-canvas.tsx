@@ -1825,7 +1825,7 @@ function Canvas({
           {/* Before the map in the page, so Tab reaches the toolbar first. */}
           {editable && editorState && (
             <div className="absolute top-2.5 left-2.5 z-10 max-w-[calc(100%-1.25rem)]">
-              <Toolbar bundle={bundle} editor={editor} state={editorState} onAdd={addFromToolbar} hideAdd={hideAdd} savedLabel={savedLabel} />
+              <Toolbar bundle={bundle} state={editorState} onAdd={addFromToolbar} hideAdd={hideAdd} savedLabel={savedLabel} />
             </div>
           )}
           {/* Nothing to draw means nothing for a run to change on the map: the empty state says enough. */}
@@ -2066,17 +2066,15 @@ function LaneToggle({
   );
 }
 
-/** Add a step, undo, redo, the swimlane view, and whether edits are saved. */
+/** Add a step, the swimlane view, and whether edits are saved (undo and redo are in the editor bar). */
 function Toolbar({
   bundle,
-  editor,
   state,
   onAdd,
   hideAdd,
   savedLabel,
 }: {
   bundle: ProcessBundle;
-  editor: ProcessEditor;
   state: EditorState;
   onAdd: (kind: NewStepKind, outcome: StepOutcome | null) => void;
   hideAdd: boolean;
@@ -2139,25 +2137,7 @@ function Toolbar({
       <span aria-hidden className="mx-0.5 h-5 w-px bg-line" />
 </>
 )}
-      <button
-        type="button"
-        onClick={() => editor.undo()}
-        disabled={!state.undoLabel}
-        title={state.undoLabel ? `Undo: ${state.undoLabel} (${mod}Z)` : "Nothing to undo"}
-        className={toolButton}
-      >
-        Undo
-      </button>
-      <button
-        type="button"
-        onClick={() => editor.redo()}
-        disabled={!state.redoLabel}
-        title={state.redoLabel ? `Redo: ${state.redoLabel} (${mac ? "⇧⌘Z" : "Ctrl+Y"})` : "Nothing to redo"}
-        className={toolButton}
-      >
-        Redo
-      </button>
-      <span aria-hidden className="mx-0.5 h-5 w-px bg-line" />
+      {/* Undo and redo are buttons in the editor bar (editor quick fixes); the keys still work here. */}
       <KeysHelp mod={mod} />
       <span className="px-1 text-fg-3" aria-live="polite">
         {state.saving ? "Saving…" : savedLabel}
