@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { EDIT_ONLY } from "@/lib/phone";
 import type { ArchivedProcess, ProcessAdminOps } from "@/lib/processes/admin";
 import type { ProcessCardData } from "@/lib/processes/data";
-import type { ProcessRowData } from "@/lib/processes/rows";
+import type { CompanyRowData, ProcessRowData } from "@/lib/processes/rows";
 
 /**
  * The Processes page (issue #101): the company map as a list, sub-processes indented under their parent. A row
@@ -22,6 +22,7 @@ export function ProcessesPage({
   companyMap,
   companyHistoryHref,
   loadCard,
+  companyRow,
   create,
   upload,
   archived,
@@ -39,6 +40,8 @@ export function ProcessesPage({
   /** The company map's History page: a button beside Company map. Omit it when the map has no published version. */
   companyHistoryHref?: string;
   loadCard: (processId: string) => Promise<ProcessCardData | null>;
+  /** The company map's own row, pinned at the top of the table (Q16): its version, a draft pill, History, Edit and Open. */
+  companyRow?: CompanyRowData;
   /** Start a process (signed-in editors only). */
   create?: CreateProcess;
   /** Bring in a process from a file (signed-in editors only; issue #166). */
@@ -101,6 +104,7 @@ export function ProcessesPage({
         rows={rows}
         hrefs={hrefs}
         loadCard={loadCard}
+        company={companyRow}
         archived={archived}
         admin={admin}
         empty={

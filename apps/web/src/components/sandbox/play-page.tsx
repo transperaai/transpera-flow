@@ -5,6 +5,7 @@
 // what the browser test mounts.
 
 import { useCallback, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   defaultPlay,
   partOf,
@@ -13,6 +14,7 @@ import {
   winMix,
   workspacePurposes,
   type CapacityChangeRow,
+  type CompanyRevisionListing,
   type CapacitySetup,
   type IssueRow,
   type PlayContext,
@@ -32,12 +34,17 @@ import { today as todayIso, DEFAULT_FORECAST_MONTHS } from "@/lib/forecast/forec
 import { timelineMonths } from "@/lib/forecast/timeline";
 import { horizonLabel } from "@/lib/horizon";
 import { companyMap } from "@/lib/overview/company-map";
+import { laneOfProcesses, laneSpecs, type DepartmentLaneInput } from "@/lib/overview/department-lanes";
+import { PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { capacityLine, capacityRunsOut } from "@/lib/sandbox/timing";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
 import type { PlayRuns } from "@/lib/sandbox/use-play-runs";
 import { SandboxExportMenu, type ExportData } from "./export-menu";
 import { PrintSummary, type PrintColumn } from "./print-summary";
+import { NativeSelect } from "@/components/ui/native-select";
+import { shortDate } from "@/lib/processes/rows";
 import { PlayView } from "./play-view";
+import type { PlayMapApi } from "./play-map";
 import type { PlayProcess } from "./play-types";
 
 export interface PlayPageProps {
@@ -57,6 +64,11 @@ export interface PlayPageProps {
   base: string;
   /** `?solution=<id>`: a solution to have picked as its process's map version when the page opens. */
   initialSolutionId?: string | null;
+  /** The departments, tier services and servicing links the map's lanes are worked out from (Q4). */
+  laneInput?: DepartmentLaneInput;
+  /** The company map's revisions (draft, live, earlier versions) for the "Company map" select, and the one `company` is. */
+  companyRevisions?: CompanyRevisionListing[];
+  companyRevisionId?: string | null;
 }
 
 /** The processes of the company model with their steps and solutions, in words. */
@@ -78,12 +90,12 @@ export function playProcesses(live: ProcessBundle, solutions: readonly SolutionR
       .filter((s) => s.process_id === p.process.id)
       .map((s) => {
         const link = links.find((l) => l.solution_id === s.id);
-        return { id: s.id, name: s.name, issue: link ? (issueTitle.get(link.issue_id) ?? null) : null };
+        return { id: s.id, name: s.name, issue: link ? (issueTitle.get(link.issue_id) ?? null) : null, status: s.status };
       }),
   }));
 }
 
-export function PlayPage({ live, parts, company, setup, library, solutions, solutionLinks, issues, canEdit, base, initialSolutionId }: PlayPageProps) {
+export function PlayPage({ live, parts, company, setup, library, solutions, solutionLinks, issues, canEdit, base, initialSolutionId, laneInput, companyRevisions = [], companyRevisionId = null }: PlayPageProps) {
   const initialSolution = useMemo(() => {
     const s = initialSolutionId ? solutions.find((x) => x.id === initialSolutionId) : undefined;
     return s ? { id: s.id, processId: s.process_id } : null;
@@ -105,17 +117,43 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
   // The company map, open groups in place, playing the run on screen.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const map = useMemo(() => companyMap(live, parts, expanded, company), [live, parts, expanded, company]);
-  const scrollToStep = (stepId: string) => {
-    const row = document.querySelector<HTMLElement>(`[data-step-row="${CSS.escape(stepId)}"]`);
-    row?.scrollIntoView({ block: "center", behavior: "smooth" });
-    row?.querySelector<HTMLElement>("select")?.focus({ preventScroll: true });
+  // Department lanes and each process's category on its card, as on the Overview (Q4).
+  const departmentLanes = useMemo(
+    () => (laneInput ? { spec: { lanes: laneSpecs(laneInput), laneOf: laneOfProcesses(parts.map((p) => p.process), laneInput) }, always: true } : undefined),
+    [laneInput, parts],
+  );
+  const cardTags = useMemo(() => new Map(parts.map((p) => [p.process.id, PROCESS_CATEGORY_LABELS[p.process.category]] as const)), [parts]);
+  const router = useRouter();
+  const pathname = usePathname();
+  const search = useSearchParams();
+  const pickCompany = (revisionId: string) => {
+    const next = new URLSearchParams(search.toString());
+    const picked = companyRevisions.find((r) => r.id === revisionId);
+    if (!picked || picked.live) next.delete("company");
+    else next.set("company", picked.status === "draft" ? "draft" : picked.id);
+    const qs = next.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
-  const renderMap = (runs: PlayRuns) =>
+  const companySelect =
+    companyRevisions.length > 1 ? (
+      <label className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm" data-company-version-select>
+        <span className="font-medium">Company map</span>
+        <NativeSelect value={companyRevisionId ?? ""} onChange={(e) => pickCompany(e.target.value)} aria-label="Company map version" className="w-auto min-w-44">
+          {companyRevisions.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.status === "draft" ? "Draft" : r.live ? `Live · version ${r.number}` : `Version ${r.number}${r.publishedAt ? ` · ${shortDate(r.publishedAt)}` : ""}`}
+            </option>
+          ))}
+        </NativeSelect>
+        <span className="text-xs text-muted-foreground">Another version changes the map&apos;s layout and handoff lines. The run is the same: the company map is a picture, and the processes in it are what is simulated.</span>
+      </label>
+    ) : null;
+  const renderMap = (runs: PlayRuns, api: PlayMapApi) =>
     map.bundle.steps.length ? (
       <div className="overflow-hidden rounded-lg border" data-company-map>
         <ProcessCanvas
-          // Opening a card changes the map's size: start again so it is framed whole.
-          key={[...expanded].sort().join("|")}
+          // Opening a card changes the map's size: frame it again, with playback going on.
+          refitOn={[...expanded].sort().join("|")}
           bundle={map.bundle}
           result={runs.changed?.run.result ?? null}
           selection={NO_SELECTION}
@@ -124,10 +162,16 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
           playbackRollUp
           playbackAbove
           showLanes={false}
+          departmentLanes={departmentLanes}
+          cardTags={cardTags}
+          cardBadges={api.badges}
           handoffs
           height="auto"
           stepDetail={false}
-          onStepClick={scrollToStep}
+          onStepClick={(stepId) => {
+            const process = map.processOfStep.get(stepId);
+            if (process) api.onProcess(process, stepId);
+          }}
           computing={runs.status === "running" && runs.changed === null}
         />
       </div>
@@ -146,6 +190,7 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
       today={base0}
       prepare={prepare}
       map={renderMap}
+      mapHeader={companySelect}
       canEdit={canEdit}
       saveChange={(id, input) => saveCapacityChange(live.workspace.id, id, input)}
       removeChange={(id) => deleteCapacityChange(live.workspace.id, id)}

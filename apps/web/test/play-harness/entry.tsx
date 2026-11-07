@@ -61,7 +61,7 @@ const processes: PlayProcess[] = Object.entries(model.servicingProcesses ?? {}).
     return { id: sid, name: stepName.get(sid) ?? sid, who: s.toClientManager ? "The client's manager" : roleName(s.role) };
   }),
   // A stand-in for a solution: the process's steps take half the time. (A real one is a copied map; see sandbox-play.test.ts.)
-  solutions: [{ id: `sol-${id}`, name: `Faster ${p.name}`, issue: i === 0 ? "Reporting takes too long" : null }],
+  solutions: [{ id: `sol-${id}`, name: `Faster ${p.name}`, issue: i === 0 ? "Reporting takes too long" : null, status: "testing" as const }],
 }));
 
 /** The run's segments on the model alone: hires, leavers and a map version are done here (the bundle path does them in the runner). */
@@ -126,6 +126,25 @@ window.mountPlay = ({ viewer, payHidden } = {}) => {
         startDate={START}
         today={todayPlan}
         prepare={(play, current) => prepareOnModel(play, { ...ctx, library: current })}
+        // A stand-in for the company map's canvas (a bare page has no workspace bundle): a card per process, the page's click and badge hooks.
+        map={(_runs, api) => (
+          <div data-company-map className="flex flex-wrap gap-6 rounded-lg border p-6">
+            {processes.map((p) => (
+              <div key={p.id} className="relative">
+                <button
+                  type="button"
+                  data-id={p.id}
+                  data-new-version={api.badges.has(p.id) ? "true" : undefined}
+                  onClick={() => api.onProcess(p.id, p.id)}
+                  className={`w-48 rounded-lg border-2 border-dashed px-3 py-3 text-left text-sm font-semibold ${api.badges.has(p.id) ? "border-accent" : ""}`}
+                >
+                  {p.name}
+                </button>
+                {api.badges.has(p.id) && <span data-version-badge className="absolute -bottom-3 left-2 rounded-full border border-accent bg-white px-2 text-xs">{api.badges.get(p.id)}</span>}
+              </div>
+            ))}
+          </div>
+        )}
         canEdit={!viewer}
         saveChange={async (id, input) => {
           const row: CapacityChangeRow = { id: id ?? `new-${window.__saved.length}`, provenance: {}, ...input };

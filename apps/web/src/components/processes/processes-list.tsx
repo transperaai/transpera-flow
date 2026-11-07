@@ -28,7 +28,7 @@ import {
   type ProcessKind,
 } from "@/lib/processes/admin";
 import type { ProcessCardData } from "@/lib/processes/data";
-import { shortDate, type ProcessRowData } from "@/lib/processes/rows";
+import { shortDate, type CompanyRowData, type ProcessRowData } from "@/lib/processes/rows";
 import { cn } from "@/lib/utils";
 import { EDIT_ONLY } from "@/lib/phone";
 
@@ -38,6 +38,7 @@ export function ProcessesList({
   rows,
   hrefs,
   loadCard,
+  company,
   archived = [],
   admin,
   empty,
@@ -45,6 +46,8 @@ export function ProcessesList({
   rows: ProcessRowData[];
   hrefs: Record<string, string>;
   loadCard: (processId: string) => Promise<ProcessCardData | null>;
+  /** The company map's pinned row (Q16). */
+  company?: CompanyRowData;
   /** The archived processes, for the Archived filter. */
   archived?: ArchivedProcess[];
   /** Rename, change type, archive and restore (Agency admins); absent for viewers and the demo. */
@@ -121,6 +124,7 @@ export function ProcessesList({
       </p>
       {view === "active" ? (
         <ProcessesTable
+          company={company}
           rows={shown}
           hrefs={hrefs}
           loadCard={loadCard}

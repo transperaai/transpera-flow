@@ -4,21 +4,32 @@
 // the page re-runs, debounced, and nothing is saved. Market, Win new clients, Lose clients, Prices (with "Clients react", D36), People and Reset.
 
 import { MARKET_PRESETS, type MarketPresetKey } from "@transpera-flow/engine";
-import { PRICE_REACTION, defaultPlay, type CapacitySetup, type PlayMarket, type PlayState, type PriceReaction } from "@transpera-flow/db";
+import { useState } from "react";
+import { PRICE_REACTION, changesActingOn, defaultPlay, describeEffect, type CapacityChangeRow, type CapacitySetup, type PlayMarket, type PlayState, type PriceReaction } from "@transpera-flow/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { SectionCard } from "@/components/page-kit";
 import { formatNumber } from "@/lib/format";
-import type { PlayMonths } from "./play-types";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/page-kit";
+import type { PlayMonths, PlayProcess } from "./play-types";
 
 const FIELD = "flex min-w-0 flex-col gap-1 text-xs text-muted-foreground";
 
-function Group({ title, children, id }: { title: string; children: React.ReactNode; id: string }) {
+function Group({ title, children, id, action }: { title: string; children: React.ReactNode; id: string; action?: React.ReactNode }) {
   return (
     <div className="border-t border-line pt-4 first:border-t-0 first:pt-0">
       <fieldset className="flex min-w-0 flex-col gap-2 border-0 p-0" data-lever-group={id}>
-        <legend className="mb-1 font-heading text-sm font-semibold">{title}</legend>
+        {action ? (
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <legend className="float-left font-heading text-sm font-semibold">{title}</legend>
+            {action}
+          </div>
+        ) : (
+          <legend className="mb-1 font-heading text-sm font-semibold">{title}</legend>
+        )}
         {children}
       </fieldset>
     </div>
@@ -62,6 +73,11 @@ export function PlayLevers({
   setup,
   months,
   expectedWinsPerMonth,
+  library,
+  processes,
+  canEdit,
+  onAddChange,
+  onEditChange,
 }: {
   play: PlayState;
   setPlay: (next: PlayState) => void;
@@ -69,7 +85,25 @@ export function PlayLevers({
   months: PlayMonths;
   /** What the lead flow brings a month, in clients, for the note under "Win new clients". */
   expectedWinsPerMonth: number | null;
+  /** The workspace's changes (automation and augmentation), each a switch. */
+  library: CapacityChangeRow[];
+  processes: PlayProcess[];
+  /** Agency admins and the Owner: add and edit changes ("Manage"). */
+  canEdit: boolean;
+  onAddChange: () => void;
+  onEditChange: (change: CapacityChangeRow) => void;
 }) {
+  const [managing, setManaging] = useState(false);
+  const stepNames = new Map(processes.flatMap((p) => p.steps.map((st) => [st.id, st.name] as const)));
+  /** Switch a change on (from a month) or off. It takes the place of any other change acting on the same step. */
+  const toggle = (c: CapacityChangeRow, on: boolean) => {
+    const blocks = { ...play.blocks };
+    if (on) {
+      for (const e of c.effects) for (const other of changesActingOn(library, e.step)) delete blocks[other.id];
+      blocks[c.id] = play.blocks[c.id] ?? 0;
+    } else delete blocks[c.id];
+    setPlay({ ...play, blocks });
+  };
   const set = (p: Partial<PlayState>) => setPlay({ ...play, ...p });
   const people = setup.people.filter((p) => p.active);
   const roles = setup.roles.filter((r) => r.active !== false);
@@ -279,6 +313,65 @@ export function PlayLevers({
             )}
           </div>
           <p className="text-xs text-muted-foreground">New hires take about {setup.rampDefault.length} months to reach full speed (the ramp in Set up).</p>
+        </Group>
+        <Group
+          title="Automation and augmentation"
+          id="automation"
+          action={
+            canEdit && (
+              <Button type="button" variant="outline" size="sm" data-changes-manage aria-pressed={managing} onClick={() => setManaging((m) => !m)}>
+                {managing ? "Done" : "Manage"}
+              </Button>
+            )
+          }
+        >
+          {library.length ? (
+            <ul className="flex flex-col divide-y divide-line" data-changes-list>
+              {library.map((c) => {
+                const on = play.blocks[c.id] !== undefined;
+                const steps = [...new Set(c.effects.map((e) => stepNames.get(e.step)).filter((n): n is string => Boolean(n)))];
+                return (
+                  <li key={c.id} className={cn("flex min-w-0 flex-col gap-1.5 py-2 text-sm first:pt-0 last:pb-0", on && "bg-accent/5")} data-change={c.id} data-automation={c.id} data-on={on ? "true" : "false"}>
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="font-medium">{c.name}</div>
+                        <div className="text-xs text-muted-foreground" data-automation-steps>
+                          {c.kind === "automation" ? "Automation" : "Augmentation"}
+                          {steps.length ? `, acts on ${steps.join(", ")}` : ""}
+                        </div>
+                        {managing && (
+                          <div className="text-xs text-muted-foreground">
+                            {Math.round(c.adoption * 100)}% adoption{c.tiers ? `, ${c.tiers.join(" ")} only` : ""}
+                            {c.effects[0] ? `. ${describeEffect(c.effects[0])}` : ""}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {managing && canEdit && (
+                          <Button type="button" variant="outline" size="sm" onClick={() => onEditChange(c)} aria-label={`Edit ${c.name}`}>
+                            Edit
+                          </Button>
+                        )}
+                        <Switch checked={on} onCheckedChange={(v) => toggle(c, v)} aria-label={`${c.name} on or off`} data-automation-switch={c.id} />
+                      </div>
+                    </div>
+                    {on && (
+                      <MonthSelect value={play.blocks[c.id] ?? 0} months={months} onChange={(m) => setPlay({ ...play, blocks: { ...play.blocks, [c.id]: m } })} label="From" id={`automation:${c.id}`} />
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <EmptyState data-changes-empty>No changes yet. {canEdit ? "Use Manage to add one." : "An Agency admin or the Owner can add some."}</EmptyState>
+          )}
+          {managing && canEdit && (
+            <div>
+              <Button type="button" variant="outline" size="sm" onClick={onAddChange} data-change-add>
+                + Add a change
+              </Button>
+            </div>
+          )}
         </Group>
       </SectionCard>
     </aside>

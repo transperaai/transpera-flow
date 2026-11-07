@@ -11,7 +11,8 @@ import { MapSkeleton } from "@/components/map/map-placeholder";
 import { Skeleton } from "@/components/ui/skeleton";
 import { confirmedBadges, confirmedRatings, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import type { ProcessCardData } from "@/lib/processes/data";
-import { shortDate, type ProcessRowData } from "@/lib/processes/rows";
+import { shortDate, type CompanyRowData, type ProcessRowData } from "@/lib/processes/rows";
+import { EDIT_ONLY } from "@/lib/phone";
 
 // The map is heavy and only needed once a row is opened.
 const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((m) => m.ProcessCanvas), {
@@ -31,7 +32,10 @@ export function ProcessesTable({
   loadCard,
   actions,
   empty,
+  company,
 }: {
+  /** The company map's own row, pinned above the processes. */
+  company?: CompanyRowData;
   rows: ProcessRowData[];
   /** Where each process opens, by id. */
   hrefs: Record<string, string>;
@@ -104,6 +108,45 @@ export function ProcessesTable({
           </tr>
         </thead>
         <tbody>
+          {company && (
+            <tr data-company-row className="border-b bg-muted/30">
+              <td className="p-0" />
+              <td className="min-w-20 px-2 py-2.5 sm:min-w-44">
+                <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+                  <span className="min-w-0 font-semibold">Company map</span>
+                  {company.draft && (
+                    <Badge data-draft-open variant="outline" className="shrink-0 border-warn bg-warn-soft text-fg">
+                      Draft open
+                    </Badge>
+                  )}
+                </span>
+              </td>
+              <td className="hidden px-2 py-2.5 text-left text-xs md:table-cell">Company</td>
+              <td className="hidden px-2 py-2.5 text-center text-muted-foreground lg:table-cell">·</td>
+              <td className="px-2 py-2.5 text-center text-muted-foreground">·</td>
+              <td className="hidden px-2 py-2.5 text-center text-xs whitespace-nowrap lg:table-cell" data-company-version>
+                {company.version ? `Version ${company.version.number}${company.version.publishedAt ? ` · ${shortDate(company.version.publishedAt)}` : ""}` : <span className="text-muted-foreground">Draft only</span>}
+              </td>
+              {actions && <td className="p-0" />}
+              <td className="px-2 py-2.5 text-center">
+                <span className="inline-flex flex-wrap items-center justify-center gap-1" data-company-actions>
+                  {company.historyHref && (
+                    <Link href={company.historyHref} className="inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium whitespace-nowrap hover:bg-muted">
+                      History
+                    </Link>
+                  )}
+                  {company.editHref && (
+                    <Link href={company.editHref} data-edit-entry className={`inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium whitespace-nowrap hover:bg-muted ${EDIT_ONLY}`}>
+                      Edit
+                    </Link>
+                  )}
+                  <Link href={company.href} className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium whitespace-nowrap hover:bg-muted" aria-label="Open the company map">
+                    Open→
+                  </Link>
+                </span>
+              </td>
+            </tr>
+          )}
           {rows.map((r) => {
             const isOpen = open.has(r.id);
             const panel = `process-card-${r.id}`;

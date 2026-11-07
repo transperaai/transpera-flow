@@ -4,6 +4,15 @@ import { getDb } from "@/lib/auth/session";
 import type { ArchivedProcess } from "./admin";
 import { isOnProcess, processRows, type LiveVersion, type ProcessRowData } from "./rows";
 
+/** The company map's live version and whether a draft is open, for its pinned row (Q16). Null when the workspace has no company map. */
+export async function loadCompanyRowFacts(workspaceId: string): Promise<{ id: string; version: LiveVersion | null; draft: boolean } | null> {
+  const db = await getDb();
+  const company = await db.selectFrom("processes").select(["id", "live_revision_id", "draft_revision_id"]).where("workspace_id", "=", workspaceId).where("is_company", "=", true).executeTakeFirst();
+  if (!company) return null;
+  const revision = company.live_revision_id ? await db.selectFrom("process_revisions").select(["number", "published_at"]).where("id", "=", company.live_revision_id).executeTakeFirst() : undefined;
+  return { id: company.id, version: revision ? { number: revision.number, publishedAt: revision.published_at } : null, draft: Boolean(company.draft_revision_id) };
+}
+
 /** What a row's map card needs: the process at its live revision, and its tracked issues (for the map's ratings and badges). */
 export interface ProcessCardData {
   bundle: ProcessBundle;

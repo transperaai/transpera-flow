@@ -74,6 +74,7 @@ function Harness({ canEdit, published }: { canEdit: boolean; published: boolean 
       hrefs={Object.fromEntries([...facts, ...archived].map((p) => [p.id, `/w/northbeam/p/${p.id}`]))}
       companyMap={published ? { href: "/w/northbeam", edit: false, editHref: canEdit ? "/w/northbeam/edit" : undefined } : canEdit ? { href: "/w/northbeam/edit", edit: true } : undefined}
       companyHistoryHref={published ? "/w/northbeam/history" : undefined}
+      companyRow={published ? { version: { number: 4, publishedAt: "2026-09-29T10:00:00Z" }, draft: true, href: "/w/northbeam", historyHref: "/w/northbeam/history", editHref: canEdit ? "/w/northbeam/edit" : undefined } : undefined}
       loadCard={async () => null}
       create={canEdit ? async () => ({}) : undefined}
       upload={canEdit ? { preview: async () => ({ error: "Not in this test." }), create: async () => ({ error: "Not in this test." }) } : undefined}

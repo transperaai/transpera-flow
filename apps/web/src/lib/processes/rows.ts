@@ -24,6 +24,20 @@ export interface LiveVersion {
   publishedAt: string | null;
 }
 
+/** The company map's own row, pinned at the top of the Processes table (Q16, D50): not a process, so not in the category filter. */
+export interface CompanyRowData {
+  /** Its live version, or null when it has never been published. */
+  version: LiveVersion | null;
+  /** A draft is open. */
+  draft: boolean;
+  /** The Overview. */
+  href: string;
+  /** The company map's History page; omitted without a published version. */
+  historyHref?: string;
+  /** The company map editor's draft (Edit); editors only. */
+  editHref?: string;
+}
+
 export interface ProcessRowData extends ProcessFacts {
   /** 1 for a top-level process, 2 for one inside it, and so on. */
   depth: number;

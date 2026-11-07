@@ -62,7 +62,7 @@ describe("layout", () => {
     expect(Math.abs(g.y - a.y)).toBeLessThan(8);
     const heights = await page.locator("[data-processes-actions] [data-slot=button]").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
     expect(new Set(heights).size).toBe(1);
-    expect(await page.locator("[data-edit-company-map]").evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe(await page.getByRole("link", { name: "History" }).evaluate((e) => getComputedStyle(e).backgroundColor));
+    expect(await page.locator("[data-edit-company-map]").evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe(await group.getByRole("link", { name: "History" }).evaluate((e) => getComputedStyle(e).backgroundColor));
     expect(errors).toEqual([]);
     await page.close();
   });
@@ -90,6 +90,23 @@ describe("layout", () => {
     const header = (await box(page, "header:has(h1)"))!;
     expect(view.y).toBeGreaterThan(header.y + header.height + 8);
     await page.close();
+  });
+
+  it("pins the company map's row at the top (Q16): outside the category filter, with its version, a draft pill, and History, Edit and Open", async () => {
+    const { page, errors } = await mount({ canEdit: true, published: true });
+    expect(await page.locator("tbody tr").first().getAttribute("data-company-row")).not.toBeNull();
+    const row = page.locator("[data-company-row]");
+    expect(await row.locator("td").nth(1).innerText()).toMatch(/^Company map\s+Draft open$/);
+    expect(await row.locator("td").nth(2).innerText()).toBe("Company");
+    expect(await row.locator("[data-company-version]").innerText()).toMatch(/^Version 4 · /);
+    expect(await row.locator("[data-company-actions] a").allInnerTexts()).toEqual(["History", "Edit", "Open→"]);
+    await page.getByRole("button", { name: /^Sales/ }).click();
+    expect(await page.locator("[data-company-row]").count()).toBe(1);
+    const reader = await mount({ canEdit: false, published: true });
+    expect(await reader.page.locator("[data-company-row] [data-company-actions] a").allInnerTexts()).toEqual(["History", "Open→"]);
+    expect(errors).toEqual([]);
+    await page.close();
+    await reader.page.close();
   });
 
   it("centres every column but Process and Type", async () => {
