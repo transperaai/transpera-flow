@@ -33,7 +33,7 @@ export async function createLibraryProcess(workspaceId: string, input: LibraryCr
     for (let n = 2; !input.name && taken.has(name.toLowerCase()) && n < 100; n++) name = `${template.name} ${n}`;
     try {
       const made = await createProcessFromTemplate({ db, userId }, workspaceId, template.id, name);
-      return { process: { ...made, live: false } };
+      return { process: { ...made, category: template.category, live: false } };
     } catch (e) {
       if (e instanceof ImportError) {
         if (e.code === "name_taken") return { error: "There is already a process with that name. Give it another name." };
@@ -83,5 +83,5 @@ export async function createLibraryProcess(workspaceId: string, input: LibraryCr
       // The process exists without its first steps; the editor opens it empty.
     }
   }
-  return { process: { id: r.process_id, name, kind, live: false } };
+  return { process: { id: r.process_id, name, kind, category, live: false } };
 }

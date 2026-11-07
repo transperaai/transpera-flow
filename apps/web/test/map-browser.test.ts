@@ -597,6 +597,10 @@ describe("the company map's New process is made by category (D52)", () => {
     expect(await select.locator("option").allInnerTexts()).toEqual(["Sales", "Onboarding", "Routine client work", "Ad hoc", "Internal"]);
     expect(await page.locator("[data-process-library] [data-library-new-kind]").count()).toBe(0);
     expect(await page.locator("[data-library-category-help]").innerText()).toBe("How new work comes in and is won.");
+    // The existing processes in the list say their category too, not an engine kind.
+    const rows = (await page.locator("[data-library-item]").allInnerTexts()).join(" | ");
+    expect(rows).not.toMatch(/\b(Pipeline|Servicing)\b/);
+    expect(rows).toMatch(/Sales|Routine client work|Ad hoc|Internal|Onboarding/);
     await select.selectOption("onboarding");
     expect(await page.locator("[data-library-category-help]").innerText()).toBe("Getting a new client set up, once per client.");
     expect((await page.locator("[data-library-template='client-onboarding']").innerText()).replace(/\s+/g, " ")).toContain("Client onboarding Onboarding");

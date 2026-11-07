@@ -9,7 +9,7 @@ export type LibraryCreateInput =
   | { kind: "template"; templateId: string; name?: string };
 
 export type LibraryCreateResult =
-  | { process: { id: string; name: string; kind: ProcessRow["kind"]; live: boolean }; error?: undefined }
+  | { process: { id: string; name: string; kind: ProcessRow["kind"]; category: ProcessCategory; live: boolean }; error?: undefined }
   | { error: string; process?: undefined };
 
 /** Makes a process for the library; the Editor passes the Server Action, a harness a stand-in. */

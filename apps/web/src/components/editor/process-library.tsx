@@ -102,7 +102,7 @@ export function ProcessLibrary({
         setNote({ tone: "warn", text: r.error });
         return;
       }
-      const made: LibraryProcess = { id: r.process.id, name: r.process.name, kind: r.process.kind, live: r.process.live, holder: null };
+      const made: LibraryProcess = { id: r.process.id, name: r.process.name, kind: r.process.kind, category: r.process.category, live: r.process.live, holder: null };
       setCreated((now) => [...now, made]);
       place([made.id], [...known, made]);
       if (input.kind === "new") setNewName("");
@@ -296,7 +296,7 @@ function LibraryGroup({
             <span className="flex min-w-0 flex-col">
               <span className="truncate">{e.name}</span>
               <span className="text-xs text-muted-foreground">
-                {e.kind === "pipeline" ? "Pipeline" : "Servicing"}
+                {PROCESS_CATEGORY_LABELS[e.category]}
                 {e.live ? "" : " · not published yet"}
               </span>
               {e.state === "map" && (
