@@ -10,6 +10,7 @@ import { loadDismissedEditorTours, loadProcessForEditing, loadTierSetup, loadWor
 import { loadLiveParts } from "@/lib/overview/data";
 import { loadDepartmentLaneInput } from "@/lib/overview/lanes-data";
 import { loadLibrary } from "@/lib/editor/library-data";
+import { readBlock } from "@/lib/blocks/blocks";
 import { exitHref, parseEditorMode, parseHorizon, parseIssueParam } from "@/lib/editor/modes";
 import { issueAboutProcess, solutionIssueOf } from "@/lib/solutions/area";
 
@@ -24,7 +25,7 @@ export async function WorkspaceEditorPage({
 }: {
   slug: string;
   processId: string;
-  searchParams: { mode?: string | string[]; from?: string | string[]; horizon?: string | string[]; issue?: string | string[]; solution?: string | string[] };
+  searchParams: { mode?: string | string[]; from?: string | string[]; horizon?: string | string[]; issue?: string | string[]; solution?: string | string[]; block?: string | string[] };
 }) {
   // The Editor also opens the company map (B11), by its id: the same screen, on its holders and handoff lines.
   const process = await loadProcessForEditing(slug, processId, { includeCompany: true });
@@ -67,6 +68,10 @@ export async function WorkspaceEditorPage({
   const issueId = editorMode === "solution" ? (parseIssueParam(searchParams.issue) ?? (fromSolution ? (stored?.links.find((l) => l.solution_id === fromSolution.id)?.issue_id ?? null) : null)) : null;
   const issueRow = issueId ? (await loadWorkspaceIssues(live.workspace.id)).find((i) => i.id === issueId) : undefined;
   const exit = exitHref(searchParams.from, base);
+  // "Edit" on a block of the library (`?mode=block&block=<id>`, Q15): block mode starts from that block. One that isn't there goes back to where we came from.
+  const editBlockId = editorMode === "block" ? parseIssueParam(searchParams.block) : null;
+  const editRow = editBlockId ? blocks.find((b) => b.id === editBlockId) : undefined;
+  if (editBlockId && !editRow) redirect(exit);
   return (
     <EditorPhoneGate backHref={exit}>
     <SourceLinkingScope workspaceId={live.workspace.id} sources={sources} canEdit>
@@ -88,6 +93,7 @@ export async function WorkspaceEditorPage({
       exitHref={exit}
       solutionSeed={fromSolution ? { bundle: bundleFromSolution(live, fromSolution), name: fromSolution.name } : undefined}
       processEditorHref={`${base}/edit?from=${encodeURIComponent(exit)}`}
+      editBlock={editRow ? { id: editRow.id, name: editRow.name, description: editRow.description, bundle: readBlock(editRow.steps) } : undefined}
       blockEditorHref={`${base}/edit?mode=block&from=${encodeURIComponent(exit)}`}
       horizonMonths={parseHorizon(searchParams.horizon)}
       library={editorMode === "draft" ? library : undefined}

@@ -7,7 +7,7 @@
 
 import { ancestorsOf, isGroup, STEP_PURPOSE_KEY, type BlockBundle, type BlockEdge, type BlockStep, type EdgeRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
 import { GROUP_PADDING, openGroupSize } from "@/lib/map/groups";
-import { deleteSteps, newId } from "@/lib/editor/commands";
+import { deleteSteps, newId, newStepRow } from "@/lib/editor/commands";
 import { edgeRow, groupRow } from "@/lib/editor/groups";
 import { applyEdit, type Edit, type Op, type RowChange } from "@/lib/editor/ops";
 
@@ -83,6 +83,42 @@ export function blockFromSteps(bundle: Pick<ProcessBundle, "steps" | "edges">): 
   const placed = steps.map((s) => (s.parent_step_id === null ? { ...s, x: Math.round(Number(s.x) + dx), y: Math.round(Number(s.y) + dy) } : s));
   const edges = bundle.edges.map(toBlockEdge);
   return { steps: placed, edges, entry_step_id: entryOf(placed, edges) };
+}
+
+/**
+ * The Editor's map for editing an existing block (Q15): the block's steps and edges as rows of `base` (the process lending its roles
+ * and people), keeping their ids so saving reads the same bundle back. A role or person since deleted is dropped, as `materialize` does.
+ */
+export function bundleFromBlock(base: ProcessBundle, block: BlockBundle, name: string): ProcessBundle {
+  const { revision } = base;
+  const owner = { revision_id: revision.id, workspace_id: revision.workspace_id, process_id: revision.process_id };
+  const roles = new Set(base.roles.map((r) => r.id));
+  const people = new Set(base.people.map((p) => p.id));
+  const template = newStepRow(base, "task", null, 0, 0);
+  const steps = parentsFirst(block.steps).map(
+    (s): StepRow => ({
+      ...template,
+      ...pickKeys<BlockStep>(s, STEP_KEYS),
+      ...owner,
+      id: s.id,
+      parent_step_id: s.parent_step_id ?? null,
+      entry_step_id: s.entry_step_id ?? null,
+      work_params: { ...s.work_params },
+      wait_params: { ...s.wait_params },
+      provenance: structuredClone(s.provenance ?? {}),
+      current_wip: null,
+      child_process_id: null,
+      purpose: typeof s.purpose === "string" && STEP_PURPOSE_KEY.test(s.purpose) ? s.purpose : null,
+      split: s.split ? { ...s.split } : null,
+      split_notes: s.split_notes ? { ...s.split_notes } : null,
+      tier_multiplier: s.tier_multiplier ? { ...s.tier_multiplier } : null,
+      to_client_manager: s.to_client_manager === true,
+      role_id: s.role_id && roles.has(s.role_id) ? s.role_id : null,
+      person_id: s.person_id && people.has(s.person_id) ? s.person_id : null,
+    }),
+  );
+  const edges = block.edges.map((e): EdgeRow => ({ ...pickKeys<BlockEdge>(e, EDGE_KEYS), ...owner, id: e.id }));
+  return { ...base, process: { ...base.process, name }, steps, edges, retired: [] };
 }
 
 /** How many steps a block has: the work steps, not the boxes that group them. */
