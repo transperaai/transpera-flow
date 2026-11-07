@@ -85,7 +85,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
           mode={canEdit ? "live" : "readonly"}
           issuesHref={`${base}/issues`}
           peopleHref={`${base}/settings`}
-          purposesHref={`${base}/settings/purposes`}
+          purposesHref={`${base}/settings#purposes`}
           scenarios={scenarios}
           solutions={solutions}
         />
