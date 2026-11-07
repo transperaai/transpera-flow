@@ -63,7 +63,7 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
   return (
     <SettingsPage
       title="Access"
-      eyebrow="Company"
+      eyebrow="Settings"
       description="People get in by signing in with Google. Nobody is emailed. Changes apply on their next page load."
     >
       <PhoneReadOnly>

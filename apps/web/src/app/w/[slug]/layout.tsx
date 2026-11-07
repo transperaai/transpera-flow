@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { WorkspaceShell } from "@/components/shell/workspace-shell";
-import { canManageWorkspace, currentViewer } from "@/lib/access-data";
+import { currentViewer } from "@/lib/access-data";
 import { shellCounts } from "@/lib/company-data";
 import { listWorkspaces, loadWorkspaceHead } from "@/lib/data";
 
@@ -10,9 +10,8 @@ export default async function WorkspaceLayout(props: LayoutProps<"/w/[slug]">) {
   const { slug } = await props.params;
   const workspace = await loadWorkspaceHead(slug);
   if (!workspace) notFound();
-  const [workspaces, canManage, shell, viewer] = await Promise.all([
+  const [workspaces, shell, viewer] = await Promise.all([
     listWorkspaces(),
-    canManageWorkspace(workspace.id),
     shellCounts(workspace.id),
     currentViewer(),
   ]);
@@ -24,7 +23,6 @@ export default async function WorkspaceLayout(props: LayoutProps<"/w/[slug]">) {
       slug={slug}
       workspaceName={workspace.name}
       workspaces={workspaces.map((w) => ({ name: w.name, href: `/w/${w.slug}` }))}
-      canManage={canManage}
       counts={{ processes: shell.processes, openIssues: shell.openIssues }}
       viewer={viewer ? { name: viewer.name, email: viewer.email } : null}
     >
