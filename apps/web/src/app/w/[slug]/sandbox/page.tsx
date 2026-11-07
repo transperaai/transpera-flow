@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { loadCapacityChanges, loadCapacitySetup } from "@transpera-flow/db";
+import { loadCapacitySetup } from "@transpera-flow/db";
 import { PlayPage } from "@/components/sandbox/play-page";
 import { SandboxView } from "@/components/sandbox/sandbox-view";
 import { SANDBOX_SCENARIOS_SHOWN } from "@/lib/sandbox/scenarios-shown";
@@ -18,7 +18,7 @@ import { loadLiveProcess, loadPublishState, loadWorkspaceIssues, loadWorkspaceSa
 /**
  * The Sandbox (capacity build P7, D38): free play. The company map on top (click a process to load another version of it), the levers on
  * the left and the results on the right: a verdict and four charts against today's path. Nothing is saved; the levers reset when you leave. Everyone who
- * can read the workspace plays; Agency admins and the Owner also add, edit and remove the list of changes. Stored scenarios stay in the database, and
+ * can read the workspace plays; Stored scenarios stay in the database, and
  * the old scenario page is behind SANDBOX_SCENARIOS_SHOWN.
  */
 export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/sandbox">) {
@@ -46,9 +46,8 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
   const ws = live.workspace.id;
   if (!SANDBOX_SCENARIOS_SHOWN) {
     const db = await getDb();
-    const [setup, library, parts, liveCompany, issues, canEdit, solutions, laneInput, companyRevisions] = await Promise.all([
+    const [setup, parts, liveCompany, issues, canEdit, solutions, laneInput, companyRevisions] = await Promise.all([
       loadCapacitySetup(db, ws),
-      loadCapacityChanges(db, ws),
       loadLiveParts(ws),
       loadLiveCompany(ws),
       loadWorkspaceIssues(ws),
@@ -64,7 +63,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
     const companyRevisionId = chosen && company !== liveCompany ? chosen.id : (companyRevisions.find((r) => r.live)?.id ?? null);
     return (
       <Page title="Sandbox" width="max-w-6xl" hideHeader>
-        <PlayPage live={live} parts={parts} company={company} setup={setup} library={library} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} laneInput={laneInput} companyRevisions={companyRevisions} companyRevisionId={companyRevisionId} initialSolutionId={typeof solutionParam === "string" && isId(solutionParam) ? solutionParam : null} />
+        <PlayPage live={live} parts={parts} company={company} setup={setup} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} laneInput={laneInput} companyRevisions={companyRevisions} companyRevisionId={companyRevisionId} initialSolutionId={typeof solutionParam === "string" && isId(solutionParam) ? solutionParam : null} />
       </Page>
     );
   }

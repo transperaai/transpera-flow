@@ -44,7 +44,8 @@ describe("blocks on a workspace without the issues", () => {
       "Monthly report",
       "QA and sign-off",
     ]);
-    expect(Number((await q("select count(*)::int as n from solutions where workspace_id = $1", [ws]))[0]!.n)).toBe(0);
+    // The example's changes are held by solutions of their own (D53); none of them is made by the blocks.
+    expect(Number((await q("select count(*)::int as n from solutions where workspace_id = $1 and step_changes = '[]'::jsonb", [ws]))[0]!.n)).toBe(0);
   });
 
   it("is idempotent: the second run changes nothing and says so", async () => {
@@ -92,7 +93,7 @@ describe("blocks on a workspace with the example issues", () => {
 
   it("puts one block into one solution, so the library shows 'Used in 1 solution'", async () => {
     const approval = blocks.find((b) => b.name === "Client approval loop")!;
-    const solutions = (await q("select * from solutions where workspace_id = $1 order by name", [ws])) as unknown as SolutionRow[];
+    const solutions = (await q("select * from solutions where workspace_id = $1 and step_changes = '[]'::jsonb order by name", [ws])) as unknown as SolutionRow[];
     expect(solutions).toHaveLength(4);
     const using = solutions.filter((s) => s.steps.steps.some((st) => (st.provenance as { block?: string } | null)?.block === approval.id));
     expect(using.map((s) => s.name)).toEqual(["One approval loop for monthly plans"]);

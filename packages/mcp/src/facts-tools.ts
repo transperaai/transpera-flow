@@ -3,7 +3,7 @@
 // ChatGPT outside the app can make an assessment of their own. Every tool reads as the token's user: RLS decides what is visible
 // (docs/adr/0018-mcp-tokens-checked-in-app-code.md). Read-only (docs/plans/cut-list.md item 5): findings, AI analyses and
 // proposing anything are gone. Every list is bounded: facts are the worst first up to a limit with their sentences trimmed,
-// sources come a page at a time with the total, and solutions leave out their copied maps.
+// sources come a page at a time with the total, and solutions leave out their copied maps (their step changes, the automations and augmentations, are listed).
 
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -178,8 +178,10 @@ export function registerFactTools(server: McpServer, ctx: ToolContext): void {
     {
       title: "List solutions",
       description:
-        "The workspace's solutions: changed copies of a process tested against its issues, each with the issues it is for, the automatic verdict and the " +
-        "team's own verdict per issue, and which steps it changed (get_process reads a process's steps). Filter by process.",
+        "The workspace's solutions: changed copies of a process tested against its issues, each with its status, the issues it is for, the automatic verdict and the " +
+        "team's own verdict per issue, and which steps it changed (get_process reads a process's steps). Automations and augmentations are part of a solution: " +
+        "`step_changes` lists them (name, kind, the effects on steps, adoption, months to full effect, tiers, monthly cost). The Sandbox runs them from the month " +
+        "the solution is picked as its process's version, and run_scenario does when a scenario puts the solution live. Filter by process.",
       inputSchema: { process: z.string().optional().describe("Only solutions of this process (id or name)."), workspace: workspaceArg },
       annotations: { readOnlyHint: true },
     },
@@ -190,7 +192,7 @@ export function registerFactTools(server: McpServer, ctx: ToolContext): void {
         // Not the copied map (`steps`): it can be large, and the changed step ids say what the solution changed.
         const solutions = await ctx.db
           .selectFrom("solutions")
-          .select(["id", "process_id", "base_revision_id", "name", "notes", "changed_step_ids", "lever_changes", "created_at", "updated_at"])
+          .select(["id", "process_id", "base_revision_id", "name", "notes", "status", "changed_step_ids", "lever_changes", "step_changes", "created_at", "updated_at"])
           .where("workspace_id", "=", ws.id)
           .$if(!!proc, (qb) => qb.where("process_id", "=", proc!.id))
           .orderBy("created_at")

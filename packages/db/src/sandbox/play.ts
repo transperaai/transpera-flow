@@ -26,7 +26,7 @@ export interface PreparedPlay {
 /** The segments for `play` on `bundle`: the model of each segment with every lever applied. */
 export function preparePlay(bundle: ProcessBundle, play: PlayState, ctx: PlayContext, solutions: readonly SolutionRow[], months = 12): PreparedPlay {
   const effective = playChanges(play, ctx).map((change) => ({ change, scenarioId: "play", scenarioName: "Free play", inherited: false }));
-  const prepared = prepareScenario(bundle, effective, solutions, months, ctx.startDate, { pair: false });
+  const prepared = prepareScenario(bundle, effective, solutions, months, ctx.startDate, { pair: false, ...(ctx.issueOf ? { issueOf: ctx.issueOf } : {}) });
   const edited = playIsDefault(play)
     ? prepared
     : { ...prepared, segments: prepared.segments.map((s) => ({ from: s.from, model: applyPlay(s.model, play, ctx, prepared.planPeople) })) };

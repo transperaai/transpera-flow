@@ -631,6 +631,10 @@ export interface Solutions {
   notes: Generated<string>;
   process_id: string;
   status: Generated<string>;
+  /**
+   * Automations and augmentations in this version of the process (D53): [{ id?, name, kind, effects, adoption, ramp_months, tiers?, cost_monthly? }]. The Sandbox runs them from the month the version is picked.
+   */
+  step_changes: Generated<Json>;
   steps: Json;
   updated_at: Generated<string>;
   workspace_id: string;

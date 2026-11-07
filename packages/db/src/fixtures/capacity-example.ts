@@ -4,7 +4,8 @@
 //     "taking both" counts, and a Sales role for the pipeline;
 //   - the 27 people with their roles, team time, speed, tiers, counted-client portfolios, salary and label;
 //   - the 13 named clients with their overrides, hand-holding hours, services and managers;
-//   - the servicing processes and steps, linked to every tier of their department, and a four-step sales pipeline.
+//   - the servicing processes and steps, linked to every tier of their department, and a four-step sales pipeline;
+//   - the prototype's 13 changes, each as part of a testing solution of every process its steps are in (D53).
 //
 // THE DATA IS MADE UP (the prototype's), so this file and its output can be committed. It is NEVER loaded into the client's deployment:
 // it is for a developer's or test workspace only. Every structural fact (who, what, how many) is read from the engine's `capacityModel()`
@@ -24,6 +25,7 @@ import { randomUUID } from "node:crypto";
 import { capacityModel, type EngineStep, type Recurrence, type TierDeliverables } from "@transpera-flow/engine";
 import type { ProcessCategory } from "../process-category";
 import { applyCapacityStarter, type Queryable } from "../capacity-starter";
+import type { StoredStepChange } from "../capacity-changes";
 import { EXAMPLE_PURPOSE_KEY, examplePurposes } from "./capacity-example-purposes";
 
 export { EXAMPLE_PURPOSES, EXAMPLE_PURPOSE_KEY, examplePurposes } from "./capacity-example-purposes";
@@ -95,6 +97,43 @@ export function fixedRecurrence(r: Recurrence, deliverables: TierDeliverables, a
   return { every: r.every, times: round(r.times) };
 }
 const round = (v: number) => Math.round(v * 1e6) / 1e6;
+
+/**
+ * A change as part of solutions: one solution, status `testing`, for each process whose LIVE version holds steps the change acts on, named after the
+ * change. Each is a copy of that live version with the change's effects on its steps in `step_changes`, as the migration 20270136000000 makes them
+ * from a stored change. Returns the ids of the solutions made, in process order. Run inside the caller's transaction.
+ */
+export async function addChangeSolutions(db: Queryable, workspaceId: string, change: StoredStepChange & { id: string }): Promise<string[]> {
+  const found = (
+    await db.query(
+      "select s.id, p.id as process_id, p.live_revision_id from public.steps s join public.processes p on p.live_revision_id = s.revision_id where p.workspace_id = $1 and not p.is_company and s.id = any($2::uuid[])",
+      [workspaceId, change.effects.map((e) => e.step)],
+    )
+  ).rows as { id: string; process_id: string; live_revision_id: string }[];
+  const byProcess = new Map<string, { revision: string; steps: Set<string> }>();
+  for (const f of found) {
+    const entry = byProcess.get(f.process_id) ?? { revision: f.live_revision_id, steps: new Set<string>() };
+    entry.steps.add(f.id);
+    byProcess.set(f.process_id, entry);
+  }
+  const made: string[] = [];
+  for (const [processId, { revision, steps }] of [...byProcess].sort(([a], [b]) => (a < b ? -1 : 1))) {
+    const mine = { ...change, effects: change.effects.filter((e) => steps.has(e.step)) };
+    const r = await db.query(
+      `insert into public.solutions (workspace_id, process_id, base_revision_id, name, steps, changed_step_ids, status, step_changes)
+       select $1, $2, $3, $4,
+              jsonb_build_object(
+                'steps', coalesce((select jsonb_agg(to_jsonb(s) - 'revision_id' - 'workspace_id' - 'process_id' order by s.id) from public.steps s where s.revision_id = $3), '[]'::jsonb),
+                'edges', coalesce((select jsonb_agg(to_jsonb(e) - 'revision_id' - 'workspace_id' - 'process_id' order by e.id) from public.edges e where e.revision_id = $3), '[]'::jsonb),
+                'entry_step_id', null),
+              $5::jsonb, 'testing', $6::jsonb
+       returning id`,
+      [workspaceId, processId, revision, change.name, JSON.stringify([...steps]), JSON.stringify([mine])],
+    );
+    made.push(String((r.rows[0] as { id: string }).id));
+  }
+  return made;
+}
 
 /**
  * Loads the example into an empty workspace. Run inside a transaction. Does nothing, and says why, when the workspace has anything in it.
@@ -277,15 +316,21 @@ export async function loadCapacityExample(db: Queryable, workspaceId: string, to
     }
   }
 
-  // ---- the prototype's 13 changes (P7): stored, so the Sandbox can swap them in. Their effects point at the step rows above ----------------------
+  // ---- the prototype's 13 changes (P7; D53): each is part of a solution (a testing copy of the live process) for every process its steps are in ------------
   let changes = 0;
-  if ((await rows("select 1 from information_schema.tables where table_schema = 'public' and table_name = 'capacity_changes'")).length > 0) {
+  if ((await rows("select 1 from information_schema.columns where table_schema = 'public' and table_name = 'solutions' and column_name = 'step_changes'")).length > 0) {
     for (const c of model.changes ?? []) {
       const effects = c.effects.map((e) => ({ ...e, step: stepDbIds.get(e.step) ?? e.step }));
-      await db.query(
-        "insert into public.capacity_changes (workspace_id, name, kind, effects, adoption, ramp_months, tiers, source) values ($1, $2, $3, $4::jsonb, $5, $6, $7, 'estimate')",
-        [workspaceId, c.name, c.kind, JSON.stringify(effects), c.adoption, c.rampMonths, c.tiers ?? null],
-      );
+      await addChangeSolutions(db, workspaceId, {
+        id: randomUUID(),
+        name: c.name,
+        kind: c.kind,
+        effects,
+        adoption: c.adoption,
+        ramp_months: c.rampMonths,
+        tiers: c.tiers ?? null,
+        cost_monthly: null,
+      });
       changes++;
     }
   }

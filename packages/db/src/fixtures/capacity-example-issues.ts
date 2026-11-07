@@ -2,7 +2,7 @@
 //
 // `addExampleIssues(db, workspaceId)` adds to a workspace the example loader filled (capacity-example.ts):
 //   - eight issues on real steps of the example processes, in plain words (the prototype's five, and three that fit the data);
-//   - the links from the stored changes to the issue each fixes (`capacity_changes.issue_id`);
+//   - the links from the solutions that hold the example's changes (capacity-example.ts, `solutions.step_changes`) to the issue each fixes (`solution_issues`);
 //   - three solutions (a copied map of one process with a real routing change), each linked to an issue, at different stages.
 //
 // THE DATA IS MADE UP, like the example's. Everything is written through the SQL functions the app calls (`save_issue`,
@@ -35,7 +35,7 @@ interface IssueSpec {
   severity: Rating;
   owner: string;
   evidence: string;
-  /** Stored changes that fix it, by exact name. */
+  /** Changes that fix it, by exact name: the solutions that hold them (one for each process the change acts on) are linked to the issue. */
   changes: string[];
 }
 
@@ -157,15 +157,24 @@ export async function addExampleIssues(db: Queryable, workspaceId: string): Prom
       issueIds.set(spec.key, String((saved.issue as { id: string }).id));
     }
 
-    // ---- the stored changes that fix them ----------------------------------------------------------------------------------------------
+    // ---- the solutions that hold the changes that fix them ----------------------------------------------------------------------------
+    // Linked as a record, as the migration 20270136000000 links a moved change: the insert's two triggers are off so the issue keeps the status the example
+    // gives it below (the example wants a mix) and logs nothing.
     let changesLinked = 0;
+    await db.query("alter table public.solution_issues disable trigger solution_issues_before_insert");
+    await db.query("alter table public.solution_issues disable trigger solution_issue_tested");
     for (const spec of ISSUES) {
       for (const name of spec.changes) {
-        const r = await db.query("update public.capacity_changes set issue_id = $3 where workspace_id = $1 and name = $2", [workspaceId, name, issueIds.get(spec.key)]);
-        if (r.rowCount !== 1) throw new Error(`The example has no single stored change called "${name}".`);
+        const held = await rows("select id from public.solutions where workspace_id = $1 and name = $2 and step_changes <> '[]'::jsonb order by id", [workspaceId, name]);
+        if (held.length === 0) throw new Error(`The example has no solution holding a change called "${name}".`);
+        for (const h of held) {
+          await db.query("insert into public.solution_issues (solution_id, issue_id, workspace_id, auto_note) values ($1, $2, $3, $4)", [h.id, issueIds.get(spec.key), workspaceId, UNCHECKED_NOTE]);
+        }
         changesLinked++;
       }
     }
+    await db.query("alter table public.solution_issues enable trigger solution_issues_before_insert");
+    await db.query("alter table public.solution_issues enable trigger solution_issue_tested");
 
     // ---- the solutions -----------------------------------------------------------------------------------------------------------------
     /** The live map of a process as a solution's copy: its rows without revision, workspace and process, as the app stores them. */

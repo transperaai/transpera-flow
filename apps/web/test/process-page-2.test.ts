@@ -28,6 +28,7 @@ const sol = (id: string, extra: Partial<SolutionRow> = {}): SolutionRow => ({
   steps: { steps: [], edges: [], entry_step_id: null },
   changed_step_ids: [],
   lever_changes: [],
+  step_changes: [],
   created_at: `2026-10-0${id.length}T00:00:00Z`,
   updated_at: "",
   created_by: null,

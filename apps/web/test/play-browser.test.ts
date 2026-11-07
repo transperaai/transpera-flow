@@ -8,9 +8,9 @@ import { bundleHarness } from "./build-harness";
 
 // The free-play Sandbox in a real browser, with its simulations in a real Web Worker (./play-harness/entry.tsx), on the engine fixture `capacityModel()` and
 // the Set up data that agrees with it (made-up data): the three parts (company map on top, levers left, results right), the result charts (heatmap, over-line bars, three line charts against
-// today's path dashed, time donuts), a lever that moves the charts, an automation switched on, a map version picked from a process's popover (badge, chip, reset to
+// today's path dashed, time donuts), a lever that moves the charts, no automation section among the levers (D53), a map version picked from a process's popover (badge, chip, reset to
 // today), a price rise with "Clients react", Reset levers, the levers resetting when the
-// page is left (unmounted and opened again), no save, scenario or compare UI, the changes list (add, edit, remove) for an admin and not for a Viewer, pay
+// page is left (unmounted and opened again), no save, scenario or compare UI, no automation levers (D53), pay
 // hidden, and a phone, where the page never scrolls sideways. With PLAY_SHOTS=<dir> it also saves the screenshots (light and dark, 1440 and 400 px).
 
 let browser: Browser;
@@ -88,8 +88,11 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
       expect(top).toBe(true);
 
       // Every group of levers the brief lists, and Reset.
-      for (const g of ["market", "add", "lose", "price", "people", "automation"]) expect(await page.locator(`[data-lever-group="${g}"]`).count(), g).toBe(1);
-      expect(await text(page, "[data-play-levers]")).toMatch(/Win new clients[\s\S]*Lose clients[\s\S]*Prices[\s\S]*People[\s\S]*Automation and augmentation/);
+      for (const g of ["market", "add", "lose", "price", "people"]) expect(await page.locator(`[data-lever-group="${g}"]`).count(), g).toBe(1);
+      expect(await text(page, "[data-play-levers]")).toMatch(/Win new clients[\s\S]*Lose clients[\s\S]*Prices[\s\S]*People/);
+      // The levers are business conditions only (D53): an automation is part of a process version, picked on the map.
+      expect(await page.locator('[data-lever-group="automation"], [data-automation-switch], [data-changes-manage], [data-change-add]').count()).toBe(0);
+      expect(await text(page, "[data-play-levers]")).not.toMatch(/Automation and augmentation/);
       expect(await page.locator("[data-play-reset]").count()).toBe(1);
       expect(await page.locator('[data-lever="priceReaction"] option').allInnerTexts()).toEqual(["Barely", "Normally", "Strongly"]);
 
@@ -98,9 +101,6 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
       expect(await text(page, "[data-version-summary]")).toBe("All processes on today's map. Click a process to load another version.");
       for (const gone of [/No solutions for this process/, /No blocks yet/, /Company processes/]) expect(await page.locator("body").innerText(), String(gone)).not.toMatch(gone);
       expect(await page.locator("[data-block], [data-step-row], [data-version]").count()).toBe(0);
-      // Automations are a lever group: a switch and a muted line naming the steps each acts on.
-      expect(await page.locator("[data-automation-switch]").count()).toBeGreaterThan(5);
-      expect(await text(page, "[data-automation-steps]")).toMatch(/^(Automation|Augmentation), acts on .+/);
 
       // No "What happens" card: the numbers are in the chart headers. On today's path there is no change, no switch and no dashed copy.
       expect(await page.locator("[data-verdict], [data-verdict-line]").count()).toBe(0);
@@ -199,26 +199,6 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     await page.close();
   });
 
-  it("an automation switched on runs from its month, and switching it off puts today's path back", async () => {
-    const { page, errors } = await mount();
-    await ready(page);
-    const row = page.locator("[data-automation]").first();
-    const id = (await row.getAttribute("data-automation"))!;
-    expect(await row.getAttribute("data-on")).toBe("false");
-    expect(await page.locator(`[data-lever="automation:${id}"]`).count()).toBe(0);
-    await page.locator(`[data-automation-switch="${id}"]`).click();
-    expect(await row.getAttribute("data-on")).toBe("true");
-    await page.locator(`[data-lever="automation:${id}"]`).selectOption("3");
-    await settled(page);
-    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("true");
-    await page.locator(`[data-automation-switch="${id}"]`).click();
-    expect(await row.getAttribute("data-on")).toBe("false");
-    await settled(page);
-    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("false");
-    expect(errors).toEqual([]);
-    await page.close();
-  });
-
   it("clicking a process on the map picks its version: a badge, a chip and the run using it; Reset to today takes it back", async () => {
     const { page, errors } = await mount();
     await ready(page);
@@ -301,57 +281,6 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     await page.close();
   });
 
-  it("an admin adds, edits and removes a change; a Viewer can't", async () => {
-    const admin = await mount();
-    await ready(admin.page);
-    const n = await admin.page.locator("[data-changes-list] li").count();
-    expect(n).toBeGreaterThan(5);
-    // Add and Edit are behind the group's Manage button.
-    expect(await admin.page.locator("[data-change-add]").count()).toBe(0);
-    await admin.page.locator("[data-changes-manage]").click();
-    await admin.page.locator("[data-change-add]").click();
-    await admin.page.locator("[data-change-name]").fill("Auto QA");
-    await admin.page.locator("[data-change-save]").click();
-    await admin.page.waitForSelector("[data-change-dialog]", { state: "detached" });
-    expect(await admin.page.locator("[data-changes-list] li").count()).toBe(n + 1);
-    expect(await text(admin.page, "[data-changes-list]")).toContain("Auto QA");
-    expect(await admin.page.evaluate(() => window.__saved.map((r) => r.name))).toEqual(["Auto QA"]);
-    // There is no picker for an issue: changes are not linked to issues.
-    await admin.page.locator('[aria-label="Edit Auto QA"]').click();
-    expect(await admin.page.locator('[aria-label="Issue it fixes"]').count()).toBe(0);
-    await admin.page.keyboard.press("Escape");
-    // A bad one is refused in words.
-    await admin.page.locator("[data-change-add]").click();
-    await admin.page.locator("[data-change-name]").fill("");
-    await admin.page.locator("[data-change-save]").click();
-    expect(await text(admin.page, "[data-change-error]")).toBe("Give the change a name of up to 200 characters.");
-    await admin.page.keyboard.press("Escape");
-    // Edit it, then remove it.
-    await admin.page.locator('[aria-label="Edit Auto QA"]').click();
-    await admin.page.locator("[data-change-name]").fill("Auto QA two");
-    await admin.page.locator("[data-change-save]").click();
-    await admin.page.waitForSelector("[data-change-dialog]", { state: "detached" });
-    expect(await text(admin.page, "[data-changes-list]")).toContain("Auto QA two");
-    await admin.page.locator('[aria-label="Edit Auto QA two"]').click();
-    await admin.page.locator("[data-change-remove]").click();
-    await admin.page.waitForSelector("[data-change-dialog]", { state: "detached" });
-    expect(await admin.page.locator("[data-changes-list] li").count()).toBe(n);
-    expect(admin.errors).toEqual([]);
-    await admin.page.close();
-
-    const viewer = await mount({ viewer: true });
-    await ready(viewer.page);
-    expect(await viewer.page.locator("[data-changes-manage]").count()).toBe(0);
-    expect(await viewer.page.locator("[data-change-add]").count()).toBe(0);
-    expect(await viewer.page.getByRole("button", { name: /^Edit / }).count()).toBe(0);
-    // A Viewer still plays: the levers work.
-    await viewer.page.locator('[data-lever="add:org"]').fill("2");
-    await settled(viewer.page);
-    expect(await viewer.page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("true");
-    expect(viewer.errors).toEqual([]);
-    await viewer.page.close();
-  });
-
   it("hides DLER from someone who can't see pay, and still shows the rest", async () => {
     const { page, errors } = await mount({ payHidden: true });
     await ready(page);
@@ -378,7 +307,6 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
         await page.locator('[data-lever="add:org"]').fill("2");
         await page.locator('[data-lever="add:perf"]').fill("1");
         await page.locator('[data-lever="addMonths"]').selectOption("6");
-        await page.locator("[data-automation-switch]").first().click();
         const card = page.locator("[data-company-map] [data-id]").first();
         await card.click();
         await page.locator("[data-version-popover] [data-version-option]").nth(1).click();

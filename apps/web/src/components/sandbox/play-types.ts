@@ -1,5 +1,5 @@
 // What the free-play Sandbox is given about each process of the company model (built from the workspace's published processes and solutions by the
-// page, or from an engine model by the browser test): the map's version popover lists the solutions, the automation rows name the steps.
+// page, or from an engine model by the browser test): the map's version popover lists the solutions, a version that holds an automation runs it (D53).
 
 import type { SolutionStatus } from "@transpera-flow/db";
 

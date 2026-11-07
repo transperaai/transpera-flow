@@ -1,10 +1,10 @@
 // The real free-play Sandbox page on a bare page with the example agency (made-up data), for ../q16-sandbox-map.test.ts: the company map with its version
-// popover, the automations in the levers, the run in a real Web Worker. The test loads the example into a throwaway database with the real migrations,
+// popover, the run in a real Web Worker. The test loads the example into a throwaway database with the real migrations,
 // reads the workspace the way the Sandbox page does and hands the result over as JSON. Next's modules and Server Actions are stood in for by
 // ../build-harness.ts. Nothing here ships.
 
 import { createRoot } from "react-dom/client";
-import type { CapacityChangeRow, CapacitySetup, IssueRow, ProcessBundle, ProcessPart, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
+import type { CapacitySetup, IssueRow, ProcessBundle, ProcessPart, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
 import { PlayPage } from "@/components/sandbox/play-page";
 import type { DepartmentLaneInput } from "@/lib/overview/department-lanes";
 
@@ -13,7 +13,6 @@ export interface Q16Data {
   parts: ProcessPart[];
   company: ProcessPart | null;
   setup: CapacitySetup;
-  library: CapacityChangeRow[];
   solutions: SolutionRow[];
   solutionLinks: SolutionIssueRow[];
   issues: IssueRow[];
@@ -45,7 +44,6 @@ window.mountQ16 = (data, options = {}) =>
         parts={data.parts}
         company={data.company}
         setup={data.setup}
-        library={data.library}
         solutions={data.solutions}
         solutionLinks={data.solutionLinks}
         issues={data.issues}
