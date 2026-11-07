@@ -26,9 +26,23 @@ question.
    - **Go back** replaces drawing a loop line by hand. The engine already runs loops, so the engine doesn't change; how
      it's stored is still to decide.
 
+3. **No processes in the editor: blocks only.**
+   - Editing a linked process changes every process that holds it, so the editor's "+ Process" and its process
+     library go.
+   - Processes connect only on the company map, by hand-off lines (D51).
+   - A block is always copied in and is yours to change.
+   - **Existing links** (holder steps) stay visible, as a card labelled "Linked process: changes when 'X' changes", with
+     one action, "Turn into steps". This copies the steps in and cuts the link. No new links can be made.
+4. **Loose ends and evidence leave the side panel.**
+   - **Loose ends.** Each problem shows on its node as a red mark that explains itself on hover. The editor bar has one
+     line, "2 things to fix before this can simulate", that jumps to the first. Publish stays blocked while any are left.
+   - **Evidence** leaves the editor. The record stays, and it is shown and edited on the Sources pages.
+6. **"Go back" is stored as a line, drawn as a node** (a technical choice, made by Chat A).
+   - It is a line from a decision's branch back to an earlier step, which is what the engine already runs.
+   - The canvas draws the branch's end as a "Go back to X" node.
+   - Its "how often" is the branch's %.
+   - There is no new step kind, no migration and no engine change.
+
 ## Open
 
-3. Processes and blocks in the editor: keep both, merge them, or rename them.
-4. What leaves the side panel (loose ends, evidence), and where it goes.
 5. How a decision's branches are made and edited.
-6. How "Go back" is stored: as a node, or as a line drawn as a node.
