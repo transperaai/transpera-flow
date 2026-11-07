@@ -1,8 +1,8 @@
 "use client";
 
 // The Capacity page (capacity build P5; the prototype's Capacity screen, docs/prototypes/client-capacity-app.PROTOTYPE.html `pageCapacity`).
-// Every widget leads with its answer in a sentence, then the picture, with "How this works" folded away. The numbers come from two
-// simulations in the worker (Today, then the next 12 months) and the pure figures in @transpera-flow/db (capacity-figures.ts).
+// Every widget leads with its answer in a sentence, then the picture, with "How this works" folded away. The numbers come from
+// a simulation of Today in the worker and the pure figures in @transpera-flow/db (capacity-figures.ts).
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -11,8 +11,6 @@ import {
   busyShares,
   departmentCeiling,
   dler,
-  hiringAdvice,
-  hiringDelayAt,
   leaver,
   limitedBy,
   missingForCapacity,
@@ -30,7 +28,7 @@ import { MetaLine, PageHeader } from "@/components/page-kit";
 import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
-import { useCapacityRuns, type PhaseState } from "@/lib/sim/use-capacity-runs";
+import { useCapacityRuns } from "@/lib/sim/use-capacity-runs";
 import { cn } from "@/lib/utils";
 import { BusyBar, Chip, Dumbbell, How, Kpi, RoomGauge, Section, StackBar, TierChips, toneOf, TONE_TEXT } from "./widgets";
 
@@ -39,14 +37,10 @@ export interface CapacityViewProps {
   /** The workspace's model; null when it can't be built (`modelError` says why). */
   model: EngineModel | null;
   modelError?: string | null;
-  /** The 12-month run's model (planned hires, end dates and leave) and its months' edges. */
-  year: { model: EngineModel; monthStarts: number[] } | null;
   /** `/w/<slug>`. */
   base: string;
   /** Step id → the process it belongs to, for the links to steps (D32). */
   stepProcess: Record<string, string>;
-  /** The day the 12-month run starts (ISO date), to name its months. */
-  startDate?: string;
 }
 
 const f0 = (v: number) => formatNumber(v, 0);
@@ -87,10 +81,10 @@ export function CapacityHeader({ base }: { base?: string }) {
 }
 
 export function CapacityView(props: CapacityViewProps) {
-  const { setup, model, year, base } = props;
+  const { setup, model, base } = props;
   const hasTiers = setup.services.some((s) => s.active && s.department_id && s.tier_id);
   const today = useMemo(() => (model && hasTiers ? todayModel(model) : null), [model, hasTiers]);
-  const runs = useCapacityRuns(today, hasTiers ? (year?.model ?? null) : null, year?.monthStarts ?? null);
+  const runs = useCapacityRuns(today, null, null);
   const problems = useMemo(() => (model ? capacityProblems(model) : []), [model]);
   const missing = useMemo(() => missingForCapacity(setup, { salariesVisible: !setup.payHidden }), [setup]);
 
@@ -115,7 +109,6 @@ export function CapacityView(props: CapacityViewProps) {
       className="flex min-w-0 flex-col gap-6"
       data-capacity
       data-today-ms={runs.today.status === "done" ? Math.round(runs.today.run.durationMs) : undefined}
-      data-year-ms={runs.year.status === "done" ? Math.round(runs.year.run.durationMs) : undefined}
     >
       <CapacityHeader base={base} />
       {props.modelError && (
@@ -131,7 +124,6 @@ export function CapacityView(props: CapacityViewProps) {
         </div>
       )}
       {!todayRun || !model ? <RunningCard what="Working out who has room, from a simulation of today's clients…" /> : <TodaySections {...props} model={model} result={todayRun} missing={missing} />}
-      <NextTwelve {...props} phase={runs.year} />
     </div>
   );
 }
@@ -572,65 +564,6 @@ function TimeToServe({ setup, model }: { setup: CapacitySetup; model: EngineMode
       <How
         works="Adds up every step of the monthly servicing processes for one client of the tier, all roles together, using the tier's meetings, words, links, ad-hoc chance and so on, with the tier multipliers and any changes at their start. This is the planned time, not a simulation: it ignores waiting and rework. Named clients use their own values."
         tells="what takes the time, and which clients earn the most per hour of effort."
-      />
-    </Section>
-  );
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-
-/** "Nov 26": the month `i` months after the one `start` falls in. */
-function monthLabel(start: string, i: number): string {
-  const d = new Date(`${start.slice(0, 7)}-01T00:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() + i);
-  return `${d.toLocaleString("en-GB", { month: "short", timeZone: "UTC" })} ${String(d.getUTCFullYear()).slice(2)}`;
-}
-
-function NextTwelve({ setup, year, phase, startDate }: CapacityViewProps & { phase: PhaseState }) {
-  const result = phase.status === "done" ? phase.run.result : null;
-  const market = year?.model.market;
-  const advice = useMemo(() => (result ? hiringAdvice(setup, result, (m) => hiringDelayAt(market, m)) : []), [setup, result, market]);
-  if (!year) return null;
-  const monthName = (i: number) => (i === 0 ? "now" : startDate ? monthLabel(startDate, i) : `month ${i + 1}`);
-  const over = advice.filter((a) => a.overFrom !== null);
-  const under = advice.filter((a) => a.overFrom === null);
-  return (
-    <Section title="The next 12 months" data-next-twelve>
-      {phase.status === "error" ? (
-        <p role="alert" className="text-sm text-crit">
-          The 12-month run could not finish: {phase.error}
-        </p>
-      ) : !result ? (
-        <div role="status" aria-busy="true" className="flex flex-col gap-2">
-          <p className="text-sm text-muted-foreground">Running the next 12 months…</p>
-          <Skeleton className="h-5 w-1/2" />
-        </div>
-      ) : (
-        <>
-          <p className="text-base leading-snug">{over.length ? "What to do:" : "No team goes over its line in the next 12 months."}</p>
-          {over.length > 0 && (
-            <ul className="flex list-disc flex-col gap-1 pl-5 text-sm" data-todo>
-              {over.map((a) => (
-                <li key={a.roleId}>
-                  <b>{a.name}:</b>{" "}
-                  {a.overFrom === 0 ? (
-                    "over the line now"
-                  ) : (
-                    <>
-                      over the line from <b>{monthName(a.overFrom!)}</b>
-                    </>
-                  )}
-                  . {a.hireBy! <= 0 ? <span className="font-semibold text-crit">Start hiring now.</span> : `Start hiring by ${monthName(a.hireBy!)}.`}
-                </li>
-              ))}
-            </ul>
-          )}
-          {under.length > 0 && over.length > 0 && <p className="text-xs text-muted-foreground">Stay under their line all year: {under.map((a) => a.name).join(", ")}.</p>}
-        </>
-      )}
-      <How
-        works="Runs the year month by month: today's clients, expected wins from lead flow, churn, planned hires and leavers, and onboarding work for each new client. A team goes over when its average busy share passes its line. Hiring advice allows 2 months to hire, stretched or shortened by the market's time to hire in the month you would hire."
-        tells="when each team runs out of room, and when to start hiring so the new person arrives in time."
       />
     </Section>
   );
