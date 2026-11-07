@@ -1525,10 +1525,24 @@ function Canvas({
       placed.set(g.decisionId, k + 1);
       const edge = bundle.edges.find((e) => e.id === g.edgeId)!;
       const height = measured.get(decision.id)?.height ?? CARD_SIZE.height + 30;
+      // Below the decision, moved down until it lands on no other card.
+      const w = 190;
+      const h = 34;
+      const x = at.x + 8 + k * 24;
+      let y = at.y + height + 36 + k * 44;
+      const hits = (yy: number) =>
+        bundle.steps.some((st) => {
+          if (st.id === decision.id || st.parent_step_id || st.kind === "group") return false;
+          const size = measured.get(st.id) ?? (st.kind === "start" || st.kind === "end" ? TERMINAL_SIZE : CARD_SIZE);
+          const sx = Number(st.x);
+          const sy = Number(st.y);
+          return x < sx + size.width + 12 && x + w + 12 > sx && yy < sy + size.height + 12 && yy + h + 12 > sy;
+        });
+      for (let i = 0; i < 12 && hits(y); i++) y += 40;
       return {
         id: g.id,
         type: "goback",
-        position: { x: at.x + 8 + k * 24, y: at.y + height + 36 + k * 44 },
+        position: { x, y },
         selected: selection.edges.includes(g.edgeId),
         draggable: false,
         connectable: false,
