@@ -89,6 +89,7 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
   "solutions": [
     "changed_step_ids",
     "lever_changes",
+    "step_changes",
     "steps"
   ],
   "steps": [
