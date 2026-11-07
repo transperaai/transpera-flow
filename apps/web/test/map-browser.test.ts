@@ -1,4 +1,4 @@
-import { build } from "esbuild";
+import { bundleHarness } from "./build-harness";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -25,18 +25,7 @@ const LAYOUT_CSS = `
 `;
 
 beforeAll(async () => {
-  const out = await build({
-    entryPoints: [fileURLToPath(new URL("./map-harness/entry.tsx", import.meta.url))],
-    bundle: true,
-    format: "iife",
-    platform: "browser",
-    write: false,
-    jsx: "automatic",
-    define: { "process.env.NODE_ENV": '"production"' },
-    alias: { "@": fileURLToPath(new URL("../src", import.meta.url)) },
-    logLevel: "silent",
-  });
-  script = out.outputFiles[0]!.text;
+  script = await bundleHarness(new URL("./map-harness/entry.tsx", import.meta.url));
   css = readFileSync(createRequire(import.meta.url).resolve("@xyflow/react/dist/style.css"), "utf8");
   css += readFileSync(fileURLToPath(new URL("../src/styles/react-flow.css", import.meta.url)), "utf8");
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
