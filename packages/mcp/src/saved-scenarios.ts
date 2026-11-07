@@ -7,6 +7,7 @@ import {
   canSeePerson,
   A_TEAM_MEMBER,
   loadProcessBySlug,
+  withCompanyRun,
   loadScenarios,
   loadSandboxScenarios,
   loadSolutions,
@@ -52,7 +53,8 @@ export interface SandboxInputs {
 export async function loadSandboxInputs(ctx: ToolContext, ws: WorkspaceRef): Promise<SandboxInputs> {
   const loaded = await loadProcessBySlug(ctx.db, ws.slug, { draft: false });
   if (!loaded || loaded.live.revision.number === 0) throw new ToolError("not_found", `Nothing is published in '${ws.name}' yet, so there is no live model to run scenarios on. Publish a process first.`);
-  const live = loaded.live;
+  // The company map decides what is simulated once a person has published a version (Q17): the Sandbox's default, as the pages read it.
+  const live = await withCompanyRun(ctx.db, loaded.live);
   const [solutions, scenarios] = await Promise.all([loadSolutions(ctx.db, ws.id), loadSandboxScenarios(ctx.db, ws.id)]);
   return { bundle: live, solutions, scenarios };
 }

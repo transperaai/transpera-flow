@@ -56,6 +56,7 @@ export {
   type ProcessNode,
   type RollUp,
 } from "./nesting";
+export { NO_PIPELINE_ON_MAP, companyBundle, companyEngineModel, liveMapDifferences, type CompanyBundleResult, type CompanyRunNote, type CompanyRunNoteKind } from "./company-run";
 export { COMPANY_CARD, COMPANY_GAP, DEMO_COMPANY_PROCESS_ID, defaultCompanyPart, holderStepId } from "./company-map";
 export {
   MAX_POISSON_PER_MONTH,
@@ -160,6 +161,7 @@ export {
   loadIssuesForReader,
   readerSeesPeople,
   loadLiveProcessBySlug,
+  withCompanyRun,
   loadProcessBundle,
   loadProcessBySlug,
   loadServicingContext,

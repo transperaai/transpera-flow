@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { larkspurBundle, northbeamBundle, toEngineModel } from "../src";
+import { companyEngineModel, defaultCompanyPart, larkspurBundle, northbeamBundle, partOf, toEngineModel, type ProcessBundle } from "../src";
 
 // Capacity build, P1: the Set up screens store new columns but must not change what the engine is given.
 // `snapshots/to-engine-model.json` was taken from the code before P1, so every variant below must stay deep-equal to it.
@@ -36,5 +36,32 @@ describe("toEngineModel is unchanged by the capacity Set up columns", () => {
     it(`${key} deep-equals the model from before P1`, () => {
       expect(now[key]).toEqual(saved[key]);
     });
+  }
+});
+
+// Q17 (ADR 0023): the company map drives the run, so the same variants built through `companyEngineModel` with the default company map of the bundle's
+// processes (the map the database makes for a workspace) must deep-equal the very same saved entries. The snapshot file is not touched.
+function throughCompanyMap(b: ProcessBundle, options: Parameters<typeof toEngineModel>[1]) {
+  const parts = [partOf(b), ...(b.otherProcesses ?? [])];
+  const made = companyEngineModel(defaultCompanyPart(b.workspace.id, parts), b, parts, options);
+  expect(made.notes).toEqual([]);
+  return JSON.parse(JSON.stringify(made.model)) as unknown;
+}
+
+describe("the company map's run is today's run for the system-made map", () => {
+  const saved = JSON.parse(readFileSync(FILE, "utf8")) as Record<string, unknown>;
+  for (const [name, b] of [["northbeam", northbeamBundle()], ["larkspur", larkspurBundle()]] as const) {
+    const variants: [string, ProcessBundle, Parameters<typeof toEngineModel>[1]][] = [
+      [name, b, { startDate: START }],
+      [`${name}:planned`, b, { startDate: START, planned: true }],
+      [`${name}:purposes`, b, { startDate: START, purposes: true }],
+      [`${name}:payHidden`, { ...b, payHidden: true }, { startDate: START }],
+      [`${name}:noGroups`, { ...b, clientGroups: [] }, { startDate: START }],
+    ];
+    for (const [key, bundle, options] of variants) {
+      it(`${key} through companyEngineModel deep-equals the saved entry`, () => {
+        expect(throughCompanyMap(bundle, options)).toEqual(saved[key]);
+      });
+    }
   }
 });

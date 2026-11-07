@@ -192,6 +192,12 @@ export interface ProcessRow {
   department_id?: string | null;
   /** The owner put it under "Sales and whole business" although its servicing links would work out a department. Never with `department_id`. */
   whole_business?: boolean;
+  /**
+   * The company map only (Q17, D51, migration 20270134000000): true once a person has published a version of it, from when its processes and
+   * hand-off lines are what the live run simulates. False: the live run is still today's, whatever the map holds. Absent (true) on fixtures and
+   * on every process but the company map.
+   */
+  map_drives_run?: boolean;
 }
 
 export interface ProcessRevisionRow {
@@ -670,6 +676,12 @@ export interface ServiceServicingRow {
   provenance: ProvenanceMap;
 }
 
+/** One hand-off line of the company map the run honours: work won or done in process `from` goes on in process `to` (both process ids). */
+export interface CompanyHandoff {
+  from: string;
+  to: string;
+}
+
 /** One process at one revision: what a run needs of a process other than the one on screen. */
 export interface ProcessPart {
   process: ProcessRow;
@@ -751,6 +763,14 @@ export interface ProcessBundle {
    */
   servicingLinks?: ServiceServicingRow[];
   otherProcesses?: ProcessPart[];
+  /**
+   * Hand-offs between pipelines (Q17, ADR 0023), set only by `companyBundle` when the company map has a line from a pipeline to another
+   * pipeline: in order from the sales pipeline (`process`), each says that every client won in `from` carries on into `to`. Each `to` is in
+   * `otherProcesses`. Absent: nothing is handed on and `toEngineModel` takes the path it always took.
+   */
+  handoffs?: CompanyHandoff[];
+  /** Set by `companyBundle`: the name of every process on the company map, for notes about one that isn't in the run. */
+  companyNames?: Record<string, string>;
   /**
    * The capacity Set up data the engine reads (P1's columns, mapped by P2b: `docs/plans/capacity/p2b-mapping-brief.md`). Present only
    * for a workspace that has at least one tier service (a service with a department and a tier); absent, the model is exactly the
@@ -1062,8 +1082,8 @@ export type _SchemaDriftChecks = [
   Assert<Matches<PersonSkillRow, "person_skills">>,
   Assert<Matches<PersonLeaveRow, "person_leave">>,
   // is_company and archived_at are optional here (absent on fixtures).
-  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "category" | "department_id" | "whole_business">, "processes">>,
-  Assert<Matches<Required<Pick<ProcessRow, "archived_at" | "department_id" | "whole_business">>, "processes">>,
+  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "category" | "department_id" | "whole_business" | "map_drives_run">, "processes">>,
+  Assert<Matches<Required<Pick<ProcessRow, "archived_at" | "department_id" | "whole_business" | "map_drives_run">>, "processes">>,
   Assert<Matches<ProcessRevisionRow, "process_revisions">>,
   // replaced_by defaults to '{}' in the table; the app leaves it out of new steps.
   Assert<Matches<Omit<StepRow, "replaced_by">, "steps">>,

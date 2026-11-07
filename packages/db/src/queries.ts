@@ -10,6 +10,7 @@ import type { CitingRow } from "./evidence";
 import { uiStatus, type StoredIssueStatus } from "./issue-status";
 import { hideAiIssueKey } from "./person-labels";
 import { partitionSteps } from "./retired";
+import { companyBundle } from "./company-run";
 import type { RunRow } from "./runs";
 import type { ScenarioPatch } from "@transpera-flow/engine";
 import { patchOf, type SandboxChange } from "./sandbox-levers";
@@ -410,7 +411,7 @@ export async function loadProcessBundle(
   };
 }
 
-const PROCESS_COLUMNS = "id, workspace_id, name, kind, entity_name, description, category, live_revision_id, parent_process_id, is_company, archived_at, department_id, whole_business" as const;
+const PROCESS_COLUMNS = "id, workspace_id, name, kind, entity_name, description, category, live_revision_id, parent_process_id, is_company, archived_at, department_id, whole_business, map_drives_run" as const;
 
 /** Where a process sits: the process whose LIVE version holds it by a link (B12, ADR 0014). */
 export interface Placement {
@@ -648,7 +649,25 @@ async function loadCompanyPartAt(db: Db, workspaceId: string, number: number | n
  * Only the live revision: simulation, forecasts and reports never see a draft.
  */
 export async function loadLiveProcessBySlug(db: Db, slug: string): Promise<ProcessBundle | null> {
-  return (await loadProcessBySlug(db, slug, { draft: false }))?.live ?? null;
+  const live = (await loadProcessBySlug(db, slug, { draft: false }))?.live ?? null;
+  // Never published (the stand-in revision): there is nothing for a map to drive.
+  return live && live.revision.number !== 0 ? withCompanyRun(db, live) : live;
+}
+
+/**
+ * The company run (Q17, ADR 0023): `bundle`, the workspace's default (the first live process, no process id), rebuilt from its live company
+ * map when `map_drives_run` says the map decides what is simulated: rooted at the map's sales pipeline, with the processes on the map (and
+ * their hand-offs). Every screen that runs the company reads its bundle through here, so Capacity, the Overview, Set up, issues and solutions'
+ * verdicts agree with the Sandbox's default. A bundle opened for one process (a process page, its draft included) is never passed through it.
+ * Returned as it is when the flag is false (the live run is still today's), when there is no live map, or when the map has no sales pipeline
+ * (the Sandbox says so; the run is then today's).
+ */
+export async function withCompanyRun(db: Db, bundle: ProcessBundle): Promise<ProcessBundle> {
+  const company = await db.selectFrom("processes").select(["id", "map_drives_run"]).where("workspace_id", "=", bundle.workspace.id).where("is_company", "=", true).executeTakeFirst();
+  if (!company || !company.map_drives_run) return bundle;
+  const [part, parts] = await Promise.all([loadCompanyPartAt(db, bundle.workspace.id, null), loadLiveParts(db, bundle.workspace.id)]);
+  if (!part) return bundle;
+  return companyBundle(bundle, part, parts).bundle ?? bundle;
 }
 
 /** A workspace's process as the process picker lists it (issue #76). */

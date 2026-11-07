@@ -46,13 +46,24 @@ interface Slot {
   run: PlayRun;
 }
 
-export function usePlayRuns(setup: CapacitySetup, play: PlayState, library: readonly CapacityChangeRow[], today: PreparedPlay, prepare: (play: PlayState, library: readonly CapacityChangeRow[]) => PreparedPlay): PlayRuns {
-  const asDefault = playIsDefault(play);
+/**
+ * `mapKey` is the company map revision the changed path runs from when it isn't the live map (the open draft or an earlier version, Q17): null for
+ * the live map. Another map is part of the changed path and of its run key, so the verdict and charts show what the map change does against today's path.
+ */
+export function usePlayRuns(
+  setup: CapacitySetup,
+  play: PlayState,
+  library: readonly CapacityChangeRow[],
+  today: PreparedPlay,
+  prepare: (play: PlayState, library: readonly CapacityChangeRow[]) => PreparedPlay,
+  mapKey: string | null = null,
+): PlayRuns {
+  const asDefault = playIsDefault(play) && mapKey === null;
   const prepared = useMemo(() => (asDefault ? today : prepare(play, library)), [asDefault, today, prepare, play, library]);
   const todayKey = useMemo(() => today.segments.map((s) => `${s.from}:${runKey(s.model, today.monthStarts, today.start, YEAR_REPS)}`).join("|"), [today]);
   // The changes swapped in are part of what the run was run from (editing one re-runs it).
   const swappedKey = useMemo(() => JSON.stringify(library.filter((c) => play.blocks[c.id] !== undefined)), [library, play.blocks]);
-  const preparedKey = useMemo(() => (asDefault ? todayKey : JSON.stringify(play) + "|" + swappedKey + "|" + prepared.segments.map((s) => s.from).join(",")), [asDefault, todayKey, play, swappedKey, prepared]);
+  const preparedKey = useMemo(() => (asDefault ? todayKey : JSON.stringify(play) + "|" + (mapKey ?? "") + "|" + swappedKey + "|" + prepared.segments.map((s) => s.from).join(",")), [asDefault, todayKey, play, mapKey, swappedKey, prepared]);
 
   const [todaySlot, setTodaySlot] = useState<Slot | null>(null);
   const [changedSlot, setChangedSlot] = useState<Slot | null>(null);

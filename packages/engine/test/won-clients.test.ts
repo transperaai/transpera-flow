@@ -125,6 +125,52 @@ describe("wonClients", () => {
   });
 });
 
+describe("wonClients through a hand-off (Q17, ADR 0023)", () => {
+  // The company map hands the sales pipeline's won clients on to an onboarding process: the pipeline has no step after the sale, and its won end
+  // carries a `handoff`. An injected client enters at the won end (counted won once) and carries on at the hand-off, as a won lead does.
+  const handed = (extra: Partial<EngineModel> = {}) =>
+    model({
+      ends: { care_done: { outcome: "done" }, won: { outcome: "won", handoff: "onb" }, onb_done: { outcome: "done" } },
+      steps: [
+        { id: "a", name: "A", role: "r", work: 1, wait: 0, rework: 0, workDist: { kind: "constant" }, next: [{ to: "won", p: 1 }] },
+        { id: "onb", name: "Onboarding", role: "r", work: 2, wait: 0, rework: 0, workDist: { kind: "constant" }, next: [{ to: "onb_done", p: 1 }] },
+        { id: "task", name: "Task", role: "r", work: 1, wait: 0, rework: 0, workDist: { kind: "constant" }, next: [{ to: "care_done", p: 1 }] },
+      ],
+      ...extra,
+    });
+  /** Visits to a step in the one replication. */
+  const visits = (m: EngineModel, step: string) => run(m).steps[step]?.arrivals ?? 0;
+  const wins = { wonClients: [{ service: "sb", month: 2, count: 3 }] };
+
+  it("each injected client goes through the handed-to process, and is counted won once", () => {
+    const m = handed(wins);
+    expect(run(m).kpi.won.mean).toBe(3);
+    expect(visits(m, "onb")).toBe(3);
+  });
+
+  it("without a hand-off the injected client is won at once and skips the process, as before", () => {
+    const { won: _won, ...ends } = handed().ends!;
+    const m = { ...handed(wins), ends };
+    expect(run(m).kpi.won.mean).toBe(3);
+    expect(visits(m, "onb")).toBe(0);
+  });
+
+  it("a pipeline with a step after the sale still starts the client there, and it then carries on at the hand-off", () => {
+    const m = handed({
+      ...wins,
+      steps: [
+        { id: "a", name: "A", role: "r", work: 1, wait: 0, rework: 0, workDist: { kind: "constant" }, next: [{ to: "kick", p: 0.5 }, { to: "lost", p: 0.5 }] },
+        { id: "kick", name: "Kick-off", role: "r", work: 1, wait: 0, rework: 0, workDist: { kind: "constant" }, next: [{ to: "won", p: 1 }] },
+        { id: "onb", name: "Onboarding", role: "r", work: 2, wait: 0, rework: 0, workDist: { kind: "constant" }, next: [{ to: "onb_done", p: 1 }] },
+        { id: "task", name: "Task", role: "r", work: 1, wait: 0, rework: 0, workDist: { kind: "constant" }, next: [{ to: "care_done", p: 1 }] },
+      ],
+    });
+    // Kick-off is after the sale (it reaches a win and no loss), so the three clients start there; no lead flow, so nothing else reaches it.
+    expect(visits(m, "kick")).toBe(3);
+    expect(visits(m, "onb")).toBe(3);
+  });
+});
+
 describe("leavesMonth", () => {
   const roster = (leavesMonth?: number): Record<string, EngineClient> => ({
     c1: { name: "C1", services: ["sa"], mrr: 4330, assignments: {}, ...(leavesMonth !== undefined ? { leavesMonth } : {}) },

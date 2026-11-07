@@ -472,6 +472,7 @@ export interface Processes {
   is_company: Generated<boolean>;
   kind: Generated<string>;
   live_revision_id: string | null;
+  map_drives_run: Generated<boolean>;
   name: string;
   parent_process_id: string | null;
   source: Generated<string>;

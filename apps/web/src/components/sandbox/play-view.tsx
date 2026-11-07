@@ -54,6 +54,8 @@ export interface PlayViewProps {
   base?: string;
   /** An error that stops a run being built (the company can't be simulated yet), in plain words. */
   modelError?: string | null;
+  /** The company map revision the changed path runs from when it isn't the live one (Q17); null for the live map. Another map moves the levers' path off today's. */
+  mapKey?: string | null;
   /** A solution picked as its process's map version when the page opens (`?solution=<id>`, from "Try it in the Sandbox"), live from the first month. */
   initialSolution?: { id: string; processId: string } | null;
 }
@@ -69,8 +71,9 @@ export function PlayView(props: PlayViewProps) {
   const [library, setLibrary] = useState(props.library);
   const [dialog, setDialog] = useState<{ existing: CapacityChangeRow | null } | null>(null);
   const months = useMemo(() => playMonths(startDate), [startDate]);
-  const runs = usePlayRuns(setup, play, library, today, prepare);
-  const moved = !playIsDefault(play);
+  const mapKey = props.mapKey ?? null;
+  const runs = usePlayRuns(setup, play, library, today, prepare, mapKey);
+  const moved = !playIsDefault(play) || mapKey !== null;
   const expectedWins = runs.today ? runs.today.run.result.kpi.won.mean / 12 : null;
   const tiers = setup.tiers.map((t) => ({ key: t.key, name: t.name }));
 

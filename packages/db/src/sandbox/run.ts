@@ -399,7 +399,9 @@ export function scenarioSegments(
         continue;
       }
       if (withSolution(people.bundle, solution) === null) {
-        problems.push({ changeId: c.id, message: `“${solution.name}” changes a process the forecast doesn't run` });
+        // A run built from a company map (Q17) says which process isn't on it; any other run keeps its old wording.
+        const onMap = people.bundle.companyNames?.[solution.process_id];
+        problems.push({ changeId: c.id, message: onMap ? `'${onMap}' isn't on this company map, so its version isn't used.` : `“${solution.name}” changes a process the forecast doesn't run` });
         continue;
       }
       items.push({ change: c, month, kind: "solution", solution });

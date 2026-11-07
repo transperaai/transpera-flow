@@ -13,6 +13,7 @@ import {
   listProcesses,
   loadIssuesForReader,
   loadProcessBundle,
+  withCompanyRun,
   loadScenarios,
   loadSandboxScenarios,
   ModelError,
@@ -80,7 +81,9 @@ export async function loadLiveModel(
   const startDate = args.start_date ?? ctx.today;
   if (!isRunDate(startDate)) throw new ToolError("invalid_args", `start_date '${startDate}' isn't a calendar date between 2000 and 2100 (YYYY-MM-DD).`);
   if (!args.start_date) assumptions.push(`start_date defaulted to today (${ctx.today}).`);
-  const bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, "live"));
+  let bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, "live"));
+  // No process named: the company run, as every page reads it (Q17).
+  if (args.process === undefined) bundle = await withCompanyRun(ctx.db, bundle);
   try {
     return { ws, proc, bundle, model: toEngineModel(bundle, { startDate }), startDate };
   } catch (err) {

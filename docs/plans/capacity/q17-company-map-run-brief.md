@@ -63,3 +63,48 @@ Implement the note.
 
 - `pnpm lint && pnpm typecheck && pnpm test` and the web build pass.
 - Goldens are unchanged unless the note says why and `golden:approve --bump` records it.
+
+## Phase 2 go-ahead (orchestrator, 7 Nov)
+
+The design note `docs/adr/0023-company-map-drives-the-run.md` is **approved as written**. Build it; where this section and
+the note differ, this section wins. Start a fresh `claude/cap-q17-company-run` from `claude/relaxed-babbage-51ysen` (the
+note is already on it). Commit after each numbered item.
+
+1. **Decisions.** Write D51 in `docs/plans/client-requirements.md` (the two bullets above, pointing at ADR 0023) and amend
+   D50: no "One process" scope. Set ADR 0023's status to `accepted`, and in 0014 add a line that 0023 amends it.
+2. **Migration `20270134000000_map_drives_run.sql`.**
+   - `processes.map_drives_run boolean not null default true`, meaningful on company map rows only.
+   - Backfill `false` for each company map whose workspace has any company map revision with `published_by` not null.
+   - A trigger on `process_revisions`: when a company map revision becomes `published` with `published_by` not null (a
+     person's publish, a person's restore included), set its process's `map_drives_run = true`. System-made versions
+     (`published_by` null) leave it. Never set it back to `false`.
+   - Database tests: the backfill on both kinds of workspace, a person's publish flips it, a system-made version doesn't.
+   - Run `gen:types` and commit the output.
+3. **`companyBundle` and `companyEngineModel`** in `packages/db/src` (next to `model.ts`; a new file is fine), exactly as
+   note sections 1–3: sales pipeline choice, `otherProcesses` cut and order, the optional `handoffs` list that
+   `toEngineModel` reads, forks follow the first line by process order, shares and conditions ignored, loops cut at the
+   closing line, lost ends in a handed-to process mapped as `done`, handed-to steps counted as after-sale in
+   `resolveAll`. Every note in sections 1–2 is a returned value (`{ kind, message }`), worded as the note words it.
+4. **Equality proof**, as note section 3: the snapshot test over Northbeam and Larkspur and every variant through
+   `companyEngineModel` with `defaultCompanyPart`, against the existing snapshot entries (the snapshot file must not
+   change), and a database test for `capacity:example` and the seeded workspaces through the loader.
+5. **Engine: "Win new clients" through a hand-off** (note section 6). When the pipeline has no after-sale step and the won
+   sink's end has a `handoff`, the injected client enters there. Pinned in `packages/engine/test/won-clients.test.ts`.
+   Run the goldens unapproved: if none moves, `ENGINE_VERSION` stays. If any moves, stop and report before approving.
+6. **The loader seam** (note section 5): when `map_drives_run`, the default bundle (no process id) is built through
+   `companyBundle` with the live map, for Capacity, the Overview, issues, solutions' verdicts, Set up, share-link
+   snapshots and MCP. A process page is unchanged. Test: for a map-driven workspace with a card taken off, Capacity's and
+   the Sandbox's default models are deep-equal.
+7. **The Sandbox.** The "Company map" select runs the chosen revision (live default, the open draft, earlier versions);
+   the map revision goes into the changed path and its run key. Process-version swaps list processes from the company
+   bundle and skip ones not on the map with the reworded problem (note section 4). The note under the select drops "only
+   changes the picture" and lists the run's notes, the fork note included, in plain words; while `map_drives_run` is
+   false on the live map, show the "The run still includes it until a company map version is published" note. Keep
+   page changes to the Sandbox's map card and its notes (Chat B owns the rest of the page).
+8. **No "One process" scope**: confirm no `?scope=` / `?process=` handling or UI for it remains in the Sandbox; remove any.
+9. **Help**: the (i) on the Sandbox's Company map select says the map decides what is simulated once a person publishes
+   a version, and that cycle time stops at the win.
+10. **Tests from the brief**: deep-equality on every seed (item 4), a revision that drops a process, one that adds a
+    pipeline-to-pipeline hand-off (the handed-to steps run and count as after-sale), a fork, a loop, and the draft run.
+
+Report as the shared rules say, with the golden result stated plainly.
