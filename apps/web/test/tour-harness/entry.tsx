@@ -16,8 +16,6 @@ export interface TourHarnessOptions {
   userId?: string | null;
   /** The database says this person has already dismissed the tour. */
   dismissed?: boolean;
-  /** Leave the process with something missing for simulation, so the checklist is on the screen. */
-  gaps?: boolean;
   /** A step that holds another process (a link made before the Editor stopped making them), unconnected, on the map. */
   holder?: boolean;
   /** Offer "+ New purpose…" (the demo has nowhere to save one; the server action is stood in for by the test's build). */
@@ -44,7 +42,6 @@ function companyBundle(): ProcessBundle {
 window.mountEditor = (options) => {
   let live = options.company ? companyBundle() : demoBundle();
   // No lead volume anywhere: "Missing for simulation" lists it.
-  if (options.gaps) live.leadSources = [];
   if (options.holder) {
     const other = live.otherProcesses![0]!;
     live = applyEdit(live, placeProcesses(live, [other.process.id])!.edit);

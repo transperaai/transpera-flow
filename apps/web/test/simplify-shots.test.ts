@@ -114,6 +114,19 @@ describe("simpler editor screenshots", () => {
       await page.locator("[data-problem-mark] [role=img]").first().hover({ force: true });
       await settle(page);
       await page.screenshot({ path: `${dir}/problem-mark-1440-${theme}.png` });
+      // Publish is disabled while something is left to fix (its reason is the button's tooltip, which a screenshot doesn't draw).
+      await page.getByRole("button", { name: "Publish…" }).hover({ force: true });
+      await settle(page);
+      await page.screenshot({ path: `${dir}/publish-blocked-1440-${theme}.png`, clip: { x: 0, y: 0, width: 1440, height: 130 } });
+      await page.context().close();
+    }, 300_000);
+
+    it.skipIf(!dir || theme === "dark")(`saves a step's inspector at Done again (${theme})`, async () => {
+      const page = await open(theme);
+      await pick(page, DISCOVERY);
+      await page.getByLabel("Done again", { exact: false }).first().evaluate((el) => el.scrollIntoView({ block: "center" }));
+      await settle(page);
+      await page.screenshot({ path: `${dir}/step-rework-1440-${theme}.png` });
       await page.context().close();
     }, 300_000);
 

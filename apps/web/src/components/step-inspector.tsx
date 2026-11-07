@@ -29,7 +29,6 @@ import { ProvenanceBadge } from "@/components/provenance-badge";
 import {
   OUTCOME_LABELS,
   kindProblem,
-  reworkTargets,
   setDistribution,
   setRangePoint,
   setStepKind,
@@ -193,7 +192,6 @@ export function StepInspector({
       return { value: p.id, label: roles.length ? `${p.name} (${roles.join(", ")})` : p.name };
     })
     .sort((a, b) => a.label.localeCompare(b.label));
-  const reworkOptions = reworkTargets(bundle, id).map((s) => ({ value: s.id, label: s.name }));
 
   return (
     <aside
@@ -334,27 +332,20 @@ export function StepInspector({
             settingsHref={settingsHref}
           />
           <div className={sectionClass}>
-            <div className="grid grid-cols-2 gap-2">
-              <NumberField
-                label="Rework %"
-                help={{ description: "How often work has to be done again.", example: "8 out of every 100 proposals have to be redone." }}
-                value={Number(step.rework_rate)}
-                scale={100}
-                unit="%"
-                min={0}
-                max={100}
-                step={1}
-                save={field("rework_rate")}
-              />
-              <SelectField
-                label="Goes back to"
-                help={{ description: "Rework goes back to this step when work has to be redone. “This step” means it is simply repeated.", example: "A rejected proposal goes back to “Write proposal”, not to the start." }}
-                value={step.rework_to_step_id}
-                options={reworkOptions}
-                noneLabel="This step"
-                save={field("rework_to_step_id")}
-              />
-            </div>
+            <NumberField
+              label="Done again"
+              help={{
+                description: "Use this for a step that is sometimes redone. When work goes back to an earlier step, add a decision with a “Go back to…” branch instead.",
+                example: "8 out of every 100 proposals have to be written again, so enter 8.",
+              }}
+              value={Number(step.rework_rate)}
+              scale={100}
+              unit="% of the time"
+              min={0}
+              max={100}
+              step={1}
+              save={field("rework_rate")}
+            />
             <div className="grid grid-cols-2 gap-2">
               <NumberField
                 label="Promised time"
@@ -378,8 +369,7 @@ export function StepInspector({
               />
             </div>
             <p className="text-xs text-fg-3">
-              Work already in progress is what sits at this step now. Where to send rework and the promised time are
-              saved but don&apos;t change the numbers yet.
+              Work already in progress is what sits at this step now. The promised time is saved but doesn&apos;t change the numbers yet.
             </p>
             <TextField
               label="Tool"

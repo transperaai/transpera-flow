@@ -42,14 +42,6 @@ const STEPS: Record<string, TourStep> = {
     title: "The inspector",
     body: "Click a step and its details show here: its name, who does it, how long it takes and what it achieves. Change a value and it saves to your draft straight away.",
   },
-  checklist: {
-    id: "checklist",
-    target: ["[data-missing-for-simulation]"],
-    // The list is folded away until it is opened: the tour opens it so the step shows what it talks about.
-    reveal: true,
-    title: "The assumptions checklist",
-    body: "Missing for simulation lists what the map still has no real figure for: a role, a time, a wait, odds on a branch or how many arrive. Click one to go to that step, then fill it in.",
-  },
   draft: {
     id: "draft",
     target: ["[data-tour=draft]"],
@@ -89,7 +81,7 @@ const STEPS: Record<string, TourStep> = {
 };
 
 const ORDER: Record<TourVariant, string[]> = {
-  process: ["palette", "canvas", "problems", "inspector", "checklist", "draft", "simulate", "publish", "history"],
+  process: ["palette", "canvas", "problems", "inspector", "draft", "simulate", "publish", "history"],
   // The company map is a picture of the business: nothing to simulate and no assumptions to check, so the tour is shorter.
   company: ["palette", "canvas", "inspector", "draft", "publishCompany", "historyCompany"],
 };

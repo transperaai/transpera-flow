@@ -50,8 +50,6 @@ import { IssueArea } from "./issue-area";
 import { Inspector } from "./inspector";
 import { Palette } from "./palette";
 import { useEditorTour } from "./editor-tour";
-import { capacityBlockers, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
-import { MissingForSimulation } from "@/components/simulation-gaps";
 import type { TierSetup } from "@/lib/tier-setup";
 import type { ChangesOnSteps } from "@/components/step-base-values";
 import { SimulateFooter, type SimulatedPair } from "./simulate-footer";
@@ -180,12 +178,6 @@ export function EditorView({
   const workingModel = useEngineModel(working, weeks);
   const liveModel = useEngineModel(live, weeks);
   const unresolved = useMemo(() => unresolvedSteps(working), [working]);
-  // What the draft still lacks for meaningful numbers (issue #167): the same check as the upload preview, on the draft as edited.
-  const gaps = useMemo(
-    () => (company || scratch ? [] : [...findGaps(gapInputFromBundle(working)), ...capacityBlockers(workingModel.model)]),
-    [company, scratch, working, workingModel],
-  );
-
   // Selection can outlive what it points at (after a delete or an undo).
   const selected = useMemo(() => {
     const steps = new Set(working.steps.map((s) => s.id));
@@ -505,12 +497,6 @@ export function EditorView({
         </aside>
         <main className="flex min-h-[28rem] min-w-0 flex-col gap-2 bg-bg p-3 lg:min-h-0">
           {(state.conflicts.length > 0 || state.error) && <SaveProblems editor={editor} bundle={working} conflicts={state.conflicts} error={state.error} />}
-          <MissingForSimulation gaps={gaps} onSelectStep={select} settingsHref={settingsHref} />
-          {workingModel.error && !blockMode && !company && (
-            <p role="status" className="rounded-token border border-warn bg-warn-soft px-2 py-1.5 text-xs">
-              This {solutionMode ? "solution" : "draft"} can&apos;t be simulated yet: {workingModel.error}.
-            </p>
-          )}
           <div className="flex min-h-0 flex-1" data-tour="canvas" data-highlight-tone={solutionMode ? "issue" : undefined}>
             <ProcessCanvas
               bundle={working}
@@ -580,7 +566,6 @@ export function EditorView({
         liveNumber={live.revision.number}
         solution={solutionMode}
         verdict={verdict}
-        incomplete={gaps.length}
       />
       )}
     </div>
