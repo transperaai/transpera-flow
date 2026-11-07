@@ -6,7 +6,7 @@
 
 import { GROUP_LABELS, type Lever, type LeverGroup } from "./levers";
 
-export const LEVER_GROUP_ORDER: readonly LeverGroup[] = ["demand", "people", "process", "clients", "finances", "market"];
+export const LEVER_GROUP_ORDER: readonly LeverGroup[] = ["demand", "people", "process", "clients", "finances"];
 
 /** Where a lever kind can be changed today. */
 export type LeverControl =
@@ -197,27 +197,6 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     description: "Monthly costs that don't change, like rent and software.",
     example: "A$18,000 a month.",
     control: "later",
-  },
-  // Market
-  {
-    id: "market.conditions",
-    group: "market",
-    label: "Market conditions",
-    description: "How good or bad business conditions are (Settings → Market conditions).",
-    example: "Switch to a downturn: far fewer enquiries.",
-    control: "settings",
-    settingsPath: "/settings#market-heading",
-    settingsLabel: "Settings → Market conditions",
-  },
-  {
-    id: "market.schedule",
-    group: "market",
-    label: "Market changes over time",
-    description: "When the market is expected to change over the next 2 years.",
-    example: "Business slows from month 7.",
-    control: "settings",
-    settingsPath: "/settings#market-heading",
-    settingsLabel: "Settings → Market conditions",
   },
 ];
 

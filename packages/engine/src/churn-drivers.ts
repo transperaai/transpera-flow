@@ -59,7 +59,7 @@ export const CHURN_SOURCE_LABELS: Record<ChurnDriverSource, string> = {
   partly: "Partly measured",
   entered: "You enter it",
   lever: "Lever",
-  market: "From market settings",
+  market: "From the Sandbox's Market lever",
 };
 
 /** The limits of a weight: 0 ignores the cause, 1 is normal, 3 matters three times as much. */

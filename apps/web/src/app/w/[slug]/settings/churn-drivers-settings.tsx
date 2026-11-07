@@ -1,7 +1,8 @@
 "use client";
 
 // Settings, Churn drivers (A56, issue #121; the prototype's Settings screen of the same name): the reasons clients
-// leave, each with a weight and an on/off switch, plus your own. The simulation measures the ones it can; this section
+// leave, each with a weight, plus your own. The list holds the drivers in use: Remove takes one out of the simulation
+// (a built-in is switched off and can be added back; your own is deleted). The simulation measures the ones it can; this section
 // shows each one's value now, its weight and how much of the churn it explains, and projects churn as the weights
 // move (no new simulation: it works from what the latest run measured).
 
@@ -11,7 +12,7 @@ import { CHURN_DRIVER_SPECS, CHURN_WEIGHT_MAX, CHURN_WEIGHT_MIN, CUSTOM_DRIVER_V
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
   CHANCE_HELP,
   CONTROL_HELP,
@@ -134,6 +135,7 @@ export function ChurnDriversSettings({
   };
 
   const remove = async (d: DriverState) => {
+    if (d.builtin) return change(d.key, { enabled: false });
     if (mode === "live" && workspaceId) {
       const out = await removeChurnDriver(workspaceId, d.key).catch(() => null);
       if (out?.status !== "saved") return setSave({ kind: "error", message: out?.status === "error" ? out.message : "Couldn't remove it. Try again." });
@@ -170,13 +172,16 @@ export function ChurnDriversSettings({
     [causes, states],
   );
   const customs = states.filter((d) => !d.builtin).length;
+  const shown = states.filter((d) => d.enabled);
+  // Built-ins not in use (most start out), and your own drivers switched off before Remove existed: the add menu puts them in.
+  const removed = states.filter((d) => !d.enabled);
   const clientCount = model?.activeClients ?? 0;
 
   return (
     <SettingsSection
       id="churn-drivers"
       title="Churn drivers"
-      description="Base churn per service is multiplied by these drivers. Weights are your estimates; the simulation measures the drivers marked Measured. Contribution shows how much of the churn in the latest run each driver explains."
+      description="Base churn per service is multiplied by these drivers. Weights are your estimates; the simulation measures the drivers marked Measured. Contribution shows how much of the churn in the latest run each driver explains. Remove a driver to leave it out of the simulation."
     >
       {mode === "live" && <SaveStatus state={save} />}
       {mode === "readonly" && (
@@ -221,16 +226,38 @@ export function ChurnDriversSettings({
           </div>
         </div>
         <div className="flex items-center">
-          <Button type="button" variant="outline" disabled={!canEdit || adding || customs >= MAX_CUSTOM_DRIVERS} onClick={() => void add()}>
-            + Add driver
-          </Button>
-          {customs >= MAX_CUSTOM_DRIVERS && <span className="ml-2 text-xs text-muted-foreground">Up to {MAX_CUSTOM_DRIVERS} of your own.</span>}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="outline" disabled={!canEdit || adding} data-add-driver>
+                + Add driver
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-64">
+              {removed.length > 0 && (
+                <>
+                  <DropdownMenuLabel>Built-in drivers</DropdownMenuLabel>
+                  {removed.map((d) => (
+                    <DropdownMenuItem key={d.key} data-restore-driver={d.key} onSelect={() => change(d.key, { enabled: true })}>
+                      {d.name}
+                    </DropdownMenuItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuItem data-new-driver disabled={customs >= MAX_CUSTOM_DRIVERS} onSelect={() => void add()}>
+                A driver of your own
+              </DropdownMenuItem>
+              {customs >= MAX_CUSTOM_DRIVERS && <p className="px-1.5 pb-1 text-xs text-muted-foreground">Up to {MAX_CUSTOM_DRIVERS} of your own.</p>}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Help label="Add driver" {...CONTROL_HELP.add} />
         </div>
       </div>
 
       <div className="rounded-lg border border-line">
         <ul className="flex flex-col" aria-label="Churn drivers" aria-busy={sim.status === "running"}>
-          {states.map((d) => (
+          {shown.length === 0 && <li className="px-4 py-3 text-sm text-muted-foreground">No drivers in use: only normal churn. Add one to put it back.</li>}
+          {shown.map((d) => (
             <DriverRow
               key={d.key}
               d={d}
@@ -243,8 +270,7 @@ export function ChurnDriversSettings({
               onRemove={() => void remove(d)}
             />
           ))}
-          <li className="grid items-center gap-3 border-t border-line px-4 py-3 md:grid-cols-[3.5rem_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]">
-            <span />
+          <li className="grid items-center gap-3 border-t border-line px-4 py-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]">
             <span className="flex items-center text-sm font-medium">
               Normal churn
               <Help label="Normal churn" {...CONTROL_HELP.normal} />
@@ -295,17 +321,13 @@ function DriverRow({
   const range = d.builtin ? CHURN_DRIVER_SPECS[d.builtin].valueRange : { min: CUSTOM_DRIVER_VALUE.min, max: CUSTOM_DRIVER_VALUE.max };
   const help = d.builtin ? DRIVER_HELP[d.builtin] : { description: d.description || "Your own cause of clients leaving.", example: d.example || "Add an example below." };
   return (
-    <li className={cn("grid gap-3 border-t border-line px-4 py-3 first:border-t-0 md:grid-cols-[3.5rem_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)] md:items-center", !d.enabled && "opacity-60")}>
-      <span className="flex items-center">
-        <Switch checked={d.enabled} disabled={!canEdit} onCheckedChange={(on) => onChange({ enabled: on })} aria-label={`Use ${d.name}`} />
-        <Help label={`Use ${d.name}`} {...CONTROL_HELP.switch} />
-      </span>
-
+    <li className="grid gap-3 border-t border-line px-4 py-3 first:border-t-0 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)] md:items-center">
       <div className="flex min-w-0 flex-col gap-1.5">
         {d.builtin ? (
           <span className="flex items-center">
             <b className="text-sm font-semibold">{d.name}</b>
             <Help label={d.name} {...help} />
+            <RemoveButton d={d} canEdit={canEdit} onRemove={onRemove} />
           </span>
         ) : (
           <CustomFields d={d} canEdit={canEdit} onChange={onChange} onRemove={onRemove} />
@@ -366,7 +388,7 @@ function DriverRow({
         />
       </label>
 
-      <Contribution share={d.enabled ? share : 0} tone="accent" label={d.name} hint={CONTROL_HELP.contribution} />
+      <Contribution share={share} tone="accent" label={d.name} hint={CONTROL_HELP.contribution} />
     </li>
   );
 }
@@ -412,12 +434,21 @@ function CustomFields({ d, canEdit, onChange, onRemove }: { d: DriverState; canE
         onCommit={(v) => onChange({ example: v || null })}
       />
       <span className="flex items-center">
-        <Button type="button" variant="ghost" size="sm" disabled={!canEdit} onClick={onRemove} aria-label={`Remove ${d.name}`}>
-          Remove
-        </Button>
-        <Help label="Remove a driver" {...CONTROL_HELP.remove} />
+        <RemoveButton d={d} canEdit={canEdit} onRemove={onRemove} />
       </span>
     </div>
+  );
+}
+
+/** Remove: a built-in leaves the simulation (Add driver puts it back); your own is deleted. */
+function RemoveButton({ d, canEdit, onRemove }: { d: DriverState; canEdit: boolean; onRemove: () => void }) {
+  return (
+    <span className={cn("flex items-center", d.builtin && "ml-auto")}>
+      <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" disabled={!canEdit} onClick={onRemove} aria-label={`Remove ${d.name}`}>
+        Remove
+      </Button>
+      <Help label={`Remove ${d.name}`} {...(d.builtin ? CONTROL_HELP.removeBuiltin : CONTROL_HELP.remove)} />
+    </span>
   );
 }
 

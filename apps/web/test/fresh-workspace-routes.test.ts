@@ -160,11 +160,11 @@ describe("Capacity with nothing published", () => {
   it("points an editor to Set up, People & roles and shows a reader nothing more than the sentence", async () => {
     const people = (await import("@/app/w/[slug]/capacity/page")).default as Page;
     const editor = await html(people);
-    expect(editor).toContain("Add people in Set up");
-    expect(editor).toContain(`href="/w/${FRESH_SLUG}/setup/people"`);
+    expect(editor).toContain("Add people in Settings");
+    expect(editor).toContain(`href="/w/${FRESH_SLUG}/settings/people"`);
     state.canEdit = false;
     const reader = await html(people);
-    expect(reader).not.toContain("Add people in Set up");
+    expect(reader).not.toContain("Add people in Settings");
     expect(reader).toContain("Capacity, and who has room for more clients, comes from a simulation of a published process.");
   });
 });

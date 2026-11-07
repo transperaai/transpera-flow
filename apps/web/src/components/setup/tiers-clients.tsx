@@ -27,7 +27,7 @@ import { ServiceMore } from "@/app/w/[slug]/settings/services-settings";
 import { GroupFields } from "@/app/w/[slug]/settings/client-groups-settings";
 import { ClientMore, type ClientOps, type ClientsSettingsProps } from "@/app/w/[slug]/settings/clients-settings";
 import { saveClientAssignment, saveClientField, saveClientServices } from "@/app/w/[slug]/settings/client-actions";
-import { addNamedClient, addTierAction, removeTierAction, saveClientLookedAfter, saveSetupField } from "@/app/w/[slug]/setup/actions";
+import { addNamedClient, addTierAction, removeTierAction, saveClientLookedAfter, saveSetupField } from "@/app/w/[slug]/settings/setup-actions";
 import { HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

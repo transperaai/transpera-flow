@@ -16,10 +16,7 @@ import {
   loadClientGroups,
   loadTeam,
   loadClients,
-  loadMarket,
-  type MarketConditionRow,
   type PersonCapacityFactorRow,
-  type MarketScheduleRow,
   loadIssuesForReader,
   loadIssueEvents,
   loadLiveRevisionIds,
@@ -439,9 +436,6 @@ export interface WorkspaceSettingsData {
   clientGroups: ClientGroupRow[];
   /** Churn drivers you have set (A56); a built-in with no row is at its default. */
   churnDrivers: ChurnDriverRow[];
-  /** Market conditions (A57): presets and your own, and the 24-month schedule. */
-  marketConditions: MarketConditionRow[];
-  marketSchedule: MarketScheduleRow[];
 }
 
 export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSettingsData | null> {
@@ -467,7 +461,6 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
     db.selectFrom("seasonality").select(columnList<"seasonality">(SEASONALITY_COLUMNS)).where("workspace_id", "=", ws).orderBy("month").execute(),
     db.selectFrom("demand_settings").select(columnList<"demand_settings">(DEMAND_SETTINGS_COLUMNS)).where("workspace_id", "=", ws).executeTakeFirst(),
     db.selectFrom("service_servicing").select(columnList<"service_servicing">(SERVICE_SERVICING_COLUMNS)).where("workspace_id", "=", ws).orderBy("created_at").orderBy("id").execute(),
-    loadMarket(db, ws),
     loadClientGroups(db, ws),
     loadChurnDrivers(db, ws),
   ]);
@@ -516,7 +509,7 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
       .orderBy("step_id", (ob) => ob.asc().nullsFirst())
       .execute(),
   ]);
-  const [leadSources, seasonality, demand, servicingLinks, market, clientGroups, churnDrivers] = await demandQueries;
+  const [leadSources, seasonality, demand, servicingLinks, clientGroups, churnDrivers] = await demandQueries;
 
   return {
     workspace: { ...workspace, settings: workspace.settings as unknown as WorkspaceSettings },
@@ -547,7 +540,6 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
     servicingLinks: servicingLinks as unknown as ServiceServicingRow[],
     clientGroups,
     churnDrivers,
-    ...market,
   };
 }
 

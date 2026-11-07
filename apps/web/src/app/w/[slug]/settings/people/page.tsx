@@ -7,8 +7,8 @@ import { peopleMeta } from "@/lib/setup/people-meta";
 import { loadWorkspaceSettings } from "@/lib/data";
 import { getDb } from "@/lib/auth/session";
 
-/** Set up, People & roles (capacity build P1): people and roles as standard rows that open into a panel, how the shared teams work, and the workspace-wide defaults. */
-export default async function SetupPeoplePage(props: PageProps<"/w/[slug]/setup/people">) {
+/** Settings, People & roles (capacity build P1): people and roles as standard rows that open into a panel, how the shared teams work, and the workspace-wide defaults. */
+export default async function SettingsPeoplePage(props: PageProps<"/w/[slug]/settings/people">) {
   const { slug } = await props.params;
   const data = await loadWorkspaceSettings(slug);
   if (!data) notFound();
@@ -17,7 +17,7 @@ export default async function SetupPeoplePage(props: PageProps<"/w/[slug]/setup/
   return (
     <SettingsPage
       title="People & roles"
-      eyebrow="Set up"
+      eyebrow="Settings"
       description={peopleMeta(setup)}
       actions={<PeopleHeaderActions setup={setup} data={data} />}
       width="max-w-6xl"

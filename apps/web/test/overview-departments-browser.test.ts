@@ -149,13 +149,13 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
     await page.close();
   });
 
-  it("shows the start checklist, with links to Set up, when no tier services exist", async () => {
+  it("shows the start checklist, with links to Settings, when no tier services exist", async () => {
     const { page, errors } = await mount({ noTiers: true });
     await page.waitForSelector("[data-no-tiers]");
     expect(await page.locator("[data-no-tiers]").innerText()).toContain("No tiers and services are set up yet.");
     const links = await page.locator("[data-setup-checklist] a").evaluateAll((as) => as.map((a) => a.getAttribute("href")));
     expect(links.length).toBeGreaterThanOrEqual(3);
-    for (const l of links) expect(l).toMatch(/^\/w\/example\/setup\/(people|clients)/);
+    for (const l of links) expect(l).toMatch(/^\/w\/example\/settings\/(people|clients)/);
     expect(await page.locator("[data-department]").count()).toBe(0);
     expect(await page.evaluate(() => window.workerPosts.length)).toBe(0);
     expect(errors).toEqual([]);
@@ -171,7 +171,7 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
       expect(d).not.toMatch(/goal/);
     }
     expect(await page.locator("[data-whole-business] [data-salaries-missing]").count()).toBe(1);
-    expect(await page.locator("[data-salaries-missing] a").first().getAttribute("href")).toBe("/w/example/setup/people");
+    expect(await page.locator("[data-salaries-missing] a").first().getAttribute("href")).toBe("/w/example/settings/people");
     expect(await kpi(page, ORGANIC, "Revenue per employee")).toMatch(/\d/);
     expect(errors).toEqual([]);
     await page.close();

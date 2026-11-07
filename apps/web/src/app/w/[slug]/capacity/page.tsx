@@ -35,8 +35,8 @@ export default async function WorkspaceCapacityPage(props: PageProps<"/w/[slug]/
         />
         {canEdit && (
           <p className="mt-3 text-sm">
-            <Link href={`${base}/setup/people`} className="font-medium text-accent hover:underline">
-              Add people in Set up →
+            <Link href={`${base}/settings/people`} className="font-medium text-accent hover:underline">
+              Add people in Settings →
             </Link>
           </p>
         )}

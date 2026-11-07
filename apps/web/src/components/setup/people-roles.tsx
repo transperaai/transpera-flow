@@ -15,7 +15,7 @@ import { SettingsSection } from "@/app/w/[slug]/settings/section";
 import { AddRole, RoleMore } from "@/app/w/[slug]/settings/roles-settings";
 import { AddPerson, PersonMore } from "@/app/w/[slug]/settings/people-settings";
 import { saveRoleField } from "@/app/w/[slug]/settings/actions";
-import { savePersonTiers, savePortfolioCount, saveSetupField } from "@/app/w/[slug]/setup/actions";
+import { savePersonTiers, savePortfolioCount, saveSetupField } from "@/app/w/[slug]/settings/setup-actions";
 import { NumberField, SelectField, TextField, type FieldHelp } from "@/components/fields";
 import { Help } from "@/components/help";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
@@ -481,7 +481,7 @@ function PersonPanel({
               <ul className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
                 {named.map((c) => (
                   <li key={c.id}>
-                    <Link href={`/w/${data.workspace.slug}/setup/clients`} className="text-accent hover:underline">
+                    <Link href={`/w/${data.workspace.slug}/settings/clients`} className="text-accent hover:underline">
                       {c.name}
                     </Link>
                   </li>

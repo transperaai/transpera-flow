@@ -15,13 +15,12 @@ const item = (groups: NavGroup[], key: string) => flatItems(groups).find((i) => 
 const PID = "0d5f6f0e-0000-4000-8000-000000000001";
 
 describe("workspaceNav: groups and order", () => {
-  it("has the prototype's groups, in order (Set up sits between Improve and Company)", () => {
+  it("has the prototype's groups, in order (Tiers & clients and People & roles are pages of Settings, not a group)", () => {
     const g = nav("/w/s");
-    expect(g.map((x) => x.label)).toEqual([null, "Improve", "Set up", "Company"]);
+    expect(g.map((x) => x.label)).toEqual([null, "Improve", "Company"]);
     expect(g.map((x) => x.items.map((i) => i.key))).toEqual([
       ["overview", "processes"],
       ["issues", "solutions", "library"],
-      ["setup-clients", "setup-people"],
       ["capacity", "sandbox", "settings", "access"],
     ]);
   });
@@ -32,8 +31,6 @@ describe("workspaceNav: groups and order", () => {
       "Issues",
       "Solutions",
       "Block library",
-      "Tiers & clients",
-      "People & roles",
       "Capacity",
       "Sandbox",
       "Settings",
@@ -53,13 +50,18 @@ describe("workspaceNav: groups and order", () => {
 });
 
 describe("workspaceNav: the active item", () => {
+  it("has no Set up items: their pages are under Settings", () => {
+    expect(flatItems(nav("/w/s")).map((i) => i.key)).not.toContain("setup-clients");
+  });
   it("is Overview on the workspace root, the landing page", () => expect(active(nav("/w/s"))).toEqual(["overview"]));
   it("is Processes on a process page and on the processes list", () => {
     expect(active(nav(`/w/s/p/${PID}`))).toEqual(["processes"]);
     expect(active(nav("/w/s/processes"))).toEqual(["processes"]);
   });
   it("is Overview on its own page", () => expect(active(nav("/w/s/overview"))).toEqual(["overview"]));
-  it("is Settings on exactly /settings", () => expect(active(nav("/w/s/settings"))).toEqual(["settings"]));
+  it("is Settings on /settings and its Tiers & clients and People & roles pages", () => {
+    for (const path of ["/w/s/settings", "/w/s/settings/clients", "/w/s/settings/people"]) expect(active(nav(path)), path).toEqual(["settings"]);
+  });
   it("is Access, not Settings, on /settings/access", () => expect(active(nav("/w/s/settings/access"))).toEqual(["access"]));
   it("is the matching item on each of the other pages", () => {
     for (const [path, key] of [
@@ -90,8 +92,6 @@ describe("workspaceNav: hrefs", () => {
       "/w/s/issues",
       "/w/s/solutions",
       "/w/s/blocks",
-      "/w/s/setup/clients",
-      "/w/s/setup/people",
       "/w/s/capacity",
       "/w/s/sandbox",
       "/w/s/settings",

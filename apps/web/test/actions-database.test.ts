@@ -482,17 +482,6 @@ describe("settings", () => {
     expect(await s.saveGrowth(WS, 0, 0.02)).toEqual({ status: "saved", value: 0.02 });
 
     expect(await s.createRole(WS, {}, form({ name: "Concierge" }))).toEqual({});
-
-    const market = await s.createMarketCondition(WS, null);
-    expect(market).toMatchObject({ id: expect.any(String) });
-    const marketId = (market as { id: string }).id;
-    expect(await s.saveMarketField(marketId, "name", "My market")).toEqual({ status: "saved", value: "My market" });
-    expect(await s.addMarketChange(WS, {}, form({ condition_id: marketId, from_month: "1", to_month: "3" }))).toEqual({});
-    expect(await s.addMarketChange(WS, {}, form({ condition_id: marketId, from_month: "2", to_month: "4" }))).toEqual({ error: "Those months overlap another change. Remove it first, or pick other months." });
-    expect(await s.removeMarketCondition(marketId)).toEqual({ error: "This market is on your schedule. Remove it from the schedule first." });
-    const change = await one("select id from market_schedule where condition_id = $1", [marketId]);
-    expect(await s.removeMarketChange(change.id)).toEqual({});
-    expect(await s.removeMarketCondition(marketId)).toEqual({});
   });
 
   it("sets up a client group on first edit, and keeps churn drivers", async () => {
@@ -525,7 +514,7 @@ describe("settings", () => {
 
   it("adds a client, assigns people to it, and links servicing", async () => {
     const c = await import("@/app/w/[slug]/settings/client-actions");
-    const setup = await import("@/app/w/[slug]/setup/actions");
+    const setup = await import("@/app/w/[slug]/settings/setup-actions");
     const sv = await import("@/app/w/[slug]/settings/servicing-actions");
     expect(await setup.addNamedClient(WS, northbeamServiceIds.seo, "Test Client Ltd", { mrr: "1200", start_date: "2026-09-01" })).toEqual({ id: expect.any(String) });
     expect(await setup.addNamedClient(WS, northbeamServiceIds.seo, "   ")).toEqual({ error: "Enter the client's name." });

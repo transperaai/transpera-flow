@@ -164,7 +164,7 @@ function TierRecurrence({ linkId, recurrence: r, disabled }: { linkId: string; r
         }}
         disabled={disabled}
         help={{
-          description: "What the client's tier gets each month that sets how much of this work there is. Set the amounts for the tier in Set up.",
+          description: "What the client's tier gets each month that sets how much of this work there is. Set the amounts for the tier in Settings, under Tiers & clients.",
           example: "Words: a tier that gets 4,000 words a month makes more reports than one that gets 1,000.",
         }}
       />

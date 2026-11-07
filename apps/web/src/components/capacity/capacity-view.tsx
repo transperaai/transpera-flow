@@ -52,11 +52,11 @@ const f1 = (v: number) => formatNumber(v, 1);
 
 /** Where an engine problem or a missing item is fixed. */
 function fixHref(base: string, where: string): string {
-  if (where.startsWith("people") || where.startsWith("roles")) return `${base}/setup/people`;
+  if (where.startsWith("people") || where.startsWith("roles")) return `${base}/settings/people`;
   if (where.startsWith("steps") || where.startsWith("changes")) return `${base}/processes`;
-  return `${base}/setup/clients`;
+  return `${base}/settings/clients`;
 }
-const missingHref = (base: string, m: MissingItem): string => (m.kind === "tier_deliverable" || m.kind === "tier_total_over" || m.kind === "tier_total_unassigned" ? `${base}/setup/clients` : `${base}/setup/people`);
+const missingHref = (base: string, m: MissingItem): string => (m.kind === "tier_deliverable" || m.kind === "tier_total_over" || m.kind === "tier_total_unassigned" ? `${base}/settings/clients` : `${base}/settings/people`);
 
 export const CAPACITY_DESCRIPTION = 'Are we at capacity, who has room, and how many more clients fit. "Today" is the current book of clients with nobody arriving or leaving.';
 
@@ -98,8 +98,8 @@ export function CapacityView(props: CapacityViewProps) {
         <CapacityHeader base={base} />
         <Section title="No tiers and services are set up yet." data-no-tiers description="Capacity is worked out from each department's tiers, the clients in them and the people who look after them.">
           <div>
-            <Link href={`${base}/setup/clients`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-              Set up tiers and clients →
+            <Link href={`${base}/settings/clients`} className={buttonVariants({ variant: "outline", size: "sm" })}>
+              Set up tiers and clients in Settings →
             </Link>
           </div>
         </Section>
@@ -175,7 +175,7 @@ function Attention({ base, problems, missing }: { base: string; problems: Return
       title="Some figures below are not worked out yet"
       data-attention
       className="[&_[data-slot=card]]:bg-warn-soft"
-      description="Fix these in Set up and the figures fill in. Where a value is missing the page leaves it out rather than guess."
+      description="Fix these in Settings (Tiers & clients, People & roles) and the figures fill in. Where a value is missing the page leaves it out rather than guess."
     >
       <ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
         {problems.map((p, i) => (

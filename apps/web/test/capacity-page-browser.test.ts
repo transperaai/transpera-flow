@@ -144,7 +144,7 @@ describe("Capacity page", { timeout: 180_000 }, () => {
     const { page, errors } = await mount({ noTiers: true });
     await page.waitForSelector("[data-no-tiers]");
     expect(await text(page, "[data-no-tiers]")).toContain("No tiers and services are set up yet.");
-    expect(await page.locator("[data-no-tiers] a").getAttribute("href")).toBe("/w/example/setup/clients");
+    expect(await page.locator("[data-no-tiers] a").getAttribute("href")).toBe("/w/example/settings/clients");
     expect(await page.locator("[data-room]").count()).toBe(0);
     expect(errors).toEqual([]);
     await page.close();
@@ -172,7 +172,7 @@ describe("Capacity page", { timeout: 180_000 }, () => {
     expect(list).toContain("Organic (SEO) T1: words");
     expect(list).toMatch(/adoption/i);
     const links = await missing.page.locator("[data-attention] a").evaluateAll((as) => as.map((a) => a.getAttribute("href")));
-    expect(links).toContain("/w/example/setup/clients");
+    expect(links).toContain("/w/example/settings/clients");
     expect(links).toContain("/w/example/processes");
     // The attention list is above the widgets it affects.
     const order = await missing.page.evaluate(() => {
