@@ -256,12 +256,12 @@ export function BlockLibrary({
                               <ChevronRight aria-hidden className={`size-4 transition-transform ${isOpen ? "rotate-90" : ""}`} />
                             </button>
                           </td>
-                          <td className="min-w-24 px-2 py-2.5 sm:min-w-44">
-                            <span className="block min-w-0 font-semibold" data-block-name>
+                          <td className="w-full max-w-0 min-w-28 px-2 py-2.5 sm:min-w-44">
+                            <span className="block min-w-0 truncate font-semibold" data-block-name>
                               {r.name}
                             </span>
                             {r.line && (
-                              <span className="block max-w-[28rem] truncate text-xs text-muted-foreground" data-block-line>
+                              <span className="block truncate text-xs text-muted-foreground" data-block-line>
                                 {r.line}
                               </span>
                             )}
