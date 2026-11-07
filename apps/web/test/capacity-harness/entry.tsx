@@ -1,4 +1,4 @@
-// The Capacity page's view on a bare page, for ../capacity-page-browser.test.ts: the real component with its two simulations in a real
+// The Capacity page's view on a bare page, for ../capacity-page-browser.test.ts: the real component with its simulation in a real
 // Web Worker, fed with the engine fixture `capacityModel()` and the Set up data that agrees with it (made-up data). Next's modules are
 // stood in for by ../build-harness.ts. Nothing here ships.
 //
@@ -6,7 +6,6 @@
 
 import { createRoot } from "react-dom/client";
 import { capacitySetupFromModel } from "@transpera-flow/db";
-import { calendarMonthStarts } from "@transpera-flow/db/sandbox";
 import { capacityModel } from "@transpera-flow/engine";
 import { CapacityView } from "@/components/capacity/capacity-view";
 
@@ -38,10 +37,9 @@ window.mountCapacity = ({ payHidden, noTiers, missingWords, badModel, tierTotal 
   // Every servicing step belongs to its process, which the page links to.
   const stepProcess: Record<string, string> = {};
   for (const [pid, proc] of Object.entries(model.servicingProcesses ?? {})) for (const s of proc.steps) stepProcess[s] = pid;
-  const start = "2026-11-02";
   createRoot(document.getElementById("root")!).render(
     <div className="p-4">
-      <CapacityView setup={setup} model={model} year={{ model, monthStarts: calendarMonthStarts(start, model.horizonWeeks, model.hoursPerWeek) }} base="/w/example" stepProcess={stepProcess} startDate={start} />
+      <CapacityView setup={setup} model={model} base="/w/example" stepProcess={stepProcess} />
     </div>,
   );
 };
