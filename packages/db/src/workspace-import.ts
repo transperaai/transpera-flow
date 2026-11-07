@@ -152,6 +152,7 @@ const SETTING_KEYS: Record<keyof WorkspaceSettings, true> = {
   capacity_factor_enabled: true,
   overhead_monthly: true,
   purposes: true,
+  churn_drivers_removed: true,
   ramp_default: true,
   dler_includes_leadership: true,
 };

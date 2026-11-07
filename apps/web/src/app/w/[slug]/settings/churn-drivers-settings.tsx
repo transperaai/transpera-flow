@@ -1,18 +1,21 @@
 "use client";
 
 // Settings, Churn drivers (A56, issue #121; the prototype's Settings screen of the same name): the reasons clients
-// leave, each with a weight, plus your own. The list holds the drivers in use: Remove takes one out of the simulation
-// (a built-in is switched off and can be added back; your own is deleted). The simulation measures the ones it can; this section
+// leave, each with a weight and an on/off switch, plus your own. Every row has a Delete: one of your own is deleted for good; a
+// built-in is switched off and taken off the list (`settings.churn_drivers_removed`), and + Add driver puts it back. The simulation measures the ones it can; this section
 // shows each one's value now, its weight and how much of the churn it explains, and projects churn as the weights
 // move (no new simulation: it works from what the latest run measured).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { ModelError, toEngineModel, type ChurnDriverRow, type ProcessBundle, type Viewer } from "@transpera-flow/db";
 import { CHURN_DRIVER_SPECS, CHURN_WEIGHT_MAX, CHURN_WEIGHT_MIN, CUSTOM_DRIVER_VALUE, equivalentEvents, projectChurn, type ChurnCauses, type EngineModel } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ConfirmDialog } from "@/components/sandbox/scenario-bar";
 import {
   CHANCE_HELP,
   CONTROL_HELP,
@@ -33,7 +36,7 @@ import {
 } from "@/lib/churn-drivers";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { cn } from "@/lib/utils";
-import { addChurnDriver, removeChurnDriver, saveChurnDriver } from "./churn-drivers-actions";
+import { addChurnDriver, removeChurnDriver, saveChurnDriver, saveRemovedDrivers } from "./churn-drivers-actions";
 import { SettingsSection } from "./section";
 
 export type DriversMode = "live" | "readonly" | "demo";
@@ -47,6 +50,7 @@ export function ChurnDriversSettings({
   workspaceId,
   bundle,
   rows,
+  removed: removedStored = null,
 }: {
   mode: DriversMode;
   workspaceId: string | null;
@@ -54,12 +58,17 @@ export function ChurnDriversSettings({
   bundle: ProcessBundle | null;
   /** The drivers the workspace has set; a built-in with no row is at its default. */
   rows: readonly ChurnDriverRow[];
+  /** The built-ins deleted from the list (`settings.churn_drivers_removed`); null: none. */
+  removed?: readonly string[] | null;
 }) {
   const canEdit = mode !== "readonly";
   const [states, setStates] = useState<DriverState[]>(() => driverStates(rows));
   const [save, setSave] = useState<SaveState>({ kind: "idle" });
   const [adding, setAdding] = useState(false);
   const nextDemoId = useRef(1);
+  const [removed, setRemoved] = useState<string[]>(() => [...(removedStored ?? [])]);
+  const removedBase = useRef<string[] | null>(removedStored ? [...removedStored] : null);
+  const [confirm, setConfirm] = useState<DriverState | null>(null);
 
   // Saves: edits to one driver are merged and sent after a short pause, one request at a time per driver.
   const pending = useRef(new Map<string, DriverPatch>());
@@ -134,15 +143,41 @@ export function ChurnDriversSettings({
     } else setSave({ kind: "error", message: out?.status === "error" ? out.message : "Couldn't add it. Try again." });
   };
 
-  const remove = async (d: DriverState) => {
-    if (d.builtin) return change(d.key, { enabled: false });
+  const deleteOwn = async (d: DriverState) => {
     if (mode === "live" && workspaceId) {
       const out = await removeChurnDriver(workspaceId, d.key).catch(() => null);
-      if (out?.status !== "saved") return setSave({ kind: "error", message: out?.status === "error" ? out.message : "Couldn't remove it. Try again." });
+      if (out?.status !== "saved") return setSave({ kind: "error", message: out?.status === "error" ? out.message : "Couldn't delete it. Try again." });
       pending.current.delete(d.key);
     }
     setStates((all) => all.filter((x) => x.key !== d.key));
   };
+
+  /** Take a built-in off the list (switched off too, so the simulation leaves it out), or put it back on (switched on). */
+  const setListed = async (d: DriverState, listed: boolean) => {
+    const next = listed ? removed.filter((k) => k !== d.key) : [...removed.filter((k) => k !== d.key), d.key];
+    setRemoved(next);
+    change(d.key, { enabled: listed });
+    if (mode !== "live" || !workspaceId) return;
+    setSave({ kind: "saving" });
+    const out = await saveRemovedDrivers(workspaceId, removedBase.current, next).catch(() => null);
+    if (out?.status === "saved") {
+      removedBase.current = out.value ? [...out.value] : null;
+      setSave((s) => (pending.current.size || s.kind === "error" ? s : { kind: "saved" }));
+    } else if (out?.status === "conflict") {
+      // Someone else changed the list: theirs, with this change made to it.
+      const theirs = out.theirs ? [...out.theirs] : [];
+      const merged = listed ? theirs.filter((k) => k !== d.key) : [...theirs.filter((k) => k !== d.key), d.key];
+      const again = await saveRemovedDrivers(workspaceId, out.theirs ? [...out.theirs] : null, merged).catch(() => null);
+      if (again?.status === "saved") {
+        removedBase.current = again.value ? [...again.value] : null;
+        setRemoved(merged);
+        setSave({ kind: "saved" });
+      } else setSave({ kind: "error", message: "Couldn't save. Reload the page and try again." });
+    } else setSave({ kind: "error", message: out?.status === "error" ? out.message : "Couldn't save. Try again." });
+  };
+
+  const askDelete = (d: DriverState) => (d.builtin ? void setListed(d, false) : setConfirm(d));
+
 
   // What each cause measures now: simulated once, and again only when something the measures depend on changes
   // (an entered number or a driver of your own). Moving a weight or a switch doesn't run anything.
@@ -172,16 +207,16 @@ export function ChurnDriversSettings({
     [causes, states],
   );
   const customs = states.filter((d) => !d.builtin).length;
-  const shown = states.filter((d) => d.enabled);
-  // Built-ins not in use (most start out), and your own drivers switched off before Remove existed: the add menu puts them in.
-  const removed = states.filter((d) => !d.enabled);
+  const isRemoved = (d: DriverState) => d.builtin !== null && removed.includes(d.key);
+  const shown = states.filter((d) => !isRemoved(d));
+  const deleted = states.filter(isRemoved);
   const clientCount = model?.activeClients ?? 0;
 
   return (
     <SettingsSection
       id="churn-drivers"
       title="Churn drivers"
-      description="Base churn per service is multiplied by these drivers. Weights are your estimates; the simulation measures the drivers marked Measured. Contribution shows how much of the churn in the latest run each driver explains. Remove a driver to leave it out of the simulation."
+      description="Base churn per service is multiplied by these drivers. Weights are your estimates; the simulation measures the drivers marked Measured. Contribution shows how much of the churn in the latest run each driver explains."
     >
       {mode === "live" && <SaveStatus state={save} />}
       {mode === "readonly" && (
@@ -233,21 +268,21 @@ export function ChurnDriversSettings({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-64">
-              {removed.length > 0 && (
-                <>
-                  <DropdownMenuLabel>Built-in drivers</DropdownMenuLabel>
-                  {removed.map((d) => (
-                    <DropdownMenuItem key={d.key} data-restore-driver={d.key} onSelect={() => change(d.key, { enabled: true })}>
-                      {d.name}
-                    </DropdownMenuItem>
-                  ))}
-                  <DropdownMenuSeparator />
-                </>
-              )}
               <DropdownMenuItem data-new-driver disabled={customs >= MAX_CUSTOM_DRIVERS} onSelect={() => void add()}>
                 A driver of your own
               </DropdownMenuItem>
               {customs >= MAX_CUSTOM_DRIVERS && <p className="px-1.5 pb-1 text-xs text-muted-foreground">Up to {MAX_CUSTOM_DRIVERS} of your own.</p>}
+              {deleted.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Put back</DropdownMenuLabel>
+                  {deleted.map((d) => (
+                    <DropdownMenuItem key={d.key} data-restore-driver={d.key} onSelect={() => void setListed(d, true)}>
+                      {d.name}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
           <Help label="Add driver" {...CONTROL_HELP.add} />
@@ -256,7 +291,6 @@ export function ChurnDriversSettings({
 
       <div className="rounded-lg border border-line">
         <ul className="flex flex-col" aria-label="Churn drivers" aria-busy={sim.status === "running"}>
-          {shown.length === 0 && <li className="px-4 py-3 text-sm text-muted-foreground">No drivers in use: only normal churn. Add one to put it back.</li>}
           {shown.map((d) => (
             <DriverRow
               key={d.key}
@@ -267,19 +301,36 @@ export function ChurnDriversSettings({
               share={projection ? (projection.shares[engineIdOf(d)] ?? 0) : null}
               canEdit={canEdit}
               onChange={(patch) => change(d.key, patch)}
-              onRemove={() => void remove(d)}
+              onDelete={() => askDelete(d)}
             />
           ))}
-          <li className="grid items-center gap-3 border-t border-line px-4 py-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]">
+          <li className="grid items-center gap-3 border-t border-line px-4 py-3 md:grid-cols-[3.5rem_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_4rem]">
+            <span />
             <span className="flex items-center text-sm font-medium">
               Normal churn
               <Help label="Normal churn" {...CONTROL_HELP.normal} />
             </span>
             <span />
             <Contribution share={projection ? projection.normalShare : null} tone="plain" label="Normal churn" />
+            <span />
           </li>
         </ul>
       </div>
+      {confirm && (
+        <ConfirmDialog
+          title={`Delete “${confirm.name}”?`}
+          description="Your own driver is deleted for good, with its name, description and numbers."
+          confirm="Delete"
+          cancel="Cancel"
+          destructive
+          onConfirm={() => {
+            const d = confirm;
+            setConfirm(null);
+            void deleteOwn(d);
+          }}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
     </SettingsSection>
   );
 }
@@ -306,7 +357,7 @@ function DriverRow({
   share,
   canEdit,
   onChange,
-  onRemove,
+  onDelete,
 }: {
   d: DriverState;
   cause: ChurnCauses["causes"][number] | undefined;
@@ -315,22 +366,26 @@ function DriverRow({
   share: number | null;
   canEdit: boolean;
   onChange: (patch: DriverPatch) => void;
-  onRemove: () => void;
+  onDelete: () => void;
 }) {
   const valueHelp = d.builtin ? VALUE_HELP[d.builtin] : undefined;
   const range = d.builtin ? CHURN_DRIVER_SPECS[d.builtin].valueRange : { min: CUSTOM_DRIVER_VALUE.min, max: CUSTOM_DRIVER_VALUE.max };
   const help = d.builtin ? DRIVER_HELP[d.builtin] : { description: d.description || "Your own cause of clients leaving.", example: d.example || "Add an example below." };
   return (
-    <li className="grid gap-3 border-t border-line px-4 py-3 first:border-t-0 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)] md:items-center">
+    <li className={cn("grid gap-3 border-t border-line px-4 py-3 first:border-t-0 md:grid-cols-[3.5rem_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_4rem] md:items-center", !d.enabled && "[&>*:not([data-delete-cell])]:opacity-60")}>
+      <span className="flex items-center">
+        <Switch checked={d.enabled} disabled={!canEdit} onCheckedChange={(on) => onChange({ enabled: on })} aria-label={`Use ${d.name}`} />
+        <Help label={`Use ${d.name}`} {...CONTROL_HELP.switch} />
+      </span>
+
       <div className="flex min-w-0 flex-col gap-1.5">
         {d.builtin ? (
           <span className="flex items-center">
             <b className="text-sm font-semibold">{d.name}</b>
             <Help label={d.name} {...help} />
-            <RemoveButton d={d} canEdit={canEdit} onRemove={onRemove} />
           </span>
         ) : (
-          <CustomFields d={d} canEdit={canEdit} onChange={onChange} onRemove={onRemove} />
+          <CustomFields d={d} canEdit={canEdit} onChange={onChange} />
         )}
         <span className="text-xs text-muted-foreground">
           {sourceLabel(d)} · now: {valueNow(d, cause, model, viewer)}
@@ -388,7 +443,14 @@ function DriverRow({
         />
       </label>
 
-      <Contribution share={share} tone="accent" label={d.name} hint={CONTROL_HELP.contribution} />
+      <Contribution share={d.enabled ? share : 0} tone="accent" label={d.name} hint={CONTROL_HELP.contribution} />
+
+      <span className="flex items-center justify-end" data-delete-cell>
+        <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" disabled={!canEdit} onClick={onDelete} aria-label={`Delete ${d.name}`}>
+          <Trash2 aria-hidden />
+        </Button>
+        <Help label={`Delete ${d.name}`} {...(d.builtin ? CONTROL_HELP.removeBuiltin : CONTROL_HELP.remove)} />
+      </span>
     </li>
   );
 }
@@ -411,7 +473,7 @@ function Contribution({ share, tone, label, hint }: { share: number | null; tone
   );
 }
 
-function CustomFields({ d, canEdit, onChange, onRemove }: { d: DriverState; canEdit: boolean; onChange: (patch: DriverPatch) => void; onRemove: () => void }) {
+function CustomFields({ d, canEdit, onChange }: { d: DriverState; canEdit: boolean; onChange: (patch: DriverPatch) => void }) {
   return (
     <div className="flex flex-col gap-1.5">
       <TextBox label="Name" help={{ label: "Driver name", ...CONTROL_HELP.name }} value={d.name} maxLength={80} required disabled={!canEdit} onCommit={(v) => v && onChange({ name: v })} />
@@ -433,22 +495,7 @@ function CustomFields({ d, canEdit, onChange, onRemove }: { d: DriverState; canE
         placeholder="An example"
         onCommit={(v) => onChange({ example: v || null })}
       />
-      <span className="flex items-center">
-        <RemoveButton d={d} canEdit={canEdit} onRemove={onRemove} />
-      </span>
     </div>
-  );
-}
-
-/** Remove: a built-in leaves the simulation (Add driver puts it back); your own is deleted. */
-function RemoveButton({ d, canEdit, onRemove }: { d: DriverState; canEdit: boolean; onRemove: () => void }) {
-  return (
-    <span className={cn("flex items-center", d.builtin && "ml-auto")}>
-      <Button type="button" variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" disabled={!canEdit} onClick={onRemove} aria-label={`Remove ${d.name}`}>
-        Remove
-      </Button>
-      <Help label={`Remove ${d.name}`} {...(d.builtin ? CONTROL_HELP.removeBuiltin : CONTROL_HELP.remove)} />
-    </span>
   );
 }
 

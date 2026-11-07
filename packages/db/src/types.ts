@@ -75,6 +75,11 @@ export interface WorkspaceSettings {
    * (`DEFAULT_PURPOSES`). Shape-checked by `workspaces_purposes`; read through `workspacePurposes`.
    */
   purposes?: { key: string; name: string; description: string }[] | null;
+  /**
+   * The built-in churn drivers deleted from Settings' list (their keys, such as "price"). A deleted one is also switched off, so the
+   * simulation leaves it out; + Add driver puts it back. Absent or null: none deleted.
+   */
+  churn_drivers_removed?: string[] | null;
   /** Per-person times (capacity factors, C6): off unless true. Owners and editors switch it; see `person_capacity_factors`. */
   capacity_factor_enabled?: boolean;
   /**

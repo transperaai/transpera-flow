@@ -47,9 +47,13 @@ export const CONTROL_HELP = {
     description: "How much this cause matters. 1 is normal. 0 means ignore it. 3 means it matters three times as much.",
     example: "Late work is set to 1.5, so it matters a bit more than normal.",
   },
+  switch: {
+    description: "Turns this cause on or off. Off means the simulation ignores it, as if its weight were 0.",
+    example: "Switch off “Price changes” if you aren't planning a price rise.",
+  },
   add: {
-    description: "Adds one of the built-in causes not in use yet, or a cause of your own.",
-    example: "Add “Price changes” when you plan a price rise.",
+    description: "Adds a cause of your own, or puts back a built-in cause you deleted.",
+    example: "Put back “Price changes” if you deleted it and now plan a price rise.",
   },
   contribution: {
     description: "How much of the churn in the simulation this cause explains, with the weights you've set. The rest is normal churn.",
@@ -70,10 +74,10 @@ export const CONTROL_HELP = {
     description: "How much extra churn this cause adds when its weight is 1, in percent. You estimate it.",
     example: "15 means 15% more clients leave than normal.",
   },
-  remove: { description: "Deletes your own cause for good, with its name and numbers.", example: "Remove “A cheaper competitor” once they've closed down." },
+  remove: { description: "Deletes your own cause for good, with its name and numbers.", example: "Delete “A cheaper competitor” once they've closed down." },
   removeBuiltin: {
-    description: "Leaves this cause out of the simulation. Its weight and numbers are kept: Add driver puts it back.",
-    example: "Remove “Price changes” if you aren't planning a price rise.",
+    description: "Takes this cause off the list and out of the simulation. + Add driver puts it back, with its weight and numbers.",
+    example: "Delete “Price changes” if you never plan a price rise.",
   },
 } as const satisfies Record<string, HelpCopy>;
 

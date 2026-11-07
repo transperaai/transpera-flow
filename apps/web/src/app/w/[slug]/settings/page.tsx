@@ -65,7 +65,7 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
           and on the Overview.
         </p>
       </PurposesSettings>
-      <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} />
+      <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} removed={data.workspace.settings.churn_drivers_removed} />
       <DemandSettings data={data} />
     </SettingsPage>
   );
