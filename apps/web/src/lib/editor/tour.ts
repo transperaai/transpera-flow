@@ -22,19 +22,25 @@ const STEPS: Record<string, TourStep> = {
     id: "palette",
     target: ['aside[aria-label="Palette"]'],
     title: "The palette",
-    body: "This is where you add things. Press + Step, + Decision or + Wait and it appears where you are looking on the map. You can also group steps, or insert a saved block.",
+    body: "This is where you add things. Press + Step, + Wait or + Decision and it appears where you are looking on the map. A decision comes with two branches, Yes and No. You can also group steps, or insert a saved block.",
   },
   canvas: {
     id: "canvas",
     target: ["[data-tour=canvas]"],
     title: "The canvas",
-    body: "This is the map. Drag a step to move it. To connect two steps, drag from the dot on the edge of one to the other. Double-click an empty spot to add a step there.",
+    body: "This is the map. Drag a step to move it. To connect two steps, drag from the dot on the edge of one to the other. Double-click an empty spot to add a step. A decision lists its branches on its card: click one to edit it.",
+  },
+  problems: {
+    id: "problems",
+    target: ["[data-problems-line]"],
+    title: "Things to fix",
+    body: "A red mark on a step or line means something stops the process simulating. Hover over it, or tab to it, to see why. This line counts them and jumps to the first. Publishing waits until they are fixed.",
   },
   inspector: {
     id: "inspector",
     target: ['aside[aria-label="Inspector"]'],
     title: "The inspector",
-    body: "Click a step and its details show here: its name, who does it, how long it takes and how it is cited. Change a value and it saves to your draft straight away.",
+    body: "Click a step and its details show here: its name, who does it, how long it takes and what it achieves. Change a value and it saves to your draft straight away.",
   },
   checklist: {
     id: "checklist",
@@ -42,7 +48,7 @@ const STEPS: Record<string, TourStep> = {
     // The list is folded away until it is opened: the tour opens it so the step shows what it talks about.
     reveal: true,
     title: "The assumptions checklist",
-    body: "Missing for simulation lists what the map still has no real figure for: a role, a time, a wait, odds on a branch or how many arrive. Click one to go to that step, then fill it in or cite a source.",
+    body: "Missing for simulation lists what the map still has no real figure for: a role, a time, a wait, odds on a branch or how many arrive. Click one to go to that step, then fill it in.",
   },
   draft: {
     id: "draft",
@@ -83,7 +89,7 @@ const STEPS: Record<string, TourStep> = {
 };
 
 const ORDER: Record<TourVariant, string[]> = {
-  process: ["palette", "canvas", "inspector", "checklist", "draft", "simulate", "publish", "history"],
+  process: ["palette", "canvas", "problems", "inspector", "checklist", "draft", "simulate", "publish", "history"],
   // The company map is a picture of the business: nothing to simulate and no assumptions to check, so the tour is shorter.
   company: ["palette", "canvas", "inspector", "draft", "publishCompany", "historyCompany"],
 };

@@ -60,7 +60,7 @@ export function Inspector({
   draft: ((step: StepRow) => DraftInfo) | null;
   /** The block library as the Editor uses it: a selected group can be saved as a block. */
   blocks: BlockTools;
-  /** The company map (B11): no loose ends to chase, no blocks. */
+  /** The company map (B11): no blocks, no branches or purposes to edit. */
   company?: boolean;
 }) {
   const step = selected.steps.length === 1 && !selected.edges.length ? bundle.steps.find((s) => s.id === selected.steps[0]) : undefined;

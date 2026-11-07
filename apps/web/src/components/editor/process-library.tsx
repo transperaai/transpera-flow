@@ -1,6 +1,6 @@
 "use client";
 
-// The process library (issue #164, B12), in every editor: this workspace's processes, to place in the draft being edited as
+// The process library (issue #164, B12), in the company map's editor only (a process's own editor makes no links, editor brainstorm item 3): this workspace's processes, to place in the draft being edited as
 // links. Pick several and add them at once; they land where the person is looking. Adding never edits or copies a process, and
 // a process sits in one place only, so one that sits elsewhere is greyed with where. "New process" and the templates make a new
 // process and place it the same way. The edit goes into the draft like any other change, so it is undone, saved and published

@@ -13,8 +13,8 @@ const memory = (): TourStorage => {
 const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8");
 
 describe("the tour's steps", () => {
-  it("has 8 steps for a process, one for each area the issue names, in the order a person works", () => {
-    expect(tourSteps("process").map((s) => s.id)).toEqual(["palette", "canvas", "inspector", "checklist", "draft", "simulate", "publish", "history"]);
+  it("has 9 steps for a process, one for each area the issue names, in the order a person works", () => {
+    expect(tourSteps("process").map((s) => s.id)).toEqual(["palette", "canvas", "problems", "inspector", "checklist", "draft", "simulate", "publish", "history"]);
   });
 
   it("has a shorter tour for the company map, which has nothing to simulate", () => {
@@ -39,6 +39,10 @@ describe("the tour's steps", () => {
     expect(canvas).toMatch(/Drag a step to move/);
     expect(canvas).toMatch(/connect/);
     expect(canvas).toMatch(/Double-click/);
+  });
+
+  it("no longer mentions what has left the Editor: the process library, loose ends, evidence or citing", () => {
+    for (const s of tourSteps("process")) expect(`${s.title} ${s.body}`, s.id).not.toMatch(/process library|loose end|evidence|cite|cited|citing|\+ Process/i);
   });
 
   it("points every step at an element the Editor really draws", () => {
