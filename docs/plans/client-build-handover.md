@@ -112,3 +112,92 @@ P1 alone; then P4, P6, P7, P8 in parallel.
   - QA and UI feedback on the preview;
   - get it deploy-ready for Joe (`docs/new-client.md`, `capacity:starter`);
   - possibly a clean new repo.
+
+## Where it stands (7 Nov): two chats from here
+
+**State.**
+- **Integration branch:** `claude/relaxed-babbage-51ysen`. Every QA package Q1–Q16 is merged into it by PR, each with its
+  brief in `docs/plans/capacity/`. The preview alias `transpera-flow-next.vercel.app` follows this branch.
+- **Not yet on the handover branch:** the QA work since [transperaai/transpera-flow#255](https://github.com/transperaai/transpera-flow/pull/255).
+  One PR brings it across when Austin wants.
+- **Preview database** (Neon `main`): every migration up to `20270132000000_adopt_solution.sql`. Example agency 2
+  (`example-agency-2`) holds the made-up agency, 8 issues, 4 solutions and 4 blocks, for QA.
+- **Decisions:** D1–D50 are in `docs/plans/client-requirements.md`. D51 (the company map drives the run) is decided, and
+  phase 2 writes it.
+- **`main` and production:** untouched, on Supabase (see the 31 Oct section for why).
+- **Last full check** on the integration branch: lint, typecheck, db, web and the build all green. The engine passes on
+  a quiet machine. Timing tests flake under load; re-run them alone.
+
+**How work is done** (both chats):
+- **Opus writes the brief and reviews; Sonnet builds,** in its own worktree, from
+  `docs/plans/capacity/README.md`'s shared rules. Engine design goes to Opus.
+- **One PR per package into the integration branch.** Merge it after review. Austin doesn't need to OK every merge;
+  screenshots go to Austin first for redesigns.
+- Before merging, merge the integration branch into the package branch and re-run its tests and the web build.
+- After a merge with a migration, apply it to the preview: `packages/db/scripts/neon-preview-migrate.sh --dry-run`,
+  then without `--dry-run`, then `--dry-run` again to confirm. Example data: `packages/db/scripts/neon-preview-example.sh
+  --list | --workspace <slug> [--add-issues]`. Both are allowed in `.claude/settings.json`.
+- **Gotchas:**
+  - A restarted container leaves Postgres down: `pg_ctlcluster 16 main start`.
+  - A server component must never call a function from a `"use client"` module (`test/server-client-boundary.test.ts`).
+  - Never use a bare `git stash`.
+- **Preview sign-in:**
+  - Log in to Vercel, then Google. The Owner is Austin's Gmail, or any address on the preview's `ACCESS_ADMIN_EMAILS`.
+  - At phone width the app is read-only.
+
+**Two chats, and how they stay out of each other's way.**
+
+| | Chat A: engine and data | Chat B: page refinement |
+|---|---|---|
+| Owns | `packages/engine`, `packages/db/src/model.ts` and `capacity-model.ts`, migrations, the preview database, scripts | page components and layout under `apps/web/src/components` and `app/**` |
+| Migration numbers | `20270134000000`–`20270199999999` | `20270200000000`–`20270299999999` (rarely needed) |
+| Decision numbers | D51–D69 | D70–D89 |
+| Branch names | `claude/eng-<slug>` | `claude/ui-<slug>` |
+
+- Each chat pulls the integration branch before starting a package, and updates only its own block below.
+- A page change that needs a data change goes to Chat A, through Austin.
+- Both use the page kit (`apps/web/src/components/page-kit/`). Add new kit components as new files; don't change
+  existing ones without telling the other chat.
+
+**Chat A: open items.**
+1. **Q17 phase 2: the company map drives the run.**
+   - Design: `docs/adr/0023-company-map-drives-the-run.md`. The orchestrator approved it: build it as written.
+   - The `map_drives_run` flag (migration `20270134000000`) with its publish trigger.
+   - The small engine change for "Win new clients" through a handed-to process, with no bump if no golden moves.
+   - A fork follows its first line, with a visible note on the map.
+   - Write D51 and amend D50 (no one-process scope).
+   - Brief: `docs/plans/capacity/q17-company-map-run-brief.md`.
+2. **Get Joe's deployment ready:** his own Neon database and Vercel project (`docs/new-client.md`), `capacity:starter`,
+   and his Owner sign-in. Confirm with Austin before creating anything.
+3. **Production cutover** to Neon (runbook `packages/db/scripts/copy-from-supabase/README.md`), with Austin present. Then
+   merge to `main`.
+4. **Smaller items:**
+   - "Adopted" is set when Adopt seeds the draft, not on publish; a publish hook would fix it.
+   - Pay-hidden viewers see no DLER; that needs a server-side ratio.
+   - Capacity and Sandbox runs take 3–5 s on a client-sized model.
+5. **Later:** a clean new repo for the client product.
+
+**Chat B: open items.**
+1. **Continue Austin's QA,** page by page. Not yet QA'd since their redesigns:
+   - Capacity;
+   - Sandbox results (a brainstorm is due on what the results should show);
+   - Set up (Tiers & clients, People & roles);
+   - the Block library;
+   - Solutions.
+2. **Small leftovers:**
+   - the Overview issues donut's "No open issues" is grey text;
+   - the old demo-mode branches in about 20 components;
+   - Tidy layout on the company map (on hold until Austin's real flows are in).
+3. **Keep the look consistent:** every page on the page kit, as Q11 set out.
+
+**Starting prompts.**
+
+> **Chat A:** Read `CLAUDE.md`, then the "Where it stands (7 Nov)" section of `docs/plans/client-build-handover.md`,
+> `docs/plans/capacity/README.md`, `docs/plans/capacity/q17-company-map-run-brief.md` and
+> `docs/adr/0023-company-map-drives-the-run.md`. You are Chat A (engine and data), working on
+> `claude/relaxed-babbage-51ysen`. Start with Q17 phase 2: the design is approved as written. Brief a builder, review,
+> merge, apply the migration to the preview, then report.
+
+> **Chat B:** Read `CLAUDE.md`, then the "Where it stands (7 Nov)" section of `docs/plans/client-build-handover.md` and
+> `docs/plans/capacity/README.md`. You are Chat B (page refinement), working on `claude/relaxed-babbage-51ysen`. Stand by
+> for Austin's QA notes. For each page, answer his questions, brief a builder, review with screenshots, and merge.
