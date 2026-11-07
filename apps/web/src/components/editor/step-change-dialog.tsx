@@ -112,8 +112,8 @@ export function StepChangeDialog({
           </DialogTitle>
           <DialogDescription>
             {automation
-              ? "Say how much of this step's automatable time goes away. It is saved in this solution, and you see it in the Sandbox by picking the solution."
-              : "Say how many times faster the augmentable part of this step gets. It is saved in this solution, and you see it in the Sandbox by picking the solution."}
+              ? "Say how much of this step's automatable time goes away. It is saved with the solution when you press Save solution, and you see it in the Sandbox by picking the solution."
+              : "Say how many times faster the augmentable part of this step gets. It is saved with the solution when you press Save solution, and you see it in the Sandbox by picking the solution."}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">

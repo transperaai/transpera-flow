@@ -6,7 +6,7 @@
 // `readOnly` shows the same values as plain text (a Viewer never reaches the Editor, but the values read the same anywhere).
 
 import { useId, useState } from "react";
-import { engineRecurrence, STEP_SOURCE_LABELS, type ProcessBundle, type RecurrenceJson, type StepRow, type StepSourcedValue, type StoredStepChange } from "@transpera-flow/db";
+import { engineRecurrence, STEP_SOURCE_LABELS, type ProcessBundle, type RecurrenceJson, type StepRow, type StepSourcedValue, type StepChangeEdit } from "@transpera-flow/db";
 import { recurrenceLabel } from "@transpera-flow/engine";
 import { NumberField, SelectField, TextField } from "@/components/fields";
 import { Help } from "@/components/help";
@@ -291,14 +291,11 @@ export function StepBaseValues({
   );
 }
 
-/** The changes in a solution's version, with where the Sandbox picks that version (capacity P7; D53), and what the step panel may do about them. */
+/** The automations and augmentations of the solution being edited (D53), and what the step panel may do about them. */
 export interface ChangesOnSteps {
-  sandboxHref: string;
   changes: ChangeOnStep[];
-  /** On a saved solution's version: edit its changes in place (each edit is one save). `onChanged` is set by the Editor. */
-  edit?: { workspaceId: string; solutionId: string; stepIds: string[]; onChanged?: (list: StoredStepChange[]) => void };
+  /** In solution mode: one edit applied to the Editor's own list (saved with the solution); returns why not, or null. Set by the Editor. */
+  edit?: { stepIds: string[]; apply: (edit: StepChangeEdit) => string | null };
   /** On the live process: where a solution is started from this process. */
   makeSolutionHref?: string;
-  /** In solution mode on a solution that isn't saved yet. */
-  unsavedSolution?: boolean;
 }

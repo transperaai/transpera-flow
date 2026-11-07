@@ -91,7 +91,7 @@ export async function WorkspaceEditorPage({
       historyHref={`/w/${slug}/p/${processId}/history`}
       settingsHref={`/w/${slug}/settings`}
       exitHref={exit}
-      solutionSeed={fromSolution ? { id: fromSolution.id, bundle: bundleFromSolution(live, fromSolution), name: fromSolution.name } : undefined}
+      solutionSeed={fromSolution ? { bundle: bundleFromSolution(live, fromSolution), name: fromSolution.name } : undefined}
       processEditorHref={`${base}/edit?from=${encodeURIComponent(exit)}`}
       editBlock={editRow ? { id: editRow.id, name: editRow.name, description: editRow.description, bundle: readBlock(editRow.steps) } : undefined}
       blockEditorHref={`${base}/edit?mode=block&from=${encodeURIComponent(exit)}`}
@@ -99,20 +99,16 @@ export async function WorkspaceEditorPage({
       library={company ? library : undefined}
       tierSetup={tierSetup}
       laneInput={laneInput}
-      // The changes in the solution this editor was opened on (D53) are part of its version: edited here, tried by picking it in the Sandbox. On the live
-      // process (the draft) the panel points at making a solution; a solution not saved yet can't hold one.
+      // The changes in the solution this editor was opened on (D53) seed the Editor's own list, saved with the solution (Save solution). On the live
+      // process (the draft) the panel points at making a solution.
       changesOnSteps={
         company || editorMode === "block"
           ? undefined
           : fromSolution
-            ? {
-                sandboxHref: `/w/${slug}/sandbox?solution=${fromSolution.id}`,
-                changes: changesOnStepsOf(fromSolution.id, fromSolution.step_changes),
-                edit: { workspaceId: live.workspace.id, solutionId: fromSolution.id, stepIds: fromSolution.steps.steps.map((s) => s.id) },
-              }
+            ? { changes: changesOnStepsOf(fromSolution.id, fromSolution.step_changes) }
             : editorMode === "solution"
-              ? { sandboxHref: `/w/${slug}/sandbox`, changes: [], unsavedSolution: true }
-              : { sandboxHref: `/w/${slug}/sandbox`, changes: [], makeSolutionHref: newSolutionHref(`/w/${slug}`, live.process.id, exit) }
+              ? undefined
+              : { changes: [], makeSolutionHref: newSolutionHref(`/w/${slug}`, live.process.id, exit) }
       }
     />
     </SourceLinkingScope>

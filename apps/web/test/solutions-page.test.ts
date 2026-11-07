@@ -174,6 +174,7 @@ describe("the demo's solutions, in this tab", () => {
       copy: solutionCopy(live),
       changedStepIds: [ids.audit],
       levers: [],
+      stepChanges: [],
       links: [{ issueId: issueA!.id, autoVerdict: "pass", holdsPct: 90, autoNote: "ok" }],
     });
     expect(setDemoVerdict(s.id, issueA!.id, { verdict: "fail", notes: "Too slow in a downturn" })).toMatchObject({ user_verdict: "fail", user_notes: "Too slow in a downturn" });

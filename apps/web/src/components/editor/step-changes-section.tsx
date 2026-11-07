@@ -1,11 +1,9 @@
 "use client";
 
 // "Automation and augmentation" in a step's panel (D53, part B). On a solution's version a Step offers "Automate…" and "Augment…", and lists the
-// changes that act on it, each with Edit; every edit is one save into the solution's `step_changes` (a server action, as the solution's other
-// writes). On the live process it points at making a solution first. The Sandbox runs the changes by picking the solution on the company map.
+// changes that act on it, each with Edit; every edit goes into the solution's list of changes (part of the solution being edited, saved with it by Save solution). On the live process it points at making a solution first. The Sandbox runs the changes by picking the solution on the company map.
 
 import { useState } from "react";
-import { saveStepChange } from "@/app/w/[slug]/solution-actions";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import type { ChangesOnSteps } from "@/components/step-base-values";
@@ -20,16 +18,13 @@ export function StepChangesSection({ stepId, stepName, tiers, data }: { stepId: 
   if (!data) return <div data-slot="changes-on-step" hidden />;
   const mine = data.changes.filter((c) => c.steps.includes(stepId));
   const edit = data.edit;
-  const inSolution = edit?.stepIds.includes(stepId) ?? false;
-  if (!edit && !data.makeSolutionHref && !data.unsavedSolution && !mine.length) return <div data-slot="changes-on-step" hidden />;
+  if (!edit && !data.makeSolutionHref && !mine.length) return <div data-slot="changes-on-step" hidden />;
 
   async function send(e: StepChangeEdit): Promise<string | null> {
     if (!edit) return "This solution can't be changed from here.";
-    const r = await saveStepChange(edit.workspaceId, edit.solutionId, e);
-    if (r.status === "error") return r.message;
-    edit.onChanged?.(r.changes);
-    setOpen(null);
-    return null;
+    const problem = edit.apply(e);
+    if (!problem) setOpen(null);
+    return problem;
   }
 
   return (
@@ -50,7 +45,7 @@ export function StepChangesSection({ stepId, stepName, tiers, data }: { stepId: 
               <span className="min-w-0 break-words">
                 {c.name} <span className="text-xs text-muted-foreground">({c.kind})</span>
               </span>
-              {edit && inSolution && (
+              {edit && (
                 <Button type="button" variant="outline" size="sm" onClick={() => setOpen({ kind: c.kind, existing: c })} data-change-edit>
                   Edit
                 </Button>
@@ -60,7 +55,7 @@ export function StepChangesSection({ stepId, stepName, tiers, data }: { stepId: 
         </ul>
       )}
 
-      {edit && inSolution && (
+      {edit && (
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={() => setOpen({ kind: "automation", existing: null })} data-change-automate>
             Automate…
@@ -70,27 +65,11 @@ export function StepChangesSection({ stepId, stepName, tiers, data }: { stepId: 
           </Button>
         </div>
       )}
-      {edit && !inSolution && (
-        <p className="text-xs text-muted-foreground" data-change-not-saved>
-          This step isn&apos;t in the saved solution yet, so it can&apos;t take an automation. Save the solution with it first.
-        </p>
-      )}
       {data.makeSolutionHref && (
         <a href={data.makeSolutionHref} className="text-xs font-medium text-accent hover:underline" data-make-solution>
           Make a solution to try an automation
         </a>
       )}
-      {data.unsavedSolution && (
-        <p className="text-xs text-muted-foreground" data-change-unsaved-solution>
-          Save this solution first. Then open it from its page to add an automation or augmentation to a step.
-        </p>
-      )}
-      {mine.length > 0 && (
-        <a href={data.sandboxHref} className="text-xs font-medium text-accent hover:underline">
-          Try this version in the Sandbox
-        </a>
-      )}
-
       {open && edit && (
         <StepChangeDialog
           key={open.existing?.id ?? open.kind}

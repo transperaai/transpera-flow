@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { NORTHBEAM_PROCESS_ID, NORTHBEAM_WORKSPACE_ID, northbeamIssues, northbeamStepIds as ids, type IssueRow } from "@transpera-flow/db";
+import { NORTHBEAM_PROCESS_ID, NORTHBEAM_WORKSPACE_ID, northbeamIssues, northbeamStepIds as ids, parseStepChanges, toEngineStepChanges, type IssueRow, type StoredStepChange } from "@transpera-flow/db";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import { issueAboutProcess } from "@/lib/solutions/area";
 import { linkProblem, verdictForCopy } from "@/lib/solutions/server-verdict";
@@ -88,6 +88,56 @@ async function issue(over: Record<string, unknown> = {}) {
   const cols = Object.keys(row);
   return (await tdb.client.query(`insert into issues (${cols.join(", ")}) values (${cols.map((_, i) => `$${i + 1}`).join(", ")}) returning id`, Object.values(row))).rows[0].id as string;
 }
+
+describe("createSolution with automations (D53)", () => {
+  const change = (n: number, step: string, over: Partial<StoredStepChange> = {}): StoredStepChange => ({
+    id: `0b8f6f0e-6d0a-4d5e-9d57-2f1d1d2a9c${String(n).padStart(2, "0")}`,
+    name: `Change ${n}`,
+    kind: "automation",
+    effects: [{ step, part: "automatable", remove: 0.8, residualHours: 0.05 }],
+    adoption: 0.7,
+    ramp_months: 2,
+    tiers: null,
+    cost_monthly: 300,
+    ...over,
+  });
+  const stored = async () => parseStepChanges((await tdb.client.query("select step_changes from solutions")).rows[0].step_changes);
+
+  it("saves the list the editor sent with the new solution, ids kept, and the Sandbox model of the saved row matches the list", async () => {
+    const list = [change(1, ids.audit), change(2, ids.discovery, { kind: "augmentation", effects: [{ step: ids.discovery, part: "augmentable", factor: 2 }], tiers: ["T1"], cost_monthly: null })];
+    const r = await createSolution(WS, { ...input(), stepChanges: list });
+    expect(r.status).toBe("ok");
+    expect(await stored()).toEqual(list);
+    if (r.status === "ok") expect(r.solution.step_changes).toEqual(list);
+    const row = (await tdb.client.query("select id from solutions")).rows[0];
+    for (const month of [1, 5]) expect(toEngineStepChanges({ id: row.id, step_changes: await stored() }, month)).toEqual(toEngineStepChanges({ id: row.id, step_changes: list }, month));
+  });
+
+  it("an unsaved new solution with only automations saves them", async () => {
+    // The map is as live has it (nothing changed); the automations are the whole solution.
+    const r = await createSolution(WS, { ...input(), copy: solutionCopy({ steps: live.steps, edges: live.edges }), changedStepIds: [], stepChanges: [change(3, ids.audit)] });
+    expect(r.status).toBe("ok");
+    expect(await stored()).toEqual([change(3, ids.audit)]);
+  });
+
+  it("keeps only the effects on the saved copy's steps, and drops a change left with none", async () => {
+    const gone = "0b8f6f0e-6d0a-4d5e-9d57-2f1d1d2a9cff";
+    const two = change(4, ids.audit, { effects: [{ step: ids.audit, part: "automatable", remove: 0.5 }, { step: gone, part: "augmentable", factor: 2 }] });
+    const r = await createSolution(WS, { ...input(), stepChanges: [two, change(5, gone)] });
+    expect(r.status).toBe("ok");
+    const [only, ...rest] = await stored();
+    expect(rest).toEqual([]);
+    expect(only).toMatchObject({ id: two.id, effects: [{ step: ids.audit, part: "automatable", remove: 0.5 }] });
+  });
+
+  it("refuses more than 40 changes, and a change the checks refuse, saving nothing", async () => {
+    const many = Array.from({ length: 41 }, (_, i) => change(i, ids.audit));
+    expect(await createSolution(WS, { ...input(), stepChanges: many })).toEqual({ status: "error", message: "A solution can have at most 40 changes. Remove one first." });
+    const bad = await createSolution(WS, { ...input(), stepChanges: [change(6, ids.audit, { adoption: 5 })] });
+    expect(bad).toEqual({ status: "error", message: "Change 6: Adoption is a share from 0% to 100%." });
+    expect(await solutions()).toHaveLength(0);
+  });
+});
 
 describe("createSolution", () => {
   it("saves through save_solution with the server's verdict, not the browser's", async () => {

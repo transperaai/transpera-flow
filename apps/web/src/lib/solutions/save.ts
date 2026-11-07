@@ -2,7 +2,7 @@
 // demo store (issue #114, A49). They only reject malformed input early: the tables check the name, the shapes and the
 // verdicts again, and row-level security decides who may write.
 
-import type { BlockBundle, SolutionIssueRow, SolutionRow, SolutionVerdict } from "@transpera-flow/db";
+import { MAX_STEP_CHANGES, parseStepChanges, type BlockBundle, type SolutionIssueRow, type SolutionRow, type SolutionVerdict, type StoredStepChange } from "@transpera-flow/db";
 import { parsePatches, type ScenarioPatch } from "@transpera-flow/engine";
 import { solutionProblem } from "./bundle";
 
@@ -29,6 +29,8 @@ export interface SolutionInput {
   copy: BlockBundle;
   changedStepIds: string[];
   levers: ScenarioPatch[];
+  /** The automations and augmentations edited into it (D53); the server keeps only the effects on the copy's steps. */
+  stepChanges: StoredStepChange[];
   /** The issues it solves; none for a solution started on its own. */
   links: SolutionLinkInput[];
 }
@@ -58,6 +60,9 @@ export function parseSolutionInput(input: unknown): { ok: true; value: SolutionI
   const parsedLevers = parsePatches(rawLevers);
   if (!parsedLevers.ok) return { ok: false, error: "That solution's lever changes aren't valid." };
   const levers: ScenarioPatch[] = parsedLevers.patches;
+  const rawChanges = Array.isArray(i.stepChanges) ? i.stepChanges : [];
+  if (rawChanges.length > MAX_STEP_CHANGES) return { ok: false, error: `A solution can have at most ${MAX_STEP_CHANGES} changes. Remove one first.` };
+  const stepChanges = parseStepChanges(rawChanges);
   const links: SolutionLinkInput[] = [];
   for (const l of Array.isArray(i.links) ? i.links : []) {
     if (!l || typeof l !== "object" || typeof l.issueId !== "string" || !UUID.test(l.issueId)) return { ok: false, error: "That issue isn't valid." };
@@ -66,5 +71,5 @@ export function parseSolutionInput(input: unknown): { ok: true; value: SolutionI
     const holds = typeof l.holdsPct === "number" && Number.isFinite(l.holdsPct) ? Math.min(100, Math.max(0, Math.round(l.holdsPct))) : null;
     links.push({ issueId: l.issueId, autoVerdict: verdict, holdsPct: verdict ? holds : null, autoNote: typeof l.autoNote === "string" ? l.autoNote.slice(0, 1000) : "" });
   }
-  return { ok: true, value: { name, processId: i.processId, baseRevisionId: i.baseRevisionId, copy, changedStepIds: changed.slice(0, 2000), levers, links } };
+  return { ok: true, value: { name, processId: i.processId, baseRevisionId: i.baseRevisionId, copy, changedStepIds: changed.slice(0, 2000), levers, stepChanges, links } };
 }

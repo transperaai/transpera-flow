@@ -1,8 +1,6 @@
 "use server";
 
-import { applyStepChangeEdit, carryStepChanges, parseStepChanges, type BlockBundle, type Json, type ProcessBundle, type SolutionIssueRow, type SolutionRow, type StepChangeEdit, type StoredStepChange } from "@transpera-flow/db";
-import { randomUUID } from "node:crypto";
-import { sql } from "kysely";
+import { carryStepChanges, checkStepChange, cleanStepChange, type BlockBundle, type Json, type ProcessBundle, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
 import { rpc } from "@transpera-flow/db/client";
 import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/save";
 import { serverVerdict, type CopyRun } from "@/lib/solutions/server-verdict";
@@ -45,14 +43,21 @@ function failure(e: unknown) {
 }
 
 /** Save a solution, with the issues it solves and the automatic verdict against each (worked out here). */
-export async function createSolution(workspaceId: unknown, input: unknown, fromSolutionId?: unknown): Promise<SaveSolutionResult> {
+export async function createSolution(workspaceId: unknown, input: unknown): Promise<SaveSolutionResult> {
   if (!isId(workspaceId)) return invalid;
-  if (fromSolutionId !== undefined && fromSolutionId !== null && !isId(fromSolutionId)) return invalid;
   const parsed = parseSolutionInput(input);
   if (!parsed.ok) return { status: "error", message: parsed.error };
   if (!(await getSessionUser())) return signedOut;
   const db = await getDb();
   const v = parsed.value;
+  // The automations the solution was edited with (D53) are part of what is saved. The browser's list is checked here, before anything is written: only the
+  // effects on steps the saved copy has are kept, a change left with none is dropped, and each one passes the same checks as an edit (the column's check runs again).
+  const copyIds = new Set(v.copy.steps.map((s) => s.id));
+  const kept = carryStepChanges(v.stepChanges, copyIds).map((c) => ({ ...(c.id ? { id: c.id } : {}), ...cleanStepChange(c) }));
+  for (const c of kept) {
+    const problem = checkStepChange(c, copyIds);
+    if (problem) return { status: "error", message: `${c.name}: ${problem}` };
+  }
   const links: { issue_id: string; auto_verdict: string | null; holds_pct: number | null; auto_note: string }[] = [];
   // The copy is simulated once, for all the issues it is linked to.
   let base: ProcessBundle | undefined;
@@ -82,17 +87,13 @@ export async function createSolution(workspaceId: unknown, input: unknown, fromS
     return failure(e);
   }
   let solution = data as unknown as SolutionRow;
-  // A copy of a solution keeps its automations (D53): read from the stored source, not from what the browser sent, and only the effects on steps the copy still has.
-  if (typeof fromSolutionId === "string") {
-    const src = await db.selectFrom("solutions").select("step_changes").where("id", "=", fromSolutionId).where("workspace_id", "=", workspaceId).where("process_id", "=", v.processId).executeTakeFirst().catch(() => undefined);
-    const carried = carryStepChanges(parseStepChanges(src?.step_changes), new Set(v.copy.steps.map((s) => s.id)));
-    if (carried.length) {
-      try {
-        await db.updateTable("solutions").set({ step_changes: carried as unknown as Json }).where("id", "=", solution.id).execute();
-        solution = { ...solution, step_changes: carried };
-      } catch {
-        return { status: "error", message: "The solution was saved, but its automations couldn't be copied across. Open it from the Solutions list and add them again." };
-      }
+  // The automations are written with the new row, as the signed-in user.
+  if (kept.length) {
+    try {
+      await db.updateTable("solutions").set({ step_changes: kept as unknown as Json }).where("id", "=", solution.id).execute();
+      solution = { ...solution, step_changes: kept };
+    } catch {
+      return { status: "error", message: "The solution was saved, but its automations couldn't be saved with it. Open it from the Solutions list and add them again." };
     }
   }
   const saved = await db.selectFrom("solution_issues").select(SOLUTION_ISSUE_COLS).where("solution_id", "=", solution.id).execute().catch(() => []);
@@ -138,54 +139,4 @@ export async function linkSolutionToIssue(workspaceId: unknown, solutionId: unkn
     if (pgCode(e) === "23505") return { status: "error", message: "That solution is already linked to this issue." };
     return failure(e);
   }
-}
-
-export type StepChangesResult = { status: "ok"; changes: StoredStepChange[] } | { status: "error"; message: string };
-
-const isEdit = (e: unknown): e is StepChangeEdit => {
-  const o = e as { op?: unknown; key?: unknown; change?: unknown } | null;
-  if (!o || typeof o !== "object") return false;
-  if (o.op === "remove") return typeof o.key === "string";
-  return o.op === "save" && (o.key === null || typeof o.key === "string") && typeof o.change === "object" && o.change !== null && Array.isArray((o.change as { effects?: unknown }).effects);
-};
-
-/**
- * One edit to the automations and augmentations in a solution's version (D53): add, change or remove one. One edit is one save, and
- * the new list is returned. As the signed-in user through row-level security (the same people who write solutions): anyone else
- * changes no rows and is told so. The list is written only if it is still the one the edit was made on.
- */
-export async function saveStepChange(workspaceId: unknown, solutionId: unknown, edit: unknown): Promise<StepChangesResult> {
-  if (!isId(workspaceId) || !isId(solutionId) || !isEdit(edit)) return invalid;
-  if (!(await getSessionUser())) return signedOut;
-  const db = await getDb();
-  const read = () => db.selectFrom("solutions").select(["steps", "step_changes"]).where("id", "=", solutionId).where("workspace_id", "=", workspaceId).executeTakeFirst();
-  let sol;
-  try {
-    sol = await read();
-  } catch (e) {
-    return failure(e);
-  }
-  if (!sol) return { status: "error", message: "That solution isn't there any more." };
-  const current = parseStepChanges(sol.step_changes);
-  const ids = new Set(((sol.steps as unknown as { steps?: { id?: unknown }[] }).steps ?? []).map((s) => String(s.id)));
-  const next = applyStepChangeEdit(solutionId, current, edit, ids, randomUUID);
-  if (!next.ok) return { status: "error", message: next.message };
-  let rows;
-  try {
-    rows = await db
-      .updateTable("solutions")
-      .set({ step_changes: next.list as unknown as Json })
-      .where("id", "=", solutionId)
-      .where("workspace_id", "=", workspaceId)
-      .where(sql<boolean>`step_changes = ${JSON.stringify(sol.step_changes)}::jsonb`)
-      .returning("id")
-      .execute();
-  } catch (e) {
-    return failure(e);
-  }
-  if (rows.length) return { status: "ok", changes: next.list };
-  // Nothing written: someone changed the list first, or this person may not edit.
-  const again = await read().catch(() => undefined);
-  if (again && JSON.stringify(again.step_changes) !== JSON.stringify(sol.step_changes)) return { status: "error", message: "Someone else changed this solution's automations first. Reload the page to see them." };
-  return forbidden;
 }
