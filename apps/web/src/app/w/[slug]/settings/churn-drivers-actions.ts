@@ -1,6 +1,8 @@
 "use server";
 
-import { CHURN_DRIVER_SPECS, CUSTOM_DRIVER_VALUE, type BuiltinChurnDriverId } from "@transpera-flow/engine";
+import { BUILTIN_CHURN_DRIVER_IDS, CHURN_DRIVER_SPECS, CUSTOM_DRIVER_VALUE, type BuiltinChurnDriverId } from "@transpera-flow/engine";
+import { saveField } from "@/lib/fields/server";
+import type { SaveOutcome } from "@/lib/fields/field-controller";
 import { MAX_CUSTOM_DRIVERS, NEW_DRIVER_NAME, parseDriverPatch } from "@/lib/churn-drivers";
 import { isId } from "@/lib/services";
 import { pgCode } from "@/app/action-db";
@@ -138,4 +140,17 @@ export async function removeChurnDriver(workspaceId: string, rowId: string): Pro
     return failed(e);
   }
   return data.length ? { status: "saved", rowId } : { status: "error", message: "That driver was already removed, or you can't change it." };
+}
+
+const isBuiltinList = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.length <= BUILTIN_CHURN_DRIVER_IDS.length && v.every((k) => (BUILTIN_CHURN_DRIVER_IDS as readonly unknown[]).includes(k)) && new Set(v).size === v.length;
+
+/**
+ * The built-ins deleted from the list (`settings.churn_drivers_removed`), saved if the stored list is still `base`. Switching the driver
+ * off is a separate save (saveChurnDriver), so the simulation leaves a deleted one out.
+ */
+export async function saveRemovedDrivers(workspaceId: string, base: string[] | null, value: string[]): Promise<SaveOutcome<string[] | null>> {
+  if (!isId(workspaceId) || !(base === null || isBuiltinList(base)) || !isBuiltinList(value)) return { status: "error", message: "That value isn't valid." };
+  if (!(await signedIn())) return { status: "error", message: "Your session has ended. Sign in again." };
+  return saveField<string[] | null>("workspaces", { id: workspaceId }, "settings.churn_drivers_removed", base, value);
 }

@@ -219,34 +219,32 @@ describe("input checks", () => {
 describe("the screen", () => {
   const html = renderToStaticMarkup(createElement(ChurnDriversSettings, { mode: "demo", workspaceId: null, bundle: null, rows: [] }));
 
-  it("shows every driver in use with its Remove, weight and contribution, and an (i) on each; one not in use is left out", () => {
-    const states = driverStates([]);
-    expect(states.some((d) => !d.enabled)).toBe(true);
-    for (const d of states) {
-      if (!d.enabled) {
-        expect(html, d.name).not.toContain(`aria-label="Weight for ${d.name}"`);
-        continue;
-      }
-      expect(html, d.name).toContain(`aria-label="Remove ${d.name}"`);
+  it("shows every driver with its switch, weight and contribution, and an (i) on each", () => {
+    for (const d of driverStates([])) {
+      expect(html, d.name).toContain(`aria-label="Use ${d.name}"`);
       expect(html, d.name).toContain(`aria-label="Weight for ${d.name}"`);
       expect(html, d.name).toContain(`aria-label="About ${d.name}"`);
-      expect(html, d.name).toContain(`aria-label="About Remove ${d.name}"`);
+      expect(html, d.name).toContain(`aria-label="About Use ${d.name}"`);
       expect(html, d.name).toContain(`aria-label="About Weight for ${d.name}"`);
+      expect(html, d.name).toContain(`aria-label="Delete ${d.name}"`);
+      expect(html, d.name).toContain(`aria-label="About Delete ${d.name}"`);
     }
-    expect(html).not.toContain('role="switch"');
     expect(html).toContain("Churn drivers");
     expect(html).toContain("Projected churn");
     expect(html).toContain("+ Add driver");
     expect(html).toContain("About Normal churn");
   });
 
+  it("leaves a deleted built-in off the list, and keeps the others with their switches", () => {
+    const less = renderToStaticMarkup(createElement(ChurnDriversSettings, { mode: "demo", workspaceId: null, bundle: null, rows: [], removed: ["price"] }));
+    const price = driverStates([]).find((d) => d.key === "price")!;
+    expect(less).not.toContain(`aria-label="Use ${price.name}"`);
+    expect(less).toContain(`aria-label="Use ${driverStates([])[0]!.name}"`);
+  });
+
   it("gives every number you enter an (i) of its own", () => {
-    const ids = ["onb", "handoff", "results", "tenure", "price"] as const;
-    const all = renderToStaticMarkup(
-      createElement(ChurnDriversSettings, { mode: "demo", workspaceId: null, bundle: null, rows: ids.map((driver, i) => row({ id: `00000000-0000-4000-8000-00000000000${i}`, driver })) }),
-    );
-    for (const id of ids) expect(all).toContain(`aria-label="About ${VALUE_HELP[id]!.label}"`);
-    expect(all).toContain("About Takes effect in month");
+    for (const id of ["onb", "handoff", "results", "tenure", "price"] as const) expect(html).toContain(`aria-label="About ${VALUE_HELP[id]!.label}"`);
+    expect(html).toContain("About Takes effect in month");
   });
 
   it("explains the weight in plain words", () => {

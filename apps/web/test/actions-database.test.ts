@@ -510,6 +510,12 @@ describe("settings", () => {
     expect(await d.saveChurnDriver(WS, "late", { chance: null, effect: null, effectMonths: null })).toMatchObject({ status: "saved" });
     expect((await one("select effect from churn_drivers where workspace_id = $1 and driver = 'late'", [WS])).effect).toBeNull();
     expect(await d.saveChurnDriver(WS, "market", { effect: 10 })).toMatchObject({ status: "error" });
+    // Deleting a built-in from the list: saved against the list as loaded, and only built-in keys.
+    expect(await d.saveRemovedDrivers(WS, null, ["price"])).toEqual({ status: "saved", value: ["price"] });
+    expect(await d.saveRemovedDrivers(WS, null, ["price", "resp"])).toMatchObject({ status: "conflict", theirs: ["price"] });
+    expect(await d.saveRemovedDrivers(WS, ["price"], [])).toEqual({ status: "saved", value: [] });
+    expect(await d.saveRemovedDrivers(WS, [], ["not-a-driver"])).toMatchObject({ status: "error" });
+    expect(await one("select settings -> 'churn_drivers_removed' as v from workspaces where id = $1", [WS])).toEqual({ v: [] });
   });
 
   it("adds a client, assigns people to it, and links servicing", async () => {
