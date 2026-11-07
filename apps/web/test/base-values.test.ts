@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { bundleForProcess, northbeamBundle, northbeamServicingProcessIds, northbeamStepIds, type ProcessBundle, type StepRow } from "@transpera-flow/db";
+vi.mock("@/app/w/[slug]/solution-actions", () => ({ saveStepChange: async () => ({ status: "error", message: "Not available in this test." }) }));
 import { StepBaseValues } from "@/components/step-base-values";
 import {
   clearStepSplit,

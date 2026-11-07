@@ -11,7 +11,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { retiredSteps, isUnpublished, workspacePurposes, type BlockBundle, type BlockRow, type ProcessBundle, type PurposeCategory, type ScenarioRow } from "@transpera-flow/db";
+import { retiredSteps, isUnpublished, workspacePurposes, applyStepChangeEdit, type BlockBundle, type BlockRow, type ProcessBundle, type PurposeCategory, type ScenarioRow, type StoredStepChange } from "@transpera-flow/db";
+import { changesOnStepsOf } from "@/lib/solutions/step-changes";
 import { createSolution } from "@/app/w/[slug]/solution-actions";
 import { addPurpose } from "@/app/w/[slug]/settings/actions";
 import { createLibraryProcess } from "@/app/w/[slug]/library-actions";
@@ -83,7 +84,7 @@ export function EditorView({
   historyHref,
   library,
   tierSetup,
-  changesOnSteps,
+  changesOnSteps: changesFromServer,
   laneInput,
 }: {
   /** The departments, tier services and servicing links the company map's lanes come from (Q4). Absent: no lanes. */
@@ -139,6 +140,9 @@ export function EditorView({
   const workspaceId = initialLive.workspace.id;
   const onCreate = useCallback<LibraryCreate>((input) => createLibraryProcess(workspaceId, input), [workspaceId]);
   const libraryProps = useMemo(() => (library ? { ...library, ...(library.onCreate ? {} : mode === "live" ? { onCreate } : {}) } : undefined), [library, mode, onCreate]);
+  // The solution's automations and augmentations (D53), kept here like every other edit on this screen and saved with the solution by Save solution.
+  // Seeded from the solution this editor was opened on; empty for a new one. (The Editor's undo carries map edits only, so these have none.)
+  const [stepChanges, setStepChanges] = useState<StoredStepChange[]>(() => (changesFromServer?.changes ?? []).map((c) => c.value));
   const solutionMode = editorMode === "solution";
   // Block and solution modes edit a map of their own, in memory: never the process's live version or its draft. A block
   // starts empty; a solution starts as a copy of live.
@@ -155,6 +159,22 @@ export function EditorView({
   const marksChanges = hasDraft || solutionMode;
   const live = fromSolution ? initialLive : drafts.live;
   const working = state.bundle;
+  const changesOnSteps = useMemo<ChangesOnSteps | undefined>(() => {
+    if (!solutionMode) return changesFromServer;
+    const ids = new Set(working.steps.map((s) => s.id));
+    return {
+      changes: changesOnStepsOf("local", stepChanges),
+      edit: {
+        stepIds: [...ids],
+        apply: (e) => {
+          const r = applyStepChangeEdit("local", stepChanges, e, ids, () => crypto.randomUUID());
+          if (!r.ok) return r.message;
+          setStepChanges(r.list);
+          return null;
+        },
+      },
+    };
+  }, [solutionMode, changesFromServer, stepChanges, working.steps]);
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   // The written tour: opens the first time this user opens the Editor, and again from "Take the tour".
   const tour = useEditorTour({ userId, company, dismissed: tourDismissed });
@@ -322,7 +342,7 @@ export function EditorView({
     await editor.settled();
     const now = session.editor.getState().bundle;
     const changes = diffBundles(live, now);
-    if (!changes.list.length) return setSolutionError("Change at least one step first. A solution with no changes has nothing to test.");
+    if (!changes.list.length && !stepChanges.length) return setSolutionError("Change at least one step or add an automation first. A solution with no changes has nothing to test.");
     setSolutionSaving(true);
     // The automatic verdict. In a workspace the server works it out again from the stored copy and ignores what is sent; the demo has no
     // server, so it keeps the one worked out here, in a worker.
@@ -342,6 +362,8 @@ export function EditorView({
       copy: solutionCopy(now),
       changedStepIds: changedStepIds(changes),
       levers: [],
+      // Only the effects on the saved copy's steps are kept, and the server checks them again.
+      stepChanges,
       links: issue ? [{ issueId: issue.id, autoVerdict: auto && auto.status !== "unchecked" ? auto.status : null, holdsPct: auto?.holdsPct ?? null, autoNote: auto?.note ?? "" }] : [],
     };
     const checked = parseSolutionInput(input);

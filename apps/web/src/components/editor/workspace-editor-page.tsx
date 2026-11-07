@@ -1,4 +1,3 @@
-import { changeStepIds } from "@transpera-flow/db";
 import { bundleFromSolution } from "@transpera-flow/db/sandbox";
 import { notFound, redirect } from "next/navigation";
 import { EditorPhoneGate } from "@/components/editor/editor-phone-gate";
@@ -11,6 +10,8 @@ import { loadDepartmentLaneInput } from "@/lib/overview/lanes-data";
 import { loadLibrary } from "@/lib/editor/library-data";
 import { readBlock } from "@/lib/blocks/blocks";
 import { exitHref, parseEditorMode, parseHorizon, parseIssueParam } from "@/lib/editor/modes";
+import { changesOnStepsOf } from "@/lib/solutions/step-changes";
+import { newSolutionHref } from "@/lib/solutions/links";
 import { issueAboutProcess, solutionIssueOf } from "@/lib/solutions/area";
 
 /**
@@ -98,8 +99,17 @@ export async function WorkspaceEditorPage({
       library={company ? library : undefined}
       tierSetup={tierSetup}
       laneInput={laneInput}
-      // The changes in the solution this editor was opened on (D53): they are part of its version, tried by picking it in the Sandbox.
-      changesOnSteps={fromSolution ? { sandboxHref: `/w/${slug}/sandbox?solution=${fromSolution.id}`, changes: fromSolution.step_changes.map((c, i) => ({ id: c.id ?? `${fromSolution.id}:${i}`, name: c.name, kind: c.kind, steps: changeStepIds(c) })) } : undefined}
+      // The changes in the solution this editor was opened on (D53) seed the Editor's own list, saved with the solution (Save solution). On the live
+      // process (the draft) the panel points at making a solution.
+      changesOnSteps={
+        company || editorMode === "block"
+          ? undefined
+          : fromSolution
+            ? { changes: changesOnStepsOf(fromSolution.id, fromSolution.step_changes) }
+            : editorMode === "solution"
+              ? undefined
+              : { changes: [], makeSolutionHref: newSolutionHref(`/w/${slug}`, live.process.id, exit) }
+      }
     />
     </SourceLinkingScope>
     </EditorPhoneGate>

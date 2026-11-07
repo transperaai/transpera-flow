@@ -6,10 +6,12 @@
 // `readOnly` shows the same values as plain text (a Viewer never reaches the Editor, but the values read the same anywhere).
 
 import { useId, useState } from "react";
-import { engineRecurrence, STEP_SOURCE_LABELS, type ProcessBundle, type RecurrenceJson, type StepRow, type StepSourcedValue } from "@transpera-flow/db";
+import { engineRecurrence, STEP_SOURCE_LABELS, type ProcessBundle, type RecurrenceJson, type StepRow, type StepSourcedValue, type StepChangeEdit } from "@transpera-flow/db";
 import { recurrenceLabel } from "@transpera-flow/engine";
 import { NumberField, SelectField, TextField } from "@/components/fields";
 import { Help } from "@/components/help";
+import { StepChangesSection } from "@/components/editor/step-changes-section";
+import type { ChangeOnStep } from "@/lib/solutions/step-changes";
 import { SplitBar, SplitLegend } from "@/components/split-bar";
 import {
   clearStepSplit,
@@ -284,34 +286,16 @@ export function StepBaseValues({
       </div>
 
       {/* Changes that act on this step are part of the solution's version (D53). */}
-      <ChangesOnStep stepId={step.id} data={changesOnSteps} />
+      <StepChangesSection stepId={step.id} stepName={step.name} tiers={tierSetup.keys} split={percents} data={changesOnSteps} />
     </div>
   );
 }
 
-/** The changes in a solution's version, with where the Sandbox picks that version (capacity P7; D53). */
+/** The automations and augmentations of the solution being edited (D53), and what the step panel may do about them. */
 export interface ChangesOnSteps {
-  sandboxHref: string;
-  changes: { id: string; name: string; kind: "automation" | "augmentation"; steps: string[] }[];
-}
-
-/** "Changes that act on this step": read only, with a link to the Sandbox, where the version is picked from a month. */
-function ChangesOnStep({ stepId, data }: { stepId: string; data?: ChangesOnSteps }) {
-  const mine = (data?.changes ?? []).filter((c) => c.steps.includes(stepId));
-  if (!data || !mine.length) return <div data-slot="changes-on-step" hidden />;
-  return (
-    <div className="flex flex-col gap-1 border-t border-line pt-3 text-sm" data-slot="changes-on-step">
-      <h4 className="text-xs font-semibold tracking-wide text-fg-3 uppercase">Changes that act on this step</h4>
-      <ul className="list-disc pl-4">
-        {mine.map((c) => (
-          <li key={c.id} data-change-on-step={c.id}>
-            {c.name} <span className="text-xs text-muted-foreground">({c.kind})</span>
-          </li>
-        ))}
-      </ul>
-      <a href={data.sandboxHref} className="text-xs font-medium text-accent hover:underline">
-        Try this version in the Sandbox
-      </a>
-    </div>
-  );
+  changes: ChangeOnStep[];
+  /** In solution mode: one edit applied to the Editor's own list (saved with the solution); returns why not, or null. Set by the Editor. */
+  edit?: { stepIds: string[]; apply: (edit: StepChangeEdit) => string | null };
+  /** On the live process: where a solution is started from this process. */
+  makeSolutionHref?: string;
 }

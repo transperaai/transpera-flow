@@ -1,6 +1,6 @@
 "use server";
 
-import type { BlockBundle, Json, ProcessBundle, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
+import { carryStepChanges, checkStepChange, cleanStepChange, type BlockBundle, type Json, type ProcessBundle, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
 import { rpc } from "@transpera-flow/db/client";
 import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/save";
 import { serverVerdict, type CopyRun } from "@/lib/solutions/server-verdict";
@@ -50,6 +50,14 @@ export async function createSolution(workspaceId: unknown, input: unknown): Prom
   if (!(await getSessionUser())) return signedOut;
   const db = await getDb();
   const v = parsed.value;
+  // The automations the solution was edited with (D53) are part of what is saved. The browser's list is checked here, before anything is written: only the
+  // effects on steps the saved copy has are kept, a change left with none is dropped, and each one passes the same checks as an edit (the column's check runs again).
+  const copyIds = new Set(v.copy.steps.map((s) => s.id));
+  const kept = carryStepChanges(v.stepChanges, copyIds).map((c) => ({ ...(c.id ? { id: c.id } : {}), ...cleanStepChange(c) }));
+  for (const c of kept) {
+    const problem = checkStepChange(c, copyIds);
+    if (problem) return { status: "error", message: `${c.name}: ${problem}` };
+  }
   const links: { issue_id: string; auto_verdict: string | null; holds_pct: number | null; auto_note: string }[] = [];
   // The copy is simulated once, for all the issues it is linked to.
   let base: ProcessBundle | undefined;
@@ -78,7 +86,16 @@ export async function createSolution(workspaceId: unknown, input: unknown): Prom
   } catch (e) {
     return failure(e);
   }
-  const solution = data as unknown as SolutionRow;
+  let solution = data as unknown as SolutionRow;
+  // The automations are written with the new row, as the signed-in user.
+  if (kept.length) {
+    try {
+      await db.updateTable("solutions").set({ step_changes: kept as unknown as Json }).where("id", "=", solution.id).execute();
+      solution = { ...solution, step_changes: kept };
+    } catch {
+      return { status: "error", message: "The solution was saved, but its automations couldn't be saved with it. Open it from the Solutions list and add them again." };
+    }
+  }
   const saved = await db.selectFrom("solution_issues").select(SOLUTION_ISSUE_COLS).where("solution_id", "=", solution.id).execute().catch(() => []);
   return { status: "ok", solution, links: saved as unknown as SolutionIssueRow[] };
 }
