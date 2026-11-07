@@ -2,7 +2,7 @@
 
 // "Automate…" and "Augment…" on a step (D53; changes-into-solutions brief, part B): the fields of one step change, saved into the solution this
 // editor was opened on. An automation takes a share of the step's automatable time away (leaving some checking); an augmentation speeds up its
-// augmentable time. Adoption, months to full effect, the tiers it applies to and what it costs a month are the change's own. A change that also
+// augmentable time. Adoption, months to full effect and the tiers it applies to are the change's own (a cost a month is not asked for: nothing simulates it yet, so one stored before is kept as it is). A change that also
 // acts on other steps keeps those effects as they are: this form edits what it does to this step.
 
 import { useState } from "react";
@@ -25,7 +25,6 @@ interface FormValues {
   factor: string;
   adoption: string;
   ramp: string;
-  cost: string;
   tiers: string[];
 }
 
@@ -49,7 +48,8 @@ export function stepChangeFromForm(stepId: string, existing: StoredStepChange | 
     adoption: num(v.adoption) / 100,
     ramp_months: num(v.ramp),
     tiers: v.tiers.length ? v.tiers : null,
-    cost_monthly: v.cost.trim() === "" ? null : num(v.cost),
+    // Not asked for (nothing simulates it yet): a cost stored before is kept as it was.
+    cost_monthly: existing?.cost_monthly ?? null,
   };
 }
 
@@ -89,13 +89,12 @@ export function StepChangeDialog({
   const [factor, setFactor] = useState(mine?.part === "augmentable" ? shown(mine.factor) : "1.5");
   const [adoption, setAdoption] = useState(shown((existing?.adoption ?? 0.8) * 100));
   const [ramp, setRamp] = useState(String(existing?.ramp_months ?? 0));
-  const [cost, setCost] = useState(existing?.cost_monthly != null ? String(existing.cost_monthly) : "");
   const [picked, setPicked] = useState<string[]>(existing?.tiers ?? []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   async function save() {
-    const value = stepChangeFromForm(stepId, existing, { name, kind, remove, checking, factor, adoption, ramp, cost, tiers: picked });
+    const value = stepChangeFromForm(stepId, existing, { name, kind, remove, checking, factor, adoption, ramp, tiers: picked });
     const problem = checkStepChange(value, stepIds);
     if (problem) return setError(problem);
     setBusy(true);
@@ -147,7 +146,7 @@ export function StepChangeDialog({
             </div>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className={field}>
               <HelpLabel label="Adoption (%)" description="The share of the work that uses the change once it is fully in place." example="80 means four jobs in five use it." />
               <Input inputMode="decimal" value={adoption} onChange={(e) => setAdoption(e.target.value)} aria-label="Adoption, percent" data-change-adoption />
@@ -155,10 +154,6 @@ export function StepChangeDialog({
             <div className={field}>
               <HelpLabel label="Months to full effect" description="How many months it takes to reach full adoption once the solution is in use. 0 means at once." example="3 builds up over three months." />
               <Input inputMode="numeric" value={ramp} onChange={(e) => setRamp(e.target.value)} aria-label="Months to full effect" data-change-ramp />
-            </div>
-            <div className={field}>
-              <HelpLabel label="Costs a month" description="What the change costs to run each month, such as a licence. Leave it blank for nothing." example="400 adds 400 a month to the cost of this version." />
-              <Input inputMode="decimal" value={cost} placeholder="Nothing" onChange={(e) => setCost(e.target.value)} aria-label="Cost a month" data-change-cost />
             </div>
           </div>
 
