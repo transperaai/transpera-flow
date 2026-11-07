@@ -13,6 +13,7 @@ import type { BlockTools } from "@/components/editor/use-blocks";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { addStep, deleteSelection } from "@/lib/editor/commands";
 import type { ViewHint } from "@/lib/editor/groups";
+import { kindForCategory } from "@transpera-flow/db";
 import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
 import type { LibraryCreate, LibraryCreateInput } from "@/lib/editor/library-create";
 import { ProcessEditor } from "@/lib/editor/editor";
@@ -108,11 +109,14 @@ function libraryOf(bundle: ProcessBundle): { processes: LibraryProcess[]; templa
       { id: "f0000000-0000-4000-8000-000000000001", name: "Renewals", kind: "servicing", live: true, holder: null },
       { id: "f0000000-0000-4000-8000-000000000002", name: "Referrals", kind: "pipeline", live: true, holder: { id: "cccc0000-0000-4000-8000-00000000c0c0", name: "Company map", company: true } },
     ],
-    templates: [{ id: "agency-delivery", name: "Agency delivery", kind: "servicing", description: "A template." }],
+    templates: [
+      { id: "agency-delivery", name: "Agency delivery", kind: "servicing", category: "routine_client_work", description: "A template." },
+      { id: "client-onboarding", name: "Client onboarding", kind: "servicing", category: "onboarding", description: "A template." },
+    ],
     onCreate: async (input: LibraryCreateInput) => {
       created.push(input);
       const name = input.kind === "new" ? input.name : "Agency delivery";
-      return { process: { id: `e0000000-0000-4000-8000-00000000000${created.length}`, name, kind: input.kind === "new" ? input.processKind : "servicing", live: false } };
+      return { process: { id: `e0000000-0000-4000-8000-00000000000${created.length}`, name, kind: input.kind === "new" ? kindForCategory(input.category) : "servicing", live: false } };
     },
   };
 }

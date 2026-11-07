@@ -7,10 +7,11 @@
 // with the rest.
 
 import { useId, useMemo, useState, useTransition, type Dispatch, type SetStateAction } from "react";
-import type { ProcessBundle, ProcessRow } from "@transpera-flow/db";
+import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS, type ProcessBundle, type ProcessCategory } from "@transpera-flow/db";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeSelect } from "@/components/ui/native-select";
 import type { Selection } from "@/components/process-canvas";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { PLACED_REMOVE_NOTE } from "@/lib/editor/commands";
@@ -44,7 +45,7 @@ export function ProcessLibrary({
   const [created, setCreated] = useState<LibraryProcess[]>([]);
   const [note, setNote] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
   const [newName, setNewName] = useState("");
-  const [newKind, setNewKind] = useState<ProcessRow["kind"]>("pipeline");
+  const [newCategory, setNewCategory] = useState<ProcessCategory>("sales");
   const [busy, startTransition] = useTransition();
   const searchId = useId();
   const nameId = useId();
@@ -203,16 +204,29 @@ export function ProcessLibrary({
             Name of the new process
           </label>
           <Input id={nameId} value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Name" autoComplete="off" maxLength={120} data-library-new-name />
-          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Kind of process">
-            {(["pipeline", "servicing"] as const).map((k) => (
-              <Button key={k} type="button" size="xs" variant={newKind === k ? "secondary" : "ghost"} aria-pressed={newKind === k} onClick={() => setNewKind(k)} data-library-new-kind={k}>
-                {k === "pipeline" ? "Pipeline" : "Servicing"}
-              </Button>
+          <span className="flex items-center">
+            <label htmlFor={`${nameId}-category`} className="text-xs font-medium text-fg-2">
+              What kind of process it is
+            </label>
+            <Help
+              label="What kind of process it is"
+              description="What the process is for, in the words the Processes page uses. It decides how the simulation treats it: Sales and Onboarding run for each new lead or client; the rest run as repeating work."
+              example="A monthly report for existing clients is Routine client work."
+            />
+          </span>
+          <NativeSelect id={`${nameId}-category`} value={newCategory} onChange={(e) => setNewCategory(e.target.value as ProcessCategory)} data-library-new-category>
+            {PROCESS_CATEGORIES.map((c) => (
+              <option key={c} value={c}>
+                {PROCESS_CATEGORY_LABELS[c]}
+              </option>
             ))}
-            <Button type="button" size="sm" variant="outline" disabled={busy || !newName.trim()} onClick={() => create({ kind: "new", name: newName, processKind: newKind })} data-library-new-make className="ml-auto">
-              Make and add
-            </Button>
-          </div>
+          </NativeSelect>
+          <p className="text-xs text-muted-foreground" data-library-category-help>
+            {PROCESS_CATEGORY_HELP[newCategory]}
+          </p>
+          <Button type="button" size="sm" variant="outline" disabled={busy || !newName.trim()} onClick={() => create({ kind: "new", name: newName, category: newCategory })} data-library-new-make className="self-end">
+            Make and add
+          </Button>
           {shownTemplates.length > 0 && (
             <>
               <h3 className="text-xs font-medium text-fg-2">From a template (its numbers are rough estimates to check)</h3>
@@ -221,7 +235,7 @@ export function ProcessLibrary({
                   <li key={t.id} data-library-template={t.id} className="flex items-center justify-between gap-2 rounded-token border border-line px-2 py-1.5 text-sm">
                     <span className="flex min-w-0 flex-col">
                       <span className="truncate">{t.name}</span>
-                      <span className="text-xs text-muted-foreground">{t.kind === "pipeline" ? "Pipeline" : "Servicing"}</span>
+                      <span className="text-xs text-muted-foreground">{PROCESS_CATEGORY_LABELS[t.category]}</span>
                     </span>
                     <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => create({ kind: "template", templateId: t.id })}>
                       Use

@@ -130,6 +130,16 @@ describe("simpler editor screenshots", () => {
       await page.context().close();
     }, 300_000);
 
+    it.skipIf(!dir || theme === "dark")(`saves the company map's left column (${theme})`, async () => {
+      const page = await open(theme, { company: true });
+      await page.locator("[data-library-new-name]").fill("Client offboarding");
+      await page.locator("[data-library-new-category]").selectOption("onboarding");
+      await page.locator("[data-library-new-category]").scrollIntoViewIfNeeded();
+      await settle(page);
+      await page.screenshot({ path: `${dir}/company-map-left-column-1440-${theme}.png` });
+      await page.context().close();
+    }, 300_000);
+
     it.skipIf(!dir)(`saves the new-purpose form (${theme})`, async () => {
       const page = await open(theme, { canAddPurpose: true });
       await pick(page, DISCOVERY);

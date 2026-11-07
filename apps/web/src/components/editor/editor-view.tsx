@@ -128,7 +128,7 @@ export function EditorView({
   /** Solution mode opened from a solution's page ("Open in editor", `?solution=<id>`): the map starts as that solution's copy, not as live. */
   solutionSeed?: { bundle: ProcessBundle; name: string };
   /** The process library (B12): the workspace's processes, where each sits (live links), and the templates. */
-  library?: { processes: LibraryProcess[]; templates: LibraryTemplate[] };
+  library?: { processes: LibraryProcess[]; templates: LibraryTemplate[]; /** Makes a process for the library; default in a workspace is the server action (a harness stands in). */ onCreate?: LibraryCreate };
 }) {
   const router = useRouter();
   // The company map (B11): a picture of the business. Cards are moved and joined by handoff lines; nothing is simulated.
@@ -138,7 +138,7 @@ export function EditorView({
   // The library makes new processes on the server, as the signed-in editor; the demo (memory) only places existing ones.
   const workspaceId = initialLive.workspace.id;
   const onCreate = useCallback<LibraryCreate>((input) => createLibraryProcess(workspaceId, input), [workspaceId]);
-  const libraryProps = useMemo(() => (library ? { ...library, ...(mode === "live" ? { onCreate } : {}) } : undefined), [library, mode, onCreate]);
+  const libraryProps = useMemo(() => (library ? { ...library, ...(library.onCreate ? {} : mode === "live" ? { onCreate } : {}) } : undefined), [library, mode, onCreate]);
   const solutionMode = editorMode === "solution";
   // Block and solution modes edit a map of their own, in memory: never the process's live version or its draft. A block
   // starts empty; a solution starts as a copy of live.

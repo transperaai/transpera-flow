@@ -15,6 +15,6 @@ export async function loadLibrary(workspaceId: string): Promise<{ processes: Lib
   const holderOf = new Map(placements.map((p) => [p.processId, { id: p.holderId, name: p.holderName, company: p.holderIsCompany }]));
   return {
     processes: processes.map((p) => ({ id: p.id, name: p.name, kind: p.kind, live: Boolean(p.live_revision_id), holder: holderOf.get(p.id) ?? null })),
-    templates: PROCESS_TEMPLATES.map((t) => ({ id: t.id, name: t.name, kind: t.kind, description: t.description })),
+    templates: PROCESS_TEMPLATES.map((t) => ({ id: t.id, name: t.name, kind: t.kind, category: t.category, description: t.description })),
   };
 }

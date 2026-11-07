@@ -1,5 +1,6 @@
 "use server";
 
+import { isProcessCategory, kindForCategory } from "@transpera-flow/db";
 import { createProcessFromTemplate, PROCESS_TEMPLATES, ImportError } from "@transpera-flow/db/process-import";
 import { isId } from "@/lib/editor/validate";
 import type { LibraryCreateInput, LibraryCreateResult } from "@/lib/editor/library-create";
@@ -44,12 +45,13 @@ export async function createLibraryProcess(workspaceId: string, input: LibraryCr
 
   if (input.kind !== "new") return { error: GENERIC };
   const name = typeof input.name === "string" ? input.name.trim() : "";
-  const kind = input.processKind === "servicing" ? "servicing" : input.processKind === "pipeline" ? "pipeline" : null;
+  const category = isProcessCategory(input.category) ? input.category : null;
+  const kind = category ? kindForCategory(category) : null;
   if (!name || name.length > MAX_NAME) return { error: `Give it a name (up to ${MAX_NAME} characters).` };
-  if (!kind) return { error: GENERIC };
+  if (!category || !kind) return { error: "Choose what kind of process it is." };
   let r: { status: string; process_id?: string };
   try {
-    r = (await rpc(db, "create_library_process", { p_workspace: workspaceId, p_name: name, p_kind: kind })) as unknown as { status: string; process_id?: string };
+    r = (await rpc(db, "create_library_process", { p_workspace: workspaceId, p_name: name, p_kind: kind, p_category: category })) as unknown as { status: string; process_id?: string };
   } catch {
     return { error: GENERIC };
   }

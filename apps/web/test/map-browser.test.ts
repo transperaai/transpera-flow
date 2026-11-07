@@ -590,6 +590,25 @@ describe("the process library on the company map (B12)", () => {
   }, 60_000);
 });
 
+describe("the company map's New process is made by category (D52)", () => {
+  it("offers the five categories with their help, makes the process with the category chosen, and labels templates by category", async () => {
+    const page = await mount({ editable: true, company: true, palette: true, library: true });
+    const select = page.locator("[data-library-new-category]");
+    expect(await select.locator("option").allInnerTexts()).toEqual(["Sales", "Onboarding", "Routine client work", "Ad hoc", "Internal"]);
+    expect(await page.locator("[data-process-library] [data-library-new-kind]").count()).toBe(0);
+    expect(await page.locator("[data-library-category-help]").innerText()).toBe("How new work comes in and is won.");
+    await select.selectOption("onboarding");
+    expect(await page.locator("[data-library-category-help]").innerText()).toBe("Getting a new client set up, once per client.");
+    expect((await page.locator("[data-library-template='client-onboarding']").innerText()).replace(/\s+/g, " ")).toContain("Client onboarding Onboarding");
+    expect((await page.locator("[data-library-template='agency-delivery']").innerText()).replace(/\s+/g, " ")).toContain("Routine client work");
+    await page.locator("[data-library-new-name]").fill("Client offboarding");
+    await page.locator("[data-library-new-make]").click();
+    await page.locator("[data-library-note]").waitFor();
+    expect(await page.evaluate(() => window.mapApi.created())).toEqual([{ kind: "new", name: "Client offboarding", category: "onboarding" }]);
+    await page.close();
+  }, 60_000);
+});
+
 describe("loading and empty states (issue #44)", () => {
   it("shows the first-run status over a map whose first run is computing, and only then", async () => {
     const page = await mount({ computing: true });

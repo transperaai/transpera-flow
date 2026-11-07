@@ -8,7 +8,7 @@
 // Where a process sits comes from the LIVE versions (ADR 0014, B12): the process whose live version holds it. A process sits in
 // one place only, so one that sits elsewhere is listed greyed with where; the database refuses a second place on publish too.
 
-import type { ProcessBundle, ProcessRow, StepRow } from "@transpera-flow/db";
+import type { ProcessBundle, ProcessCategory, ProcessRow, StepRow } from "@transpera-flow/db";
 import { CARD_SIZE } from "@/lib/map/groups";
 import { newStepRow } from "./commands";
 import { nearestFreeSpot, type ViewHint } from "./groups";
@@ -30,6 +30,8 @@ export interface LibraryTemplate {
   id: string;
   name: string;
   kind: ProcessRow["kind"];
+  /** What it is for: what the template's process is made as (D52). */
+  category: ProcessCategory;
   description: string;
 }
 
