@@ -1,6 +1,6 @@
 # 23. The company map drives the run
 
-Date: 7 Nov 2026 · Status: proposed · D51 (amends D50) · `docs/plans/capacity/q17-company-map-run-brief.md`; amends 0014's "the company map is a picture"
+Date: 7 Nov 2026 · Status: accepted · D51 (amends D50) · `docs/plans/capacity/q17-company-map-run-brief.md`; amends 0014's "the company map is a picture"
 
 ## Context
 
