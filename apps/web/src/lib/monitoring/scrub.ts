@@ -19,7 +19,7 @@ const UUID_WHOLE = new RegExp(`^${UUID}$`);
 // test/monitoring-scrub.test.ts checks every static route segment under src/app is here, and that no name is.
 export const ROUTE_WORDS: ReadonlySet<string> = new Set([
   // The app's routes (src/app). "s" is the old share-link path: the page is gone, but an old link in a report still reads /s/[token].
-  "access", "api", "auth", "blocks", "bundle", "calibration", "callback", "capacity", "churn-drivers", "edit",
+  "access", "api", "auth", "blocks", "bundle", "callback", "capacity", "churn-drivers", "edit",
   "export", "forecast", "history", "issues", "library", "login", "market", "mcp", "monitoring-check",
   "clients", "overview", "p", "people", "privacy", "processes", "purposes", "restore", "s", "settings", "setup", "signout", "solutions",
   "sources", "tokens", "w",

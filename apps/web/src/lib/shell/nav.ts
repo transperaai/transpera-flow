@@ -55,7 +55,7 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
     // Who gets too busy, and when (issue #35).
     item({ key: "sandbox", label: "Sandbox", path: "/sandbox", icon: "sandbox" }),
   ];
-  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || rest === "/settings/calibration" }));
+  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" }));
   if (extra.access) company.push(item({ key: "access", label: "Access", path: "/settings/access", icon: "access" }));
   return [
     {

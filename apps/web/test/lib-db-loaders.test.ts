@@ -4,7 +4,7 @@ import { NORTHBEAM_WORKSPACE_ID, northbeamRoleIds, type Db } from "@transpera-fl
 import type { Claims } from "@transpera-flow/db/client";
 import { createTestDb, createUser, type TestDb } from "../../../packages/db/test/harness";
 
-// The lib functions that go through the shared loaders in packages/db (processes, settings, suggestions, calibration),
+// The lib functions that go through the shared loaders in packages/db (processes, settings, suggestions),
 // run against a throwaway Postgres as real users. Only the session is faked.
 
 const session = vi.hoisted(() => ({ db: null as unknown, user: null as unknown }));
@@ -19,8 +19,6 @@ const data = await import("@/lib/data");
 const { loadHistory } = await import("@/lib/history/data");
 const { loadProcessCard, loadProcessesAndArchived, loadProcessesPage } = await import("@/lib/processes/data");
 const { loadLibrary } = await import("@/lib/editor/library-data");
-const { loadCalibrationPage } = await import("@/lib/calibration/data");
-const { loadClientCalibration } = await import("@/lib/calibration/client-data");
 const { loadLiveCompany, loadLiveParts } = await import("@/lib/overview/data");
 
 let tdb: TestDb;
@@ -132,18 +130,5 @@ describe("process pages", () => {
     expect(Array.isArray(await loadLiveParts(ws))).toBe(true);
     const map = await loadLiveCompany(ws);
     expect(map === null || typeof map === "object").toBe(true);
-  });
-});
-
-describe("calibration pages", () => {
-  it("loads the calibration page of a process and the client calibration", async () => {
-    actAs("editor");
-    const page = await loadCalibrationPage("northbeam", processId);
-    expect(page!.process.id).toBe(processId);
-    expect(page!.history).toEqual([]);
-    const clients = await loadClientCalibration("northbeam");
-    expect(clients!.workspaceId).toBe(ws);
-    expect(clients!.history).toEqual([]);
-    expect(clients!.runs.length).toBeGreaterThan(0);
   });
 });

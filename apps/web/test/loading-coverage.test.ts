@@ -12,7 +12,6 @@ const ROOT = join(WEB, "src/app/w/[slug]");
 /** Folders that show their parent's `loading.tsx` (the nearest one wins), and why. */
 const INHERITS: Record<string, string> = {
   "settings/access": "inherit settings/loading.tsx",
-  "settings/calibration": "inherit settings/loading.tsx",
   "settings/purposes": "inherit settings/loading.tsx",
   "setup/clients": "inherit setup/loading.tsx",
   "setup/people": "inherit setup/loading.tsx",

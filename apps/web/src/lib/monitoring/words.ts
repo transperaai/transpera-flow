@@ -43,7 +43,7 @@ const SDK = [
 
 // Product words, from the app's own UI and SQL messages.
 const PRODUCT = [
-  "admin", "agency", "analysis", "api", "backup", "block", "blocks", "bundle", "calibration", "child", "churn",
+  "admin", "agency", "analysis", "api", "backup", "block", "blocks", "bundle", "child", "churn",
   "client", "clients", "company", "copy", "decision", "demand", "draft", "drafts", "edge", "edges", "editor", "editors",
   "end", "engine", "export", "first", "forecast", "group", "groups", "held", "history", "horizon",
   "idea", "ideas", "import", "inside", "insight", "insights", "issue", "issues", "itself", "lever", "levers", "link",
