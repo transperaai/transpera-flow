@@ -129,6 +129,26 @@ describe("inserting a block after the selection", () => {
     expect(after.steps.every((s) => s.revision_id === live.revision.id && s.process_id === live.process.id)).toBe(true);
   });
 
+  it("with nothing selected and a view, lands in view and clear of the other steps", () => {
+    const live = flat();
+    // Look at a place far to the right and below the whole map.
+    const far = { x: 6000, y: 4000 };
+    const view = { ...far, visible: { left: far.x - 600, top: far.y - 400, right: far.x + 600, bottom: far.y + 400 } };
+    const { edit, id } = insertBlock(live, null, sales(), "Sales conversation", null, view)!;
+    const after = applyEdit(live, edit);
+    const group = stepOf(after, id);
+    const size = openGroupSize(after.steps, id, "all");
+    expect(Number(group.x)).toBeGreaterThanOrEqual(view.visible.left);
+    expect(Number(group.y)).toBeGreaterThanOrEqual(view.visible.top);
+    expect(Number(group.x) + size.width).toBeLessThanOrEqual(view.visible.right);
+    expect(Number(group.y) + size.height).toBeLessThanOrEqual(view.visible.bottom);
+    // Without a view it still goes after the last step, and a selected step keeps its place after it whatever the view.
+    const plain = insertBlock(live, null, sales(), "S")!;
+    expect(Number(stepOf(applyEdit(live, plain.edit), plain.id).x)).toBeLessThan(3000);
+    const next = insertBlock(live, ids.audit, sales(), "S", null, view)!;
+    expect(Number(stepOf(applyEdit(live, next.edit), next.id).x)).toBeLessThan(3000);
+  });
+
   it("gives a second insert of the same block its own new ids", () => {
     const live = flat();
     const block = sales();

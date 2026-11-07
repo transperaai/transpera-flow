@@ -1,6 +1,6 @@
 /**
- * The Transpera Flow mark at the top of the sidebar. It is drawn from `--brand-mark`, never `--accent`, so a client's accent
- * (client branding, issue #34) doesn't recolour it: only the workspace tile is the client's. Inline style, so it needs no
+ * The Transpera Flow mark at the top of the sidebar. It is drawn from `--brand-mark`, never `--accent`, so it stays the Transpera
+ * colour whatever the accent is. Inline style, so it needs no
  * generated class.
  */
 export function TransperaMark() {

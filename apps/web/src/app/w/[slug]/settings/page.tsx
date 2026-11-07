@@ -4,7 +4,6 @@ import { SettingsPage } from "@/components/settings/settings-page";
 import { SectionCard } from "@/components/page-kit";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { loadLiveProcess, loadWorkspaceSettings } from "@/lib/data";
-import { loadLatestChecks } from "@/lib/calibration/client-data";
 import { ChurnDriversSettings } from "./churn-drivers-settings";
 import { DemandSettings } from "./demand-settings";
 import { MarketSettings } from "./market-settings";
@@ -21,7 +20,6 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
   const { slug } = await props.params;
   const [data, bundle] = await Promise.all([loadWorkspaceSettings(slug), loadLiveProcess(slug)]);
   if (!data) notFound();
-  const history = await loadLatestChecks(data.workspace.id);
   return (
     <SettingsPage
       title="Settings"
@@ -33,10 +31,7 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
         <LinkRows
           label="Settings pages"
           items={[
-            { href: `/w/${slug}/settings/branding`, title: "Branding", description: "A logo and an accent colour that make this workspace look like the client's." },
             { href: `/w/${slug}/settings/purposes`, title: "Purposes", description: "The categories a step's \"What it achieves\" is chosen from." },
-            { href: `/w/${slug}/settings/calibration`, title: "Historical data", description: "Import past data, check it against the model and apply the changes you choose." },
-            ...(data.canManage ? [{ href: `/w/${slug}/settings/changes`, title: "Change log", description: "Who changed the company model, and what they changed." }] : []),
           ]}
         />
       </SectionCard>
@@ -60,7 +55,7 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
           ]}
         />
       </SettingsSection>
-      <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} history={history} />
+      <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} />
       <DemandSettings data={data} />
       <MarketSettings data={data} />
     </SettingsPage>

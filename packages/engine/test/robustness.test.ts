@@ -58,15 +58,17 @@ function counting(): { execute: RobustnessExecutor; runs: () => number } {
 }
 
 describe("which parameters are estimated", () => {
-  it("treats a field as estimated unless its provenance says entered or measured", () => {
+  it("treats a field as estimated unless its provenance says entered", () => {
     expect(provenanceSource(undefined, "work_hours")).toBe("estimated");
     expect(provenanceSource({}, "work_hours")).toBe("estimated");
     expect(provenanceSource({ source: "entered" }, "work_hours")).toBe("entered");
     expect(provenanceSource({ source: "guess" }, "work_hours")).toBe("estimated");
     // Per-column entries win over the row's source; a column without one falls back to it.
     expect(provenanceSource({ source: "entered", work_hours: { source: "estimated" } }, "work_hours")).toBe("estimated");
-    expect(provenanceSource({ wait_hours: { source: "measured" } }, "wait_hours")).toBe("measured");
-    expect(provenanceSource({ wait_hours: { source: "measured" } }, "work_hours")).toBe("estimated");
+    expect(provenanceSource({ wait_hours: { source: "entered" } }, "wait_hours")).toBe("entered");
+    expect(provenanceSource({ wait_hours: { source: "entered" } }, "work_hours")).toBe("estimated");
+    // "measured" was calibration's; it is gone, so an old entry reads as an estimate.
+    expect(provenanceSource({ wait_hours: { source: "measured" } }, "wait_hours")).toBe("estimated");
   });
 
   it("lists every non-zero input that can move wins or the bottleneck, leaving out known ones", () => {
@@ -82,7 +84,7 @@ describe("which parameters are estimated", () => {
     expect(estimatedParameters(model, { metric: "mrrAdded" }).map((p) => p.path)).toContain("finances.retainer");
 
     const known = estimatedParameters(model, {
-      provenance: (t) => (t.kind === "steps" && t.id === "audit" ? { source: "measured" } : t.kind === "demand" ? { leads_per_week: { source: "entered" } } : undefined),
+      provenance: (t) => (t.kind === "steps" && t.id === "audit" ? { source: "entered" } : t.kind === "demand" ? { leads_per_week: { source: "entered" } } : undefined),
     }).map((p) => p.path);
     expect(known).not.toContain("steps.audit.work_hours");
     expect(known).not.toContain("demand.leads_per_week");
@@ -123,7 +125,7 @@ describe("client health and churn (issue #79)", () => {
     expect(healthAndChurn(estimatedParameters(m))).not.toContain("services.seo.churn_health_sensitivity");
   });
 
-  it("leaves out entered or measured values, read from the service and workspace rows", () => {
+  it("leaves out entered values, read from the service and workspace rows", () => {
     const m = northbeamWithServicing();
     m.health = { recover: 2, latePenalty: 5, missedPenalty: 12 };
     const paths = (rows: ProvenanceRows) => healthAndChurn(estimatedParameters(m, { provenance: provenanceFromRows(rows) }));
@@ -134,7 +136,7 @@ describe("client health and churn (issue #79)", () => {
         { id: "ppc", provenance: { churn_health_sensitivity: { source: "estimated" }, price: { source: "entered" } } },
       ],
       workspace: {
-        "settings.health_recover": { source: "measured" },
+        "settings.health_recover": { source: "entered" },
         "settings.health_late_penalty": { source: "entered" },
         "settings.health_missed_penalty": { source: "estimated" },
         // Starting health isn't set, so the default is in force: an estimate, whatever this says.

@@ -35,7 +35,9 @@ const START = "2026-11-02";
 const full = capacityModel();
 const { changes: _changes, ...today } = full;
 void _changes;
-const model: EngineModel = today;
+// The fixture's steps name no purpose; give them the workspace's, in turn, so "Where the time goes" has something to split.
+const PURPOSES = ["client_job", "required", "winning", "coordination", "fixing", "removable"];
+const model: EngineModel = { ...today, steps: today.steps.map((s, i) => ({ ...s, purpose: PURPOSES[i % PURPOSES.length] })) };
 
 const stepName = new Map(model.steps.map((s) => [s.id, s.name]));
 const roleName = (id: string | null) => (id ? (model.roles[id]?.name ?? id) : "No one assigned");

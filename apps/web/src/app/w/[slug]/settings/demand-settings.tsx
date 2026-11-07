@@ -40,14 +40,13 @@ const sourceSaver =
     saveLeadSourceField(sourceId, field, base, next) as Promise<SaveOutcome<T>>;
 
 
-const PROVENANCE_LABEL = { estimated: "Estimated", entered: "Entered", measured: "Measured" } as const;
+const PROVENANCE_LABEL = { estimated: "Estimated", entered: "Entered" } as const;
 const PROVENANCE_CLASS = {
   estimated: "border-warn bg-warn-soft",
   entered: "border-line bg-panel-2",
-  measured: "border-good bg-good-soft",
 } as const;
 
-/** Where a value came from: estimated (an assumption to confirm), entered by a person, or measured from data. */
+/** Where a value came from: estimated (an assumption to confirm), or entered by a person. */
 function ProvenanceBadge({ provenance, field }: { provenance: ProvenanceMap | null | undefined; field: string }) {
   const source = provenanceOf(provenance, field);
   const entry = provenance?.[field];

@@ -12,7 +12,7 @@ export const DRAFT = { id: "00000000-0000-4000-8000-0000000000d1", name: "Quote 
 export type FreshVariant = "company map only" | "company map and one draft";
 export const VARIANTS: FreshVariant[] = ["company map only", "company map and one draft"];
 
-export const freshHead = { id: FRESH_WORKSPACE_ID, name: FRESH_NAME, slug: FRESH_SLUG, branding: null };
+export const freshHead = { id: FRESH_WORKSPACE_ID, name: FRESH_NAME, slug: FRESH_SLUG };
 
 /** `loadWorkspaceOverview`: the workspace and its ordinary processes (never the company map). */
 export function freshOverview(variant: FreshVariant) {

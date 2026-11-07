@@ -46,10 +46,10 @@ describe("process admin", () => {
     const { page, errors } = await mount({ canEdit: true });
     await page.getByRole("button", { name: "New process" }).click();
     await dialog(page).getByLabel("Name").fill("Quarterly review");
-    expect(await dialog(page).getByRole("radio").count()).toBe(2);
-    await dialog(page).getByRole("radio", { name: /Client work/ }).check();
+    expect(await dialog(page).getByRole("radio").count()).toBe(5);
+    await dialog(page).getByRole("radio", { name: /Routine client work/ }).check();
     await dialog(page).getByRole("button", { name: "Create" }).click();
-    await expect.poll(() => calls(page)).toContainEqual(["create", "Quarterly review", "servicing"]);
+    await expect.poll(() => calls(page)).toContainEqual(["create", "Quarterly review", "routine_client_work"]);
     expect(errors).toEqual([]);
     await page.close();
   }, 60_000);

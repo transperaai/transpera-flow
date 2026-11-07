@@ -219,7 +219,7 @@ describe("Person detail", { timeout: 120_000 }, () => {
   const jessRoles = new Set(live.personRoles.filter((r) => r.person_id === larkspurPersonIds.jess).map((r) => r.role_id));
   const JESS_STEP = live.steps.find((st) => st.role_id && jessRoles.has(st.role_id))!;
   const FOREIGN = live.steps.find((st) => st.role_id && !jessRoles.has(st.role_id))!;
-  const row = (person: string, step: string | null, factor: number): PersonCapacityFactorRow => ({ person_id: larkspurPersonIds[person]!, workspace_id: live.workspace.id, step_id: step, factor, source: "entered" });
+  const row = (person: string, step: string | null, factor: number): PersonCapacityFactorRow => ({ person_id: larkspurPersonIds[person]!, workspace_id: live.workspace.id, step_id: step, factor });
   const FACTORS = [row("freya", null, 0.9), row("freya", STEP.id, 0.8), row("hana", null, 1.35), row("jess", JESS_STEP.id, 1.2), row("jess", FOREIGN.id, 1.6)];
 
   it("switch off, with factors stored: no 'Time on each step' text anywhere and no [data-capacity-factors]", async () => {

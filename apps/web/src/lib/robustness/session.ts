@@ -39,7 +39,7 @@ export const sessionCache: RobustnessCache = new MemoryRobustnessCache(20_000);
  * #79).
  *
  * Rule: a parameter is estimated, and so perturbed, unless its provenance
- * says `entered` or `measured` (see `provenanceSource` in the engine for the
+ * says `entered` (see `provenanceSource` in the engine for the
  * per-column and per-row shapes); a health rule the workspace hasn't set is
  * the estimated default. Demand and roles carry no provenance the check
  * reads, so theirs are all estimated.

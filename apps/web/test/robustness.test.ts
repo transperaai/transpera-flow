@@ -30,19 +30,19 @@ const hire: ScenarioPatch[] = [{ path: "roles.strat.headcount", op: "add", value
 
 function input() {
   const model = northbeamModel();
-  const steps = model.steps.map((s) => ({ id: s.id, provenance: s.id === "discovery" ? { source: "measured" } : {} }));
+  const steps = model.steps.map((s) => ({ id: s.id, provenance: s.id === "discovery" ? { source: "entered" } : {} }));
   const parameters = robustnessParameters(model, { steps }).slice(0, 4);
   return { model, scenario: hire, options: { parameters, refineTop: 2 } };
 }
 
 describe("robustness parameters from provenance", () => {
-  it("perturbs a step's values unless its provenance says entered or measured", () => {
+  it("perturbs a step's values unless its provenance says entered", () => {
     const model = northbeamModel();
     const paths = (steps: { id: string; provenance?: unknown }[]) => robustnessParameters(model, { steps }).map((p) => p.path);
     expect(paths([])).toContain("steps.audit.work_hours");
     expect(paths([{ id: "audit", provenance: { source: "entered" } }])).not.toContain("steps.audit.work_hours");
     // Per-column: only the named column is known.
-    const perColumn = paths([{ id: "audit", provenance: { work_hours: { source: "measured" } } }]);
+    const perColumn = paths([{ id: "audit", provenance: { work_hours: { source: "entered" } } }]);
     expect(perColumn).not.toContain("steps.audit.work_hours");
     expect(perColumn).toContain("steps.audit.rework_rate");
     // No provenance on demand yet: estimated.

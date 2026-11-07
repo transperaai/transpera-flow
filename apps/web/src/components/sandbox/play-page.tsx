@@ -232,6 +232,7 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
       setup={setup}
       processes={processes}
       startDate={start}
+      purposes={workspacePurposes(live.workspace.settings)}
       today={base0}
       prepare={prepare}
       map={renderMap}

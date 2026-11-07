@@ -1,14 +1,13 @@
 import type { StepRow } from "@transpera-flow/db";
 import { provenanceSource, stepProvenance } from "@/lib/editor/provenance";
 
-const LABEL = { estimated: "Estimated", entered: "Entered", measured: "Measured" } as const;
+const LABEL = { estimated: "Estimated", entered: "Entered" } as const;
 const TONE = {
   estimated: "border-warn bg-warn-soft",
   entered: "border-line bg-panel-2",
-  measured: "border-good bg-good-soft",
 } as const;
 
-/** Where a step's value came from: estimated (an assumption to confirm), entered by a person, or measured from data. */
+/** Where a step's value came from: estimated (an assumption to confirm), or entered by a person. */
 export function ProvenanceBadge({ step, column }: { step: StepRow; column: string }) {
   const source = provenanceSource(step, column);
   const at = stepProvenance(step, column)?.at;

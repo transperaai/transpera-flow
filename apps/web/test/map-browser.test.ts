@@ -337,7 +337,7 @@ const covers = (a: Box, b: Box) => centre(a).x > b.l && centre(a).x < b.r && cen
 
 
 describe("adding from the Editor's palette", () => {
-  for (const label of ["+ Step", "+ Decision", "+ Wait", "+ Group"]) {
+  for (const label of ["+ Step", "+ Decision", "+ Wait"]) {
     it(`${label} adds a card in view that does not sit on another`, async () => {
       const page = await mount({ editable: true, palette: true });
       const before = new Set((await cards(page)).map((c) => c.id));
@@ -348,12 +348,9 @@ describe("adding from the Editor's palette", () => {
       const added = after.filter((c) => !before.has(c.id));
       expect(added.length).toBeGreaterThanOrEqual(1);
       const p = await panel(page);
-      // A new group arrives with its first step inside it: the box is the one placed. (The harness draws cards taller than
-      // the app does, so for a group the box's top-left corner and title are what must be in view.)
-      const card = [...added].sort((a, b) => (b.r - b.l) * (b.b - b.t) - (a.r - a.l) * (a.b - a.t))[0]!;
-      if (label === "+ Group") expect(card.l >= p.x && card.r <= p.x + p.width && card.t >= p.y && card.t + 40 <= p.y + p.height).toBe(true);
-      else expect(within(card, p)).toBe(true);
-      // Nothing it was not joined to is under it (the first of a new group sits inside the group's own box).
+      const card = added[0]!;
+      expect(within(card, p)).toBe(true);
+      // Nothing it was not joined to is under it.
       for (const o of after.filter((c) => before.has(c.id))) expect(covers(card, o) || covers(o, card)).toBe(false);
       await page.close();
     }, 60_000);

@@ -72,21 +72,6 @@ export interface Blocks {
   workspace_id: string;
 }
 
-export interface Calibrations {
-  applied: Generated<boolean>;
-  applied_at: string | null;
-  applied_by: string | null;
-  applied_keys: Generated<string[]>;
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  dataset_id: string;
-  id: Generated<string>;
-  process_id: string | null;
-  results: Json;
-  updated_at: Generated<string>;
-  workspace_id: string;
-}
-
 export interface CapacityChanges {
   adoption: Generated<Numeric>;
   cost_monthly: Numeric | null;
@@ -102,17 +87,6 @@ export interface CapacityChanges {
   source: Generated<string>;
   tiers: string[] | null;
   updated_at: Generated<string>;
-  workspace_id: string;
-}
-
-export interface CapacityFactorProposals {
-  calibration_id: string;
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  id: Generated<string>;
-  person_id: string;
-  proposal: Json;
-  step_id: string;
   workspace_id: string;
 }
 
@@ -192,20 +166,6 @@ export interface ClientServices {
   created_at: Generated<string>;
   service_id: string;
   start_date: string | null;
-  workspace_id: string;
-}
-
-export interface Datasets {
-  column_map: Generated<Json>;
-  created_at: Generated<string>;
-  created_by: Generated<string | null>;
-  details: Generated<Json>;
-  file_name: string;
-  id: Generated<string>;
-  imported_at: Generated<string>;
-  kind: string;
-  process_id: string | null;
-  row_count: number;
   workspace_id: string;
 }
 
@@ -798,16 +758,7 @@ export interface WorkspaceHeadlines {
   workspace_id: string;
 }
 
-export interface WorkspaceLogos {
-  bytes: Buffer;
-  mime: string;
-  sha256: string;
-  updated_at: Generated<string>;
-  workspace_id: string;
-}
-
 export interface Workspaces {
-  branding: Generated<Json>;
   created_at: Generated<string>;
   created_by: Generated<string | null>;
   id: Generated<string>;
@@ -824,15 +775,12 @@ export interface DB {
   api_tokens: ApiTokens;
   audit_log: AuditLog;
   blocks: Blocks;
-  calibrations: Calibrations;
   capacity_changes: CapacityChanges;
-  capacity_factor_proposals: CapacityFactorProposals;
   churn_drivers: ChurnDrivers;
   client_assignments: ClientAssignments;
   client_groups: ClientGroups;
   client_services: ClientServices;
   clients: Clients;
-  datasets: Datasets;
   demand_settings: DemandSettings;
   departments: Departments;
   deployment_access: DeploymentAccess;
@@ -872,6 +820,5 @@ export interface DB {
   tiers: Tiers;
   user_tours: UserTours;
   workspace_headlines: WorkspaceHeadlines;
-  workspace_logos: WorkspaceLogos;
   workspaces: Workspaces;
 }

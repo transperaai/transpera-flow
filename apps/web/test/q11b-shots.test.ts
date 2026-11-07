@@ -35,7 +35,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-const PAGES = ["setup-clients", "setup-people", "settings", "branding", "changes", "purposes"];
+const PAGES = ["setup-clients", "setup-people", "settings", "purposes", "sidebar"];
 const VIEWS = [
   { name: "light-1440", width: 1440, theme: "light" },
   { name: "dark-1440", width: 1440, theme: "dark" },
@@ -47,12 +47,14 @@ describe("Q11 group B screenshots", () => {
     mkdirSync(dir!, { recursive: true });
     for (const what of PAGES) {
       for (const v of VIEWS) {
-        const page = await browser.newPage({ viewport: { width: v.width, height: 1000 } });
+        // The sidebar is a drawer on a phone: its tile is shown at desktop width only.
+        if (what === "sidebar" && v.width < 1000) continue;
+        const page = await browser.newPage({ viewport: { width: v.width, height: 1000 }, deviceScaleFactor: 2 });
         page.on("pageerror", (e) => console.log(what, "pageerror", e.message));
         await page.setContent(`<!doctype html><html data-theme="${v.theme}"><head><style>${css}</style></head><body><div id="root"></div></body></html>`);
         await page.addScriptTag({ content: script });
         await page.evaluate((w) => window.mountQ11b(w), what);
-        await page.waitForSelector("h1", { timeout: 30_000 });
+        await page.waitForSelector(what === "sidebar" ? "[data-sidebar]" : "h1", { timeout: 30_000 });
         await page.evaluate(() => document.fonts.ready);
         await page.setViewportSize({ width: v.width, height: await page.evaluate(() => document.documentElement.scrollHeight) });
         await page.screenshot({ path: `${dir}/${what}-${v.name}.png` });

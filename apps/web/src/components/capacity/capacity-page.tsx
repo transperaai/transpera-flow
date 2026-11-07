@@ -4,7 +4,7 @@
 // leads and churn off) and hands it to the view.
 
 import { useMemo } from "react";
-import type { CapacitySetup, ProcessBundle } from "@transpera-flow/db";
+import { workspacePurposes, type CapacitySetup, type ProcessBundle } from "@transpera-flow/db";
 import { capacityBaseModel } from "@/lib/capacity/model";
 import { CapacityView } from "./capacity-view";
 
@@ -19,5 +19,6 @@ export function stepProcessMap(bundle: ProcessBundle): Record<string, string> {
 export function CapacityPage({ bundle, setup, base }: { bundle: ProcessBundle; setup: CapacitySetup; base: string }) {
   const built = useMemo(() => capacityBaseModel(bundle), [bundle]);
   const stepProcess = useMemo(() => stepProcessMap(bundle), [bundle]);
-  return <CapacityView setup={setup} model={built.model} modelError={built.error} base={base} stepProcess={stepProcess} />;
+  const purposes = useMemo(() => workspacePurposes(bundle.workspace.settings), [bundle.workspace.settings]);
+  return <CapacityView setup={setup} model={built.model} modelError={built.error} base={base} stepProcess={stepProcess} purposes={purposes} />;
 }
