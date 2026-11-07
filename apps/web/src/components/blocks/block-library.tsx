@@ -100,7 +100,8 @@ export function BlockLibrary({
   const wantsBase = !!baseProcessId && !!openBase;
   // The first row to open loads the base for every row.
   const loadBase = () => {
-    if (!wantsBase || base.state !== "idle") return;
+    // A failed load is tried again the next time a row opens ("Close the row and open it again").
+    if (!wantsBase || (base.state !== "idle" && base.state !== "error")) return;
     setBase({ state: "loading" });
     openBase!(slug, baseProcessId!).then(
       (bundle) => setBase(bundle ? { state: "ready", bundle } : { state: "none" }),

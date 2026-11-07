@@ -90,7 +90,7 @@ async function open(o: { call: string; arg: object; width?: number; scheme?: "li
   return { page, errors };
 }
 
-const library = (o: { width?: number; scheme?: "light" | "dark"; editor?: boolean; empty?: boolean; base?: "ok" | "none" | "fail" } = {}) =>
+const library = (o: { width?: number; scheme?: "light" | "dark"; editor?: boolean; empty?: boolean; base?: "ok" | "none" | "fail" | "fail-once" } = {}) =>
   open({ call: "q15MountLibrary", arg: { editor: o.editor ?? true, empty: o.empty, base: o.base }, width: o.width, scheme: o.scheme, ready: o.empty ? "[data-testid=blocks-empty]" : "tr[data-block]" });
 const editor = (o: { width?: number; scheme?: "light" | "dark" } = {}) =>
   open({ call: "q15MountEditor", arg: { blockId: approval.id }, width: o.width, scheme: o.scheme, ready: o.width && o.width < 640 ? "[data-phone-gate]" : ".react-flow__node" });
@@ -163,6 +163,18 @@ describe("Block library list", () => {
     await alert.waitFor();
     expect(await alert.innerText()).toBe("Couldn't load the map. Close the row and open it again.");
     expect(await page.locator("[data-block-panel] .react-flow__node").count()).toBe(0);
+    await page.close();
+  }, 300_000);
+
+  it("after a failed load, closing the row and opening it again tries again", async () => {
+    const { page } = await library({ base: "fail-once" });
+    const row = rowOf(page, "Client approval loop");
+    await row.locator("[data-block-open]").click();
+    await page.locator("[data-block-panel] [role=alert]").waitFor();
+    await row.locator("[data-block-open]").click();
+    await row.locator("[data-block-open]").click();
+    await page.locator("[data-block-panel] .react-flow__node[data-id]").first().waitFor();
+    expect(await page.locator("[data-block-panel] .react-flow__node[data-id]").count()).toBe(3);
     await page.close();
   }, 300_000);
 

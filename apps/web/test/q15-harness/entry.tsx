@@ -21,7 +21,7 @@ declare global {
       workspaceId: string;
       bundle: ProcessBundle;
     };
-    q15MountLibrary: (o: { editor: boolean; empty?: boolean; base?: "ok" | "none" | "fail" }) => void;
+    q15MountLibrary: (o: { editor: boolean; empty?: boolean; base?: "ok" | "none" | "fail" | "fail-once" }) => void;
     q15MountEditor: (o: { blockId: string }) => void;
   }
 }
@@ -38,8 +38,11 @@ window.Worker = class extends NativeWorker {
 window.q15MountLibrary = ({ editor, empty, base = "ok" }) => {
   const d = window.q15Data;
   // Stands in for the Server Action that loads the live bundle of the workspace's first process.
+  // "fail-once": the first load fails and the next one works, as when the server was briefly unreachable.
+  let calls = 0;
   const openBase = async () => {
-    if (base === "fail") throw new Error("down");
+    calls++;
+    if (base === "fail" || (base === "fail-once" && calls === 1)) throw new Error("down");
     return d.bundle;
   };
   createRoot(document.getElementById("root")!).render(
