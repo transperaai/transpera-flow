@@ -10,7 +10,6 @@ import { PeopleAndRoles, PeopleHeaderActions } from "@/components/setup/people-r
 import { peopleMeta } from "@/lib/setup/people-meta";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { LinkRows } from "@/components/settings/link-rows";
-import { SectionCard } from "@/components/page-kit";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { SimulationSettings } from "@/app/w/[slug]/settings/people-settings";
@@ -72,11 +71,6 @@ window.mountQ11b = (what) => {
         description="Changes save as you go. If someone else changes the same field at the same time, you'll be asked which value to keep."
       >
         <PhoneNotice />
-        <SectionCard id="more-settings" title="More settings" description="The rest of Settings has a page each.">
-          <LinkRows label="Settings pages" items={[
-            { href: "#", title: "Purposes", description: "The categories a step's \"What it achieves\" is chosen from." },
-          ]} />
-        </SectionCard>
         <WorkspaceDetails workspaceId={data.workspace.id} name="Acme" currency="AUD" overheadMonthly={18000} canManage saveName={saveWorkspaceName} saveCurrency={saveWorkspaceCurrency} saveOverhead={saveOverheadMonthly} />
         <SimulationSettings data={data} />
         <SettingsSection id="services" title="Services, clients, roles and people" description="These moved to Set up, where the capacity figures' inputs are keyed in.">
@@ -90,7 +84,7 @@ window.mountQ11b = (what) => {
     );
   } else if (what === "purposes") {
     page = (
-      <SettingsPage title="Purposes" eyebrow="Settings">
+      <SettingsPage title="Settings" eyebrow="Company">
         <PurposesSettings mode="live" workspaceId={data.workspace.id} stored={[] as never} initial={[] as never} use={{} as never} save={(async () => ({ status: "error", message: "n/a" })) as never}>
           <p className="text-sm text-muted-foreground">Time by these categories is shown in the Sandbox and on the Overview.</p>
         </PurposesSettings>

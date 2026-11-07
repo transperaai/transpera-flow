@@ -1,15 +1,17 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { workspacePurposes } from "@transpera-flow/db";
+import { PurposesSettings } from "@/components/purposes/purposes-settings";
 import { LinkRows } from "@/components/settings/link-rows";
 import { SettingsPage } from "@/components/settings/settings-page";
-import { SectionCard } from "@/components/page-kit";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
-import { loadLiveProcess, loadWorkspaceSettings } from "@/lib/data";
+import { loadLiveProcess, loadPurposeUse, loadStoredPurposes, loadWorkspaceSettings } from "@/lib/data";
 import { ChurnDriversSettings } from "./churn-drivers-settings";
 import { DemandSettings } from "./demand-settings";
 import { MarketSettings } from "./market-settings";
 import { SimulationSettings } from "./people-settings";
 import { SettingsSection } from "./section";
-import { saveOverheadMonthly } from "./actions";
+import { saveOverheadMonthly, savePurposes } from "./actions";
 import { saveWorkspaceCurrency, saveWorkspaceName } from "./workspace-actions";
 import { WorkspaceDetails } from "./workspace-details";
 
@@ -20,6 +22,7 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
   const { slug } = await props.params;
   const [data, bundle] = await Promise.all([loadWorkspaceSettings(slug), loadLiveProcess(slug)]);
   if (!data) notFound();
+  const [purposes, purposeUse] = await Promise.all([loadStoredPurposes(data.workspace.id), loadPurposeUse(data.workspace.id)]);
   return (
     <SettingsPage
       title="Settings"
@@ -27,14 +30,6 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
       description="Changes save as you go. If someone else changes the same field at the same time, you'll be asked which value to keep."
     >
       <PhoneNotice />
-      <SectionCard id="more-settings" title="More settings" description="The rest of Settings has a page each.">
-        <LinkRows
-          label="Settings pages"
-          items={[
-            { href: `/w/${slug}/settings/purposes`, title: "Purposes", description: "The categories a step's \"What it achieves\" is chosen from." },
-          ]}
-        />
-      </SectionCard>
       <WorkspaceDetails
         workspaceId={data.workspace.id}
         name={data.workspace.name}
@@ -55,6 +50,22 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
           ]}
         />
       </SettingsSection>
+      <PurposesSettings
+        mode={data.canEdit ? "live" : "readonly"}
+        workspaceId={data.workspace.id}
+        stored={purposes}
+        initial={workspacePurposes({ purposes })}
+        use={purposeUse}
+        save={savePurposes}
+      >
+        <p className="text-sm text-muted-foreground">
+          Time by these categories is shown in the{" "}
+          <Link href={`/w/${slug}/sandbox`} className="underline">
+            Sandbox
+          </Link>{" "}
+          and on the Overview.
+        </p>
+      </PurposesSettings>
       <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} />
       <DemandSettings data={data} />
       <MarketSettings data={data} />
