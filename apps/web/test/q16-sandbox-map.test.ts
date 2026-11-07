@@ -86,7 +86,7 @@ async function mount(o: { width?: number; scheme?: "light" | "dark"; solution?: 
   await page.addScriptTag({ content: script });
   await page.evaluate(([d, opt]) => window.mountQ16(d as Q16Data, opt as { solution?: string }), [data, { solution: o.solution }] as const);
   await page.waitForSelector("[data-company-map] .react-flow__node-group", { timeout: 120_000 });
-  await page.waitForSelector("[data-verdict-line]", { timeout: 60_000 }).catch(async (e: Error) => {
+  await page.waitForSelector("[data-play-heatmap]", { timeout: 60_000 }).catch(async (e: Error) => {
     // Say what the page shows instead of a bare timeout.
     const seen = await page.evaluate(() => [document.querySelector("[data-model-error]")?.textContent, document.querySelector("[data-run-error]")?.textContent, document.querySelector("[data-run-status]")?.textContent].join(" | "), []).catch(() => "");
     throw new Error(`${e.message}\n${seen}\n${errors.join("\n")}`);
@@ -206,7 +206,7 @@ describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
       await page.locator(`[data-version-option="${solution.id}"]`).click();
       await page.keyboard.press("Escape");
       await settled(page);
-      await page.waitForSelector("[data-verdict-line]", { timeout: 120_000 });
+      await page.waitForSelector("[data-play-heatmap]", { timeout: 120_000 });
       await page.evaluate(() => (window.scrollTo(0, 0), document.querySelector("[data-play-levers-column]")?.scrollTo(0, 0), document.fonts.ready));
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
       await page.waitForTimeout(500);

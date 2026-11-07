@@ -41,7 +41,7 @@ export function PlayResults({ runs, setup, months, moved, purposes = DEFAULT_PUR
   if (!today || !changed) {
     return (
       <div role="status" aria-busy="true" data-running className="flex min-w-0 flex-col gap-4">
-        <p className="text-sm text-muted-foreground" data-run-status>
+        <p className="text-sm text-muted-foreground">
           Working out today&apos;s path over the next 12 months…
         </p>
         <SectionCard id="play-overloaded" title="Who's overloaded, and when" contentClassName="gap-3">
