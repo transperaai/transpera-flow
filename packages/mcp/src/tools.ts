@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { PROCESS_TEMPLATES } from "@transpera-flow/db/process-import";
-import { listProcesses, loadLiveCompanyPart, loadProcessBundle, ModelError, resolveBundlePurposes, toEngineModel, workspacePurposes, type WorkspaceSettings } from "@transpera-flow/db";
+import { listProcesses, loadLiveCompanyPart, loadProcessBundle, withCompanyRun, ModelError, resolveBundlePurposes, toEngineModel, workspacePurposes, type WorkspaceSettings } from "@transpera-flow/db";
 import { applyPatches, isBlocking, MAX_PATCHES, PATCH_OPS, simulate, type EngineModel, type ScenarioPatch, type SimulationResult } from "@transpera-flow/engine";
 import { resolveProcess, resolveWorkspace, revisionIdFor, visibleWorkspaces, matchWorkspace, type ToolContext } from "./context";
 import { runTool, ToolError } from "./result";
@@ -289,7 +289,9 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         if (!isRunDate(startDate)) throw new ToolError("invalid_args", `start_date '${startDate}' isn't a calendar date between 2000 and 2100 (YYYY-MM-DD).`);
         if (!args.start_date) assumptions.push(`start_date defaulted to today (${ctx.today}).`);
 
-        const bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, revision));
+        let bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, revision));
+        // No process named: the company run, as every page reads it (once a person has published a company map version, the map decides what runs).
+        if (args.process === undefined && revision === "live") bundle = await withCompanyRun(ctx.db, bundle);
         let model: EngineModel;
         try {
           model = toEngineModel(bundle, { startDate });

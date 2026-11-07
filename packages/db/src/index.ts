@@ -161,6 +161,7 @@ export {
   loadIssuesForReader,
   readerSeesPeople,
   loadLiveProcessBySlug,
+  withCompanyRun,
   loadProcessBundle,
   loadProcessBySlug,
   loadServicingContext,
