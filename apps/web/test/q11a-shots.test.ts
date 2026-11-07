@@ -81,7 +81,7 @@ describe("Q11 group A screenshots", { timeout: 600_000 }, () => {
   it.skipIf(!dir)("Capacity", async () => {
     await shoot("capacity", scripts.capacity!, "mountCapacity", async (page) => {
       await page.waitForSelector("[data-room]", { timeout: 120_000 });
-      await page.waitForSelector("[data-next-twelve] [data-todo], [data-next-twelve]:not(:has([role=status]))", { timeout: 120_000 });
+      await page.waitForSelector("[data-named-clients]", { timeout: 120_000 });
     });
   });
   it.skipIf(!dir)("Sandbox", async () => {
