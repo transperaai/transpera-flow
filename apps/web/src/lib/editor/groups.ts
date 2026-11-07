@@ -77,6 +77,8 @@ export interface ViewHint {
   sizes?: ReadonlyMap<string, Size>;
   /** Places the map draws something that is not a step of the draft (the ghosts of steps the draft removed, drawn where they are live), kept clear too. */
   occupied?: readonly { x: number; y: number; width: number; height: number }[];
+  /** Pans the map to a step just added, if it is not wholly on screen. */
+  reveal?: (stepId: string) => void;
 }
 export type ViewRef = { current: (() => ViewHint | null) | null };
 

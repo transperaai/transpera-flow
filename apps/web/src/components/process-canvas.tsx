@@ -1132,7 +1132,18 @@ function Canvas({
           const size = measured.get(ghostId(c.live!.id)) ?? (c.live!.kind === "start" || c.live!.kind === "end" ? TERMINAL_SIZE : CARD_SIZE);
           return { x: Number(c.live!.x), y: Number(c.live!.y), width: size.width, height: size.height };
         });
-      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, visible: { left: from.x, top: from.y, right: to.x, bottom: to.y }, sizes: measured, occupied };
+      // Pan to a step that was just added if it is not wholly on screen (it is drawn a moment after the edit).
+      const reveal = (id: string) =>
+        setTimeout(() => {
+          const node = flow.getNodes().find((n) => n.id === id);
+          const panel = wrapper.current?.querySelector(".react-flow")?.getBoundingClientRect();
+          if (!node || !panel) return;
+          const b = flow.getNodesBounds([node]);
+          const view = flow.getViewport();
+          const inView = b.x * view.zoom + view.x >= 0 && (b.x + b.width) * view.zoom + view.x <= panel.width && b.y * view.zoom + view.y >= 0 && (b.y + b.height) * view.zoom + view.y <= panel.height;
+          if (!inView) void flow.setCenter(b.x + b.width / 2, b.y + b.height / 2, { zoom: view.zoom, duration: 200 });
+        }, 60);
+      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, visible: { left: from.x, top: from.y, right: to.x, bottom: to.y }, sizes: measured, occupied, reveal };
     };
     return () => {
       viewRef.current = null;
