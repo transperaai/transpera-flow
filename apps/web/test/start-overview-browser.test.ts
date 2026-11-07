@@ -48,7 +48,7 @@ describe("the start page at 1280px", () => {
     await page.getByRole("button", { name: /New process/ }).click();
     const dialog = page.getByRole("dialog");
     await dialog.getByLabel("Name").fill("Quote to cash");
-    await dialog.getByRole("radio", { name: /Sales pipeline/ }).check();
+    await dialog.getByRole("radio", { name: /Sales/ }).check();
     await dialog.getByRole("button", { name: /^Create/ }).click();
     await expect.poll(() => page.evaluate(() => window.created)).toEqual(["Quote to cash"]);
     expect(errors).toEqual([]);
