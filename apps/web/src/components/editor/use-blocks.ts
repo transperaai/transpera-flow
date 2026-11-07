@@ -5,10 +5,10 @@
 
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
 import type { BlockRow, ProcessBundle } from "@transpera-flow/db";
-import { createBlock } from "@/app/w/[slug]/block-actions";
+import { createBlock, updateBlock } from "@/app/w/[slug]/block-actions";
 import type { Selection } from "@/components/process-canvas";
 import { blockFromGroup, insertBlock, readBlock, replaceProblem, replaceWithBlock } from "@/lib/blocks/blocks";
-import { addDemoBlock, useDemoBlocks } from "@/lib/blocks/demo";
+import { addDemoBlock, updateDemoBlock, useDemoBlocks } from "@/lib/blocks/demo";
 import type { BlockInput, SaveBlockResult } from "@/lib/blocks/save";
 import type { ProcessEditor } from "@/lib/editor/editor";
 
@@ -19,6 +19,8 @@ export interface BlockTools {
   note: { kind: "save" | "place"; tone: "ok" | "problem"; text: string } | null;
   /** Save a block to the library. */
   save: (input: BlockInput) => Promise<SaveBlockResult>;
+  /** Write an edited block back to the library (Q15). */
+  update: (id: string, input: BlockInput) => Promise<SaveBlockResult>;
   /** Save a group of the map as a block, named after the group. */
   saveGroup: (groupId: string) => Promise<void>;
   /** Put a block in after the selection. */
@@ -65,6 +67,17 @@ export function useBlockTools({
     [mode, workspaceId],
   );
 
+  const update = useCallback(
+    async (id: string, input: BlockInput): Promise<SaveBlockResult> => {
+      if (mode === "demo") {
+        const block = updateDemoBlock(id, input);
+        return block ? { status: "ok", block } : { status: "error", message: "That block no longer exists." };
+      }
+      return updateBlock(workspaceId, id, input);
+    },
+    [mode, workspaceId],
+  );
+
   const saveGroup = useCallback(
     async (groupId: string) => {
       const group = bundle.steps.find((s) => s.id === groupId);
@@ -107,5 +120,5 @@ export function useBlockTools({
     setSelection({ steps: [id], edges: [] });
   };
 
-  return { library, note, save, saveGroup, insert, replace, replaceWhy };
+  return { library, note, save, update, saveGroup, insert, replace, replaceWhy };
 }
