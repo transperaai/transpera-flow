@@ -42,6 +42,19 @@ question.
    - Its "how often" is the branch's %.
    - There is no new step kind, no migration and no engine change.
 
-## Open
+5. **A decision shows and edits its branches.**
+   - **Adding one.** A new decision comes with two branches, "Yes" and "No", at 50% each, already drawn as lines out of
+     it.
+   - **On the canvas.** The node shows its question as the title, then one row per branch: name and %.
+   - **The side panel.** It holds the question, then each branch's name and %, and "+ Add branch". The last branch
+     always takes what is left, so the shares always add up to 100%.
+   - **Where a branch goes.** Drag its line, or pick from its row's menu: "Next step…", "Go back to…" or "End (won /
+     lost / done)".
+   - **Conditions.** The condition tag stays, as an optional "Only when…" field on a branch.
 
-5. How a decision's branches are made and edited.
+## Briefs
+
+- Chat A, the data: `docs/plans/capacity/eng-editor-model-brief.md`.
+- Chat B, the screens: `docs/plans/capacity/ui-editor-simplify-brief.md`. It is blocked by Chat A's package.
+- Already briefed: `docs/plans/capacity/editor-quick-fixes-brief.md`, which covers the five categories, block
+  placement, undo and redo buttons, and no "+ Group".
