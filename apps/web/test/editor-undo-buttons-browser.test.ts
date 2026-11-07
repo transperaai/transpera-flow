@@ -8,9 +8,6 @@ import { bundleHarness } from "./build-harness";
 let browser: Browser;
 let script: string;
 const ORIGIN = "https://editor.test/";
-const AUDIT = "e0000000-0000-4000-8000-000000000003";
-const DISCOVERY = "e0000000-0000-4000-8000-000000000002";
-const KICKOFF = "e0000000-0000-4000-8000-000000000006";
 
 beforeAll(async () => {
   script = await bundleHarness(new URL("./tour-harness/entry.tsx", import.meta.url));
