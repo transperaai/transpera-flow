@@ -2,11 +2,11 @@
 
 // The free-play Sandbox (capacity build P7, docs/plans/capacity/p7-sandbox-brief.md; decisions D28 to D38; Q16): the company map on top (click a process to
 // load another version of it), the levers on the left (automations among them), the results on the right. Nothing is saved: the levers are this component's state and reset
-// when you leave the page. Every lever change re-runs in the worker (debounced), against today's path, and the verdict and four charts follow.
+// when you leave the page. Every lever change re-runs in the worker (debounced), against today's path, and the result charts follow.
 
 import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { defaultPlay, monthKey, monthShort, playIsDefault, type CapacityChangeInput, type CapacityChangeRow, type CapacitySetup, type PlayState } from "@transpera-flow/db";
+import { defaultPlay, monthKey, monthShort, playIsDefault, type CapacityChangeInput, type CapacityChangeRow, type CapacitySetup, type PlayState, type PurposeCategory } from "@transpera-flow/db";
 import type { PreparedPlay } from "@transpera-flow/db/sandbox";
 import { MetaLine, PageHeader } from "@/components/page-kit";
 import { usePlayRuns, type PlayRuns } from "@/lib/sandbox/use-play-runs";
@@ -35,6 +35,8 @@ export interface PlayViewProps {
   /** The workspace's changes. */
   library: CapacityChangeRow[];
   processes: PlayProcess[];
+  /** The workspace's purposes, for "Where the time goes" (the defaults when not given). */
+  purposes?: readonly PurposeCategory[];
   /** The ISO date the run starts on. */
   startDate: string;
   /** Today's path, ready to run, and the way to prepare a run for the levers as they stand. */
@@ -113,7 +115,7 @@ export function PlayView(props: PlayViewProps) {
             onEditChange={(c) => setDialog({ existing: c })}
           />
         </div>
-        <PlayResults runs={runs} setup={setup} months={months} moved={moved} />
+        <PlayResults runs={runs} setup={setup} months={months} moved={moved} purposes={props.purposes} />
       </div>
 
       {props.base && (

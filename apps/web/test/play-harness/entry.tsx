@@ -35,7 +35,9 @@ window.Worker = class extends NativeWorker {
 const START = "2026-11-02";
 const full = capacityModel();
 const { changes: engineChanges, ...today } = full;
-const model: EngineModel = today;
+// The fixture's steps name no purpose; give them the workspace's, in turn, so "Where the time goes" has something to split.
+const PURPOSES = ["client_job", "required", "winning", "coordination", "fixing", "removable"];
+const model: EngineModel = { ...today, steps: today.steps.map((s, i) => ({ ...s, purpose: PURPOSES[i % PURPOSES.length] })) };
 
 const library: CapacityChangeRow[] = (engineChanges ?? []).map((c) => ({
   id: c.id,

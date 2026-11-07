@@ -65,12 +65,14 @@ function firstOver(p: PlayPersonSeries): number | null {
   return i < 0 ? null : i;
 }
 
+/** How many people are over their line in each month. */
+export function overByMonth(people: readonly PlayPersonSeries[], months = Math.max(0, ...people.map((p) => p.busy.length))): number[] {
+  return Array.from({ length: months }, (_, m) => people.filter((p) => p.busy[m] != null && p.busy[m]! >= p.line).length);
+}
+
 /** The most people over their line in any one month. */
 export function peakOver(people: readonly PlayPersonSeries[]): number {
-  const months = Math.max(0, ...people.map((p) => p.busy.length));
-  let peak = 0;
-  for (let m = 0; m < months; m++) peak = Math.max(peak, people.filter((p) => p.busy[m] != null && p.busy[m]! >= p.line).length);
-  return peak;
+  return Math.max(0, ...overByMonth(people));
 }
 
 /** The verdict lines: `base` is today's path, `run` the changed one. */

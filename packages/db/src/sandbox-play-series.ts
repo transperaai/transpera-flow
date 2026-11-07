@@ -20,6 +20,8 @@ export interface PlayLine {
 export interface PlayTeamLine extends PlayLine {
   /** The team's line (D17), 0-1. */
   line: number;
+  /** The month's 90th percentile busy share: the busy share "in 9 of 10 runs" is at or under. Null when nobody of the role is there. */
+  p90: (number | null)[];
 }
 
 export interface PlayCharts {
@@ -31,6 +33,9 @@ export interface PlayCharts {
   dlerWhole: (number | null)[];
   /** Every team, the busiest over the run first, each with its line (the chart shows the first five). */
   teams: PlayTeamLine[];
+  /** Clients won and lost in each month, every department together (the months' means). */
+  won: number[];
+  lost: number[];
   /** Clients lost to a price rise over the run, from the churn causes (D36); 0 with no rise. */
   lostToPrice: number;
 }
@@ -137,7 +142,7 @@ export function playSeries(setup: CapacitySetup, play: Pick<PlayState, "leavers"
 
   const teams: PlayTeamLine[] = setup.roles
     .filter((r) => r.active !== false && monthly.roles[r.id])
-    .map((r) => ({ id: r.id, name: r.name, line: r.line, values: range.map((m) => monthly.roles[r.id]![m]?.mean ?? null) }))
+    .map((r) => ({ id: r.id, name: r.name, line: r.line, values: range.map((m) => monthly.roles[r.id]![m]?.mean ?? null), p90: range.map((m) => monthly.roles[r.id]![m]?.p90 ?? null) }))
     .sort((a, b) => Math.max(0, ...b.values.map((v) => v ?? 0)) - Math.max(0, ...a.values.map((v) => v ?? 0)));
 
   const lostToPrice = result.churnCauses?.causes.find((c) => c.id === "price")?.clients ?? 0;
@@ -147,6 +152,6 @@ export function playSeries(setup: CapacitySetup, play: Pick<PlayState, "leavers"
     dler: dlerWhole,
     advice,
     people,
-    charts: { clients: deptClients, retainers, dler: dlerDepts, dlerWhole, teams, lostToPrice },
+    charts: { clients: deptClients, retainers, dler: dlerDepts, dlerWhole, teams, won: range.map((m) => mean(monthly.clientsWon[m])), lost: range.map((m) => mean(monthly.clientsLost[m])), lostToPrice },
   };
 }
