@@ -120,7 +120,7 @@ P1 alone; then P4, P6, P7, P8 in parallel.
   brief in `docs/plans/capacity/`. The preview alias `transpera-flow-next.vercel.app` follows this branch.
 - **Not yet on the handover branch:** the QA work since [transperaai/transpera-flow#255](https://github.com/transperaai/transpera-flow/pull/255).
   One PR brings it across when Austin wants.
-- **Preview database** (Neon `main`): every migration up to `20270136000000_changes_into_solutions.sql` (and Q19's `20270200000000`). Example agency 2
+- **Preview database** (Neon `main`): every migration up to `20270137000000_library_process_category.sql` (and Q19's `20270200000000`). Example agency 2
   (`example-agency-2`) holds the made-up agency, 8 issues, 4 solutions and 4 blocks, for QA.
 - **Decisions:** D1–D51 are in `docs/plans/client-requirements.md` (D51: the company map drives the run; D50 amended).
 - **`main` and production:** untouched, on Supabase (see the 31 Oct section for why).
@@ -176,9 +176,17 @@ P1 alone; then P4, P6, P7, P8 in parallel.
      - D53 part A: automations and augmentations move into solutions,
        [transperaai/transpera-flow#296](https://github.com/transperaai/transpera-flow/pull/296). It is applied to the preview, with 26 changes moved into
        solutions.
-   - **In flight:** the simpler editor screens (`docs/plans/capacity/ui-editor-simplify-brief.md`, branch
-     `claude/ui-editor-simplify`). Screenshots go to Austin before merging.
-   - **Next:** D53 part B, "Automate…" and "Augment…" in the editor's step panel (`eng-changes-into-solutions-brief.md`).
+   - **Also merged:**
+     - the simpler process editor and the company map's New process by category,
+       [transperaai/transpera-flow#299](https://github.com/transperaai/transpera-flow/pull/299) (migration `20270137000000`, applied to the
+       preview). "Rework %" is now "Done again", and "Goes back to" is gone.
+     - D53 part B, Automate and Augment in the step panel, saved with the solution,
+       [transperaai/transpera-flow#303](https://github.com/transperaai/transpera-flow/pull/303).
+   - **Open follow-ups:**
+     - undo for automation edits (they aren't in the editor's undo);
+     - a badge on the map for a step with an automation;
+     - [transperaai/transpera-flow#300](https://github.com/transperaai/transpera-flow/pull/300) (another chat) stopped simulating the stored market
+       schedule. Confirm with Austin that this was intended.
    - **Known:**
      - `test/overview-browser.test.ts` "Stop button" is flaky on the integration branch.
      - `pnpm --filter @transpera-flow/db capacity:example` fails with `ERR_MODULE_NOT_FOUND`, an extensionless import.
