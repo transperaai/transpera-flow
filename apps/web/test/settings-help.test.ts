@@ -149,18 +149,11 @@ describe("the checker catches a missing (i)", () => {
   });
 });
 
-describe("each churn driver switch has its own (i)", () => {
+describe("the churn drivers screen", () => {
   const churn = readFileSync(join(SRC, "app/w/[slug]/settings/churn-drivers-settings.tsx"), "utf8");
 
   it("passes the real source", () => {
     expect(problemsIn(churn, "churn-drivers-settings.tsx")).toEqual([]);
   });
-
-  it("fails when a switch's (i) is deleted, though the row's other (i)s remain", () => {
-    const line = churn.split("\n").find((l) => l.includes("CONTROL_HELP.switch"))!;
-    expect(line).toBeTruthy();
-    const found = problemsIn(churn.replace(line, ""), "churn-drivers-settings.tsx");
-    expect(found).toHaveLength(1);
-    expect(found[0]).toMatch(/<Switch> has no \(i\)/);
-  });
 });
+

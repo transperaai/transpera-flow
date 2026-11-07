@@ -1,12 +1,10 @@
 "use server";
 
 import { refresh } from "next/cache";
-import type { MarketFactorKey } from "@transpera-flow/engine";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
 import { saveCapacityFactor, saveCapacityFactorSwitch, saveField, saveFields, saveLinks } from "@/lib/fields/server";
 import { DEFAULT_PURPOSES, MAX_PURPOSE_DESCRIPTION, MAX_PURPOSE_NAME, MAX_PURPOSES, newPurposeKey, parsePurposes, type PurposeCategory } from "@transpera-flow/db";
 import { isGrowth, isMonth, isMultiplier, parseLeadSourceField, parseNewLeadSource, type LeadSourceField } from "@/lib/demand";
-import { copyName, parseChange, parseConditionField } from "@/lib/market";
 import { parseNewRole, parseRoleField, type RoleField } from "@/lib/roles";
 import {
   CLIENT_GROUP_FIELDS,
@@ -576,115 +574,4 @@ export async function saveGrowth(workspaceId: string, base: number | null, value
   );
   if (outcome.status === "saved") refresh();
   return outcome;
-}
-
-// Market conditions (A57). Agency admins manage them; RLS enforces that, and the four presets are read-only.
-
-export interface MarketActionResult extends ActionResult {
-  /** The condition just created, so the screen can select it. */
-  id?: string;
-}
-
-/** Add a condition: a copy of `sourceId` (to customise a preset), or a fresh one starting from Stable. */
-export async function createMarketCondition(workspaceId: string, sourceId: string | null): Promise<MarketActionResult> {
-  if (!isId(workspaceId) || (sourceId !== null && !isId(sourceId))) return { error: "Couldn't save. Try again." };
-  if (!(await signedIn())) return { error: signedOut.message };
-  const db = await getDb();
-  let from;
-  try {
-    const query = db
-      .selectFrom("market_conditions")
-      .select(["name", "leads", "conv", "cycle", "price", "churn", "hire", "pay"])
-      .where("workspace_id", "=", workspaceId);
-    from = await (sourceId ? query.where("id", "=", sourceId) : query.where("preset", "=", "stable")).executeTakeFirst();
-  } catch (e) {
-    return failure(e);
-  }
-  if (!from) return { error: "That market is gone. Reload the page." };
-  const { name, ...values } = from;
-  let data;
-  try {
-    data = await db
-      .insertInto("market_conditions")
-      .values({ workspace_id: workspaceId, ...values, name: sourceId ? copyName({ name }) : copyName(undefined) })
-      .returning("id")
-      .executeTakeFirstOrThrow();
-  } catch (e) {
-    return failure(e);
-  }
-  refresh();
-  return { id: data.id };
-}
-
-/** Save one column of one of your own conditions: its name, or a factor as a whole percent. The last save wins. */
-export async function saveMarketField(conditionId: string, field: string, value: string | number): Promise<SaveOutcome<string | number>> {
-  const parsed = parseConditionField(conditionId, field, value);
-  if (!parsed) return invalid;
-  if (!(await signedIn())) return signedOut;
-  const db = await getDb();
-  let data;
-  try {
-    data = await db
-      .updateTable("market_conditions")
-      .set({ [parsed.field]: parsed.value } as { name?: string } & Partial<Record<MarketFactorKey, number>>)
-      .where("id", "=", parsed.id)
-      .returning(["id", "workspace_id"])
-      .execute();
-  } catch (e) {
-    return { status: "error", message: pgCode(e) === "42501" ? "You don't have permission to change this." : "Couldn't save. Try again." };
-  }
-  // A preset, or a row you can't edit, matches no row for an update.
-  if (!data.length) return { status: "not_found" };
-  refresh();
-  return { status: "saved", value: parsed.value };
-}
-
-export async function removeMarketCondition(conditionId: string): Promise<ActionResult> {
-  if (!isId(conditionId)) return { error: "Couldn't remove it. Try again." };
-  if (!(await signedIn())) return { error: signedOut.message };
-  const db = await getDb();
-  let data;
-  try {
-    data = await db.deleteFrom("market_conditions").where("id", "=", conditionId).returning("id").execute();
-  } catch (e) {
-    // 23503: the schedule refers to it.
-    if (pgCode(e) === "23503") return { error: "This market is on your schedule. Remove it from the schedule first." };
-    return failure(e);
-  }
-  if (!data.length) return { error: "That market was already removed, or it is a preset, or you can't edit it." };
-  refresh();
-  return {};
-}
-
-export async function addMarketChange(workspaceId: string, _prev: ActionResult, form: FormData): Promise<ActionResult> {
-  const parsed = parseChange(workspaceId, form.get("condition_id"), Number(form.get("from_month")), Number(form.get("to_month")));
-  if ("error" in parsed) return parsed;
-  if (!(await signedIn())) return { error: signedOut.message };
-  const db = await getDb();
-  try {
-    await db
-      .insertInto("market_schedule")
-      .values({ workspace_id: parsed.workspaceId, condition_id: parsed.conditionId, from_month: parsed.from, to_month: parsed.to })
-      .execute();
-  } catch (e) {
-    // 23P01: the months overlap another change (the table's trigger).
-    return pgCode(e) === "23P01" ? { error: "Those months overlap another change. Remove it first, or pick other months." } : failure(e);
-  }
-  refresh();
-  return {};
-}
-
-export async function removeMarketChange(changeId: string): Promise<ActionResult> {
-  if (!isId(changeId)) return { error: "Couldn't remove it. Try again." };
-  if (!(await signedIn())) return { error: signedOut.message };
-  const db = await getDb();
-  let data;
-  try {
-    data = await db.deleteFrom("market_schedule").where("id", "=", changeId).returning(["id", "workspace_id"]).execute();
-  } catch (e) {
-    return failure(e);
-  }
-  if (!data.length) return { error: "That change was already removed, or you can't edit it." };
-  refresh();
-  return {};
 }

@@ -16,7 +16,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/lib/auth/session", async () => (await import("./action-harness")).sessionMock);
 
-const actions = () => import("@/app/w/[slug]/setup/actions");
+const actions = () => import("@/app/w/[slug]/settings/setup-actions");
 
 let world: World;
 const q = async (sql: string, params: unknown[] = []) => (await world.tdb.client.query(sql, params)).rows as Record<string, unknown>[];

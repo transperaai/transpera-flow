@@ -184,7 +184,7 @@ function ClientHealthCard({ health }: { health: ClientHealthSummary }) {
           Client health · company
         </Eyebrow>
         {health.score === null ? (
-          <p className="text-sm text-muted-foreground">No clients are counted yet. Count them per tier in Set up, under Tiers & clients.</p>
+          <p className="text-sm text-muted-foreground">No clients are counted yet. Count them per tier in Settings, under Tiers & clients.</p>
         ) : (
           <>
             <BigNumber value={String(Math.round(health.score))} unit="/ 100" />
@@ -365,7 +365,7 @@ function HowBusy({
       )}
       {onlyOwn && rows.length === 0 && notInRun && (
         <p className="px-4 pb-4 text-sm text-muted-foreground" data-not-in-run>
-          You aren&apos;t in this simulation: your record is inactive or starts later. Agency admins can change that in Set up → People & roles.
+          You aren&apos;t in this simulation: your record is inactive or starts later. Agency admins can change that in Settings → People & roles.
         </p>
       )}
       {onlyOwn && rows.length === 0 && !notInRun && (
@@ -379,15 +379,15 @@ function HowBusy({
             action={
               setupHref ? (
                 <Link href={`${setupHref}/people#people-heading`} className="font-medium text-accent hover:underline">
-                  Open Set up, People & roles →
+                  Open Settings, People & roles →
                 </Link>
               ) : undefined
             }
           >
             {/* Only someone who sees everyone gets here, so saying whether people exist reveals nothing. */}
             {bundle.people.length > 0
-              ? "Nobody is in this simulation: every person is inactive or starts later. Change that in Set up, People & roles."
-              : "No people yet. Add them in Set up, People & roles."}
+              ? "Nobody is in this simulation: every person is inactive or starts later. Change that in Settings, People & roles."
+              : "No people yet. Add them in Settings, People & roles."}
           </EmptyState>
         </div>
       )}

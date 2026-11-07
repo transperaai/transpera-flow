@@ -40,11 +40,14 @@ export interface NavCounts {
 
 const matches = (rest: string, path: string) => rest === path || rest.startsWith(`${path}/`);
 
+/** The pages under Settings that its item stands for (Access has an item of its own). */
+const SETTINGS_SUB_PAGES = ["/settings/clients", "/settings/people"];
+
 /**
  * The shared shape: `base` is where the workspace's pages live (`/w/<slug>`), `rest` the path under it.
  * The workspace root is the Overview, the landing page (issue #100); a process's map (`/p/<id>`) belongs to Processes.
  */
-function groups(base: string, rest: string, counts: NavCounts, extra: { settings: boolean; access: boolean; levers?: boolean; share?: boolean; setup?: boolean }): NavGroup[] {
+function groups(base: string, rest: string, counts: NavCounts, extra: { settings: boolean; access: boolean; levers?: boolean; share?: boolean }): NavGroup[] {
   const onMap = rest.startsWith("/p/");
   const item = (i: Omit<NavItem, "href" | "active"> & { path: string; active?: boolean }): NavItem => {
     const { path, active, ...fields } = i;
@@ -55,7 +58,8 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
     // Who gets too busy, and when (issue #35).
     item({ key: "sandbox", label: "Sandbox", path: "/sandbox", icon: "sandbox" }),
   ];
-  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" }));
+  // Settings holds its sub pages (Tiers & clients, People & roles, Purposes); Access has an item of its own.
+  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || SETTINGS_SUB_PAGES.some((p) => matches(rest, p)) }));
   if (extra.access) company.push(item({ key: "access", label: "Access", path: "/settings/access", icon: "access" }));
   return [
     {
@@ -75,19 +79,6 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
         item({ key: "library", label: "Block library", path: "/blocks", icon: "library" }),
       ],
     },
-    // Where the capacity figures' inputs are keyed in (capacity build P1): shown to everyone, editable by the Owner and Agency admins.
-    ...(extra.setup
-      ? [
-          {
-            key: "setup",
-            label: "Set up",
-            items: [
-              item({ key: "setup-clients", label: "Tiers & clients", path: "/setup/clients", icon: "clients" as const }),
-              item({ key: "setup-people", label: "People & roles", path: "/setup/people", icon: "team" as const }),
-            ],
-          },
-        ]
-      : []),
     { key: "company", label: "Company", items: company },
   ];
 }
@@ -95,7 +86,7 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
 export function workspaceNav({ slug, pathname, canManage, counts }: { slug: string; pathname: string; canManage: boolean; counts: NavCounts }): NavGroup[] {
   const base = `/w/${slug}`;
   const rest = pathname.startsWith(base) ? pathname.slice(base.length) : "\u0000";
-  return groups(base, rest, counts, { settings: true, access: canManage, setup: true });
+  return groups(base, rest, counts, { settings: true, access: canManage });
 }
 
 export const flatItems = (groups: NavGroup[]): NavItem[] => groups.flatMap((g) => g.items);

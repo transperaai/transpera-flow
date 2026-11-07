@@ -30,8 +30,6 @@ import type {
   IssueRow,
   ResolveHow,
   LeadSourceRow,
-  MarketConditionRow,
-  MarketScheduleRow,
   EdgeRow,
   PersonCapacityFactorRow,
   PersonLeaveRow,
@@ -322,21 +320,6 @@ export const SEASONALITY_COLUMNS = "id, workspace_id, month, multiplier, provena
 export const DEMAND_SETTINGS_COLUMNS = "workspace_id, growth_monthly, provenance" as const;
 
 /** The `MarketConditionRow` and `MarketScheduleRow` columns. */
-export const MARKET_CONDITION_COLUMNS = "id, workspace_id, name, preset, leads, conv, cycle, price, churn, hire, pay" as const;
-export const MARKET_SCHEDULE_COLUMNS = "id, workspace_id, from_month, to_month, condition_id" as const;
-
-/** A workspace's market conditions (presets first, then its own by name) and its 24-month schedule in month order. */
-export async function loadMarket(db: Db, workspaceId: string): Promise<{ marketConditions: MarketConditionRow[]; marketSchedule: MarketScheduleRow[] }> {
-  const [conditions, schedule] = await Promise.all([
-    db.selectFrom("market_conditions").select(columns(MARKET_CONDITION_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("created_at").orderBy("id").execute(),
-    db.selectFrom("market_schedule").select(columns(MARKET_SCHEDULE_COLUMNS)).where("workspace_id", "=", workspaceId).orderBy("from_month").orderBy("id").execute(),
-  ]);
-  return {
-    // preset is check-constrained to MarketPreset.
-    marketConditions: conditions as unknown as MarketConditionRow[],
-    marketSchedule: schedule,
-  };
-}
 
 /** Load one process revision with everything needed to render and simulate it. */
 export async function loadProcessBundle(
@@ -348,7 +331,7 @@ export async function loadProcessBundle(
   const ws = workspace.id;
   // People, roles held, skills, leave and assignments: the stored rows for editors, labels and no pay for members.
   const teamLoad = loadTeam(db, ws);
-  const [revision, roles, steps, edges, team, services, leadSources, seasonality, demand, roster, clientGroups, churnDrivers, servicing, market, settingsProvenance, capacity] =
+  const [revision, roles, steps, edges, team, services, leadSources, seasonality, demand, roster, clientGroups, churnDrivers, servicing, settingsProvenance, capacity] =
     await Promise.all([
       db.selectFrom("process_revisions").select(["id", "workspace_id", "process_id", "number", "status"]).where("id", "=", revisionId).executeTakeFirstOrThrow(),
       db.selectFrom("roles").selectAll().where("workspace_id", "=", ws).execute(),
@@ -365,7 +348,6 @@ export async function loadProcessBundle(
       loadChurnDrivers(db, ws),
       // The company map runs nothing: it needs no other processes (the Editor draws its cards from the live processes it is given).
       process.is_company ? { servicingLinks: [], otherProcesses: [] } : loadServicingContext(db, ws, process, revisionId),
-      loadMarket(db, ws),
       db.selectFrom("workspaces").select("provenance").where("id", "=", ws).executeTakeFirst(),
       loadCapacityInputs(db, ws),
     ]);
@@ -405,7 +387,7 @@ export async function loadProcessBundle(
     clientGroups,
     churnDrivers,
     ...servicing,
-    ...market,
+    // No market: Settings no longer has a market schedule, so a stored one is not simulated (the Sandbox's Market lever sets its own).
     // Only a workspace with a tier service has any (P2b); the key is left out otherwise so the bundle is as it was.
     ...(capacity ? { capacity } : {}),
   };

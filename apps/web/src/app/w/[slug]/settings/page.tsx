@@ -8,7 +8,6 @@ import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { loadLiveProcess, loadPurposeUse, loadStoredPurposes, loadWorkspaceSettings } from "@/lib/data";
 import { ChurnDriversSettings } from "./churn-drivers-settings";
 import { DemandSettings } from "./demand-settings";
-import { MarketSettings } from "./market-settings";
 import { SimulationSettings } from "./people-settings";
 import { SettingsSection } from "./section";
 import { saveOverheadMonthly, savePurposes } from "./actions";
@@ -30,6 +29,15 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
       description="Changes save as you go. If someone else changes the same field at the same time, you'll be asked which value to keep."
     >
       <PhoneNotice />
+      <SettingsSection id="services" title="Clients and team" description="Tiers, clients, roles and people have a page each, as the capacity figures' inputs.">
+        <LinkRows
+          label="Settings pages"
+          items={[
+            { href: `/w/${slug}/settings/clients`, title: "Tiers & clients", description: "Tiers (pricing, entry process, servicing steps, path tags), tier client counts and optional named clients." },
+            { href: `/w/${slug}/settings/people`, title: "People & roles", description: "Roles, shared teams, people (hours, leave, skills, dates, per-person times), salaries and portfolios." },
+          ]}
+        />
+      </SettingsSection>
       <WorkspaceDetails
         workspaceId={data.workspace.id}
         name={data.workspace.name}
@@ -41,15 +49,6 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
         saveOverhead={saveOverheadMonthly}
       />
       <SimulationSettings data={data} />
-      <SettingsSection id="services" title="Services, clients, roles and people" description="These moved to Set up, where the capacity figures' inputs are keyed in.">
-        <LinkRows
-          label="Set up pages"
-          items={[
-            { href: `/w/${slug}/setup/clients`, title: "Tiers & clients", description: "Tiers (pricing, entry process, servicing steps, path tags), tier client counts and optional named clients." },
-            { href: `/w/${slug}/setup/people`, title: "People & roles", description: "Roles, shared teams, people (hours, leave, skills, dates, per-person times), salaries and portfolios." },
-          ]}
-        />
-      </SettingsSection>
       <PurposesSettings
         mode={data.canEdit ? "live" : "readonly"}
         workspaceId={data.workspace.id}
@@ -68,7 +67,6 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
       </PurposesSettings>
       <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} />
       <DemandSettings data={data} />
-      <MarketSettings data={data} />
     </SettingsPage>
   );
 }

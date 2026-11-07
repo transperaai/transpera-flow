@@ -85,22 +85,22 @@ function StartChecklist({ setup, base }: { setup: CapacitySetup; base: string })
   const items = [
     {
       label: "Add roles",
-      href: `${base}/setup/people#roles-heading`,
+      href: `${base}/settings/people#roles-heading`,
       done: setup.roles.length > 0,
     },
     {
       label: "Add people",
-      href: `${base}/setup/people#people-heading`,
+      href: `${base}/settings/people#people-heading`,
       done: setup.people.length > 0,
     },
     {
       label: "Add tiers and services",
-      href: `${base}/setup/clients`,
+      href: `${base}/settings/clients`,
       done: setup.services.some((s) => s.active && s.tier_id),
     },
     {
       label: "Enter how many clients are in each tier",
-      href: `${base}/setup/clients#clients-heading`,
+      href: `${base}/settings/clients#clients-heading`,
       done: setup.tiers.some((t) => setup.services.some((s) => s.tier_id === t.id)) && setup.clients.length + setup.portfolio.length > 0,
     },
   ];
@@ -139,7 +139,7 @@ function DlerKpi({ label, row, base }: { label: string; row: DlerRow; base: stri
         sub={
           <span data-salaries-missing>
             Salaries not entered.{" "}
-            <Link href={`${base}/setup/people`} className="whitespace-nowrap font-medium text-accent hover:underline">
+            <Link href={`${base}/settings/people`} className="whitespace-nowrap font-medium text-accent hover:underline">
               Enter them →
             </Link>
           </span>

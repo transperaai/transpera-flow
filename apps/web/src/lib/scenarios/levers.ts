@@ -13,7 +13,7 @@ import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 /** The most a slider reaches, whatever the model holds. */
 const PLAY_CAPS = { leads: 10000, clients: 100000, price: 10000000, headcount: 500 } as const;
 
-export type LeverGroup = "demand" | "people" | "process" | "clients" | "finances" | "market";
+export type LeverGroup = "demand" | "people" | "process" | "clients" | "finances";
 export type LeverUnit = "per_week" | "clients" | "share" | "money" | "people" | "fte" | "hours";
 
 export interface Lever {
@@ -39,7 +39,6 @@ export const GROUP_LABELS: Record<LeverGroup, string> = {
   process: "Process",
   clients: "Clients and churn",
   finances: "Finances",
-  market: "Market",
 };
 
 /** Relative levers run from −90% to +100%. */

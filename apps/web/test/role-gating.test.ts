@@ -21,7 +21,6 @@ describe("pages that pass canEdit into a read only mode", () => {
     ["the Block library", PAGE("blocks")],
     ["Sources", PAGE("sources")],
     ["the Sandbox", PAGE("sandbox")],
-    ["Settings → Purposes", PAGE("settings/purposes")],
   ])("%s", (_, file) => {
     const source = read(file);
     expect(source).toContain("canEditWorkspace");
@@ -102,13 +101,13 @@ describe("the Editor and the Settings", () => {
     expect(data).toContain('rpc(db, "can_manage_workspace", { ws }),');
     expect(data).toContain("canEdit: canEdit === true,");
     expect(data).toContain("canManage: canManage === true,");
-    for (const file of ["roles", "services", "demand", "market", "people"]) {
+    for (const file of ["roles", "services", "demand", "people"]) {
       expect(read(`app/w/[slug]/settings/${file}-settings.tsx`), file).toMatch(/canEdit/);
     }
   });
 
   it("Set up (Tiers & clients, People & roles): everyone reads, the loader says who may change, and the tables show text, not inputs, without it", () => {
-    for (const route of ["setup/clients", "setup/people"]) {
+    for (const route of ["settings/clients", "settings/people"]) {
       const page = read(PAGE(route));
       expect(page, route).toContain("loadCapacitySetup(");
       expect(page, route).toContain("notFound()");
@@ -123,7 +122,7 @@ describe("the Editor and the Settings", () => {
     expect(read("components/setup/people-roles.tsx")).toContain("const showSalary = !setup.payHidden;");
     expect(read("components/setup/people-roles.tsx")).toMatch(/\{showSalary && \(\s*<ColHead/);
     // The actions need a signed-in user and run through row-level security.
-    expect(read(PAGE("setup").replace("/page.tsx", "/actions.ts"))).toContain("if (!(await signedIn())) return");
+    expect(read("app/w/[slug]/settings/setup-actions.ts")).toContain("if (!(await signedIn())) return");
   });
 
   it("the People page changes nothing: it has no action to call", () => {

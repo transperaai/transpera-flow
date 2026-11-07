@@ -19,7 +19,7 @@ export const WhereTheTimeGoes: StoryObj = {
     const people = Object.keys(monthly.time.people).map((id) => ({ id, name: id }));
     return (
       <div className="w-full max-w-5xl">
-        <TimeByPurpose monthly={monthly} months={months} categories={DEFAULT_PURPOSES} roles={roles} people={people} viewer={{ seesEveryone: true, ownPersonId: null }} span="6 months" purposesHref="/w/larkspur/settings#purposes" />
+        <TimeByPurpose monthly={monthly} months={months} categories={DEFAULT_PURPOSES} roles={roles} people={people} viewer={{ seesEveryone: true, ownPersonId: null }} span="6 months" purposesHref="/w/larkspur/settings#purposes-heading" />
       </div>
     );
   },

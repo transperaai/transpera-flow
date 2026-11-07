@@ -40,7 +40,7 @@ window.mountQ14 = ({ open, role }) => {
   createRoot(document.getElementById("root")!).render(
     <SidebarProvider>
       <main className="min-w-0 flex-1">
-        <SettingsPage title="People & roles" eyebrow="Set up" description={peopleMeta(setup)} actions={<PeopleHeaderActions setup={setup} data={data} />} width="max-w-6xl">
+        <SettingsPage title="People & roles" eyebrow="Settings" description={peopleMeta(setup)} actions={<PeopleHeaderActions setup={setup} data={data} />} width="max-w-6xl">
           <PhoneNotice />
           <PeopleAndRoles setup={setup} data={data} />
         </SettingsPage>

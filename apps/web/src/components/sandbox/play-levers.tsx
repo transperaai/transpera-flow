@@ -224,7 +224,7 @@ export function PlayLevers({
               </NativeSelect>
             </label>
           </div>
-          <p className="text-xs text-muted-foreground">A rise lifts churn for 3 months. How much depends on the reaction, from each tier&apos;s own &ldquo;extra churn for each 10% rise&rdquo; in Set up.</p>
+          <p className="text-xs text-muted-foreground">A rise lifts churn for 3 months. How much depends on the reaction, from each tier&apos;s own &ldquo;extra churn for each 10% rise&rdquo; in Settings, under Tiers & clients.</p>
         </Group>
 
         <Group title="People" id="people">
@@ -285,7 +285,7 @@ export function PlayLevers({
               </Button>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">New hires take about {setup.rampDefault.length} months to reach full speed (the ramp in Set up).</p>
+          <p className="text-xs text-muted-foreground">New hires take about {setup.rampDefault.length} months to reach full speed (the ramp in Settings, under People & roles).</p>
         </Group>
       </SectionCard>
     </aside>

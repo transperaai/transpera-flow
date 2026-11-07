@@ -59,7 +59,7 @@ export function ForecastPanel({
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h2 className="font-heading text-lg leading-snug font-semibold tracking-tight">Who gets too busy, and when</h2>
-          <p className="text-sm text-muted-foreground">The next {span}, with planned hires, leave and the market schedule.</p>
+          <p className="text-sm text-muted-foreground">The next {span}, with planned hires and leave.</p>
         </div>
         <Link href={forecastHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
           Open the forecast

@@ -38,7 +38,7 @@ export const DRIVER_HELP: Record<BuiltinChurnDriverId, HelpCopy> = {
   results: { description: "Whether clients are happy with their results. You enter this.", example: "Clients rate their results 7 out of 10." },
   tenure: { description: "New clients leave more easily than long-standing ones.", example: "In their first 6 months, clients are 1.6 times as likely to leave." },
   price: { description: "Raising prices makes some clients leave.", example: "A 10% price rise in March." },
-  market: { description: "When times are tough, clients cut spending.", example: "From month 7 the market slows, so more clients leave." },
+  market: { description: "When times are tough, clients cut spending. It counts only when the Sandbox's Market lever sets a market other than today's.", example: "Pick a downturn from month 7 in the Sandbox, and more clients leave." },
 };
 
 /** The (i) beside each control that isn't a cause itself. */
@@ -47,9 +47,9 @@ export const CONTROL_HELP = {
     description: "How much this cause matters. 1 is normal. 0 means ignore it. 3 means it matters three times as much.",
     example: "Late work is set to 1.5, so it matters a bit more than normal.",
   },
-  switch: {
-    description: "Turns this cause on or off. Off means the simulation ignores it, as if its weight were 0.",
-    example: "Switch off “Price changes” if you aren't planning a price rise.",
+  add: {
+    description: "Adds one of the built-in causes not in use yet, or a cause of your own.",
+    example: "Add “Price changes” when you plan a price rise.",
   },
   contribution: {
     description: "How much of the churn in the simulation this cause explains, with the weights you've set. The rest is normal churn.",
@@ -70,7 +70,11 @@ export const CONTROL_HELP = {
     description: "How much extra churn this cause adds when its weight is 1, in percent. You estimate it.",
     example: "15 means 15% more clients leave than normal.",
   },
-  remove: { description: "Takes your own cause away for good. Switch it off instead if you might want it back.", example: "Remove “A cheaper competitor” once they've closed down." },
+  remove: { description: "Deletes your own cause for good, with its name and numbers.", example: "Remove “A cheaper competitor” once they've closed down." },
+  removeBuiltin: {
+    description: "Leaves this cause out of the simulation. Its weight and numbers are kept: Add driver puts it back.",
+    example: "Remove “Price changes” if you aren't planning a price rise.",
+  },
 } as const satisfies Record<string, HelpCopy>;
 
 /** The number a built-in takes, if it takes one: what it is called and its (i). */

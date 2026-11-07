@@ -105,8 +105,8 @@ export function PlayView(props: PlayViewProps) {
       {props.base && (
         <p className="text-xs text-muted-foreground">
           Baselines, tiers, salaries and lines are set in{" "}
-          <Link href={`${props.base}/setup/people`} className="font-medium text-accent hover:underline">
-            Set up
+          <Link href={`${props.base}/settings/people`} className="font-medium text-accent hover:underline">
+            Settings
           </Link>
           . Every baseline there is a lever here.
         </p>

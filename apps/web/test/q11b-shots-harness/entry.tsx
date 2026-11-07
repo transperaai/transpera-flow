@@ -4,7 +4,9 @@
 import { createRoot } from "react-dom/client";
 import { build } from "../setup-harness/entry";
 import { WorkspaceShell } from "@/components/shell/workspace-shell";
+import { DEFAULT_PURPOSES } from "@transpera-flow/db";
 import { PurposesSettings } from "@/components/purposes/purposes-settings";
+import { ChurnDriversSettings } from "@/app/w/[slug]/settings/churn-drivers-settings";
 import { TiersAndClients } from "@/components/setup/tiers-clients";
 import { PeopleAndRoles, PeopleHeaderActions } from "@/components/setup/people-roles";
 import { peopleMeta } from "@/lib/setup/people-meta";
@@ -48,7 +50,7 @@ window.mountQ11b = (what) => {
   let page: React.ReactNode = null;
   if (what === "setup-clients") {
     page = (
-      <SettingsPage title="Tiers & clients" eyebrow="Set up" description="Where tiers, tier counts and named clients are keyed in. A named client starts from its tier's values; anything filled in replaces them. Agency admins and the Owner can change this; everyone can read it." width="max-w-6xl">
+      <SettingsPage title="Tiers & clients" eyebrow="Settings" description="Where tiers, tier counts and named clients are keyed in. A named client starts from its tier's values; anything filled in replaces them. Agency admins and the Owner can change this; everyone can read it." width="max-w-6xl">
         <PhoneNotice />
         <p className="px-1 text-sm text-fg-2" data-unique-clients>
           <b className="text-foreground">8</b> unique clients: 6 with Organic, 3 with Performance, 1 taking both services.
@@ -58,7 +60,7 @@ window.mountQ11b = (what) => {
     );
   } else if (what === "setup-people") {
     page = (
-      <SettingsPage title="People & roles" eyebrow="Set up" description={peopleMeta(setup)} actions={<PeopleHeaderActions setup={setup} data={data} />} width="max-w-6xl">
+      <SettingsPage title="People & roles" eyebrow="Settings" description={peopleMeta(setup)} actions={<PeopleHeaderActions setup={setup} data={data} />} width="max-w-6xl">
         <PhoneNotice />
         <PeopleAndRoles setup={setup} data={data} />
       </SettingsPage>
@@ -71,14 +73,16 @@ window.mountQ11b = (what) => {
         description="Changes save as you go. If someone else changes the same field at the same time, you'll be asked which value to keep."
       >
         <PhoneNotice />
-        <WorkspaceDetails workspaceId={data.workspace.id} name="Acme" currency="AUD" overheadMonthly={18000} canManage saveName={saveWorkspaceName} saveCurrency={saveWorkspaceCurrency} saveOverhead={saveOverheadMonthly} />
-        <SimulationSettings data={data} />
-        <SettingsSection id="services" title="Services, clients, roles and people" description="These moved to Set up, where the capacity figures' inputs are keyed in.">
-          <LinkRows label="Set up pages" items={[
-            { href: "#", title: "Tiers & clients", description: "Services (pricing, entry process, servicing steps, path tags), tiers, counted clients, named clients and the client health benchmark." },
+        <SettingsSection id="services" title="Clients and team" description="Tiers, clients, roles and people have a page each, as the capacity figures' inputs.">
+          <LinkRows label="Settings pages" items={[
+            { href: "#", title: "Tiers & clients", description: "Tiers (pricing, entry process, servicing steps, path tags), tier client counts and optional named clients." },
             { href: "#", title: "People & roles", description: "Roles, shared teams, people (hours, leave, skills, dates, per-person times), salaries and portfolios." },
           ]} />
         </SettingsSection>
+        <WorkspaceDetails workspaceId={data.workspace.id} name="Acme" currency="AUD" overheadMonthly={18000} canManage saveName={saveWorkspaceName} saveCurrency={saveWorkspaceCurrency} saveOverhead={saveOverheadMonthly} />
+        <SimulationSettings data={data} />
+        <PurposesSettings mode="live" workspaceId={data.workspace.id} stored={null} initial={DEFAULT_PURPOSES.map((c) => ({ ...c }))} use={{ winning: 3 }} save={async () => ({ status: "error", message: "n/a" })} />
+        <ChurnDriversSettings mode="demo" workspaceId={null} bundle={null} rows={[]} />
         <HealthSettings data={data} />
       </SettingsPage>
     );
