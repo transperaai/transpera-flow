@@ -29,12 +29,14 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
       description="Changes save as you go. If someone else changes the same field at the same time, you'll be asked which value to keep."
     >
       <PhoneNotice />
-      <SettingsSection id="services" title="Clients and team" description="Tiers, clients, roles and people have a page each, as the capacity figures' inputs.">
+      <SettingsSection id="services" title="Clients, team and access" description="Tiers and clients, people and roles, and who can sign in have a page each.">
         <LinkRows
           label="Settings pages"
           items={[
             { href: `/w/${slug}/settings/clients`, title: "Tiers & clients", description: "Tiers (pricing, entry process, servicing steps, path tags), tier client counts and optional named clients." },
             { href: `/w/${slug}/settings/people`, title: "People & roles", description: "Roles, shared teams, people (hours, leave, skills, dates, per-person times), salaries and portfolios." },
+            // Access is for whoever manages the workspace (its page answers 404 to anyone else).
+            ...(data.canManage ? [{ href: `/w/${slug}/settings/access`, title: "Access", description: "Who can sign in, their role, and which person in the team each sign-in is." }] : []),
           ]}
         />
       </SettingsSection>
@@ -65,7 +67,7 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
           and on the Overview.
         </p>
       </PurposesSettings>
-      <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} />
+      <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} removed={data.workspace.settings.churn_drivers_removed} />
       <DemandSettings data={data} />
     </SettingsPage>
   );

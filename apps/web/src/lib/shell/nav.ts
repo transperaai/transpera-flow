@@ -2,7 +2,7 @@
 // active item is unit-tested; the sidebar component only renders what this returns. Order and grouping follow the
 // prototype's `sidebar()` (apps/web/prototype/app-flow.html).
 
-export type NavIcon = "clients" | "team" | "overview" | "processes" | "issues" | "solutions" | "library" | "people" | "sandbox" | "settings" | "access";
+export type NavIcon = "clients" | "team" | "overview" | "processes" | "issues" | "solutions" | "library" | "people" | "sandbox" | "settings";
 
 /** How a count badge looks: plain, or a warning. */
 export type CountTone = "plain" | "warn";
@@ -40,14 +40,14 @@ export interface NavCounts {
 
 const matches = (rest: string, path: string) => rest === path || rest.startsWith(`${path}/`);
 
-/** The pages under Settings that its item stands for (Access has an item of its own). */
-const SETTINGS_SUB_PAGES = ["/settings/clients", "/settings/people"];
+/** The pages under Settings that its item stands for. */
+const SETTINGS_SUB_PAGES = ["/settings/clients", "/settings/people", "/settings/access"];
 
 /**
  * The shared shape: `base` is where the workspace's pages live (`/w/<slug>`), `rest` the path under it.
  * The workspace root is the Overview, the landing page (issue #100); a process's map (`/p/<id>`) belongs to Processes.
  */
-function groups(base: string, rest: string, counts: NavCounts, extra: { settings: boolean; access: boolean; levers?: boolean; share?: boolean }): NavGroup[] {
+function groups(base: string, rest: string, counts: NavCounts, extra: { settings: boolean; levers?: boolean; share?: boolean }): NavGroup[] {
   const onMap = rest.startsWith("/p/");
   const item = (i: Omit<NavItem, "href" | "active"> & { path: string; active?: boolean }): NavItem => {
     const { path, active, ...fields } = i;
@@ -58,9 +58,8 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
     // Who gets too busy, and when (issue #35).
     item({ key: "sandbox", label: "Sandbox", path: "/sandbox", icon: "sandbox" }),
   ];
-  // Settings holds its sub pages (Tiers & clients, People & roles, Purposes); Access has an item of its own.
+  // Settings holds its sub pages (Tiers & clients, People & roles, Access).
   if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || SETTINGS_SUB_PAGES.some((p) => matches(rest, p)) }));
-  if (extra.access) company.push(item({ key: "access", label: "Access", path: "/settings/access", icon: "access" }));
   return [
     {
       key: "main",
@@ -83,10 +82,10 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
   ];
 }
 
-export function workspaceNav({ slug, pathname, canManage, counts }: { slug: string; pathname: string; canManage: boolean; counts: NavCounts }): NavGroup[] {
+export function workspaceNav({ slug, pathname, counts }: { slug: string; pathname: string; counts: NavCounts }): NavGroup[] {
   const base = `/w/${slug}`;
   const rest = pathname.startsWith(base) ? pathname.slice(base.length) : "\u0000";
-  return groups(base, rest, counts, { settings: true, access: canManage });
+  return groups(base, rest, counts, { settings: true });
 }
 
 export const flatItems = (groups: NavGroup[]): NavItem[] => groups.flatMap((g) => g.items);

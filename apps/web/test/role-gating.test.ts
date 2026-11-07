@@ -135,6 +135,7 @@ describe("the Editor and the Settings", () => {
     expect(access).toContain('rpc(db, "can_manage_workspace", { ws }),');
     expect(access).toContain("if (!canManage) return null;");
     expect(read(PAGE("settings/access"))).toContain("if (!settings) notFound();");
-    expect(read("lib/shell/nav.ts")).toContain("access: canManage");
+    // The link is on the Settings page, for managers only.
+    expect(read(PAGE("settings"))).toContain("...(data.canManage ? [{ href: `/w/${slug}/settings/access`");
   });
 });

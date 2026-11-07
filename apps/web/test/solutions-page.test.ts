@@ -194,7 +194,7 @@ describe("the demo's solutions, in this tab", () => {
 
 describe("the sidebar", () => {
   it("has Solutions built, so nothing is marked soon", () => {
-    const item = workspaceNav({ slug: "s", pathname: "/w/s/solutions", canManage: false, counts: {} })
+    const item = workspaceNav({ slug: "s", pathname: "/w/s/solutions", counts: {} })
       .flatMap((g) => g.items)
       .find((i) => i.key === "solutions");
     expect(item).toMatchObject({ href: "/w/s/solutions", active: true });

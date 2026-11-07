@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {}, push:
 // The sidebar's groups, items and which one is active (issues #93, #98), after the prototype's `sidebar()`.
 
 const nav = (pathname: string, over: Partial<Parameters<typeof workspaceNav>[0]> = {}) =>
-  workspaceNav({ slug: "s", pathname, canManage: true, counts: {}, ...over });
+  workspaceNav({ slug: "s", pathname, counts: {}, ...over });
 const active = (groups: NavGroup[]) => flatItems(groups).filter((i) => i.active).map((i) => i.key);
 const item = (groups: NavGroup[], key: string) => flatItems(groups).find((i) => i.key === key);
 const PID = "0d5f6f0e-0000-4000-8000-000000000001";
@@ -21,7 +21,7 @@ describe("workspaceNav: groups and order", () => {
     expect(g.map((x) => x.items.map((i) => i.key))).toEqual([
       ["overview", "processes"],
       ["issues", "solutions", "library"],
-      ["capacity", "sandbox", "settings", "access"],
+      ["capacity", "sandbox", "settings"],
     ]);
   });
   it("labels the items as the prototype does", () => {
@@ -34,7 +34,6 @@ describe("workspaceNav: groups and order", () => {
       "Capacity",
       "Sandbox",
       "Settings",
-      "Access",
     ]);
   });
   it("gives every item an icon", () => expect(flatItems(nav("/w/s")).every((i) => i.icon)).toBe(true));
@@ -43,10 +42,7 @@ describe("workspaceNav: groups and order", () => {
     for (const gone of ["report", "clients", "scenarios", "runs", "map"]) expect(keys).not.toContain(gone);
     expect(flatItems(nav("/w/s")).map((i) => i.href).filter((h) => /^\/w\/s\/(reports|clients|runs)\b|panel=scenarios/.test(h))).toEqual([]);
   });
-  it("shows Access only to managers", () => {
-    expect(item(nav("/w/s", { canManage: false }), "access")).toBeUndefined();
-    expect(item(nav("/w/s"), "access")?.href).toBe("/w/s/settings/access");
-  });
+  it("has no Access item: Access is a page of Settings", () => expect(item(nav("/w/s"), "access")).toBeUndefined());
 });
 
 describe("workspaceNav: the active item", () => {
@@ -62,7 +58,7 @@ describe("workspaceNav: the active item", () => {
   it("is Settings on /settings and its Tiers & clients and People & roles pages", () => {
     for (const path of ["/w/s/settings", "/w/s/settings/clients", "/w/s/settings/people"]) expect(active(nav(path)), path).toEqual(["settings"]);
   });
-  it("is Access, not Settings, on /settings/access", () => expect(active(nav("/w/s/settings/access"))).toEqual(["access"]));
+  it("is Settings on /settings/access", () => expect(active(nav("/w/s/settings/access"))).toEqual(["settings"]));
   it("is the matching item on each of the other pages", () => {
     for (const [path, key] of [
       ["/w/s/issues", "issues"],
@@ -95,7 +91,6 @@ describe("workspaceNav: hrefs", () => {
       "/w/s/capacity",
       "/w/s/sandbox",
       "/w/s/settings",
-      "/w/s/settings/access",
     ]);
   });
   it("marks the pages that are not built yet with the ticket that builds them", () => {
@@ -118,7 +113,7 @@ describe("workspaceNav: counts", () => {
   });
   it("has no count where nothing is counted", () => {
     const g = nav("/w/s", { counts });
-    for (const key of ["overview", "library", "capacity", "settings", "access"]) expect(item(g, key)?.count).toBeUndefined();
+    for (const key of ["overview", "library", "capacity", "settings"]) expect(item(g, key)?.count).toBeUndefined();
   });
   it("leaves the count off when none is given", () => {
     for (const i of flatItems(nav("/w/s"))) expect(i.count).toBeUndefined();
@@ -153,7 +148,6 @@ describe("the live shell's workspace tile", () => {
       slug: "s",
       workspaceName: "Northbeam Digital",
       workspaces: [{ name: "Northbeam Digital", href: "/w/s" }],
-      canManage: true,
       counts: {},
       viewer: null,
       children: null,

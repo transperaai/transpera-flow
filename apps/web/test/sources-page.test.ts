@@ -115,7 +115,7 @@ describe("the Sources page", () => {
 
 describe("the sidebar", () => {
   it("does not list Sources: it is hidden from the menu, and still opens by its address", () => {
-    const groups = workspaceNav({ slug: "s", pathname: "/w/s/sources", canManage: true, counts: {} });
+    const groups = workspaceNav({ slug: "s", pathname: "/w/s/sources", counts: {} });
     expect(flatItems(groups).map((i) => i.key)).not.toContain("sources");
     expect(flatItems(groups).filter((i) => i.active)).toEqual([]);
     expect(existsSync(join(__dirname, "..", "src/app/w/[slug]/sources/page.tsx"))).toBe(true);

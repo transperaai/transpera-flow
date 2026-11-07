@@ -37,7 +37,6 @@ window.mountQ11b = (what) => {
         slug="northbeam"
         workspaceName="Northbeam Digital"
         workspaces={[{ name: "Northbeam Digital", href: "/w/northbeam" }, { name: "Larkspur Studio", href: "/w/larkspur" }]}
-        canManage
         counts={{ processes: 6, openIssues: 3 }}
         viewer={{ name: "Olive Owner", email: "olive@northbeam.example" }}
       >
