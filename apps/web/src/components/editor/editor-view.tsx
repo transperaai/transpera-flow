@@ -11,7 +11,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { retiredSteps, isUnpublished, workspacePurposes, type BlockBundle, type BlockRow, type ProcessBundle, type PurposeCategory, type ScenarioRow } from "@transpera-flow/db";
+import { retiredSteps, isUnpublished, workspacePurposes, type BlockBundle, type BlockRow, type ProcessBundle, type PurposeCategory, type ScenarioRow, type StoredStepChange } from "@transpera-flow/db";
+import { changesOnStepsOf } from "@/lib/solutions/step-changes";
 import { createSolution } from "@/app/w/[slug]/solution-actions";
 import { addPurpose } from "@/app/w/[slug]/settings/actions";
 import { createLibraryProcess } from "@/app/w/[slug]/library-actions";
@@ -83,7 +84,7 @@ export function EditorView({
   historyHref,
   library,
   tierSetup,
-  changesOnSteps,
+  changesOnSteps: changesFromServer,
   laneInput,
 }: {
   /** The departments, tier services and servicing links the company map's lanes come from (Q4). Absent: no lanes. */
@@ -139,6 +140,13 @@ export function EditorView({
   const workspaceId = initialLive.workspace.id;
   const onCreate = useCallback<LibraryCreate>((input) => createLibraryProcess(workspaceId, input), [workspaceId]);
   const libraryProps = useMemo(() => (library ? { ...library, ...(library.onCreate ? {} : mode === "live" ? { onCreate } : {}) } : undefined), [library, mode, onCreate]);
+  // The solution's changes as saved so far: each Automate… / Augment… edit is one save, and its answer replaces the list the panel shows.
+  const [savedChanges, setSavedChanges] = useState<StoredStepChange[] | null>(null);
+  const changesOnSteps = useMemo<ChangesOnSteps | undefined>(() => {
+    const c = changesFromServer;
+    if (!c?.edit) return c;
+    return { ...c, changes: savedChanges ? changesOnStepsOf(c.edit.solutionId, savedChanges) : c.changes, edit: { ...c.edit, onChanged: setSavedChanges } };
+  }, [changesFromServer, savedChanges]);
   const solutionMode = editorMode === "solution";
   // Block and solution modes edit a map of their own, in memory: never the process's live version or its draft. A block
   // starts empty; a solution starts as a copy of live.
