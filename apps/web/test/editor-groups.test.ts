@@ -127,22 +127,9 @@ describe("adding after the selected step", () => {
     expect(stepsOf(applyEdit(inner, deep.edit), deep.id).parent_step_id).toBe(g.id);
   });
 
-  it("adds a group holding one step, which is its first step and keeps the model simulatable", () => {
-    const b = flat();
-    const { edit, id } = addAfter(b, ids.seo, "group");
-    const after = applyEdit(b, edit);
-    const group = stepsOf(after, id);
-    expect(group.kind).toBe("group");
-    const inside = membersOf(after, id);
-    expect(inside).toHaveLength(1);
-    expect(group.entry_step_id).toBe(inside[0]!.id);
-    expect(group.work_hours).toBe(0);
-    expect(() => simulate(modelOf(after), 2, 1)).not.toThrow();
-  });
-
   it("is undone as one edit", () => {
     const b = flat();
-    const { edit } = addAfter(b, ids.qualify, "group");
+    const { edit } = addAfter(b, ids.qualify, "task");
     const back = applyEdit(applyEdit(b, edit), invertEdit(edit));
     expect(back.steps.map((s) => s.id).sort()).toEqual(b.steps.map((s) => s.id).sort());
     expect(back.edges.map((e) => [e.id, e.to_step_id]).sort()).toEqual(b.edges.map((e) => [e.id, e.to_step_id]).sort());
@@ -224,8 +211,11 @@ describe("grouping and ungrouping", () => {
 describe("groups with nowhere to go", () => {
   it("warns about a new group with no way out, and about the step inside it", () => {
     const b = flat();
-    const lone = addAfter(b, null, "group");
-    const withGroup = applyEdit(b, lone.edit);
+    // A step with nothing joined to it, put in a group of its own.
+    const step = addAfter(b, null, "task");
+    const withStep = applyEdit(b, step.edit);
+    const lone = groupSteps(withStep, [step.id])!;
+    const withGroup = applyEdit(withStep, lone.edit);
     expect(stepWarnings(withGroup).get(lone.id)).toMatch(/Nothing leaves this group/);
     const inner = membersOf(withGroup, lone.id)[0]!;
     expect(stepWarnings(withGroup).get(inner.id)).toMatch(/no group it is in has a connection out/);

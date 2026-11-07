@@ -6,12 +6,12 @@
 // step must already be one of the group's own steps). Ungrouping runs the other way round.
 
 import { ancestorsOf, groupHasExit, isGroup, type EdgeRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
-import { CARD_SIZE, EMPTY_GROUP, GROUP_PADDING, TERMINAL_SIZE, openGroupSize, type Size } from "@/lib/map/groups";
+import { CARD_SIZE, GROUP_PADDING, TERMINAL_SIZE, openGroupSize, type Size } from "@/lib/map/groups";
 import { newId, newStepRow, type NewStepKind } from "./commands";
 import type { Edit, Op, Patch, RowChange } from "./ops";
 
-/** What the palette can add. */
-export type PaletteKind = NewStepKind | "group";
+/** What the palette can add. A group is made by grouping selected steps (`groupSteps`), not added empty. */
+export type PaletteKind = NewStepKind;
 
 /** A step card's rough size on the map, to find a free place for a new one. */
 const SLOT = { x: 240 };
@@ -114,7 +114,7 @@ export function nearestFreeSpot(bundle: ProcessBundle, view: ViewHint, size: Siz
 }
 
 /**
- * Add a step, decision, wait or group after the selected step, in the same group as it (so inside a nested group, the new
+ * Add a step, decision or wait after the selected step, in the same group as it (so inside a nested group, the new
  * one lands inside it). The new one is joined in: a selected step with nothing after it leads to it, and one with a
  * single next step now leads to the new one, which leads on to that step. A step with branches, or an end step, gets
  * the new one placed beside it, unconnected. With nothing selected, it is not connected to anything.
@@ -131,38 +131,22 @@ export function addAfter(bundle: ProcessBundle, selectedId: string | null, kind:
   // After a step with branches the right is crowded: put the new one just below it, where it is easy to find.
   const x0 = sel ? Number(sel.x) + (branches ? 0 : SLOT.x) : siblings.reduce((m, s) => Math.max(m, Number(s.x) + SLOT.x), 0);
   const y0 = sel ? Number(sel.y) + (branches ? 120 : 0) : siblings.length ? Number(siblings[siblings.length - 1]!.y) : 0;
-  // A new group is drawn open around its first step.
-  const size =
-    kind === "group"
-      ? { width: Math.max(EMPTY_GROUP.width, GROUP_PADDING.left + CARD_SIZE.width + GROUP_PADDING.right), height: GROUP_PADDING.top + CARD_SIZE.height + GROUP_PADDING.bottom }
-      : kind === "start" || kind === "end"
-        ? TERMINAL_SIZE
-        : CARD_SIZE;
+  const size = kind === "start" || kind === "end" ? TERMINAL_SIZE : CARD_SIZE;
   const { x, y } = view && parent === null ? nearestFreeSpot(bundle, view, size) : freeSpot(bundle, parent, x0, y0);
 
-  let added: StepRow;
-  const extra: StepRow[] = [];
-  if (kind === "group") {
-    added = groupRow(bundle, x, y, parent);
-    // A group starts with one step, so it can be simulated and opened to edit.
-    const first: StepRow = { ...newStepRow(bundle, "task", null, GROUP_PADDING.left, GROUP_PADDING.top), parent_step_id: added.id };
-    added = { ...added, entry_step_id: first.id };
-    extra.push(first);
-  } else {
-    added = { ...newStepRow(bundle, kind, null, x, y), parent_step_id: parent };
-  }
+  const added: StepRow = { ...newStepRow(bundle, kind, null, x, y), parent_step_id: parent };
 
   const ops: Op[] = [];
   const out = sel && sel.kind !== "end" ? bundle.edges.filter((e) => e.from_step_id === sel.id) : null;
   if (sel && out && out.length === 0) {
-    ops.push({ kind: "insert", steps: [added, ...extra], edges: [edgeRow(bundle, sel.id, added.id, 1)] });
+    ops.push({ kind: "insert", steps: [added], edges: [edgeRow(bundle, sel.id, added.id, 1)] });
   } else if (sel && out && out.length === 1) {
     const next = out[0]!;
     // sel -> new keeps the old connection's share and tag; new -> next carries on at 100%.
-    ops.push({ kind: "insert", steps: [added, ...extra], edges: [edgeRow(bundle, added.id, next.to_step_id, 1)] });
+    ops.push({ kind: "insert", steps: [added], edges: [edgeRow(bundle, added.id, next.to_step_id, 1)] });
     ops.push({ kind: "update", changes: [{ table: "edges", id: next.id, before: { to_step_id: next.to_step_id }, after: { to_step_id: added.id } }] });
   } else {
-    ops.push({ kind: "insert", steps: [added, ...extra], edges: [] });
+    ops.push({ kind: "insert", steps: [added], edges: [] });
   }
   const note = sel && branches ? `${sel.name} has branches: connect the new step yourself.` : sel?.kind === "end" ? `${sel.name} is an end step, so nothing leads on from it: connect the new step yourself.` : undefined;
   return { edit: { label: `Added ${added.name}`, ops }, id: added.id, ...(note ? { note } : {}) };

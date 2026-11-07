@@ -21,7 +21,6 @@ const PALETTE: { kind: PaletteKind; label: string }[] = [
   { kind: "task", label: "+ Step" },
   { kind: "decision", label: "+ Decision" },
   { kind: "wait", label: "+ Wait" },
-  { kind: "group", label: "+ Group" },
 ];
 
 export function Palette({
@@ -104,7 +103,7 @@ export function Palette({
           Add
           <Help
             label="Add"
-            description="Adds a new step, decision, wait or group in the middle of what you are looking at, joined in after the step you have selected. Nothing selected adds it unconnected. + Process opens the process library, to add whole processes as links."
+            description="Adds a new step, decision or wait in the middle of what you are looking at, joined in after the step you have selected. Nothing selected adds it unconnected. + Process opens the process library, to add whole processes as links."
             example="Select “Discovery call”, press + Wait, and a waiting step appears in view, joined in after it."
           />
         </h2>

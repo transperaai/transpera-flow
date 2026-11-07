@@ -128,15 +128,13 @@ describe("the Editor's group edits against the database", () => {
     await checks(c, (cur) => ungroup(cur, DEMO_GROUP_IDS.conversation)!);
   });
 
-  it("adds steps and groups after the selected step, at any depth", async () => {
+  it("adds steps after the selected step, at any depth", async () => {
     let b = await seedDraft(withDemoGroups(demoBundle()));
     b = await checks(b, (cur) => addAfter(cur, ids.seo, "task").edit);
     b = await checks(b, (cur) => addAfter(cur, ids.qualify, "decision").edit);
-    b = await checks(b, (cur) => addAfter(cur, ids.seo, "group").edit);
     b = await checks(b, (cur) => addAfter(cur, ids.audit, "wait").edit);
-    // And a group inside the group just made.
-    const group = b.steps.filter((s) => s.kind === "group" && !Object.values(DEMO_GROUP_IDS).includes(s.id as never))[0]!;
-    const inside = b.steps.find((s) => s.parent_step_id === group.id)!;
-    await checks(b, (cur) => addAfter(cur, inside.id, "group").edit);
+    // And a step inside a group inside a group.
+    b = await checks(b, (cur) => groupSteps(cur, [ids.seo])!.edit);
+    await checks(b, (cur) => addAfter(cur, ids.seo, "wait").edit);
   });
 });
