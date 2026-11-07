@@ -6,6 +6,7 @@ import {
   companyEngineModel,
   defaultCompanyPart,
   holderStepId,
+  liveMapDifferences,
   northbeamBundle,
   partOf,
   resolveBundlePurposes,
@@ -14,8 +15,10 @@ import {
   type EdgeRow,
   type ProcessBundle,
   type ProcessPart,
+  type SolutionRow,
   type StepRow,
 } from "../src";
+import { scenarioSegments, withSolution } from "../src/sandbox";
 
 // Q17 (ADR 0023): what the company map's processes and hand-off lines do to the run. Northbeam is the workspace (one pipeline, two servicing
 // processes); processes are added and cards dropped on the map. The equality with today for the system-made map is `engine-model-snapshot.test.ts`.
@@ -248,5 +251,49 @@ describe("the draft and earlier versions run from their own map", () => {
     expect(a.model).toEqual(toEngineModel(base, { startDate: START }));
     expect(b.model).not.toEqual(a.model);
     expect(b.model.ends![b.model.sinks.won]!.handoff).toBe("p-onboarding-task");
+  });
+});
+
+describe("process versions on top of the map", () => {
+  const parts = [pipeline, onboarding, ...servicingParts];
+  const solution = (process: ProcessPart): SolutionRow => ({ id: "s-1", process_id: pid(process), name: "Faster", steps: { steps: [], edges: [] }, lever_changes: [] }) as unknown as SolutionRow;
+  const change = { id: "c-1", lever: "E6", target: "s-1", op: "set", value: 1, from: "2026-11" } as const;
+  const segments = (bundle: ProcessBundle, sol: SolutionRow) =>
+    scenarioSegments(bundle, [{ change: change as never, scenarioId: "play", scenarioName: "Free play", inherited: false }], [sol], START, [0, 173, 346], 40);
+
+  it("a swap applies to any process on the map, a handed-to pipeline included", () => {
+    const company = mapOf(parts, { lines: [[pid(pipeline), pid(onboarding)]] });
+    const { bundle } = run(company, parts);
+    expect(withSolution(bundle, solution(onboarding))).not.toBeNull();
+    expect(withSolution(bundle, solution(servicingParts[0]!))).not.toBeNull();
+    expect(segments(bundle, solution(onboarding)).problems).toEqual([]);
+  });
+
+  it("a version of a process that isn't on the chosen map is skipped, with the map's wording", () => {
+    // Onboarding is not run on the system-made map (no line into it).
+    const { bundle } = run(mapOf(parts), parts);
+    expect(withSolution(bundle, solution(onboarding))).toBeNull();
+    expect(segments(bundle, solution(onboarding)).problems.map((p) => p.message)).toEqual(["'Onboarding' isn't on this company map, so its version isn't used."]);
+    // A bundle that no map made keeps the old wording.
+    expect(segments(base, solution(onboarding)).problems.map((p) => p.message)).toEqual(["“Faster” changes a process the forecast doesn't run"]);
+  });
+});
+
+describe("how the live map differs while it doesn't drive the run", () => {
+  const parts = [pipeline, onboarding, ...servicingParts];
+  const diff = (company: ProcessPart) => liveMapDifferences(base, companyBundle(base, company, parts));
+
+  it("names a process the run still includes, and a hand-off it doesn't make", () => {
+    const left = servicingParts[0]!;
+    expect(diff(mapOf(parts, { drop: [pid(left)] })).map((n) => n.message)).toEqual([`The live company map leaves out '${left.process.name}'. The run still includes it until a company map version is published.`]);
+    expect(diff(mapOf(parts, { lines: [[pid(pipeline), pid(onboarding)]] })).map((n) => n.message)).toEqual([
+      `The live company map hands work on from '${pipeline.process.name}' to 'Onboarding'. The run doesn't until a company map version is published.`,
+    ]);
+    const both = diff(mapOf(parts, { drop: [pid(servicingParts[0]!), pid(servicingParts[1]!)] })).map((n) => n.message);
+    expect(both).toEqual([`The live company map leaves out '${servicingParts[0]!.process.name}' and '${servicingParts[1]!.process.name}'. The run still includes them until a company map version is published.`]);
+  });
+
+  it("says nothing when the map and the run agree", () => {
+    expect(diff(mapOf(parts))).toEqual([]);
   });
 });

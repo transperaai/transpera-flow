@@ -58,7 +58,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
       listCompanyRevisions(ws),
     ]);
     if (!setup) notFound();
-    // `?company=<revision id | draft>`: another version of the company map for the map card (the run doesn't use the company map, so it is the same run).
+    // `?company=<revision id | draft>`: another version of the company map (Q17): it is run against today's path, so an unpublished map can be tested.
     const chosen = typeof companyParam === "string" ? (companyParam === "draft" ? companyRevisions.find((r) => r.status === "draft") : companyRevisions.find((r) => r.id === companyParam)) : undefined;
     const company = chosen && !chosen.live ? ((await loadCompanyRevision(ws, chosen.id)) ?? liveCompany) : liveCompany;
     const companyRevisionId = chosen && company !== liveCompany ? chosen.id : (companyRevisions.find((r) => r.live)?.id ?? null);

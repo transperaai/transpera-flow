@@ -7,7 +7,9 @@
 import { useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
+  companyBundle,
   defaultPlay,
+  liveMapDifferences,
   partOf,
   playChanges,
   playIsDefault,
@@ -16,6 +18,7 @@ import {
   type CapacityChangeRow,
   type CompanyRevisionListing,
   type CapacitySetup,
+  type CompanyRunNote,
   type IssueRow,
   type PlayContext,
   type PlayState,
@@ -42,6 +45,8 @@ import type { PlayRuns } from "@/lib/sandbox/use-play-runs";
 import { SandboxExportMenu, type ExportData } from "./export-menu";
 import { PrintSummary, type PrintColumn } from "./print-summary";
 import { NativeSelect } from "@/components/ui/native-select";
+import { Help } from "@/components/help";
+import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { shortDate } from "@/lib/processes/rows";
 import { PlayView } from "./play-view";
 import type { PlayMapApi } from "./play-map";
@@ -101,7 +106,22 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
     return s ? { id: s.id, processId: s.process_id } : null;
   }, [initialSolutionId, solutions]);
   const [start] = useState(() => todayIso());
-  const processes = useMemo(() => playProcesses(live, solutions, solutionLinks, issues), [live, solutions, solutionLinks, issues]);
+
+  // The company map decides what is simulated (Q17, ADR 0023). `live` is the loader's bundle: the live map's run once a person has published a company
+  // map version, today's run before. Today's path is always that. The map chosen in the select, when it isn't the live one (the open draft or an
+  // earlier version), is the levers' path's own scene: the same processes and levers, run from that map.
+  const liveRevisionId = companyRevisions.find((r) => r.live)?.id ?? null;
+  const mapKey = companyRevisionId !== null && companyRevisionId !== liveRevisionId ? companyRevisionId : null;
+  const mapDrives = company?.process.map_drives_run !== false;
+  const made = useMemo(() => (company ? companyBundle(live, company, parts) : null), [live, company, parts]);
+  const run = useMemo(() => (mapKey !== null && made?.bundle ? made.bundle : live), [mapKey, made, live]);
+  const mapProblem = mapKey !== null && made && !made.bundle ? made.problem : null;
+  // What to say about the map: a map that runs says what it can't honour; the live map before a person has published one says how it differs.
+  const mapNotes: CompanyRunNote[] = useMemo(() => {
+    if (!made) return [];
+    return mapKey === null && !mapDrives ? liveMapDifferences(live, made) : made.notes;
+  }, [made, mapKey, mapDrives, live]);
+  const processes = useMemo(() => playProcesses(run, solutions, solutionLinks, issues), [run, solutions, solutionLinks, issues]);
 
   // Today's path, and the way to prepare the levers' path. The model of today's path gives the win mix for "Win new clients".
   const base0 = useMemo(() => {
@@ -112,7 +132,14 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
     const model = base0.segments[0]?.model;
     return { startDate: start, setup, library, winMix: (d) => (model ? winMix(setup, model, d) : {}) };
   }, [base0, start, setup, library]);
-  const prepare = useCallback((play: PlayState, current: readonly CapacityChangeRow[]) => preparePlay(live, play, { ...ctx, library: current }, solutions, DEFAULT_FORECAST_MONTHS), [live, ctx, solutions]);
+  const prepare = useCallback(
+    (play: PlayState, current: readonly CapacityChangeRow[]) => {
+      const prepared = preparePlay(run, play, { ...ctx, library: current }, solutions, DEFAULT_FORECAST_MONTHS);
+      // A map the run can't start from (no sales pipeline on it) is an error of the levers' path, not of today's.
+      return mapProblem !== null ? { ...prepared, segments: [], error: mapProblem } : prepared;
+    },
+    [run, ctx, solutions, mapProblem],
+  );
 
   // The company map, open groups in place, playing the run on screen.
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
@@ -134,19 +161,38 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
     const qs = next.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
+  const noteList = mapNotes.length ? (
+    <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground" data-company-run-notes>
+      {mapNotes.map((n, i) => (
+        <li key={`${n.kind}:${i}`} data-company-run-note={n.kind}>
+          {n.message}
+        </li>
+      ))}
+    </ul>
+  ) : null;
   const companySelect =
-    companyRevisions.length > 1 ? (
-      <label className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm" data-company-version-select>
-        <span className="font-medium">Company map</span>
-        <NativeSelect value={companyRevisionId ?? ""} onChange={(e) => pickCompany(e.target.value)} aria-label="Company map version" className="w-auto min-w-44">
-          {companyRevisions.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.status === "draft" ? "Draft" : r.live ? `Live · version ${r.number}` : `Version ${r.number}${r.publishedAt ? ` · ${shortDate(r.publishedAt)}` : ""}`}
-            </option>
-          ))}
-        </NativeSelect>
-        <span className="text-xs text-muted-foreground">Another version changes the map&apos;s layout and handoff lines. The run is the same: the company map is a picture, and the processes in it are what is simulated.</span>
-      </label>
+    companyRevisions.length > 1 || noteList ? (
+      <div className="flex min-w-0 flex-col gap-1.5">
+        {companyRevisions.length > 1 && (
+          <label className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm" data-company-version-select>
+            <span className="font-medium">Company map</span>
+            <Help {...SANDBOX_HELP.companyMap} />
+            <NativeSelect value={companyRevisionId ?? ""} onChange={(e) => pickCompany(e.target.value)} aria-label="Company map version" className="w-auto min-w-44">
+              {companyRevisions.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.status === "draft" ? "Draft" : r.live ? `Live · version ${r.number}` : `Version ${r.number}${r.publishedAt ? ` · ${shortDate(r.publishedAt)}` : ""}`}
+                </option>
+              ))}
+            </NativeSelect>
+            <span className="text-xs text-muted-foreground">
+              {mapKey === null
+                ? "The processes on the company map are what is simulated, and its hand-off lines say where won clients carry on."
+                : "This version's processes and hand-off lines are run against today's path (the live company map)."}
+            </span>
+          </label>
+        )}
+        {noteList}
+      </div>
     ) : null;
   const renderMap = (runs: PlayRuns, api: PlayMapApi) =>
     map.bundle.steps.length ? (
@@ -179,7 +225,7 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
       <EmptyState>No process has been published yet.</EmptyState>
     );
 
-  const exportSlot = ({ runs, play }: { runs: PlayRuns; play: PlayState }) => <PlayExport live={live} runs={runs} play={play} ctx={ctx} solutions={solutions} start={start} canSeeMoney={canEdit} />;
+  const exportSlot = ({ runs, play }: { runs: PlayRuns; play: PlayState }) => <PlayExport live={run} runs={runs} play={play} ctx={ctx} solutions={solutions} start={start} canSeeMoney={canEdit} mapMoved={mapKey !== null} />;
 
   return (
     <PlayView
@@ -196,14 +242,15 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
       removeChange={(id) => deleteCapacityChange(live.workspace.id, id)}
       exportSlot={exportSlot}
       base={base}
-      modelError={base0.error}
+      modelError={base0.error ?? mapProblem}
+      mapKey={mapKey}
       initialSolution={initialSolution}
     />
   );
 }
 
 /** The Export menu for the run on screen: today's path and the levers' path, as CSV, or printed (CSV and print are made in the browser). */
-function PlayExport({ live, runs, play, ctx, solutions, start, canSeeMoney }: { live: ProcessBundle; runs: PlayRuns; play: PlayState; ctx: PlayContext; solutions: SolutionRow[]; start: string; canSeeMoney: boolean }) {
+function PlayExport({ live, runs, play, ctx, solutions, start, canSeeMoney, mapMoved }: { live: ProcessBundle; runs: PlayRuns; play: PlayState; ctx: PlayContext; solutions: SolutionRow[]; start: string; canSeeMoney: boolean; mapMoved: boolean }) {
   const [includeCosts, setIncludeCosts] = useState(true);
   const hpw = live.workspace.settings.hours_per_week;
   const cutoffs = useMemo(() => toRatingConfig(ANALYSIS_DEFAULTS, hpw).rules.busy.cutoffs, [hpw]);
@@ -212,7 +259,7 @@ function PlayExport({ live, runs, play, ctx, solutions, start, canSeeMoney }: { 
   const changed = runs.changed;
   const ready = runs.status === "done" && today && changed && changed.run.result.monthly && today.run.result.monthly;
   const columns: PrintColumn[] | null = ready
-    ? [{ name: "Today's path", monthly: today.run.result.monthly!, priceRise: null, changes: [] }, ...(playIsDefault(play) ? [] : [{ name: "Free play", monthly: changed.run.result.monthly!, priceRise: null, changes }])]
+    ? [{ name: "Today's path", monthly: today.run.result.monthly!, priceRise: null, changes: [] }, ...(playIsDefault(play) && !mapMoved ? [] : [{ name: "Free play", monthly: changed.run.result.monthly!, priceRise: null, changes }])]
     : null;
   const months = useMemo(() => (ready ? timelineMonths(start, changed.run.result.monthly!.months, changed.run.model.hoursPerWeek) : null), [ready, changed, start]);
   const exportCtx = useMemo(() => ({ bundle: live, solutions, changes: changes.map((e) => e.change), mix: {} as Record<string, number> }), [live, solutions, changes]);

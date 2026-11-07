@@ -5,6 +5,12 @@ import type { HelpProps } from "@/components/help";
 type Entry = Pick<HelpProps, "label" | "description" | "example">;
 
 export const SANDBOX_HELP = {
+  companyMap: {
+    label: "Company map",
+    description:
+      "Once a person publishes a company map version, the map decides what is simulated: the processes on it run, and a hand-off line from one pipeline to another carries each won client on into the second. Cycle time stops at the win, so work in a process handed on to is after the sale and adds nothing to it. The draft and earlier versions run from their own map against today's path.",
+    example: "A line from Sales to Onboarding sends every won client through Onboarding. Taking the Audit card off leaves its work out of the run.",
+  },
   scenario: {
     label: "Scenario",
     description:

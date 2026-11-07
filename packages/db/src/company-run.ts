@@ -26,7 +26,8 @@ export type CompanyRunNoteKind =
   | "loop"
   | "no-won-end"
   | "lost-end"
-  | "won-end";
+  | "won-end"
+  | "map-differs";
 
 /** A thing about the company map the run can't honour or has changed, in plain words. */
 export interface CompanyRunNote {
@@ -214,4 +215,28 @@ export function companyEngineModel(
   const made = companyBundle(bundle, company, parts);
   if (!made.bundle) throw new ModelError(made.problem ?? NO_PIPELINE_ON_MAP);
   return { model: toEngineModel(made.bundle, options), notes: made.notes, bundle: made.bundle };
+}
+
+/**
+ * How the live company map differs from the run while `map_drives_run` is false (no person has published a company map version since the map
+ * began to drive the run): the processes it leaves out that the run still includes, and the hand-offs it has that the run doesn't make. `today`
+ * is the run's bundle (today's), `made` what `companyBundle` makes of the live map. Empty when the map and the run agree.
+ */
+export function liveMapDifferences(today: ProcessBundle, made: CompanyBundleResult): CompanyRunNote[] {
+  const until = "until a company map version is published";
+  if (!made.bundle) return [{ kind: "map-differs", message: `The live company map has no sales pipeline on it. The run still has one ${until}.` }];
+  const inRun = new Set([today.process.id, ...(today.otherProcesses ?? []).map((p) => p.process.id)]);
+  const onMap = new Set([made.bundle.process.id, ...(made.bundle.otherProcesses ?? []).map((p) => p.process.id)]);
+  // A child process goes with the process that holds it, so only the top-level processes are named.
+  const tops = [today.process, ...(today.otherProcesses ?? []).map((p) => p.process)];
+  const left = tops.filter((p) => inRun.has(p.id) && !onMap.has(p.id) && !p.parent_process_id).map((p) => p.name);
+  const out: CompanyRunNote[] = [];
+  if (left.length) out.push({ kind: "map-differs", message: `The live company map leaves out ${quoted(left)}. The run still includes ${left.length === 1 ? "it" : "them"} ${until}.` });
+  const names = made.bundle.companyNames ?? {};
+  for (const h of made.bundle.handoffs ?? []) {
+    if (!(today.handoffs ?? []).some((t) => t.from === h.from && t.to === h.to)) {
+      out.push({ kind: "map-differs", message: `The live company map hands work on from '${names[h.from] ?? "a process"}' to '${names[h.to] ?? "a process"}'. The run doesn't ${until}.` });
+    }
+  }
+  return out;
 }
