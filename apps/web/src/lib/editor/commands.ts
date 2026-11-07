@@ -517,9 +517,13 @@ export function deleteEdges(bundle: ProcessBundle, ids: readonly string[]): Edit
   return { label, ops: [{ kind: "remove", steps: [], edges }] };
 }
 
-/** Delete what is selected: steps (with their edges) and edges, as one edit. */
+/**
+ * Delete what is selected: steps (with their edges) and edges, as one edit. The start step is never deleted (editor brainstorm, item 2):
+ * it is left out of a selection that includes it.
+ */
 export function deleteSelection(bundle: ProcessBundle, stepIds: readonly string[], edgeIds: readonly string[]): Edit | null {
-  const steps = deleteSteps(bundle, stepIds);
+  const keep = new Set(bundle.steps.filter((s) => s.kind === "start").map((s) => s.id));
+  const steps = deleteSteps(bundle, stepIds.filter((id) => !keep.has(id)));
   const covered = new Set(steps?.ops.flatMap((op) => (op.kind === "remove" ? op.edges.map((e) => e.id) : [])) ?? []);
   const edges = deleteEdges(bundle, edgeIds.filter((id) => !covered.has(id)));
   if (!steps || !edges) return steps ?? edges;

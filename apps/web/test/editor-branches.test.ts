@@ -3,7 +3,7 @@ import { northbeamStepIds as ids, toEngineModel, type ProcessBundle } from "@tra
 import { simulate } from "@transpera-flow/engine";
 import { addEdge, stepWarnings } from "@/lib/editor/commands";
 import { addAfter, addDecision, groupSteps } from "@/lib/editor/groups";
-import { addBranch, branchesOf, isGoBack, setBranchCondition, setBranchName, setBranchShare, setBranchTarget, type BranchResult } from "@/lib/editor/branches";
+import { addBranch, branchesOf, isGoBack, removeBranch, setBranchCondition, setBranchName, setBranchShare, setBranchTarget, type BranchResult } from "@/lib/editor/branches";
 import { applyEdit, invertEdit, type Edit } from "@/lib/editor/ops";
 import { demoBundle } from "@/lib/sources/demo";
 
@@ -328,5 +328,40 @@ describe("branch names and conditions", () => {
     expect(setBranchName(b, yes!.id, "x".repeat(201))).toBeNull();
     expect(setBranchCondition(b, yes!.id, "x".repeat(101))).toBeNull();
     expect(setBranchName(b, "nope", "A")).toBeNull();
+  });
+});
+
+describe("removeBranch", () => {
+  it("takes a branch off and gives its share to the branch that is last, so the shares still add to 100%", () => {
+    const { b, d } = withDecision();
+    const three = applyEdit(b, edit(addBranch(b, d, ids.lost)));
+    expect(percents(three, d)).toEqual([50, 25, 25]);
+    const [yes, , third] = branchesOf(three, d);
+    const e = removeBranch(three, yes!.id)!;
+    const after = applyEdit(three, e);
+    expect(percents(after, d)).toEqual([25, 75]);
+    expect(branchesOf(after, d).map((x) => x.id)).not.toContain(yes!.id);
+    expect(branchesOf(after, d)[1]!.id).toBe(third!.id);
+    expect(total(after, d)).toBeCloseTo(1, 10);
+    // Undo puts the line and its share back (the line comes back at the end of the list).
+    const undone = applyEdit(after, invertEdit(e));
+    const byId = (x: ProcessBundle) => [...x.edges].sort((p, q) => p.id.localeCompare(q.id));
+    expect(byId(undone)).toEqual(byId(three));
+  });
+
+  it("removing the last branch gives its share to the new last; the last two become one at 100%", () => {
+    const { b, d } = withDecision();
+    const [yes, no] = branchesOf(b, d);
+    const after = applyEdit(b, removeBranch(b, no!.id)!);
+    expect(percents(after, d)).toEqual([100]);
+    expect(branchesOf(after, d)[0]!.id).toBe(yes!.id);
+  });
+
+  it("never removes the only branch, or a line that isn't a branch", () => {
+    const { b, d } = withDecision();
+    const [yes, no] = branchesOf(b, d);
+    const one = applyEdit(b, removeBranch(b, no!.id)!);
+    expect(removeBranch(one, yes!.id)).toBeNull();
+    expect(removeBranch(b, "00000000-0000-4000-8000-000000000000")).toBeNull();
   });
 });

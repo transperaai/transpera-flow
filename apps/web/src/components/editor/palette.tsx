@@ -1,8 +1,9 @@
 "use client";
 
-// The Editor's left column (issue #104): the step palette (adds after the selected step, inside its group if it is in
-// one), grouping, and the block library (issue #116): each saved block with its step count, to insert after the selection
-// or to put in place of the selected step or group.
+// The Editor's left column (issue #104): the palette ("+ Step", "+ Wait", "+ Decision": adds after the selected step, inside its group
+// if it is in one), grouping, and the block library (issue #116): each saved block with its step count, to insert after the selection
+// or to put in place of the selected step or group. End and Go back are not added from here: they come from a decision's branch menu.
+// There is no "+ Process": processes join only on the company map, whose palette is the process library (editor brainstorm, item 3).
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { isGroup, type ProcessBundle } from "@transpera-flow/db";
@@ -19,8 +20,8 @@ import type { BlockTools } from "./use-blocks";
 
 const PALETTE: { kind: PaletteKind; label: string }[] = [
   { kind: "task", label: "+ Step" },
-  { kind: "decision", label: "+ Decision" },
   { kind: "wait", label: "+ Wait" },
+  { kind: "decision", label: "+ Decision" },
 ];
 
 export function Palette({
@@ -49,8 +50,6 @@ export function Palette({
   const only = selected.steps.length === 1 ? bundle.steps.find((s) => s.id === selected.steps[0]) : undefined;
   // What the last add left for the person to do ("connect the new step yourself").
   const [note, setNote] = useState<string | null>(null);
-  // "+ Process" opens the process library (always open on the company map, where processes are all there is to add).
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const add = (kind: PaletteKind) => {
     let id: string | null = null;
     let said: string | null = null;
@@ -103,7 +102,7 @@ export function Palette({
           Add
           <Help
             label="Add"
-            description="Adds a new step, decision or wait in the middle of what you are looking at, joined in after the step you have selected. Nothing selected adds it unconnected. + Process opens the process library, to add whole processes as links."
+            description="Adds a new step, wait or decision in the middle of what you are looking at, joined in after the step you have selected. A decision comes with two branches, Yes and No. Nothing selected adds it unconnected. To end the process or loop back, use a decision's branch menu."
             example="Select “Discovery call”, press + Wait, and a waiting step appears in view, joined in after it."
           />
         </h2>
@@ -113,17 +112,6 @@ export function Palette({
               {label}
             </Button>
           ))}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setLibraryOpen((o) => !o)}
-            aria-expanded={libraryOpen}
-            data-palette-process
-            className="col-span-3 border-dashed hover:border-edit"
-          >
-            + Process
-          </Button>
         </div>
         <p className="text-xs text-muted-foreground">
           {only
@@ -139,7 +127,6 @@ export function Palette({
         )}
       </section>
       )}
-      {!company && libraryOpen && <ProcessLibrary bundle={bundle} editor={editor} setSelection={setSelection} viewRef={viewRef} {...library} />}
 
       <section aria-label="Groups" className="flex flex-col gap-2">
         <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
