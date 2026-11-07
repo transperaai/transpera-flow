@@ -11,6 +11,7 @@ import { blockFromGroup, insertBlock, readBlock, replaceProblem, replaceWithBloc
 import { addDemoBlock, updateDemoBlock, useDemoBlocks } from "@/lib/blocks/demo";
 import type { BlockInput, SaveBlockResult } from "@/lib/blocks/save";
 import type { ProcessEditor } from "@/lib/editor/editor";
+import type { ViewRef } from "@/lib/editor/groups";
 
 export interface BlockTools {
   /** The library, as the Editor lists it. */
@@ -40,6 +41,7 @@ export function useBlockTools({
   selected,
   setSelection,
   processName,
+  viewRef,
 }: {
   mode: "live" | "demo";
   workspaceId: string;
@@ -50,6 +52,8 @@ export function useBlockTools({
   selected: Selection;
   setSelection: Dispatch<SetStateAction<Selection>>;
   processName: string;
+  /** Where the map is looking: an inserted block goes there with nothing selected, and the map pans to it if it lands off screen. */
+  viewRef?: ViewRef;
 }): BlockTools {
   const demo = useDemoBlocks();
   const [added, setAdded] = useState<BlockRow[]>([]);
@@ -93,8 +97,9 @@ export function useBlockTools({
   const insert = (block: BlockRow) => {
     let id: string | null = null;
     let said: string | undefined;
+    const view = viewRef?.current?.() ?? null;
     const ran = editor.run((b) => {
-      const made = insertBlock(b, only, readBlock(block.steps), block.name, block.id);
+      const made = insertBlock(b, only, readBlock(block.steps), block.name, block.id, view);
       id = made?.id ?? null;
       said = made?.note;
       return made?.edit ?? null;
@@ -102,6 +107,7 @@ export function useBlockTools({
     if (!ran || !id) return setNote({ kind: "place", tone: "problem", text: `${block.name} has no steps to insert.` });
     setNote({ kind: "place", tone: said ? "problem" : "ok", text: said ?? `Inserted ${block.name}.` });
     setSelection({ steps: [id], edges: [] });
+    view?.reveal?.(id);
   };
 
   const replaceWhy = replaceProblem(bundle, only);

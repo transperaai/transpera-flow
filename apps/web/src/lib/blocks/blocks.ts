@@ -8,7 +8,7 @@
 import { ancestorsOf, isGroup, STEP_PURPOSE_KEY, type BlockBundle, type BlockEdge, type BlockStep, type EdgeRow, type ProcessBundle, type StepRow } from "@transpera-flow/db";
 import { GROUP_PADDING, openGroupSize } from "@/lib/map/groups";
 import { deleteSteps, newId, newStepRow } from "@/lib/editor/commands";
-import { edgeRow, groupRow } from "@/lib/editor/groups";
+import { edgeRow, groupRow, nearestFreeSpot, type ViewHint } from "@/lib/editor/groups";
 import { applyEdit, type Edit, type Op, type RowChange } from "@/lib/editor/ops";
 
 /** The key in a group's `provenance` that names the library block it was made from (capacity P8). */
@@ -264,9 +264,10 @@ const stepOf = (bundle: ProcessBundle, id: string | null) => (id ? bundle.steps.
  * block lands inside it). It arrives as a new group named after the block, joined in like `addAfter` does: a selected step
  * with nothing after it leads to the block, one with a single next step now leads to the block, which leads on to that
  * step. A step with branches, or an end step, gets the block placed beside it, unconnected. With nothing selected it goes
- * at the end of the top level. The new steps are new rows, so they show as added.
+ * at the end of the top level, unless `view` (what the person is looking at) is given: then its box goes at the free place
+ * nearest the view's centre, as `addAfter` does. The new steps are new rows, so they show as added.
  */
-export function insertBlock(bundle: ProcessBundle, selectedId: string | null, block: BlockBundle, name: string, blockId: string | null = null): { edit: Edit; id: string; note?: string } | null {
+export function insertBlock(bundle: ProcessBundle, selectedId: string | null, block: BlockBundle, name: string, blockId: string | null = null, view?: ViewHint | null): { edit: Edit; id: string; note?: string } | null {
   if (blockProblem(block)) return null;
   const sel = stepOf(bundle, selectedId);
   const parent = sel ? (sel.parent_step_id ?? null) : null;
@@ -277,7 +278,8 @@ export function insertBlock(bundle: ProcessBundle, selectedId: string | null, bl
   const y0 = sel ? Number(sel.y) + (branches ? 120 : 0) : siblings.length ? Number(siblings[siblings.length - 1]!.y) : 0;
   // Build it once to measure the box it needs, then put the group where that box fits.
   const probe = materialize(bundle, block, name, parent, 0, 0, blockId);
-  const at = freeSpotFor(bundle, parent, x0, y0, openGroupSize([probe.group, ...probe.steps], probe.group.id, "all"));
+  const size = openGroupSize([probe.group, ...probe.steps], probe.group.id, "all");
+  const at = !sel && view ? nearestFreeSpot(bundle, view, size) : freeSpotFor(bundle, parent, x0, y0, size);
   const made = { ...probe, group: { ...probe.group, x: at.x, y: at.y } };
 
   const ops: Op[] = [];
