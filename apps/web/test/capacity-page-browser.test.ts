@@ -58,8 +58,8 @@ async function mount(options: Options = {}, width = 1440, scheme: "light" | "dar
   return { page, errors };
 }
 
-/** Both runs finished: the "What to do" section has its answer. */
-const allDone = (page: Page) => page.waitForSelector("[data-next-twelve] [data-todo], [data-next-twelve]:not(:has([role=status]))", { timeout: 120_000 });
+/** The Today run finished: the last section, named clients, is on the page. */
+const allDone = (page: Page) => page.waitForSelector("[data-named-clients]", { timeout: 120_000 });
 const text = (page: Page, sel: string) => page.locator(sel).first().innerText();
 
 describe("Capacity page", { timeout: 180_000 }, () => {
@@ -69,7 +69,7 @@ describe("Capacity page", { timeout: 180_000 }, () => {
       await page.waitForSelector("[data-room]", { timeout: 120_000 });
       await allDone(page);
       const root = page.locator("[data-capacity]");
-      console.log(`capacity runs (${width}px): today ${await root.getAttribute("data-today-ms")} ms, 12 months ${await root.getAttribute("data-year-ms")} ms`);
+      console.log(`capacity run (${width}px): today ${await root.getAttribute("data-today-ms")} ms`);
 
       // Headline: clients by service line, taking both, and DLER as the average of each person's DLER (D40, no goal).
       const kpis = await page.locator("[data-headline] [data-kpi]").allInnerTexts();
@@ -100,12 +100,11 @@ describe("Capacity page", { timeout: 180_000 }, () => {
       const href = await page.locator("[data-step-link]").first().getAttribute("href");
       expect(href).toMatch(/^\/w\/example\/p\/[\w-]+\?step=\w+$/);
 
-      // What if someone leaves, time to serve, next 12 months.
+      // What if someone leaves, time to serve.
       expect(await text(page, "[data-leaver-sentence]")).toMatch(/If .+ leaves/);
       expect(await page.locator("[data-dumbbell]").count()).toBeGreaterThan(0);
       expect(await page.locator("[data-tier-card]").count()).toBe(6);
       expect(await page.locator("[data-named-clients] tbody tr").count()).toBe(13);
-      expect(await text(page, "[data-next-twelve]")).toMatch(/What to do:|No team goes over/);
       // Each widget folds its "How this works".
       expect(await page.locator("details[data-how]").count()).toBeGreaterThanOrEqual(8);
       expect(await page.locator("details[data-how][open]").count()).toBe(0);
