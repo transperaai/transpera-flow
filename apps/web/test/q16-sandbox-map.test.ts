@@ -13,8 +13,8 @@ import type { Q16Data } from "./q16-harness/entry";
 
 // Q16, the Sandbox as the company map, in a real browser on the example agency (with its solutions) in a throwaway database with the real migrations: the
 // real company map canvas (lanes, category tags) in a "Company map" card with one line above it; a click on a process card opens the version popover
-// (Today, each solution with its status); picking one gives the card a badge and outline, a chip and a run on it; Reset to today; an automation switched
-// on; `?solution=` still picks a version when the page opens; and nothing sideways at 400 px.
+// (Today, each solution with its status); picking one gives the card a badge and outline, a chip and a run on it; Reset to today;
+// `?solution=` still picks a version when the page opens; and nothing sideways at 400 px.
 // With Q16_SHOTS=<dir> it also saves the screenshots (1440 px light and dark and 400 px; a version popover and a swapped process).
 
 let tdb: TestDb;
@@ -162,22 +162,6 @@ describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
     await page.close();
   });
 
-  it("an automation switched on is a lever: it names its steps, runs from its month and moves the run", async () => {
-    const { page, errors } = await mount();
-    const row = page.locator("[data-automation]").first();
-    const id = (await row.getAttribute("data-automation"))!;
-    expect(await row.locator("[data-automation-steps]").innerText()).toMatch(/, acts on .+/);
-    await page.locator(`[data-automation-switch="${id}"]`).click();
-    await page.locator(`[data-lever="automation:${id}"]`).selectOption("1");
-    await settled(page);
-    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("true");
-    await page.locator(`[data-automation-switch="${id}"]`).click();
-    await settled(page);
-    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("false");
-    expect(errors).toEqual([]);
-    await page.close();
-  });
-
   it("?solution= still picks the solution as its process's version when the page opens", async () => {
     const { solution, processId } = withSolution();
     const { page, errors } = await mount({ solution: solution.id });
@@ -198,7 +182,6 @@ describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
     const { solution, processId } = withSolution();
     for (const [width, scheme] of [[1440, "light"], [1440, "dark"], [400, "light"]] as const) {
       const { page } = await mount({ width, scheme });
-      await page.locator("[data-automation-switch]").first().click();
       await card(page, processId).click();
       await page.locator(`[data-version-popover="${processId}"]`).waitFor();
       await page.waitForTimeout(300);

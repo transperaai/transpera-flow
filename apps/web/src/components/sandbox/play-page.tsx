@@ -31,7 +31,6 @@ import { preparePlay } from "@transpera-flow/db/sandbox";
 import { ENGINE_VERSION, toRatingConfig } from "@transpera-flow/engine";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
 import { EmptyState } from "@/components/page-kit";
-import { deleteCapacityChange, saveCapacityChange } from "@/app/w/[slug]/capacity-change-actions";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { today as todayIso, DEFAULT_FORECAST_MONTHS } from "@/lib/forecast/forecast";
 import { timelineMonths } from "@/lib/forecast/timeline";
@@ -237,9 +236,6 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
       prepare={prepare}
       map={renderMap}
       mapHeader={companySelect}
-      canEdit={canEdit}
-      saveChange={(id, input) => saveCapacityChange(live.workspace.id, id, input)}
-      removeChange={(id) => deleteCapacityChange(live.workspace.id, id)}
       exportSlot={exportSlot}
       base={base}
       modelError={base0.error ?? mapProblem}

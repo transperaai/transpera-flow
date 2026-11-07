@@ -16,9 +16,8 @@ import type { PlayProcess } from "@/components/sandbox/play-types";
 declare global {
   interface Window {
     workerScripts: Record<string, string>;
-    mountPlay: (options?: { viewer?: boolean; payHidden?: boolean }) => void;
+    mountPlay: (options?: { payHidden?: boolean }) => void;
     unmountPlay: () => void;
-    __saved: CapacityChangeRow[];
   }
 }
 
@@ -110,8 +109,7 @@ function halve(m: EngineModel, processId: string): EngineModel {
 
 let root: Root | null = null;
 
-window.mountPlay = ({ viewer, payHidden } = {}) => {
-  window.__saved = [];
+window.mountPlay = ({ payHidden } = {}) => {
   const setup = capacitySetupFromModel(model, { payHidden });
   for (const s of setup.services) s.price_rise_churn = 0.5;
   const ctx: PlayContext = { startDate: START, setup, library, winMix: (d) => winMix(setup, model, d) };
@@ -145,16 +143,6 @@ window.mountPlay = ({ viewer, payHidden } = {}) => {
             ))}
           </div>
         )}
-        canEdit={!viewer}
-        saveChange={async (id, input) => {
-          const row: CapacityChangeRow = { id: id ?? `new-${window.__saved.length}`, provenance: {}, ...input };
-          window.__saved = [...window.__saved.filter((r) => r.id !== row.id), row];
-          return { status: "ok", change: row };
-        }}
-        removeChange={async (id) => {
-          window.__saved = window.__saved.filter((r) => r.id !== id);
-          return { status: "ok" };
-        }}
         base="/w/example"
       />
     </div>,
