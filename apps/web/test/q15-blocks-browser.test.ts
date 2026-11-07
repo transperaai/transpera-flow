@@ -70,7 +70,7 @@ afterAll(async () => {
 });
 
 async function open(o: { call: string; arg: object; width?: number; scheme?: "light" | "dark"; ready: string }): Promise<{ page: Page; errors: string[] }> {
-  const page = await browser.newPage({ viewport: { width: o.width ?? 1440, height: 1000 }, colorScheme: o.scheme ?? "light" });
+  const page = await browser.newPage({ viewport: { width: o.width ?? 1440, height: 1000 }, colorScheme: o.scheme ?? "light", deviceScaleFactor: shots ? 2 : 1 });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -269,7 +269,8 @@ describe.skipIf(!shots)("screenshots", () => {
       await list.page.screenshot({ path: file("list"), fullPage: true });
       await rowOf(list.page, "Client approval loop").locator("[data-block-open]").click();
       await list.page.locator("[data-block-panel]").waitFor();
-      await list.page.waitForTimeout(300);
+      await list.page.locator(".react-flow__node[data-id]").first().waitFor();
+      await list.page.waitForTimeout(800);
       await list.page.screenshot({ path: file("row-open"), fullPage: true });
       await list.page.locator("[data-block-open]").first().click();
       // Editing, and so the menu, is for a tablet or computer: a phone has neither.
