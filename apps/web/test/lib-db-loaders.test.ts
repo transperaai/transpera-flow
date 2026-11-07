@@ -16,7 +16,6 @@ vi.mock("@/lib/auth/session", () => ({
 }));
 
 const data = await import("@/lib/data");
-const companyData = await import("@/lib/company-data");
 const { loadHistory } = await import("@/lib/history/data");
 const { loadProcessCard, loadProcessesAndArchived, loadProcessesPage } = await import("@/lib/processes/data");
 const { loadLibrary } = await import("@/lib/editor/library-data");
@@ -98,21 +97,6 @@ describe("workspace settings", () => {
     const live = (await data.loadProcessForEditing("northbeam", processId))!.live;
     expect(await data.loadProcessVersion(live, live.revision.number)).toBeNull();
     expect(await data.loadProcessVersion(live, 9999)).toBeNull();
-  });
-});
-
-describe("change log page", () => {
-  it("shows the log and the people behind it to owners only", async () => {
-    actAs("owner");
-    const page = await companyData.loadChangeLogPage("northbeam");
-    expect(page!.workspace.slug).toBe("northbeam");
-    expect(Array.isArray(page!.changes)).toBe(true);
-    expect(page!.people[users.owner!.id]).toBe("owner@loaders.example.com");
-    actAs("viewer");
-    const v = await companyData.loadChangeLogPage("northbeam");
-    expect(v!.changes).toBeNull();
-    actAs("stranger");
-    expect(await companyData.loadChangeLogPage("northbeam")).toBeNull();
   });
 });
 

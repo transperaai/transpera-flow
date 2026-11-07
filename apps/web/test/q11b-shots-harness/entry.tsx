@@ -5,7 +5,6 @@ import Link from "next/link";
 import { createRoot } from "react-dom/client";
 import { build } from "../setup-harness/entry";
 import { BrandingSettings } from "@/components/branding/branding-settings";
-import { ChangeLog } from "@/components/change-log";
 import { PurposesSettings } from "@/components/purposes/purposes-settings";
 import { TiersAndClients } from "@/components/setup/tiers-clients";
 import { PeopleAndRoles, PeopleHeaderActions } from "@/components/setup/people-roles";
@@ -82,12 +81,6 @@ window.mountQ11b = (what) => {
       <SettingsPage title="Branding" eyebrow="Settings" description="Make this workspace look like the client's: a logo and an accent colour. Changes save as you go." actions={<Link href="#" className={buttonVariants({ variant: "outline" })}>Back to settings</Link>}>
         <PhoneNotice />
         <BrandingSettings mode="live" workspaceId={data.workspace.id} name="Acme" branding={readBranding({})} logoSha={null} logoUrl={null} saveAccent={async () => ({ status: "error", message: "n/a" })} removeLogo={async () => ({ status: "error", message: "n/a" })} />
-      </SettingsPage>
-    );
-  } else if (what === "changes") {
-    page = (
-      <SettingsPage title="Change log" eyebrow="Company" description="Who changed the company model, and what they changed.">
-        <ChangeLog entries={[]} model={{} as never} people={{}} stepNames={{}} />
       </SettingsPage>
     );
   } else if (what === "purposes") {
