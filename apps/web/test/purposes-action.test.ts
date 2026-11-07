@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PURPOSES, NORTHBEAM_WORKSPACE_ID, type PurposeCategory } from "@transpera-flow/db";
+import { DEFAULT_PURPOSES, NORTHBEAM_WORKSPACE_ID, STEP_PURPOSE_KEY, type PurposeCategory } from "@transpera-flow/db";
 import { addMember, signInAs, signOut, type TestUser } from "./action-harness";
 import { createTestDb, type TestDb } from "../../../packages/db/test/harness";
 
@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ refresh: mocks.refresh, revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth/session", async () => (await import("./action-harness")).sessionMock);
-const { savePurposes } = await import("@/app/w/[slug]/settings/actions");
+const { addPurpose, savePurposes } = await import("@/app/w/[slug]/settings/actions");
 
 const WS = NORTHBEAM_WORKSPACE_ID;
 let tdb: TestDb;
@@ -83,6 +83,71 @@ describe("savePurposes", () => {
     expect(out.status).not.toBe("saved");
     signOut({ tdb });
     expect((await savePurposes(WS, null, renamed())).status).toBe("error");
+    expect(await stored()).toEqual({ v: null, has: false });
+  });
+});
+
+describe("addPurpose (the editor's '+ New purpose…')", () => {
+  it("adds one at the end of the defaults and gives back its key, which a step may use", async () => {
+    const out = await addPurpose(WS, null, { name: "  Hand-offs ", description: " Passing work on " });
+    expect(out.status).toBe("saved");
+    if (out.status !== "saved") return;
+    expect(out.key).toMatch(STEP_PURPOSE_KEY);
+    expect(out.purposes).toEqual([...list(), { key: out.key, name: "Hand-offs", description: "Passing work on" }]);
+    expect((await stored()).v).toEqual(out.purposes);
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds to the list as loaded, and the description is optional", async () => {
+    expect((await savePurposes(WS, null, renamed())).status).toBe("saved");
+    const out = await addPurpose(WS, renamed(), { name: "Chasing" });
+    expect(out.status).toBe("saved");
+    if (out.status !== "saved") return;
+    expect(out.purposes.slice(0, -1)).toEqual(renamed());
+    expect(out.purposes.at(-1)).toEqual({ key: out.key, name: "Chasing", description: "" });
+    const again = await addPurpose(WS, out.purposes, { name: "Other" });
+    expect(again.status === "saved" && again.key !== out.key).toBe(true);
+  });
+
+  it("is a conflict that returns theirs when the list changed since it was loaded", async () => {
+    await tdb.client.query("update workspaces set settings = jsonb_set(settings, '{purposes}', $2::jsonb) where id = $1", [WS, JSON.stringify(renamed())]);
+    expect(await addPurpose(WS, null, { name: "Chasing" })).toEqual({ status: "conflict", theirs: renamed() });
+    expect((await stored()).v).toEqual(renamed());
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it("stops at 12 purposes", async () => {
+    let cur: PurposeCategory[] | null = null;
+    for (let i = list().length; i < 12; i++) {
+      const out = await addPurpose(WS, cur, { name: `Extra ${i}` });
+      expect(out.status).toBe("saved");
+      if (out.status === "saved") cur = out.purposes;
+    }
+    expect(cur).toHaveLength(12);
+    const over = await addPurpose(WS, cur, { name: "One too many" });
+    expect(over).toEqual({ status: "error", message: expect.stringMatching(/at most 12/) });
+    expect(((await stored()).v as unknown[]).length).toBe(12);
+  });
+
+  it("refuses a blank, long or repeated name and a long description, writing nothing", async () => {
+    const bad: [string, { name: string; description?: string }][] = [
+      ["blank", { name: "   " }],
+      ["a long name", { name: "n".repeat(61) }],
+      ["a repeated name", { name: " winning WORK " }],
+      ["a long description", { name: "Fine", description: "d".repeat(201) }],
+    ];
+    for (const [why, input] of bad) expect((await addPurpose(WS, null, input)).status, why).toBe("error");
+    expect((await addPurpose("nope", null, { name: "Fine" })).status).toBe("error");
+    expect((await addPurpose(WS, "junk" as never, { name: "Fine" })).status).toBe("error");
+    expect(await stored()).toEqual({ v: null, has: false });
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it("is refused to a viewer and to a signed-out user, as saving the list is", async () => {
+    signInAs({ tdb }, viewer);
+    expect((await addPurpose(WS, null, { name: "Chasing" })).status).not.toBe("saved");
+    signOut({ tdb });
+    expect((await addPurpose(WS, null, { name: "Chasing" })).status).toBe("error");
     expect(await stored()).toEqual({ v: null, has: false });
   });
 });

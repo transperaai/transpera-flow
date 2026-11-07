@@ -113,6 +113,16 @@ export function nearestFreeSpot(bundle: ProcessBundle, view: ViewHint, size: Siz
   return { x: Math.round(x0 + (hit?.dx ?? 0)), y: Math.round(y0 + (hit?.dy ?? 0)) };
 }
 
+/** Where a new card goes beside the selection (or after the last sibling when nothing is selected), before any view is looked at. */
+function spotBeside(bundle: ProcessBundle, sel: StepRow | undefined, parent: string | null, branches: boolean): { x: number; y: number } {
+  const siblings = bundle.steps.filter((s) => (s.parent_step_id ?? null) === parent);
+  // After a step with branches the right is crowded: put the new one just below it, where it is easy to find.
+  return {
+    x: sel ? Number(sel.x) + (branches ? 0 : SLOT.x) : siblings.reduce((m, s) => Math.max(m, Number(s.x) + SLOT.x), 0),
+    y: sel ? Number(sel.y) + (branches ? 120 : 0) : siblings.length ? Number(siblings[siblings.length - 1]!.y) : 0,
+  };
+}
+
 /**
  * Add a step, decision or wait after the selected step, in the same group as it (so inside a nested group, the new
  * one lands inside it). The new one is joined in: a selected step with nothing after it leads to it, and one with a
@@ -123,14 +133,13 @@ export function nearestFreeSpot(bundle: ProcessBundle, view: ViewHint, size: Siz
  * and on screen), so it appears where they are looking. Inside a group it still goes beside the selected step.
  */
 export function addAfter(bundle: ProcessBundle, selectedId: string | null, kind: PaletteKind, view?: ViewHint | null): { edit: Edit; id: string; note?: string } {
+  // A decision comes with its two branches (editor brainstorm, item 5).
+  if (kind === "decision") return addDecision(bundle, selectedId, view);
   const sel = selectedId ? stepOf(bundle, selectedId) : undefined;
   const parent = sel ? (sel.parent_step_id ?? null) : null;
-  const siblings = bundle.steps.filter((s) => (s.parent_step_id ?? null) === parent);
   const outgoing = sel && sel.kind !== "end" ? bundle.edges.filter((e) => e.from_step_id === sel.id) : [];
   const branches = outgoing.length > 1;
-  // After a step with branches the right is crowded: put the new one just below it, where it is easy to find.
-  const x0 = sel ? Number(sel.x) + (branches ? 0 : SLOT.x) : siblings.reduce((m, s) => Math.max(m, Number(s.x) + SLOT.x), 0);
-  const y0 = sel ? Number(sel.y) + (branches ? 120 : 0) : siblings.length ? Number(siblings[siblings.length - 1]!.y) : 0;
+  const { x: x0, y: y0 } = spotBeside(bundle, sel, parent, branches);
   const size = kind === "start" || kind === "end" ? TERMINAL_SIZE : CARD_SIZE;
   const { x, y } = view && parent === null ? nearestFreeSpot(bundle, view, size) : freeSpot(bundle, parent, x0, y0);
 
@@ -266,4 +275,56 @@ export function ungroup(bundle: ProcessBundle, groupId: string): Edit | null {
   // The row is removed with no first step (it was cleared above), so undo can bring it back before its steps move in.
   ops.push({ kind: "remove", steps: [{ ...group, entry_step_id: null }], edges: [...(entry ? [] : into), ...outOf] });
   return { label: `Ungrouped ${group.name}`, ops };
+}
+
+/** The names a new decision's two branches start with, and the name of the step its second branch leads to. */
+export const NEW_BRANCH_NAMES = ["Yes", "No"] as const;
+export const NEXT_STEP_NAME = "Next step";
+
+/**
+ * Add a decision after the selected step, already drawn with its two branches (editor brainstorm, item 5): "Yes" and "No", 0.5 each,
+ * the branch name being the line's `label`. Joined in as `addAfter` joins a step:
+ * - a selected step with one next step now leads to the decision. That next step becomes "Yes"; "No" goes to a new step named
+ *   "Next step", put where the person is looking (`view`);
+ * - a selected step with nothing after it leads to the decision, and both branches go to a new step;
+ * - a step with branches, an end step, or no selection: the decision is placed beside it, unconnected, with two new steps.
+ */
+export function addDecision(bundle: ProcessBundle, selectedId: string | null, view?: ViewHint | null): { edit: Edit; id: string; note?: string } {
+  const sel = selectedId ? stepOf(bundle, selectedId) : undefined;
+  const parent = sel ? (sel.parent_step_id ?? null) : null;
+  const outgoing = sel && sel.kind !== "end" ? bundle.edges.filter((e) => e.from_step_id === sel.id) : [];
+  const branches = outgoing.length > 1;
+  const beside = spotBeside(bundle, sel, parent, branches);
+  const at = view && parent === null ? nearestFreeSpot(bundle, view, CARD_SIZE) : freeSpot(bundle, parent, beside.x, beside.y);
+  const decision: StepRow = { ...newStepRow(bundle, "decision", null, at.x, at.y), parent_step_id: parent };
+
+  // The new steps the branches lead to are placed with the decision already on the map, so none lands on another.
+  let seen: ProcessBundle = { ...bundle, steps: [...bundle.steps, decision] };
+  const fresh: StepRow[] = [];
+  const placeNext = (): StepRow => {
+    const spot = view && parent === null ? nearestFreeSpot(seen, view, CARD_SIZE) : freeSpot(seen, parent, Number(decision.x) + SLOT.x, Number(decision.y) + 60 * (fresh.length + 1));
+    const row: StepRow = { ...newStepRow(bundle, "task", null, spot.x, spot.y), name: NEXT_STEP_NAME, parent_step_id: parent };
+    fresh.push(row);
+    seen = { ...seen, steps: [...seen.steps, row] };
+    return row;
+  };
+  const branch = (to: string, name: string): EdgeRow => ({ ...edgeRow(bundle, decision.id, to, 0.5), label: name });
+
+  const ops: Op[] = [];
+  const joined = sel && sel.kind !== "end" && outgoing.length <= 1;
+  if (joined && outgoing.length === 1) {
+    const next = outgoing[0]!;
+    // sel -> decision keeps the old connection's share and tag; the old next step is the "Yes" branch.
+    const no = placeNext();
+    ops.push({ kind: "insert", steps: [decision, no], edges: [branch(next.to_step_id, NEW_BRANCH_NAMES[0]), branch(no.id, NEW_BRANCH_NAMES[1])] });
+    ops.push({ kind: "update", changes: [{ table: "edges", id: next.id, before: { to_step_id: next.to_step_id }, after: { to_step_id: decision.id } }] });
+  } else {
+    const yes = placeNext();
+    const no = placeNext();
+    const edges = [branch(yes.id, NEW_BRANCH_NAMES[0]), branch(no.id, NEW_BRANCH_NAMES[1])];
+    if (joined && sel) edges.push(edgeRow(bundle, sel.id, decision.id, 1));
+    ops.push({ kind: "insert", steps: [decision, ...fresh], edges });
+  }
+  const note = sel && branches ? `${sel.name} has branches: connect the new decision yourself.` : sel?.kind === "end" ? `${sel.name} is an end step, so nothing leads on from it: connect the new decision yourself.` : undefined;
+  return { edit: { label: `Added ${decision.name}`, ops }, id: decision.id, ...(note ? { note } : {}) };
 }
