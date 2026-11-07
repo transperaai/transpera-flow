@@ -91,7 +91,7 @@ export async function WorkspaceEditorPage({
       historyHref={`/w/${slug}/p/${processId}/history`}
       settingsHref={`/w/${slug}/settings`}
       exitHref={exit}
-      solutionSeed={fromSolution ? { bundle: bundleFromSolution(live, fromSolution), name: fromSolution.name } : undefined}
+      solutionSeed={fromSolution ? { id: fromSolution.id, bundle: bundleFromSolution(live, fromSolution), name: fromSolution.name } : undefined}
       processEditorHref={`${base}/edit?from=${encodeURIComponent(exit)}`}
       editBlock={editRow ? { id: editRow.id, name: editRow.name, description: editRow.description, bundle: readBlock(editRow.steps) } : undefined}
       blockEditorHref={`${base}/edit?mode=block&from=${encodeURIComponent(exit)}`}

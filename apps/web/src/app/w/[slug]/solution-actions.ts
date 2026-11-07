@@ -1,6 +1,6 @@
 "use server";
 
-import { applyStepChangeEdit, parseStepChanges, type BlockBundle, type Json, type ProcessBundle, type SolutionIssueRow, type SolutionRow, type StepChangeEdit, type StoredStepChange } from "@transpera-flow/db";
+import { applyStepChangeEdit, carryStepChanges, parseStepChanges, type BlockBundle, type Json, type ProcessBundle, type SolutionIssueRow, type SolutionRow, type StepChangeEdit, type StoredStepChange } from "@transpera-flow/db";
 import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { rpc } from "@transpera-flow/db/client";
@@ -45,8 +45,9 @@ function failure(e: unknown) {
 }
 
 /** Save a solution, with the issues it solves and the automatic verdict against each (worked out here). */
-export async function createSolution(workspaceId: unknown, input: unknown): Promise<SaveSolutionResult> {
+export async function createSolution(workspaceId: unknown, input: unknown, fromSolutionId?: unknown): Promise<SaveSolutionResult> {
   if (!isId(workspaceId)) return invalid;
+  if (fromSolutionId !== undefined && fromSolutionId !== null && !isId(fromSolutionId)) return invalid;
   const parsed = parseSolutionInput(input);
   if (!parsed.ok) return { status: "error", message: parsed.error };
   if (!(await getSessionUser())) return signedOut;
@@ -80,7 +81,20 @@ export async function createSolution(workspaceId: unknown, input: unknown): Prom
   } catch (e) {
     return failure(e);
   }
-  const solution = data as unknown as SolutionRow;
+  let solution = data as unknown as SolutionRow;
+  // A copy of a solution keeps its automations (D53): read from the stored source, not from what the browser sent, and only the effects on steps the copy still has.
+  if (typeof fromSolutionId === "string") {
+    const src = await db.selectFrom("solutions").select("step_changes").where("id", "=", fromSolutionId).where("workspace_id", "=", workspaceId).where("process_id", "=", v.processId).executeTakeFirst().catch(() => undefined);
+    const carried = carryStepChanges(parseStepChanges(src?.step_changes), new Set(v.copy.steps.map((s) => s.id)));
+    if (carried.length) {
+      try {
+        await db.updateTable("solutions").set({ step_changes: carried as unknown as Json }).where("id", "=", solution.id).execute();
+        solution = { ...solution, step_changes: carried };
+      } catch {
+        return { status: "error", message: "The solution was saved, but its automations couldn't be copied across. Open it from the Solutions list and add them again." };
+      }
+    }
+  }
   const saved = await db.selectFrom("solution_issues").select(SOLUTION_ISSUE_COLS).where("solution_id", "=", solution.id).execute().catch(() => []);
   return { status: "ok", solution, links: saved as unknown as SolutionIssueRow[] };
 }

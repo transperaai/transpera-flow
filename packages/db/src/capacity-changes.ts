@@ -151,3 +151,16 @@ export function applyStepChangeEdit(solutionId: string, current: readonly Stored
   const stored: StoredStepChange = { ...(at < 0 ? { id: newId() } : old?.id ? { id: old.id } : {}), ...clean };
   return { ok: true, list: at < 0 ? [...current, stored] : current.map((c, i) => (i === at ? stored : c)) };
 }
+
+/**
+ * The changes a copy of a solution keeps (saving from the editor on a solution's version makes a copy): each change with only the effects on steps
+ * that are still in the copy, a change with none left dropped, every kept change with its own id (so the engine's id for it is the same).
+ */
+export function carryStepChanges(source: readonly StoredStepChange[], stepIds: ReadonlySet<string>): StoredStepChange[] {
+  const out: StoredStepChange[] = [];
+  for (const c of source) {
+    const effects = c.effects.filter((e) => stepIds.has(e.step)).map((e) => ({ ...e }));
+    if (effects.length) out.push({ ...c, effects, tiers: c.tiers ? [...c.tiers] : null });
+  }
+  return out;
+}

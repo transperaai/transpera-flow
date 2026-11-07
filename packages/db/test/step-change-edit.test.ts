@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { applyStepChangeEdit, loadSolutions, MAX_STEP_CHANGES, parseStepChanges, toEngineStepChanges, type SolutionRow, type StepChangeInput } from "../src";
+import { applyStepChangeEdit, carryStepChanges, loadSolutions, MAX_STEP_CHANGES, parseStepChanges, toEngineStepChanges, type SolutionRow, type StepChangeInput } from "../src";
 import { loadCapacityExample } from "../src/fixtures/capacity-example";
 import { addExampleIssues } from "../src/fixtures/capacity-example-issues";
 import { createTestDb, createUser, type TestDb } from "./harness";
@@ -104,5 +104,29 @@ describe("a change saved through the step panel", () => {
 
   it("row-level security decides who: a viewer's write changes no rows", async () => {
     expect((await writeAs(viewer.claims, [])).n).toBe(0);
+  });
+
+  it("a copy keeps its changes with the same ids, so the Sandbox model of the copy equals the source's when no steps changed", async () => {
+    const source = solution.step_changes;
+    const carried = carryStepChanges(source, stepIds);
+    expect(carried).toEqual(source);
+    const { n, stored } = await writeAs(owner.claims, carried);
+    expect(n).toBe(1);
+    for (const month of [1, 6]) {
+      expect(toEngineStepChanges({ id: "another-solution", step_changes: parseStepChanges(stored) }, month)).toEqual(toEngineStepChanges(solution, month));
+    }
+  });
+
+  it("a copy drops an effect on a deleted step, and a change left with no effects", () => {
+    const [a] = solution.step_changes;
+    const gone = "0b8f6f0e-6d0a-4d5e-9d57-2f1d1d2a9cff";
+    const keptStep = a!.effects[0]!.step;
+    const two = { ...a!, id: NEW_ID, effects: [...a!.effects, { step: gone, part: "augmentable" as const, factor: 2 }] };
+    const onlyGone = { ...a!, id: "0b8f6f0e-6d0a-4d5e-9d57-2f1d1d2a9c22", effects: [{ step: gone, part: "automatable" as const, remove: 0.5 }] };
+    const out = carryStepChanges([two, onlyGone], new Set([keptStep]));
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe(NEW_ID);
+    expect(out[0]!.effects.every((e) => e.step === keptStep)).toBe(true);
+    expect(out[0]!.effects).toHaveLength(a!.effects.length);
   });
 });

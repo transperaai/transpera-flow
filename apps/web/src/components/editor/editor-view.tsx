@@ -127,7 +127,7 @@ export function EditorView({
   /** Block mode only: a block of the library to edit (Q15); without it block mode starts on an empty map. */
   editBlock?: { id: string; name: string; description: string; bundle: BlockBundle };
   /** Solution mode opened from a solution's page ("Open in editor", `?solution=<id>`): the map starts as that solution's copy, not as live. */
-  solutionSeed?: { bundle: ProcessBundle; name: string };
+  solutionSeed?: { id?: string; bundle: ProcessBundle; name: string };
   /** The process library (B12): the workspace's processes, where each sits (live links), and the templates. */
   library?: { processes: LibraryProcess[]; templates: LibraryTemplate[]; /** Makes a process for the library; default in a workspace is the server action (a harness stands in). */ onCreate?: LibraryCreate };
 }) {
@@ -358,7 +358,7 @@ export function EditorView({
     else if (mode === "demo") {
       const made = addDemoSolution(checked.value);
       result = { status: "ok", ...made };
-    } else result = await createSolution(live.workspace.id, input);
+    } else result = await createSolution(live.workspace.id, input, solutionSeed?.id);
     setSolutionSaving(false);
     if (result.status === "error") return setSolutionError(result.message);
     router.push(exitHref);

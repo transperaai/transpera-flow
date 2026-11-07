@@ -56,6 +56,7 @@ window.mountEditor = (options) => {
     for (let i = list.length; i < options.purposes; i++) list.push({ key: `c${String(i).padStart(8, "0")}`, name: `Purpose ${i + 1}`, description: "" });
     live.workspace = { ...live.workspace, settings: { ...live.workspace.settings, purposes: list } };
   }
+  const DISCOVERY_STEP = "e0000000-0000-4000-8000-000000000002";
   const SOLUTION = "a0000000-0000-4000-8000-0000000000aa";
   const changesOnSteps = options.solutionChanges
     ? { sandboxHref: "/sandbox?solution=a", changes: changesOnStepsOf(SOLUTION, options.solutionChanges), edit: { workspaceId: live.workspace.id, solutionId: SOLUTION, stepIds: live.steps.map((s) => s.id) } }
@@ -78,6 +79,9 @@ window.mountEditor = (options) => {
         onCreate: async () => ({ error: "Not available in this test." }),
       } : undefined}
       changesOnSteps={changesOnSteps}
+      // A saved solution's version opens with its own issue and name (as the app does for `?solution=`), not as a new solution.
+      issue={options.solutionChanges ? { id: "a0000000-0000-4000-8000-0000000000bb", number: 12, title: "Pacing alerts go out late", stepIds: [DISCOVERY_STEP], whole: false, target: { measure: null, now: null, goal: null } } : undefined}
+      solutionSeed={options.solutionChanges ? { id: SOLUTION, bundle: live, name: "Pace it by machine" } : undefined}
       tourDismissed={options.dismissed ?? false}
       historyHref="/history"
       exitHref="/"
