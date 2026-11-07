@@ -110,6 +110,20 @@ describe("step changes in the step panel", () => {
     expect(saved!.step_changes[0]).toMatchObject({ name: "Pace it by machine", kind: "automation" });
   });
 
+  it("warns, without blocking, when the step's split gives the part 0%", async () => {
+    const { page } = await open({ editorMode: "solution", newSolution: true });
+    await select(page, DISCOVERY);
+    await page.locator("[data-change-automate]").dispatchEvent("click");
+    const dialog = page.locator("[data-step-change-dialog]");
+    await dialog.waitFor();
+    expect(await dialog.locator("[data-change-warning]").textContent()).toBe("This step's automatable part is 0%, so this changes nothing yet. Set the work split above first.");
+    await dialog.locator("[data-change-save]").dispatchEvent("click");
+    await dialog.waitFor({ state: "detached" });
+    expect(await page.locator("[data-change-on-step] [data-change-warning]").textContent()).toContain("automatable part is 0%");
+    await page.locator("[data-change-augment]").dispatchEvent("click");
+    expect(await page.locator("[data-step-change-dialog] [data-change-warning]").textContent()).toContain("augmentable part is 0%");
+  });
+
   it("a Wait or a Decision has no Automate… or Augment…", async () => {
     const { page } = await open({ editorMode: "solution", newSolution: true });
     await select(page, AUDIT);

@@ -60,6 +60,7 @@ export function StepChangeDialog({
   existing,
   stepIds,
   tiers,
+  warning = null,
   onSave,
   onRemove,
   onClose,
@@ -72,6 +73,8 @@ export function StepChangeDialog({
   /** The steps of the saved solution (an effect must point at one). */
   stepIds: ReadonlySet<string>;
   tiers: { key: string; name: string }[];
+  /** Why the change would do nothing yet (the step's work split gives its part 0%); shown, and never stops saving. */
+  warning?: string | null;
   /** Saves; returns why not, or null when it saved. */
   onSave: (input: StepChangeInput) => Promise<string | null>;
   onRemove?: () => Promise<string | null>;
@@ -172,6 +175,11 @@ export function StepChangeDialog({
             }}
           />
 
+          {warning && (
+            <p className="text-sm text-warn" data-change-warning>
+              {warning}
+            </p>
+          )}
           {otherEffects > 0 && (
             <p className="text-xs text-muted-foreground" data-change-other-effects>
               This change also acts on {otherEffects === 1 ? "one other part" : `${otherEffects} other parts`} of the process. {otherEffects === 1 ? "It stays" : "They stay"} as {otherEffects === 1 ? "it is" : "they are"}.

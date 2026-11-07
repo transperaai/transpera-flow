@@ -286,7 +286,7 @@ export function StepBaseValues({
       </div>
 
       {/* Changes that act on this step are part of the solution's version (D53). */}
-      <StepChangesSection stepId={step.id} stepName={step.name} tiers={tierSetup.keys} data={changesOnSteps} />
+      <StepChangesSection stepId={step.id} stepName={step.name} tiers={tierSetup.keys} split={percents} data={changesOnSteps} />
     </div>
   );
 }

@@ -7,13 +7,14 @@ import { useState } from "react";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import type { ChangesOnSteps } from "@/components/step-base-values";
-import type { ChangeOnStep } from "@/lib/solutions/step-changes";
+import type { Percents } from "@/lib/editor/base-values";
+import { changeWarning, zeroPartWarning, type ChangeOnStep } from "@/lib/solutions/step-changes";
 import { StepChangeDialog } from "./step-change-dialog";
 import type { StepChangeEdit, StepChangeInput } from "@transpera-flow/db";
 
 type Open = { kind: StepChangeInput["kind"]; existing: ChangeOnStep | null };
 
-export function StepChangesSection({ stepId, stepName, tiers, data }: { stepId: string; stepName: string; tiers: string[]; data?: ChangesOnSteps }) {
+export function StepChangesSection({ stepId, stepName, tiers, split, data }: { stepId: string; stepName: string; tiers: string[]; split: Percents; data?: ChangesOnSteps }) {
   const [open, setOpen] = useState<Open | null>(null);
   if (!data) return <div data-slot="changes-on-step" hidden />;
   const mine = data.changes.filter((c) => c.steps.includes(stepId));
@@ -44,6 +45,11 @@ export function StepChangesSection({ stepId, stepName, tiers, data }: { stepId: 
             <li key={c.id} className="flex items-center justify-between gap-2" data-change-on-step={c.id}>
               <span className="min-w-0 break-words">
                 {c.name} <span className="text-xs text-muted-foreground">({c.kind})</span>
+                {changeWarning(c.value, stepId, split) && (
+                  <span className="block text-xs text-warn" data-change-warning>
+                    {changeWarning(c.value, stepId, split)}
+                  </span>
+                )}
               </span>
               {edit && (
                 <Button type="button" variant="outline" size="sm" onClick={() => setOpen({ kind: c.kind, existing: c })} data-change-edit>
@@ -77,6 +83,7 @@ export function StepChangesSection({ stepId, stepName, tiers, data }: { stepId: 
           stepName={stepName}
           kind={open.kind}
           existing={open.existing?.value ?? null}
+          warning={zeroPartWarning(open.kind === "automation" ? "automatable" : "augmentable", split)}
           stepIds={new Set(edit.stepIds)}
           tiers={tiers.map((t) => ({ key: t, name: t }))}
           onSave={(change) => send({ op: "save", key: open.existing?.id ?? null, change })}
