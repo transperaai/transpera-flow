@@ -247,7 +247,8 @@ describe("(i) help on every control", () => {
 
   it("the Solution page has only the header, what it changes, the two maps and the notes (Q12, D44)", () => {
     const page = read("components/solutions/solution-page.tsx");
-    for (const t of ["Open in editor", "Try it in the Sandbox", "What it changes", "Notes", "Solutions never change the live map", "<SolutionMaps", "<EditableText", "<AdoptSolution", "<SolutionStatusMenu"]) expect(page).toContain(t);
+    for (const t of ["Open in editor", "Try it in the Sandbox", "What it changes", "Notes", "Solutions never change the live map", "<SolutionMaps", "<EditableText", "<SolutionStatusMenu"]) expect(page).toContain(t);
+    expect(page).not.toContain("AdoptSolution");
     // The measures, the revenue chart, the stress test and the per-issue verdict cards were taken off.
     for (const t of ["Measures", "MRR over time", "Market stress test", "SolutionCompare", "SolvesCard", "VerdictWord", "saveSolutionVerdict"]) expect(page).not.toContain(t);
     const cards = read("components/solutions/solution-cards.tsx");
