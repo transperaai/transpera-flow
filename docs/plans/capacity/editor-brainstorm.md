@@ -23,8 +23,7 @@ question.
 
    - **Start** is one fixed, labelled node per process: it can't be deleted or added.
    - **Group** is never added as a node. You group a selection and ungroup it (in the quick-fixes brief).
-   - **Go back** replaces drawing a loop line by hand. The engine already runs loops, so the engine doesn't change; how
-     it's stored is still to decide.
+   - **Go back** replaces drawing a loop line by hand. The engine already runs loops, so the engine doesn't change (see 6).
 
 3. **No processes in the editor: blocks only.**
    - Editing a linked process changes every process that holds it, so the editor's "+ Process" and its process
