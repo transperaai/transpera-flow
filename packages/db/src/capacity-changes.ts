@@ -126,3 +126,28 @@ export function cleanStepChange(input: StepChangeInput): StepChangeInput {
     tiers: input.tiers && input.tiers.length ? [...new Set(input.tiers)] : null,
   };
 }
+
+/** The key the app uses for a stored change: its id, else the solution's id and its place (the same id the engine gets). */
+export const stepChangeKey = (solutionId: string, change: Pick<StoredStepChange, "id">, index: number): string => change.id ?? `${solutionId}:${index}`;
+
+/** One edit to a solution's list of step changes: add or replace one (`key` null adds), or take one out. */
+export type StepChangeEdit = { op: "save"; key: string | null; change: StepChangeInput } | { op: "remove"; key: string };
+
+export type StepChangeEditResult = { ok: true; list: StoredStepChange[] } | { ok: false; message: string };
+
+/**
+ * The list after one edit, or why it can't be made. `stepIds` is the steps of the solution's stored version (an effect must point at one).
+ * An edited change keeps its id (or has none, as before), so the engine's id for it does not move; a new one gets `newId()`.
+ */
+export function applyStepChangeEdit(solutionId: string, current: readonly StoredStepChange[], edit: StepChangeEdit, stepIds: ReadonlySet<string>, newId: () => string): StepChangeEditResult {
+  const at = current.findIndex((c, i) => stepChangeKey(solutionId, c, i) === edit.key);
+  if (edit.key !== null && at < 0) return { ok: false, message: "That change isn't in the solution any more. Reload the page." };
+  if (edit.op === "remove") return { ok: true, list: current.filter((_, i) => i !== at) };
+  const problem = checkStepChange(edit.change, stepIds);
+  if (problem) return { ok: false, message: problem };
+  if (at < 0 && current.length >= MAX_STEP_CHANGES) return { ok: false, message: `A solution can have at most ${MAX_STEP_CHANGES} changes. Remove one first.` };
+  const clean = cleanStepChange(edit.change);
+  const old = current[at];
+  const stored: StoredStepChange = { ...(at < 0 ? { id: newId() } : old?.id ? { id: old.id } : {}), ...clean };
+  return { ok: true, list: at < 0 ? [...current, stored] : current.map((c, i) => (i === at ? stored : c)) };
+}
