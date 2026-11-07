@@ -13,7 +13,6 @@ import {
   LogOut,
   Network,
   Settings2,
-  ShieldCheck,
   TrendingUp,
   Users,
   UsersRound,
@@ -49,7 +48,6 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   people: Users,
   sandbox: TrendingUp,
   settings: Settings2,
-  access: ShieldCheck,
   clients: Building2,
   team: UsersRound,
 };
@@ -64,7 +62,6 @@ export type ShellProps = {
   slug: string;
   workspaceName: string;
   workspaces: SwitcherWorkspace[];
-  canManage: boolean;
   counts: NavCounts;
   viewer: { name: string; email: string | null } | null;
 };
@@ -72,7 +69,7 @@ export type ShellProps = {
 export function AppSidebar(props: ShellProps) {
   const pathname = usePathname();
   const { isMobile, setOpenMobile } = useSidebar();
-  const groups = workspaceNav({ slug: props.slug, pathname, canManage: props.canManage, counts: props.counts });
+  const groups = workspaceNav({ slug: props.slug, pathname, counts: props.counts });
 
   const item = (i: NavItem) => {
     const Icon = ICONS[i.icon];
