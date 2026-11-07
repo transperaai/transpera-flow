@@ -5,7 +5,7 @@
 
 import type { EdgeRow, ProcessBundle, StepOutcome } from "@transpera-flow/db";
 import { OUTCOME_LABELS } from "./commands";
-import { branchTargetProblem, branchesOf, isGoBack, type BranchTarget } from "./branches";
+import { branchTargetProblem, branchesOf, goBackProblem, isGoBack, type BranchTarget } from "./branches";
 
 /** The id of the node drawn for a go back is this plus the branch's line id. */
 export const GO_BACK_PREFIX = "goback:";
@@ -107,7 +107,8 @@ export function goesToMenu(bundle: ProcessBundle, edge: EdgeRow): GoesToGroup[] 
     const value = encodeTarget(target);
     return value === now || branchTargetProblem(bundle, decisionId, target, edge.id) === null;
   };
-  const next = working.filter((s) => offer(s.id)).map((s) => ({ value: encodeTarget(s.id), label: s.name }));
+  // A step that leads back to the decision is a "Go back to…", not a next step: the menu keeps the two apart.
+  const next = working.filter((s) => offer(s.id) && (encodeTarget(s.id) === now || goBackProblem(bundle, decisionId, s.id) !== null)).map((s) => ({ value: encodeTarget(s.id), label: s.name }));
   const back = working.filter((s) => offer({ goBackTo: s.id })).map((s) => ({ value: encodeTarget({ goBackTo: s.id }), label: s.name }));
   const ends = (["won", "lost", "done"] as const).filter((o) => offer({ end: o })).map((o) => ({ value: encodeTarget({ end: o }), label: OUTCOME_LABELS[o] }));
   return [
