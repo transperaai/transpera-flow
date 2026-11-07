@@ -583,3 +583,10 @@ Verified only against plain Postgres 16 (`packages/db/test/capacity-setup.test.t
 - [ ] As the Owner, `select public.add_tier(<workspace>)` then `select public.remove_tier(<that tier>)` work; as a Viewer, `add_tier` raises "Only Agency admins and the Owner can change tiers."
 - [ ] `public.import_workspace_bundle` is still SECURITY INVOKER with `statement_timeout=40s` and `authenticated` the only grantee.
 
+
+## The company map drives the run (`20270134000000_map_drives_run.sql`)
+
+Verified only against plain Postgres 16 (`packages/db/test/map-drives-run-migration.test.ts`: the backfill on a database built up to `20270132000000`, a person's publish and restore, a system-made version). Check on Neon, once, after the apply:
+
+- [ ] Every company map is true except those with a person's version: `select count(*) from public.processes p where p.is_company and not p.map_drives_run and not exists (select 1 from public.process_revisions r where r.process_id = p.id and r.published_by is not null)` is 0, and the same query with `and p.map_drives_run` and `exists` is 0.
+- [ ] `select public.publish_process(<company map id>)` as an editor on a workspace whose flag is false turns it true (the trigger is SECURITY DEFINER and writes `processes` as its owner); adding a process (a system-made map version) leaves it as it was.
