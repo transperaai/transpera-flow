@@ -393,6 +393,7 @@ export function EditorView({
         company={company}
         onTour={tour.start}
         historyHref={historyHref}
+        history={{ undoLabel: state.undoLabel, redoLabel: state.redoLabel, onUndo: () => editor.undo(), onRedo: () => editor.redo() }}
         simulating={simulating}
         onSimulate={simulate}
         onReview={select}

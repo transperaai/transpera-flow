@@ -5,6 +5,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Redo2, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { StepRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
@@ -77,6 +78,7 @@ export function EditorBar({
   company = false,
   onTour,
   historyHref,
+  history,
 }: {
   mode: EditorMode;
   /** What is being edited: the process's name. */
@@ -114,6 +116,8 @@ export function EditorBar({
   onTour?: () => void;
   /** The History page of what is edited: shows a History button that goes there (after the last edits are saved). */
   historyHref?: string;
+  /** Undo and redo: what each would step over (null when there is nothing to do), and the actions. Without it there are no buttons. */
+  history?: { undoLabel: string | null; redoLabel: string | null; onUndo: () => void; onRedo: () => void };
 }) {
   const info = MODE_INFO[mode];
   const router = useRouter();
@@ -145,6 +149,36 @@ export function EditorBar({
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
+          {history && (
+            <div className="flex items-center gap-1" role="group" aria-label="Undo and redo" data-history-buttons>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className={onBar}
+                data-undo
+                aria-label={history.undoLabel ? `Undo: ${history.undoLabel}` : "Undo"}
+                title={history.undoLabel ? `Undo: ${history.undoLabel}` : "Nothing to undo"}
+                disabled={!history.undoLabel}
+                onClick={history.onUndo}
+              >
+                <Undo2 aria-hidden />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className={onBar}
+                data-redo
+                aria-label={history.redoLabel ? `Redo: ${history.redoLabel}` : "Redo"}
+                title={history.redoLabel ? `Redo: ${history.redoLabel}` : "Nothing to redo"}
+                disabled={!history.redoLabel}
+                onClick={history.onRedo}
+              >
+                <Redo2 aria-hidden />
+              </Button>
+            </div>
+          )}
           {mode !== "block" && !company && (
             <>
             <Button type="button" variant="outline" size="sm" className={onBar} data-tour="simulate" onClick={onSimulate} disabled={simulating || !!blocked} title={blocked ?? undefined}>
