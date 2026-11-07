@@ -117,9 +117,9 @@ describe("every (i) on the Editor screen", () => {
 });
 
 describe("every control of the block library (issue #116)", () => {
-  it("names its (i)s: the library's New block and usage count", () => {
+  it("names its (i)s: the library's New block and its column headings", () => {
     const tags = helpTags(read("components/blocks/block-library.tsx"));
-    expect(tags.map((t) => /label="([^"]+)"/.exec(t)?.[1])).toEqual(["New block", "Used in"]);
+    expect(tags.map((t) => /label="([^"]+)"/.exec(t)?.[1])).toEqual(["New block", "Steps", "Who does it", "Time per run", "Automatable", "Used in"]);
   });
 
   it("marks no block as made by AI: in-app AI and its solution ideas are gone (cut list items 1 and 2)", () => {

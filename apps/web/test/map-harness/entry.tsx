@@ -80,6 +80,7 @@ const NO_BLOCKS: BlockTools = {
   library: [],
   note: null,
   save: async () => ({ ok: false, error: "not in this harness" }) as never,
+  update: async () => ({ ok: false, error: "not in this harness" }) as never,
   saveGroup: async () => undefined,
   insert: () => undefined,
   replace: () => undefined,

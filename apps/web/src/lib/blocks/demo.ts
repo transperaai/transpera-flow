@@ -90,3 +90,44 @@ export function useDemoBlocks(): BlockRow[] {
 }
 
 const INITIAL = blocks;
+
+const notify = () => {
+  for (const l of listeners) l();
+};
+
+/** Write an edited block back (this tab only). */
+export function updateDemoBlock(id: string, input: BlockInput): BlockRow | null {
+  const old = blocks.find((b) => b.id === id);
+  if (!old) return null;
+  const next: BlockRow = { ...old, name: input.name, description: input.description, steps: structuredClone(input.bundle), updated_at: new Date().toISOString() };
+  blocks = blocks.map((b) => (b.id === id ? next : b));
+  notify();
+  return next;
+}
+
+/** Rename a block (this tab only). */
+export function renameDemoBlock(id: string, name: string): BlockRow | null {
+  const old = blocks.find((b) => b.id === id);
+  if (!old) return null;
+  const next: BlockRow = { ...old, name, updated_at: new Date().toISOString() };
+  blocks = blocks.map((b) => (b.id === id ? next : b));
+  notify();
+  return next;
+}
+
+/** Copy a block as "<name> (copy)" (this tab only). */
+export function duplicateDemoBlock(id: string): BlockRow | null {
+  const old = blocks.find((b) => b.id === id);
+  if (!old) return null;
+  const now = new Date().toISOString();
+  const copy: BlockRow = { ...old, id: crypto.randomUUID(), name: `${old.name} (copy)`.slice(0, 200), steps: structuredClone(old.steps), created_at: now, updated_at: now };
+  blocks = [...blocks, copy];
+  notify();
+  return copy;
+}
+
+/** Remove a block from the demo's library (this tab only). */
+export function removeDemoBlock(id: string): void {
+  blocks = blocks.filter((b) => b.id !== id);
+  notify();
+}

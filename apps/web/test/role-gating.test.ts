@@ -72,7 +72,7 @@ describe("screens whose controls come in as props that are undefined without can
   });
 
   it("the Block library: no New block link without canEdit", () => {
-    expect(read(PAGE("blocks"))).toContain("const newHref = canEdit && first ?");
+    expect(read(PAGE("blocks"))).toContain("const editBase = canEdit && first ?");
   });
 
   it("the process page offers New solution and Build solution only to those who can edit", () => {

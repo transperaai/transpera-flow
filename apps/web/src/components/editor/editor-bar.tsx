@@ -33,6 +33,8 @@ export interface BlockForm {
   saving: boolean;
   /** What went wrong with the last save, in plain English. */
   error: string | null;
+  /** Editing a block already in the library (Q15), not making a new one. */
+  editing?: boolean;
 }
 
 /** Solution mode's form: the name the solution is saved with, and the save itself. */
@@ -47,6 +49,8 @@ export interface SolutionForm {
   refusedWithout: { processHref: string; blockHref: string } | null;
 }
 
+const BLOCK_EDIT_TITLE = "Edit block";
+const BLOCK_EDIT_HINT = "You're editing a block in the library. Nothing changes until you press Save changes, and solutions that already use the block keep their own copy. Cancel goes back to the library.";
 const COMPANY_TITLE = "Draft of the company map";
 const COMPANY_HINT =
   "You're editing a draft of the company map. Move cards, draw and label handoff lines, or put cards in groups. Handoff lines are pictures: they never change a simulation. The live map doesn't change until you publish.";
@@ -129,7 +133,7 @@ export function EditorBar({
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-edit px-4 py-2.5 text-edit-fg">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <span className="rounded border-[1.5px] border-current px-1.5 py-px font-mono text-[11px] font-semibold tracking-widest uppercase">✎ Editor</span>
-          <h1 className="min-w-0 truncate text-[17px] font-bold">{mode === "solution" && issue ? SOLUTION_FOR_ISSUE.title(issue) : company ? COMPANY_TITLE : info.title(subject)}</h1>
+          <h1 className="min-w-0 truncate text-[17px] font-bold">{mode === "solution" && issue ? SOLUTION_FOR_ISSUE.title(issue) : company ? COMPANY_TITLE : mode === "block" && blockForm?.editing ? BLOCK_EDIT_TITLE : info.title(subject)}</h1>
           {mode === "draft" && (
             <span data-tour="draft" className="rounded-full bg-edit-fg/15 px-2 py-0.5 text-xs font-semibold" aria-live="polite">
               {unpublished ? "Not published yet" : hasDraft ? `Draft version ${draftNumber} · live is version ${liveNumber}` : `New draft (version ${draftNumber}) · live is version ${liveNumber}`}
@@ -137,7 +141,7 @@ export function EditorBar({
             </span>
           )}
           <span className="text-xs opacity-90" aria-live="polite">
-            {mode === "block" ? "Nothing is saved until you press Save to library" : mode === "solution" ? "Nothing is saved until you press Save solution" : saving ? "Saving…" : hasDraft ? "All changes saved to the draft" : "Nothing changed yet"}
+            {mode === "block" ? blockForm?.editing ? "Nothing is saved until you press Save changes" : "Nothing is saved until you press Save to library" : mode === "solution" ? "Nothing is saved until you press Save solution" : saving ? "Saving…" : hasDraft ? "All changes saved to the draft" : "Nothing changed yet"}
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -202,7 +206,7 @@ export function EditorBar({
             if (s.id === "save-block" && blockForm) {
               return (
                 <Button key={s.id} type="button" variant="outline" size="sm" className={cls} disabled={!canSave || blockForm.saving} onClick={blockForm.onSave}>
-                  {blockForm.saving ? "Saving…" : s.label}
+                  {blockForm.saving ? "Saving…" : blockForm.editing ? "Save changes" : s.label}
                 </Button>
               );
             }
@@ -260,12 +264,12 @@ export function EditorBar({
               router.push(exitHref);
             }}
           >
-            Exit editor
+            {mode === "block" && blockForm?.editing ? "Cancel" : "Exit editor"}
           </Button>
         </div>
       </div>
       <p className="border-b border-line bg-edit-soft px-4 py-1.5 text-[12.5px]" role="note">
-        {mode === "solution" && issue ? SOLUTION_FOR_ISSUE.hint : company ? COMPANY_HINT : info.hint}
+        {mode === "solution" && issue ? SOLUTION_FOR_ISSUE.hint : company ? COMPANY_HINT : mode === "block" && blockForm?.editing ? BLOCK_EDIT_HINT : info.hint}
         {onTour && (
           <button type="button" className="ml-2 font-semibold underline" onClick={onTour} data-take-tour>
             Take the tour

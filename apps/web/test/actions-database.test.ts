@@ -299,6 +299,51 @@ describe("blocks and runs", () => {
     expect((await one("select steps from blocks where id = $1", [r.block.id])).steps.steps).toHaveLength(2);
   });
 
+  it("edits, renames, copies and deletes a block, refusing the delete while a solution uses it (Q15)", async () => {
+    const { createBlock, updateBlock, renameBlock, duplicateBlock, deleteBlock } = await import("@/app/w/[slug]/block-actions");
+    const steps = northbeamBundle().steps.slice(0, 2);
+    const bundle = { steps, edges: [], entry_step_id: steps[0]!.id };
+    const made = await createBlock(WS, { name: "Q15 block", description: "d", bundle });
+    if (made.status !== "ok") throw new Error(JSON.stringify(made));
+    const id = made.block.id;
+    // A solution holding a copy of it, stamped as the app stamps an insert.
+    const stamped = { steps: [{ ...steps[0]!, id: "11111111-1111-4111-8111-111111111111", provenance: { block: id } }], edges: [], entry_step_id: null };
+    const sol = (await tdb.client.query("insert into solutions (workspace_id, process_id, base_revision_id, name, steps) values ($1, $2, $3, 'Uses Q15', $4::jsonb) returning id", [WS, P, REV, JSON.stringify(stamped)])).rows[0].id;
+    // Editing writes name, description and steps back to the same row, and leaves the solution's stamp alone.
+    const edited = await updateBlock(WS, id, { name: "Q15 edited", description: "new", bundle: { steps: [steps[0]!], edges: [], entry_step_id: steps[0]!.id } });
+    expect(edited).toMatchObject({ status: "ok", block: { id, name: "Q15 edited", description: "new", type: "manual" } });
+    expect((await one("select steps from blocks where id = $1", [id])).steps.steps).toHaveLength(1);
+    expect((await one("select steps from solutions where id = $1", [sol])).steps.steps[0].provenance).toEqual({ block: id });
+    expect(await updateBlock(WS, id, { name: "", description: "", bundle })).toMatchObject({ status: "error" });
+    expect(await renameBlock(WS, id, "  Q15 renamed ")).toMatchObject({ status: "ok", block: { name: "Q15 renamed" } });
+    const copy = await duplicateBlock(WS, id);
+    if (copy.status !== "ok") throw new Error(JSON.stringify(copy));
+    expect(copy.block).toMatchObject({ name: "Q15 renamed (copy)", description: "new" });
+    // Used in a solution: refused, and it says where.
+    expect(await deleteBlock(WS, id)).toEqual({ status: "error", message: "This block can't be deleted. Used in 1 solution: “Uses Q15”." });
+    expect(await deleteBlock(WS, copy.block!.id)).toEqual({ status: "ok" });
+    await tdb.client.query("delete from solutions where id = $1", [sol]);
+    expect(await deleteBlock(WS, id)).toEqual({ status: "ok" });
+    expect(await one("select count(*)::int as n from blocks where id = $1", [id])).toEqual({ n: 0 });
+  });
+
+  it("a Viewer can't edit, rename, copy or delete a block (Q15)", async () => {
+    const { createBlock, updateBlock, renameBlock, duplicateBlock, deleteBlock } = await import("@/app/w/[slug]/block-actions");
+    const steps = northbeamBundle().steps.slice(0, 1);
+    const bundle = { steps, edges: [], entry_step_id: steps[0]!.id };
+    const made = await createBlock(WS, { name: "Q15 viewer", description: "", bundle });
+    if (made.status !== "ok") throw new Error(JSON.stringify(made));
+    const id = made.block.id;
+    await signInAs({ tdb }, await addMember(tdb, WS, "viewer"));
+    expect((await updateBlock(WS, id, { name: "x", description: "", bundle })).status).toBe("error");
+    expect((await renameBlock(WS, id, "x")).status).toBe("error");
+    expect((await duplicateBlock(WS, id)).status).toBe("error");
+    expect((await deleteBlock(WS, id)).status).toBe("error");
+    expect((await one("select name from blocks where id = $1", [id])).name).toBe("Q15 viewer");
+    await signInAs({ tdb }, editor);
+    expect(await deleteBlock(WS, id)).toEqual({ status: "ok" });
+  });
+
   it("saves a run against the live revision, and refuses one against an older revision", async () => {
     const { saveRun } = await import("@/app/w/[slug]/run-actions");
     const stat = { mean: 1, p10: 0, p90: 2 };

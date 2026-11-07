@@ -11,12 +11,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { retiredSteps, isUnpublished, type BlockRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
+import { retiredSteps, isUnpublished, type BlockBundle, type BlockRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
 import { createSolution } from "@/app/w/[slug]/solution-actions";
 import { createLibraryProcess } from "@/app/w/[slug]/library-actions";
 import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
-import { blockFromSteps } from "@/lib/blocks/blocks";
+import { blockFromSteps, bundleFromBlock } from "@/lib/blocks/blocks";
 import { parseBlockInput } from "@/lib/blocks/save";
 import { newStepRow } from "@/lib/editor/commands";
 import type { ViewHint } from "@/lib/editor/groups";
@@ -77,6 +77,7 @@ export function EditorView({
   issue = null,
   processEditorHref,
   blockEditorHref,
+  editBlock,
   solutionSeed,
   tourDismissed = false,
   historyHref,
@@ -120,6 +121,8 @@ export function EditorView({
   /** Solution mode: where "Edit the process instead" (the process's draft) and "Save as a block" (block mode) go when a save is refused for want of an issue. */
   processEditorHref?: string;
   blockEditorHref?: string;
+  /** Block mode only: a block of the library to edit (Q15); without it block mode starts on an empty map. */
+  editBlock?: { id: string; name: string; description: string; bundle: BlockBundle };
   /** Solution mode opened from a solution's page ("Open in editor", `?solution=<id>`): the map starts as that solution's copy, not as live. */
   solutionSeed?: { bundle: ProcessBundle; name: string };
   /** The process library (B12): the workspace's processes, where each sits (live links), and the templates. */
@@ -140,7 +143,7 @@ export function EditorView({
   const scratch = blockMode || solutionMode;
   // A solution opened from its own page starts as its copy; what is marked as changed, simulated and saved is still measured against live.
   const fromSolution = solutionMode && solutionSeed !== undefined;
-  const [seed] = useState(() => (blockMode ? blockScratch(initialLive) : fromSolution ? solutionSeed!.bundle : initialLive));
+  const [seed] = useState(() => (blockMode ? (editBlock ? bundleFromBlock(initialLive, editBlock.bundle, editBlock.name) : blockScratch(initialLive)) : fromSolution ? solutionSeed!.bundle : initialLive));
   const [backend] = useState(() => (scratch ? connectScratch(seed) : connect(mode, seed)));
   const [session, drafts, state] = useDraftSession(seed, scratch ? null : initialDraft, () => backend, () => ({ at: new Date().toISOString(), by: userId }));
   const editor = session.editor;
@@ -199,8 +202,8 @@ export function EditorView({
   });
 
   // Block mode: what the block is called, and saving it. Nothing is written until then.
-  const [blockName, setBlockName] = useState("");
-  const [blockDescription, setBlockDescription] = useState("");
+  const [blockName, setBlockName] = useState(editBlock?.name ?? "");
+  const [blockDescription, setBlockDescription] = useState(editBlock?.description ?? "");
   const [blockSaving, setBlockSaving] = useState(false);
   const [blockError, setBlockError] = useState<string | null>(null);
   const saveToLibrary = async () => {
@@ -210,13 +213,13 @@ export function EditorView({
     const checked = parseBlockInput(input);
     if (!checked.ok) return setBlockError(checked.error);
     setBlockSaving(true);
-    const result = await blockTools.save(checked.value);
+    const result = editBlock ? await blockTools.update(editBlock.id, checked.value) : await blockTools.save(checked.value);
     setBlockSaving(false);
     if (result.status === "error") return setBlockError(result.message);
     router.push(exitHref);
   };
   const blockForm: BlockForm | undefined = blockMode
-    ? { name: blockName, description: blockDescription, onName: setBlockName, onDescription: setBlockDescription, onSave: saveToLibrary, saving: blockSaving, error: blockError }
+    ? { name: blockName, description: blockDescription, onName: setBlockName, onDescription: setBlockDescription, onSave: saveToLibrary, saving: blockSaving, error: blockError, editing: !!editBlock }
     : undefined;
 
   // Solution mode: what the solution is called, the automatic verdict against the issue's target, and saving. Nothing is
