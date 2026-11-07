@@ -268,7 +268,7 @@ function checklist(steps: readonly StepRow[]) {
 async function createProcessWithDraft(
   ctx: ImportContext,
   ws: WorkspaceRef,
-  input: { name: string; kind: "pipeline" | "servicing"; entity_name: string; description: string | null; source: "template" },
+  input: { name: string; kind: "pipeline" | "servicing"; entity_name: string; description: string | null; source: "template"; /** Absent: from the kind. */ category?: ProcessCategory },
   /** For the process library (B12): made with `create_library_process`, so the company map gives it no card of its own (the person places it). */
   { offMap = false }: { offMap?: boolean } = {},
 ): Promise<{ proc: ProcessWithDraft; draft: Draft }> {
@@ -286,6 +286,7 @@ async function createProcessWithDraft(
         p_entity_name: input.entity_name,
         p_description: input.description ?? undefined,
         p_source: input.source,
+        ...(input.category ? { p_category: input.category } : {}),
       }),
     );
     const r = reply as { status: string; process_id?: string };
@@ -297,7 +298,7 @@ async function createProcessWithDraft(
     proc = (await writing("create processes", () =>
       ctx.db
         .insertInto("processes")
-        .values({ workspace_id: ws.id, name: input.name, kind: input.kind, entity_name: input.entity_name, description: input.description, source: input.source, category: defaultProcessCategory(input.kind) })
+        .values({ workspace_id: ws.id, name: input.name, kind: input.kind, entity_name: input.entity_name, description: input.description, source: input.source, category: input.category ?? defaultProcessCategory(input.kind) })
         .returning([...columns])
         .executeTakeFirstOrThrow(),
     )) as unknown as ProcessWithDraft;
@@ -551,7 +552,7 @@ export async function createProcessFromTemplate(
   const ws = await resolveWorkspace(ctx, workspaceId);
   await requireCanEdit(ctx, ws);
   const t = resolveName(PROCESS_TEMPLATES, template, "template");
-  const { proc, draft } = await createProcessWithDraft(ctx, ws, { name: name ?? t.name, kind: t.kind, entity_name: t.entity_name, description: t.description, source: "template" }, { offMap: true });
+  const { proc, draft } = await createProcessWithDraft(ctx, ws, { name: name ?? t.name, kind: t.kind, entity_name: t.entity_name, description: t.description, source: "template", category: t.category }, { offMap: true });
   const owner = { revision_id: draft.revision_id, workspace_id: ws.id, process_id: proc.id };
   const plan = planImport({ steps: t.steps, edges: t.edges }, { steps: [], edges: [], retired: [] }, owner, stampOf(ctx), { newId, origin: `template '${t.name}'` });
   await applyPlan(ctx, draft.revision_id, plan);
