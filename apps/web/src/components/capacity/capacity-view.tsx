@@ -24,8 +24,10 @@ import {
   type DepartmentCeiling,
   type MissingItem,
   type PersonBusy,
+  type PurposeCategory,
 } from "@transpera-flow/db";
 import { capacityProblems, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
+import { namedPurposeParts } from "@/lib/capacity/purposes";
 import { MetaLine, PageHeader } from "@/components/page-kit";
 import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -47,6 +49,8 @@ export interface CapacityViewProps {
   stepProcess: Record<string, string>;
   /** The day the 12-month run starts (ISO date), to name its months. */
   startDate?: string;
+  /** The workspace's purpose categories, to name the "time to serve" bars' segments; the default list when absent. */
+  purposes?: readonly PurposeCategory[];
 }
 
 const f0 = (v: number) => formatNumber(v, 0);
@@ -249,7 +253,7 @@ function TodaySections(props: CapacityViewProps & { model: EngineModel; result: 
       <SharedTeams setup={setup} model={model} result={result} busy={busy} missing={props.missing} />
       <Bottleneck setup={setup} model={model} result={result} base={base} stepProcess={props.stepProcess} />
       <Leaver setup={setup} model={model} result={result} people={busy.people} />
-      <TimeToServe setup={setup} model={model} />
+      <TimeToServe setup={setup} model={model} purposes={props.purposes} />
     </>
   );
 }
@@ -516,7 +520,7 @@ function Leaver({ setup, model, result, people }: { setup: CapacitySetup; model:
   );
 }
 
-function TimeToServe({ setup, model }: { setup: CapacitySetup; model: EngineModel }) {
+export function TimeToServe({ setup, model, purposes }: { setup: CapacitySetup; model: EngineModel; purposes?: readonly PurposeCategory[] }) {
   const t = useMemo(() => timeToServe(setup, model), [setup, model]);
   const money = (v: number) => formatWholeCurrency(v, setup.currency);
   const nameOf = (id: string | null) => setup.people.find((p) => p.id === id)?.name ?? "—";
@@ -536,7 +540,7 @@ function TimeToServe({ setup, model }: { setup: CapacitySetup; model: EngineMode
                   <b className="tabular-nums">{f0(tier.hours)} hours</b> a month
                 </p>
                 <p className="mb-1 text-xs text-muted-foreground">{tier.feePerHour === null ? "No hours planned yet" : `Earns ${money(tier.feePerHour)} per hour of work`}</p>
-                {tier.byPurpose.length > 0 && <StackBar parts={tier.byPurpose.map((x) => ({ key: x.name, name: x.name, value: x.hours }))} />}
+                {tier.byPurpose.length > 0 && <StackBar parts={namedPurposeParts(tier.byPurpose, purposes)} />}
               </div>
             ))}
           </div>

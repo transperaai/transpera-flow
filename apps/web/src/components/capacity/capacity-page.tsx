@@ -4,7 +4,7 @@
 // off; the next 12 months is the forecast's model with planned hires and leavers) and hands them to the view.
 
 import { useMemo, useState } from "react";
-import type { CapacitySetup, ProcessBundle } from "@transpera-flow/db";
+import { workspacePurposes, type CapacitySetup, type ProcessBundle } from "@transpera-flow/db";
 import { capacityBaseModel } from "@/lib/capacity/model";
 import { forecastModel, today as todayIso } from "@/lib/forecast/forecast";
 import { CapacityView } from "./capacity-view";
@@ -25,5 +25,6 @@ export function CapacityPage({ bundle, setup, base }: { bundle: ProcessBundle; s
     return f.model ? { model: f.model, monthStarts: f.monthStarts } : null;
   }, [bundle, start]);
   const stepProcess = useMemo(() => stepProcessMap(bundle), [bundle]);
-  return <CapacityView setup={setup} model={built.model} modelError={built.error} year={year} base={base} stepProcess={stepProcess} startDate={start} />;
+  const purposes = useMemo(() => workspacePurposes(bundle.workspace.settings), [bundle.workspace.settings]);
+  return <CapacityView setup={setup} model={built.model} modelError={built.error} year={year} base={base} stepProcess={stepProcess} startDate={start} purposes={purposes} />;
 }
