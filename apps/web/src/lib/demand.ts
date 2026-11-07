@@ -79,7 +79,7 @@ export function parseNewLeadSource(form: { get(name: string): FormDataEntryValue
 /** A value's provenance source; a value with none recorded is an estimate. */
 export function provenanceOf(provenance: ProvenanceMap | null | undefined, field: string): ProvenanceSource {
   const source = provenance?.[field]?.source;
-  return source === "entered" || source === "measured" ? source : "estimated";
+  return source === "entered" ? source : "estimated";
 }
 
 export interface DemandSummary {

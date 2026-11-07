@@ -138,7 +138,7 @@ export function runRobustnessTask({ model, scenario, job }: RobustnessTask): Chu
 // Which parameters are estimated
 // ---------------------------------------------------------------------------
 
-export type ProvenanceSource = "estimated" | "entered" | "measured";
+export type ProvenanceSource = "estimated" | "entered";
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -146,20 +146,20 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
  * The provenance source of one field of a row, from the row's `provenance`
  * jsonb. Two shapes are read:
  *
- * - per column, `{ work_hours: { source: "measured", ... }, ... }` (the demand
+ * - per column, `{ work_hours: { source: "entered", ... }, ... }` (the demand
  *   tables' shape): the field's own entry decides, and a field with no entry
  *   is estimated;
  * - per row, `{ source: "entered", ... }` (docs/PRD.md §5): it covers every
  *   field of the row that has no entry of its own.
  *
  * Anything else (no provenance, `{}`, an unknown source) is `estimated`: a
- * number counts as known only when someone said it was entered or measured.
+ * number counts as known only when someone said it was entered.
  */
 export function provenanceSource(provenance: unknown, field: string): ProvenanceSource {
   if (!isObject(provenance)) return "estimated";
   const own = provenance[field];
   const source = isObject(own) ? own.source : provenance.source;
-  return source === "entered" || source === "measured" ? source : "estimated";
+  return source === "entered" ? source : "estimated";
 }
 
 /**
@@ -192,38 +192,19 @@ export interface ProvenanceRows {
   services?: readonly { id: string; provenance?: unknown }[];
   /** The workspace row's `provenance`: settings keyed `settings.<key>` (`settings.health_recover`, ...). */
   workspace?: unknown;
-  /**
-   * Lead source rows, per-column provenance (`volume_week`, `conversion_to_qualified`). Qualified leads a week
-   * (`demand.leads_per_week`) are known only when every source's are (see `leadsProvenance`).
-   */
-  leadSources?: readonly { provenance?: unknown }[];
-}
-
-/**
- * Where qualified leads a week come from, given the lead sources. Calibration measures the qualified leads themselves
- * and stores the leads a week that give them (issue #41), so a source whose `volume_week` is measured has measured
- * qualified leads. Only then are they left out of the robustness check: the total is measured when every source's
- * leads a week are, and an estimate otherwise (entered volumes stay varied, as before calibration). With no sources it
- * is the workspace's interim figure, an estimate.
- */
-export function leadsProvenance(sources: readonly { provenance?: unknown }[]): ProvenanceSource {
-  return sources.length > 0 && sources.every((s) => provenanceSource(s.provenance, "volume_week") === "measured") ? "measured" : "estimated";
 }
 
 /**
  * A `ProvenanceLookup` over the stored rows: a step's or a service's own row,
  * and for a health rule (`health.<field>`) the workspace's
- * `settings.health_<field>` entry, handed over in the per-column shape;
- * for qualified leads a week, the lead sources' (`leadsProvenance`).
+ * `settings.health_<field>` entry, handed over in the per-column shape.
  * Targets with no row here (other demand, roles, people) are estimated.
  */
-export function provenanceFromRows({ steps = [], services = [], workspace, leadSources }: ProvenanceRows): ProvenanceLookup {
+export function provenanceFromRows({ steps = [], services = [], workspace }: ProvenanceRows): ProvenanceLookup {
   const byStep = new Map(steps.map((s) => [s.id, s.provenance]));
   const byService = new Map(services.map((s) => [s.id, s.provenance]));
-  const leads = leadSources ? leadsProvenance(leadSources) : "estimated";
   return (t) => {
     if (t.kind === "steps") return byStep.get(t.id);
-    if (t.kind === "demand" && t.field === "leads_per_week") return { leads_per_week: { source: leads } };
     if (t.kind === "services") return byService.get(t.id);
     if (t.kind === "health" && isObject(workspace)) return { [t.field]: workspace[`settings.health_${t.field}`] };
     return undefined;
@@ -232,7 +213,7 @@ export function provenanceFromRows({ steps = [], services = [], workspace, leadS
 
 /**
  * Every parameter the check can perturb, as patch paths, with the ones whose
- * provenance says entered or measured left out.
+ * provenance says entered left out.
  *
  * Perturbed: leads per week, active clients, monthly churn, each role's
  * client hours per client, each service's mix share (when there are several),
@@ -249,7 +230,7 @@ export function provenanceFromRows({ steps = [], services = [], workspace, leadS
  *
  * A conflicted field (per-column provenance with unresolved `conflict.values`)
  * uses the range of the conflicting values instead of ±perturbation, and is
- * perturbed even when its value was entered or measured: sources disagreeing
+ * perturbed even when its value was entered: sources disagreeing
  * with it is the uncertainty the check is for (docs/PRD.md §6.5, D17).
  */
 export function estimatedParameters(

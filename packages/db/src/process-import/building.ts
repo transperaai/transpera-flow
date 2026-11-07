@@ -11,7 +11,7 @@
 // - A value given without a citation is an assumption too, with the caller's
 //   reasoning as its note (§7.2). Citations follow packages/db/src/evidence.ts:
 //   disagreeing sources become a triangular range and a conflict.
-// - A value someone `entered` or `measured` is never overwritten: a different
+// - A value someone `entered` is never overwritten: a different
 //   value is recorded as a conflict on it instead (§7.1b).
 // - Graph checks mirror the process editor (apps/web/src/lib/editor/commands.ts
 //   and validate.ts): no edges out of an end step or into the start step, no
@@ -118,7 +118,7 @@ export interface StepFields {
   reasoning?: Partial<Record<EvidenceColumn, string>>;
 }
 
-/** A value kept because someone entered or measured it; the proposed value is flagged instead. */
+/** A value kept because someone entered it; the proposed value is flagged instead. */
 export interface KeptValue {
   step_id: string;
   step: string;
@@ -540,11 +540,11 @@ export interface StepChange {
   row: StepRow;
 }
 
-const isKnown = (entry: Provenance | null) => entry?.source === "entered" || entry?.source === "measured";
+const isKnown = (entry: Provenance | null) => entry?.source === "entered";
 
 /**
  * The changes that bring an existing step in line with `f`. Values someone
- * entered or measured are kept: a different value is added to the column's
+ * entered are kept: a different value is added to the column's
  * conflict (with its citation's source, or as a proposal) and the step is
  * flagged. Estimates take the new value; without a citation it is an
  * assumption. Citations are applied in order by the evidence rules.

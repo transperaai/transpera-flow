@@ -126,7 +126,7 @@ export function TableSkeleton({ columns = 5, rows = 6 }: { columns?: number; row
   );
 }
 
-/** One card with four field rows: Restore, a share form, Branding, Levers, Calibration, Access. */
+/** One card with four field rows: Restore, a share form, Levers, Access. */
 export function FormSkeleton() {
   return (
     <Loading name="form" label="Loading the form">

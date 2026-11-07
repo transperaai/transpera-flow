@@ -546,7 +546,8 @@ describe("settings", () => {
   });
 });
 
-describe("history and calibration", () => {
+
+describe("history", () => {
   it("duplicates a published version as a new process, and restores one into the draft", async () => {
     const { duplicateVersion, restoreVersion } = await import("@/app/w/[slug]/p/[processId]/history/actions");
     const dup = await duplicateVersion(P, REV, "Northbeam copy");
@@ -555,15 +556,6 @@ describe("history and calibration", () => {
     expect(await duplicateVersion(P, "99999999-9999-4999-8999-999999999999", "x")).toMatchObject({ status: "error" });
     const r = await restoreVersion(P, REV, true);
     expect(["restored", "error"]).toContain(r.status);
-  });
-
-  it("records an import dataset and a client calibration refusal", async () => {
-    const { recordDataset } = await import("@/app/w/[slug]/settings/calibration/actions");
-    const bad = await recordDataset({ workspaceId: WS, kind: "nope", fileName: "x.csv", columnMap: {}, rowCount: 1 });
-    expect(bad).toMatchObject({ status: "error" });
-    signInAs({ tdb }, owner);
-    const bad2 = await recordDataset({ workspaceId: WS, kind: "leads", fileName: "", columnMap: {}, rowCount: 1 });
-    expect(bad2).toMatchObject({ status: "error" });
   });
 });
 

@@ -39,7 +39,7 @@ const DIST = oneOf("constant", "triangular", "lognormal");
 const optionalProvenance: Check = (v) =>
   v === null ||
   (isObject(v) &&
-    oneOf("estimated", "entered", "measured", ...STEP_SOURCE_LABELS)(v.source) &&
+    oneOf("estimated", "entered", ...STEP_SOURCE_LABELS)(v.source) &&
     (v.at === undefined || (typeof v.at === "string" && !Number.isNaN(Date.parse(v.at)))) &&
     (v.by === undefined || isId(v.by)) &&
     JSON.stringify(v).length <= 20_000);

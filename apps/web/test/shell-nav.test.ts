@@ -145,32 +145,22 @@ describe("workspaceNav: pages that are gone", () => {
   });
 });
 
-describe("the live shell's workspace tile (client branding, issue #34)", () => {
-  const shell = (logoUrl: string | null) => {
+describe("the live shell's workspace tile", () => {
+  it("shows the monogram: the first letter of the workspace name, never an image", () => {
     const props: ComponentProps<typeof WorkspaceShell> = {
       mode: "live",
       defaultOpen: true,
       slug: "s",
       workspaceName: "Northbeam Digital",
-      logoUrl,
       workspaces: [{ name: "Northbeam Digital", href: "/w/s" }],
       canManage: true,
       counts: {},
       viewer: null,
       children: null,
     };
-    return renderToStaticMarkup(createElement(WorkspaceShell, props));
-  };
-  it("passes the logo through to the tile: an <img> on the white tile, decorative, no monogram", () => {
-    const html = shell("https://abc.supabase.co/storage/v1/object/public/branding/x.png");
-    expect(html).toContain('<img src="https://abc.supabase.co/storage/v1/object/public/branding/x.png" alt=""');
-    expect(html).toContain("bg-logo-tile");
-    expect(html).not.toMatch(/>N<\/span>/);
-  });
-  it("keeps the monogram with no logo", () => {
-    const html = shell(null);
+    const html = renderToStaticMarkup(createElement(WorkspaceShell, props));
     expect(html).not.toContain("<img");
-    expect(html).not.toContain("bg-logo-tile");
+    expect(html).toContain("bg-accent");
     expect(html).toMatch(/>N<\/span>/);
   });
 });

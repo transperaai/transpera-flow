@@ -69,7 +69,6 @@ import {
   type WorkspaceRow,
   type WorkspaceSettings,
   type PurposeCategory,
-  loadWorkspaceLogoSha,
 } from "@transpera-flow/db";
 import type { HeadlineNumbers } from "./overview/headline";
 import { roleUsage, type RoleUsage } from "./roles";
@@ -111,14 +110,11 @@ export async function listAgencyWorkspaces(): Promise<AgencyWorkspaceRow[]> {
   }));
 }
 
-/** A workspace's id, name, slug and branding by slug, for the shell around its pages (null if it doesn't exist or isn't visible). */
-export const loadWorkspaceHead = cache(async (slug: string): Promise<(Pick<WorkspaceRow, "id" | "name" | "slug"> & { branding: unknown }) | null> => {
+/** A workspace's id, name and slug by slug, for the shell around its pages (null if it doesn't exist or isn't visible). */
+export const loadWorkspaceHead = cache(async (slug: string): Promise<Pick<WorkspaceRow, "id" | "name" | "slug"> | null> => {
   const db = await getDb();
-  return (await db.selectFrom("workspaces").select(["id", "name", "slug", "branding"]).where("slug", "=", slug).executeTakeFirst()) ?? null;
+  return (await db.selectFrom("workspaces").select(["id", "name", "slug"]).where("slug", "=", slug).executeTakeFirst()) ?? null;
 });
-
-/** The hash of a workspace's logo, or null when it has none: what the shell builds the logo's URL from (RLS: members read it). */
-export const loadLogoSha = cache(async (workspaceId: string): Promise<string | null> => loadWorkspaceLogoSha(await getDb(), workspaceId));
 
 /** The workspace's sources (RLS: everyone in the workspace can read them). */
 export async function loadWorkspaceSources(workspaceId: string): Promise<SourceRow[]> {
@@ -448,18 +444,6 @@ export interface WorkspaceSettingsData {
   marketSchedule: MarketScheduleRow[];
 }
 
-/** `entered` or `measured`, from `provenance.factor.source` (entered when there is none). */
-function factorSource(provenance: unknown): string {
-  const f = (provenance as { factor?: { source?: unknown } } | null)?.factor;
-  return typeof f?.source === "string" ? f.source : "entered";
-}
-
-/** How many visits a measured time rests on (`provenance.factor.n`); null when entered or when none is recorded (#227). */
-function factorItems(provenance: unknown): number | null {
-  const f = (provenance as { factor?: { source?: unknown; n?: unknown } } | null)?.factor;
-  return f?.source === "measured" && typeof f.n === "number" && Number.isFinite(f.n) ? Math.round(f.n) : null;
-}
-
 export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSettingsData | null> {
   const db = await getDb();
   const workspace = await db.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).where("slug", "=", slug).executeTakeFirst();
@@ -550,8 +534,6 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
       workspace_id: r.workspace_id,
       step_id: r.step_id,
       factor: Number(r.factor),
-      source: factorSource(r.provenance),
-      items: factorItems(r.provenance),
     })),
     // The cast narrows pricing_model, which a check constraint limits.
     services: services as unknown as ServiceRow[],

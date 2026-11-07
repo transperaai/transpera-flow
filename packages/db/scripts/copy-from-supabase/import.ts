@@ -6,7 +6,7 @@
 // --dry-run prints the report and rolls everything back. --no-replica skips `set session_replication_role = replica`, taking the
 // path used when the database refuses it (Neon): foreign-key order, user triggers disabled per table. --driver neon-ws connects
 // through @neondatabase/serverless over a WebSocket (connect.ts), for a machine without TCP access to Neon.
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -16,11 +16,8 @@ import { listForeignKeys, planLoad, type ForeignKey } from "./foreign-keys.ts";
 import {
   COPY_BASE_VERSION,
   EXPECTED_SOURCE_VERSION,
-  LOGO_MAX_BYTES,
-  LOGO_MIMES,
   REPORT_FILE,
   STORAGE_FILE,
-  brandingFile,
   isMain,
   parseRowsExactly,
   qualified,
@@ -77,12 +74,7 @@ export interface ImportReport {
     existing: string[];
     skipped: { email: string | null; reason: string }[];
   };
-  logos: {
-    loaded: { workspaceId: string; mime: string; bytes: number; sha256: string }[];
-    oversized: { workspaceId: string; path: string; bytes: number }[];
-    skipped: { workspaceId: string; path: string; reason: string }[];
-  };
-  /** Storage objects that are not copied (only the current logos are), per bucket. */
+  /** Storage objects that are not copied (none are: client logos were cut, D70), per bucket. */
   storageNotCopied: Record<string, number>;
   sequences: Record<string, number>;
   warnings: string[];
@@ -93,7 +85,7 @@ type Row = Record<string, unknown>;
 const SCHEMAS = ["public", "auth", "better_auth"];
 const EMAIL_RULE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const BETTER_AUTH_TABLES = ["better_auth.user", "better_auth.account"];
-const ADDED_TABLES = ["public.workspace_logos", "public.deployment_access"];
+const ADDED_TABLES = ["public.deployment_access"];
 
 export async function runImport(client: Queryable, options: ImportOptions): Promise<ImportReport> {
   const log = options.log ?? (() => {});
@@ -119,7 +111,7 @@ export async function runImport(client: Queryable, options: ImportOptions): Prom
   for (const name of exported) {
     if (!targetColumns.has(name)) throw new Error(`the target has no table ${name}, so its ${manifest.tables[name]!.rows} rows have nowhere to go`);
   }
-  const mustBeEmpty = [...exported, ...BETTER_AUTH_TABLES, "public.workspace_logos"];
+  const mustBeEmpty = [...exported, ...BETTER_AUTH_TABLES];
   await assertEmpty(client, mustBeEmpty);
   const disabled = (
     await client.query(
@@ -162,7 +154,6 @@ export async function runImport(client: Queryable, options: ImportOptions): Prom
     deferredKeys: [],
     betterAuth: { users: 0, accounts: 0, skippedUsers: [], skippedAccounts: [], otherProviders: {} },
     deploymentAccess: { added: [], existing: [], skipped: [] },
-    logos: { loaded: [], oversized: [], skipped: [] },
     storageNotCopied: {},
     sequences: {},
     warnings,
@@ -193,18 +184,14 @@ export async function runImport(client: Queryable, options: ImportOptions): Prom
       report.deferredKeys = deferred.map((fk) => `${fk.child}.${fk.name}`);
     }
 
-    const logoPaths: { workspaceId: string; path: string }[] = [];
     const fills: (() => Promise<void>)[] = [];
     for (const name of order) {
       const rows = data.get(name)!;
       if (name === "public.workspaces") {
-        // branding.logo_path is gone from the target's shape check; the logo itself goes to workspace_logos below.
+        // branding.logo_path is gone from the target's shape check. The logo itself is not copied: client logos were cut (D70).
         for (const row of rows) {
           const branding = row.branding as Row | null;
-          if (branding && typeof branding === "object" && "logo_path" in branding) {
-            if (typeof branding.logo_path === "string" && branding.logo_path !== "") logoPaths.push({ workspaceId: row.id as string, path: branding.logo_path });
-            delete branding.logo_path;
-          }
+          if (branding && typeof branding === "object" && "logo_path" in branding) delete branding.logo_path;
         }
       }
       const target = targetColumns.get(name)!;
@@ -219,13 +206,11 @@ export async function runImport(client: Queryable, options: ImportOptions): Prom
     for (const fill of fills) await fill();
 
     await copyToBetterAuth(client, report, chunkSize, data.get("auth.users") ?? []);
-    await copyLogos(client, report, logoPaths, storage, options.dir);
     await seedDeploymentAccess(client, report);
     report.sequences = await resetSequences(client);
 
     const notCopied: Record<string, number> = {};
-    const copied = new Set(report.logos.loaded.map((l) => l.workspaceId));
-    for (const o of storage) if (o.bucket !== "branding" || !logoPaths.some((l) => l.path === o.name && copied.has(l.workspaceId))) notCopied[o.bucket] = (notCopied[o.bucket] ?? 0) + 1;
+    for (const o of storage) notCopied[o.bucket] = (notCopied[o.bucket] ?? 0) + 1;
     report.storageNotCopied = notCopied;
 
     // Deferred foreign-key checks run now, while they can still fail the import (and ALTER TABLE refuses with events pending).
@@ -434,52 +419,8 @@ async function copyToBetterAuth(client: Queryable, report: ImportReport, chunkSi
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------
-// Logos and deployment access
+// Deployment access
 // ---------------------------------------------------------------------------------------------------------------------------
-
-const EXTENSION_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
-
-async function copyLogos(client: Queryable, report: ImportReport, logoPaths: { workspaceId: string; path: string }[], storage: StorageObject[], dir: string): Promise<void> {
-  for (const { workspaceId, path } of logoPaths) {
-    const skip = (reason: string) => report.logos.skipped.push({ workspaceId, path, reason });
-    const object = storage.find((o) => o.bucket === "branding" && o.name === path);
-    if (!object) {
-      skip("no such object in storage.json");
-      continue;
-    }
-    const file = join(dir, object.file ?? brandingFile(path));
-    if (!existsSync(file)) {
-      skip(`its bytes are not in the export${object.error ? ` (${object.error})` : ""}`);
-      continue;
-    }
-    const bytes = readFileSync(file);
-    if (bytes.length > LOGO_MAX_BYTES) {
-      report.logos.oversized.push({ workspaceId, path, bytes: bytes.length });
-      continue;
-    }
-    if (bytes.length === 0) {
-      skip("the object is empty");
-      continue;
-    }
-    const mime = (object.contentType ?? EXTENSION_MIME[path.split(".").pop()?.toLowerCase() ?? ""] ?? "").split(";")[0]!.trim().toLowerCase();
-    if (!LOGO_MIMES.includes(mime)) {
-      skip(`type ${mime || "unknown"} is not PNG, JPEG or WebP`);
-      continue;
-    }
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
-    // The table's own checks have the last word: a refusal skips this logo and the rest carry on.
-    await client.query("savepoint logo");
-    try {
-      await client.query("insert into public.workspace_logos (workspace_id, mime, bytes, sha256) values ($1, $2, $3, $4)", [workspaceId, mime, bytes, sha256]);
-      await client.query("release savepoint logo");
-      report.logos.loaded.push({ workspaceId, mime, bytes: bytes.length, sha256 });
-    } catch (err) {
-      await client.query("rollback to savepoint logo");
-      if ((err as { code?: string }).code !== "23514") throw err;
-      skip(`refused by the table's check ${(err as { constraint?: string }).constraint ?? ""}`.trim());
-    }
-  }
-}
 
 /**
  * A named-email rule per user (brief, 7a): agency admins get admin; owners and editors anywhere get editor; everyone else
@@ -564,10 +505,6 @@ export function formatReport(report: ImportReport): string[] {
   const byRole = (r: string) => d.added.filter((x) => x.role === r).length;
   out.push(`Deployment access: ${d.added.length} rules added (${byRole("admin")} admin, ${byRole("editor")} editor, ${byRole("viewer")} viewer), ${d.existing.length} already had one`);
   for (const s of d.skipped) out.push(`  SKIPPED rule for ${s.email ?? "a user"}: ${s.reason}`);
-  const l = report.logos;
-  out.push(`Logos: ${l.loaded.length} loaded`);
-  for (const s of l.oversized) out.push(`  OVERSIZED logo for workspace ${s.workspaceId}: ${s.bytes} bytes (limit ${LOGO_MAX_BYTES}), ${s.path}`);
-  for (const s of l.skipped) out.push(`  SKIPPED logo for workspace ${s.workspaceId} (${s.path}): ${s.reason}`);
   for (const [bucket, n] of Object.entries(report.storageNotCopied)) out.push(`Storage: ${n} object(s) in "${bucket}" not copied (see storage.json)`);
   for (const w of report.warnings) out.push(`WARNING ${w}`);
   return out;

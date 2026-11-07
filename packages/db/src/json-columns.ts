@@ -10,15 +10,9 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
   "blocks": [
     "steps"
   ],
-  "calibrations": [
-    "results"
-  ],
   "capacity_changes": [
     "effects",
     "provenance"
-  ],
-  "capacity_factor_proposals": [
-    "proposal"
   ],
   "churn_drivers": [
     "provenance"
@@ -28,10 +22,6 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
   ],
   "clients": [
     "provenance"
-  ],
-  "datasets": [
-    "column_map",
-    "details"
   ],
   "demand_settings": [
     "provenance"
@@ -106,7 +96,6 @@ export const JSON_COLUMNS: Record<string, readonly string[]> = {
     "numbers"
   ],
   "workspaces": [
-    "branding",
     "provenance",
     "settings"
   ]
