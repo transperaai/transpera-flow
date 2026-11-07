@@ -98,7 +98,6 @@ describe("step change screenshots", () => {
       await dialog.locator("[data-change-checking]").fill("2");
       await dialog.locator("[data-change-adoption]").fill("70");
       await dialog.locator("[data-change-ramp]").fill("3");
-      await dialog.locator("[data-change-cost]").fill("400");
       await dialog.getByLabel("T2").check();
       await settle(page);
       await page.screenshot({ path: `${dir}/automate-form-1440-${theme}.png` });

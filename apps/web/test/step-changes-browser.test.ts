@@ -53,7 +53,6 @@ const fillAutomation = async (page: Page, name: string) => {
   await dialog.locator("[data-change-checking]").fill("2");
   await dialog.locator("[data-change-adoption]").fill("70");
   await dialog.locator("[data-change-ramp]").fill("3");
-  await dialog.locator("[data-change-cost]").fill("400");
   await dialog.locator("[data-change-save]").dispatchEvent("click");
   await dialog.waitFor({ state: "detached" });
 };
@@ -81,7 +80,7 @@ describe("step changes in the step panel", () => {
     const [saved] = await demoSolutions(page);
     expect(saved!.step_changes).toHaveLength(2);
     expect(saved!.step_changes[0]).toMatchObject({ id: change.id, kind: "augmentation", effects: [{ step: DISCOVERY, part: "augmentable", factor: 3 }] });
-    expect(saved!.step_changes[1]).toMatchObject({ name: "Pace it by machine", kind: "automation", adoption: 0.7, ramp_months: 3, cost_monthly: 400, effects: [{ step: DISCOVERY, part: "automatable", remove: 0.85, residualHours: 2 / 60 }] });
+    expect(saved!.step_changes[1]).toMatchObject({ name: "Pace it by machine", kind: "automation", adoption: 0.7, ramp_months: 3, cost_monthly: null, effects: [{ step: DISCOVERY, part: "automatable", remove: 0.85, residualHours: 2 / 60 }] });
     expect(saved!.step_changes[1]!.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(errors).toEqual([]);
   });
