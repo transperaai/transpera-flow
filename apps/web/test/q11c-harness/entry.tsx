@@ -97,8 +97,21 @@ window.q11cMountSolution = ({ id, editor }) => {
   );
 };
 
-window.q11cMountBlocks = ({ mode, empty }) =>
-  mount(<BlockLibrary blocks={[]} mode={empty && mode === "demo" ? "readonly" : mode} newHref={mode === "readonly" ? null : "/w/example/p/x/edit?mode=block"} editBase={mode === "readonly" ? null : "/w/example/p/x/edit"} libraryHref="/w/example/blocks" />);
+window.q11cMountBlocks = ({ mode, empty }) => {
+  const base = Object.values(window.q11cData.bundles)[0]!;
+  return mount(
+    <BlockLibrary
+      blocks={[]}
+      mode={empty && mode === "demo" ? "readonly" : mode}
+      newHref={mode === "readonly" ? null : "/w/example/p/x/edit?mode=block"}
+      editBase={mode === "readonly" ? null : "/w/example/p/x/edit"}
+      libraryHref="/w/example/blocks"
+      slug="example"
+      baseProcessId={base.process.id}
+      openBase={async () => base}
+    />,
+  );
+};
 
 window.q11cMountHistory = ({ company, editor, empty }) => {
   const v = empty ? [] : versions(company ? 7 : 6);

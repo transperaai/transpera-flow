@@ -214,7 +214,7 @@ describe("Solution page", () => {
 });
 
 describe("Block library", () => {
-  it("has a header card and a list with a row per block: Open, Edit, a menu, and the map and steps when opened", async () => {
+  it("has a header card and a list with a row per block: Open, Edit, a menu, and the real map when opened", async () => {
     const { page, errors } = await pageOf("blocks-library");
     const header = page.locator("[data-testid=blocks-header]");
     expect(await header.locator("h1").innerText()).toBe("Block library");
@@ -229,8 +229,9 @@ describe("Block library", () => {
     expect(await page.locator("[data-block-panel]").count()).toBe(0);
     await first.locator("[data-block-open]").click();
     const panel = page.locator("[data-block-panel]");
-    expect(await panel.locator("[data-block-map]").count()).toBe(1);
-    expect(await panel.locator("[data-block-steps]").count()).toBe(1);
+    await panel.locator(".react-flow__node[data-id]").first().waitFor({ timeout: 60_000 });
+    expect(await panel.locator(".react-flow__node[data-id]").count()).toBeGreaterThan(0);
+    expect(await panel.locator("[data-block-map], [data-block-steps], [data-block-step]").count()).toBe(0);
     expect(errors).toEqual([]);
     await page.close();
   }, 300_000);
