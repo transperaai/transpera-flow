@@ -115,7 +115,8 @@ describe("a step's base values, in the Editor", { timeout: 120_000 }, () => {
     await select(page, AUDIT);
     await move(page, "Automatable", 60);
     expect(await node(page, AUDIT).locator("[data-split-bar]").count()).toBe(1);
-    await page.getByRole("button", { name: /^Undo/ }).click();
+    // The editor bar's Undo (the map's toolbar has one too).
+    await page.locator("header [data-history=undo]").click();
     expect(await node(page, AUDIT).locator("[data-split-bar]").count()).toBe(0);
     expect(await shown(page)).toEqual(["0%", "0%", "100%"]);
   });
