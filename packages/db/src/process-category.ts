@@ -26,6 +26,18 @@ export const PROCESS_CATEGORY_HELP: Record<ProcessCategory, string> = {
 
 export const isProcessCategory = (v: unknown): v is ProcessCategory => typeof v === "string" && (PROCESS_CATEGORIES as readonly string[]).includes(v);
 
+/**
+ * The engine kind a new process of each category gets (D52): Sales and Onboarding are pipelines (an onboarding pipeline runs when the
+ * company map hands won clients to it); Routine client work, Ad hoc and Internal are servicing.
+ */
+export const PROCESS_CATEGORY_KIND: Record<ProcessCategory, "pipeline" | "servicing"> = {
+  sales: "pipeline",
+  onboarding: "pipeline",
+  routine_client_work: "servicing",
+  ad_hoc: "servicing",
+  internal: "servicing",
+};
+
 /** A recurrence that is requests at random: the ad-hoc driver or a Poisson rate. */
 export const isAdHocRecurrence = (r: RecurrenceJson | null | undefined): boolean => !!r && ("poisson_per_month" in r || ("driver" in r && r.driver === "adhoc"));
 

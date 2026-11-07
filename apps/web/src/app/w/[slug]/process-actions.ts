@@ -1,13 +1,13 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { defaultProcessCategory } from "@transpera-flow/db";
+import { isProcessCategory, PROCESS_CATEGORY_KIND } from "@transpera-flow/db";
 import { isId } from "@/lib/editor/validate";
 import { rpc } from "@transpera-flow/db/client";
 import { pgCode } from "@/app/action-db";
 import { getDb, getSessionUser } from "@/lib/auth/session";
 
-// Creating a process from the app (issues #19, #76; the kind is chosen since B19, #182). The process row is
+// Creating a process from the app (issues #19, #76; the category is chosen since D52, and picks the engine kind). The process row is
 // written directly (processes aren't revisioned); its first steps go into a
 // draft opened with open_draft, as every signed-in edit does (the database's
 // edit_drafts_only trigger refuses the rest). It opens on the canvas in Draft
@@ -21,13 +21,17 @@ const MAX_NAME = 120;
 
 const KINDS = { pipeline: { entity: "lead", start: "New lead", end: "Won", outcome: "won" }, servicing: { entity: "task", start: "Task due", end: "Done", outcome: "done" } } as const;
 
-/** Make a process of the kind chosen (`kind`: pipeline or servicing) with a start and an end, and open it in a draft. */
+/**
+ * Make a process of the category chosen (`category`: one of the five, D41) with a start and an end, and open it in a draft. The
+ * category picks the engine kind (D52), and the kind names the start and the end.
+ */
 export async function createProcess(workspaceId: string, slug: string, _prev: CreateProcessResult, form: FormData): Promise<CreateProcessResult> {
   const name = String(form.get("name") ?? "").trim();
-  const chosen = form.get("kind");
+  const category = form.get("category");
   if (!isId(workspaceId) || typeof slug !== "string") return { error: "Couldn't create it. Try again." };
   if (!name || name.length > MAX_NAME) return { error: `Give it a name (up to ${MAX_NAME} characters).` };
-  if (chosen !== "pipeline" && chosen !== "servicing") return { error: "Choose Sales pipeline or Client work." };
+  if (!isProcessCategory(category)) return { error: "Choose a type." };
+  const chosen = PROCESS_CATEGORY_KIND[category];
   const kind = KINDS[chosen];
   if (!(await getSessionUser())) return { error: "Your session has ended. Sign in again." };
   const db = await getDb();
@@ -41,7 +45,7 @@ export async function createProcess(workspaceId: string, slug: string, _prev: Cr
   try {
     proc = await db
       .insertInto("processes")
-      .values({ workspace_id: workspaceId, name, kind: chosen, entity_name: kind.entity, category: defaultProcessCategory(chosen), source: "manual" })
+      .values({ workspace_id: workspaceId, name, kind: chosen, entity_name: kind.entity, category, source: "manual" })
       .returning("id")
       .executeTakeFirstOrThrow();
   } catch (e) {

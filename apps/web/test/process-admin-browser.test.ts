@@ -42,14 +42,18 @@ const menu = async (page: Page, name: string, item: string) => {
 const dialog = (page: Page) => page.getByRole("dialog");
 
 describe("process admin", () => {
-  it("asks for the type of a new process", async () => {
+  it("asks for the type of a new process: the five categories, with the Type column's words", async () => {
     const { page, errors } = await mount({ canEdit: true });
     await page.getByRole("button", { name: "New process" }).click();
     await dialog(page).getByLabel("Name").fill("Quarterly review");
-    expect(await dialog(page).getByRole("radio").count()).toBe(2);
-    await dialog(page).getByRole("radio", { name: /Client work/ }).check();
+    const radios = dialog(page).getByRole("radio");
+    expect(await radios.evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value))).toEqual(["sales", "onboarding", "routine_client_work", "ad_hoc", "internal"]);
+    const text = await dialog(page).locator("fieldset").innerText();
+    for (const words of ["Sales", "How new work comes in and is won.", "Onboarding", "Getting a new client set up, once per client.", "Routine client work", "Ad hoc", "Internal", "Work for the agency itself, not for a client."]) expect(text).toContain(words);
+    expect(text).not.toContain("Sales pipeline");
+    await dialog(page).getByRole("radio", { name: /Routine client work/ }).check();
     await dialog(page).getByRole("button", { name: "Create" }).click();
-    await expect.poll(() => calls(page)).toContainEqual(["create", "Quarterly review", "servicing"]);
+    await expect.poll(() => calls(page)).toContainEqual(["create", "Quarterly review", "routine_client_work"]);
     expect(errors).toEqual([]);
     await page.close();
   }, 60_000);

@@ -8,7 +8,7 @@ export type ProcessKind = "pipeline" | "servicing";
 
 export const PROCESS_KIND_LABELS: Record<ProcessKind, string> = { pipeline: "Sales pipeline", servicing: "Client work" };
 
-/** The choices in "New process" and "Change type". */
+/** The engine kinds in "Change type", under "How it's simulated". "New process" offers the categories instead (D52). */
 export const PROCESS_KIND_CHOICES: readonly { value: ProcessKind; label: string; description: string }[] = [
   { value: "pipeline", label: PROCESS_KIND_LABELS.pipeline, description: "How new work comes in: leads arrive from Demand, and some are won." },
   { value: "servicing", label: PROCESS_KIND_LABELS.servicing, description: "Work done again and again for existing clients, such as a monthly report." },
