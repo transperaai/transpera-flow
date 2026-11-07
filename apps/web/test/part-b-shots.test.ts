@@ -24,7 +24,6 @@ async function appCss(): Promise<string> {
 let browser: Browser;
 let script: string;
 let css: string;
-const AUDIT = "e0000000-0000-4000-8000-000000000003";
 const DISCOVERY = "e0000000-0000-4000-8000-000000000002";
 
 beforeAll(async () => {
