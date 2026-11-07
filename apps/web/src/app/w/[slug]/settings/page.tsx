@@ -33,7 +33,6 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
         <LinkRows
           label="Settings pages"
           items={[
-            { href: `/w/${slug}/settings/branding`, title: "Branding", description: "A logo and an accent colour that make this workspace look like the client's." },
             { href: `/w/${slug}/settings/purposes`, title: "Purposes", description: "The categories a step's \"What it achieves\" is chosen from." },
             { href: `/w/${slug}/settings/calibration`, title: "Historical data", description: "Import past data, check it against the model and apply the changes you choose." },
           ]}

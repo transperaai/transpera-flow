@@ -69,7 +69,6 @@ import {
   type WorkspaceRow,
   type WorkspaceSettings,
   type PurposeCategory,
-  loadWorkspaceLogoSha,
 } from "@transpera-flow/db";
 import type { HeadlineNumbers } from "./overview/headline";
 import { roleUsage, type RoleUsage } from "./roles";
@@ -111,14 +110,11 @@ export async function listAgencyWorkspaces(): Promise<AgencyWorkspaceRow[]> {
   }));
 }
 
-/** A workspace's id, name, slug and branding by slug, for the shell around its pages (null if it doesn't exist or isn't visible). */
-export const loadWorkspaceHead = cache(async (slug: string): Promise<(Pick<WorkspaceRow, "id" | "name" | "slug"> & { branding: unknown }) | null> => {
+/** A workspace's id, name and slug by slug, for the shell around its pages (null if it doesn't exist or isn't visible). */
+export const loadWorkspaceHead = cache(async (slug: string): Promise<Pick<WorkspaceRow, "id" | "name" | "slug"> | null> => {
   const db = await getDb();
-  return (await db.selectFrom("workspaces").select(["id", "name", "slug", "branding"]).where("slug", "=", slug).executeTakeFirst()) ?? null;
+  return (await db.selectFrom("workspaces").select(["id", "name", "slug"]).where("slug", "=", slug).executeTakeFirst()) ?? null;
 });
-
-/** The hash of a workspace's logo, or null when it has none: what the shell builds the logo's URL from (RLS: members read it). */
-export const loadLogoSha = cache(async (workspaceId: string): Promise<string | null> => loadWorkspaceLogoSha(await getDb(), workspaceId));
 
 /** The workspace's sources (RLS: everyone in the workspace can read them). */
 export async function loadWorkspaceSources(workspaceId: string): Promise<SourceRow[]> {

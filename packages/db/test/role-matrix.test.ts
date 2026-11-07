@@ -531,26 +531,6 @@ describe("workspace name and currency", () => {
   });
 });
 
-describe("branding", () => {
-  // Client branding (#34, B5): the same rule as the name and currency, in a jsonb column of its own.
-  const rebrand = (c: pg.Client) => c.query("update workspaces set branding = jsonb_set(branding, '{accent}', '\"#0b6e8a\"') where id = $1", [ws]);
-
-  for (const role of ["owner (flag)", "admin", "admin, linked"] as const) {
-    it(`${role} changes it`, async () => {
-      await db.as(callers[role]!.claims, async (c) => {
-        expect(await refused(c, () => rebrand(c))).toBe(1);
-      });
-    });
-  }
-  for (const role of ["viewer, Leah", "viewer, Dan", "signed in, no membership"] as const) {
-    it(`${role} does not`, async () => {
-      await db.as(callers[role]!.claims, async (c) => {
-        expect(await refused(c, () => rebrand(c))).toMatch(/refused|no rows/);
-      });
-    });
-  }
-});
-
 describe("functions", () => {
   // The result of calling each function as a role that may not edit: the function raises, or answers `not_found`.
   interface RpcCase {
@@ -939,7 +919,7 @@ describe("anon writes nothing", () => {
       expect(fns).toEqual([
         "api_tokens_keep_revoked", "audit_access_change", "can_edit_workspace", "can_manage_workspace", "can_read_workspace", "edit_drafts_only",
         "is_agency_admin", "is_free_mail_domain", "mcp_token_lookup", "set_updated_at",
-        "stamp_provenance", "use_api_token", "workspace_logo", "workspace_role",
+        "stamp_provenance", "use_api_token", "workspace_role",
       ]);
       // And none of the functions that acted on visitors' ideas or built solutions exists any more, or is open to anon.
       for (const f of ["play_proposal_contacts", "review_proposals", "review_suggestions", "build_proposal", "submit_play_proposal", "save_solution", "play_patch_problem", "lever_kind_ids", "share_team_capacity", "open_share_link"]) expect(fns, f).not.toContain(f);

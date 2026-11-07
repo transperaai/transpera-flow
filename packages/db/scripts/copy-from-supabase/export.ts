@@ -1,10 +1,9 @@
 // Reads a Supabase database (at migration row 72) into a directory of JSON files, for import.ts (docs/plans/supabase-exit-brief.md,
 // step 7a). Every query is a read-only select.
 //   node --experimental-strip-types scripts/copy-from-supabase/export.ts --out <dir> (--supabase <project ref> | --url <postgres url>)
-//       [--page-size 500] [--storage-ref <ref> | --storage-base <url>]
-// --supabase reads through the Management API with SUPABASE_ACCESS_TOKEN (never printed) and downloads the public `branding` objects
-// from the project's public storage URL. --url reads a Postgres database directly, in one read-only repeatable-read transaction
-// (tests and rehearsals); it downloads branding objects only when --storage-ref or --storage-base says where they are.
+//       [--page-size 500]
+// --supabase reads through the Management API with SUPABASE_ACCESS_TOKEN (never printed). --url reads a Postgres database directly, in one read-only repeatable-read transaction
+// (tests and rehearsals). Storage objects are listed, never downloaded (client logos were cut, D70).
 import { parseArgs } from "node:util";
 import { join } from "node:path";
 import pg from "pg";
@@ -13,7 +12,6 @@ import {
   MANIFEST_FILE,
   STORAGE_FILE,
   assertReadOnlySelect,
-  brandingFile,
   isMain,
   managementApiSource,
   prepareOutDir,
@@ -39,15 +37,13 @@ export interface ExportOptions {
   pageSize?: number;
   /** Fewer rows per query for a table whose widest row's text is big: about this many bytes a page. Default 4 MB. */
   pageBytes?: number;
-  /** Where public `branding` objects can be fetched from (`<base>/branding/<name>`); without it nothing is downloaded. */
-  storageBase?: string;
   log?: (line: string) => void;
 }
 
 export interface ExportResult {
   dir: string;
   manifest: Manifest;
-  /** Anything that makes the export unusable as it stands (a table that changed while it was read, a failed branding download). */
+  /** Anything that makes the export unusable as it stands (a table that changed while it was read). */
   problems: string[];
 }
 
@@ -110,7 +106,7 @@ export async function runExport(options: ExportOptions): Promise<ExportResult> {
     source: options.sourceInfo,
     maxMigration: null,
     tables: {},
-    storage: { objects: 0, brandingDownloaded: 0, brandingFailed: 0 },
+    storage: { objects: 0 },
   };
 
   for (const name of tables) {
@@ -182,16 +178,6 @@ export async function runExport(options: ExportOptions): Promise<ExportResult> {
 
   const objects = storagePresent ? await listStorage(source, pageSize) : [];
   manifest.storage.objects = objects.length;
-  if (options.storageBase) {
-    for (const o of objects.filter((x) => x.bucket === "branding")) {
-      const failure = await download(options.storageBase, o, dir);
-      if (failure) {
-        o.error = failure;
-        manifest.storage.brandingFailed++;
-        problems.push(`branding/${o.name}: ${failure}`);
-      } else manifest.storage.brandingDownloaded++;
-    }
-  }
   const writesAfter = await writeCounters(source);
   for (const name of [...tables, "storage.objects"]) {
     const before = writesBefore.get(name);
@@ -202,7 +188,7 @@ export async function runExport(options: ExportOptions): Promise<ExportResult> {
   }
   writePrivate(join(dir, STORAGE_FILE), JSON.stringify(objects, null, 2));
   writePrivate(join(dir, MANIFEST_FILE), JSON.stringify(manifest, null, 2));
-  log(`storage: ${objects.length} objects (${manifest.storage.brandingDownloaded} branding downloaded, ${manifest.storage.brandingFailed} failed)`);
+  log(`storage: ${objects.length} objects`);
   return { dir, manifest, problems };
 }
 
@@ -233,27 +219,6 @@ async function listStorage(source: SqlSource, pageSize: number): Promise<Storage
   }
 }
 
-/** Branding objects are public and are saved whole; anything bigger than this is not a logo and is left for import.ts to report. */
-const MAX_DOWNLOAD = 5 * 1024 * 1024;
-
-/** Saves one public object under the export directory; returns why it could not, or undefined. */
-async function download(base: string, object: StorageObject, dir: string): Promise<string | undefined> {
-  if (object.size !== null && object.size > MAX_DOWNLOAD) return `not downloaded: ${object.size} bytes is far over the logo limit`;
-  const url = `${base.replace(/\/+$/, "")}/branding/${object.name.split("/").map(encodeURIComponent).join("/")}`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return `download answered ${res.status}`;
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.length > MAX_DOWNLOAD) return `not saved: ${bytes.length} bytes is far over the logo limit`;
-    object.file = brandingFile(object.name);
-    writePrivate(join(dir, object.file), bytes);
-    object.size ??= bytes.length;
-    return undefined;
-  } catch (err) {
-    return `download failed: ${err instanceof Error ? err.message : String(err)}`;
-  }
-}
-
 async function main(): Promise<boolean> {
   const { values } = parseArgs({
     options: {
@@ -261,17 +226,13 @@ async function main(): Promise<boolean> {
       supabase: { type: "string" },
       url: { type: "string" },
       "page-size": { type: "string" },
-      "storage-ref": { type: "string" },
-      "storage-base": { type: "string" },
     },
     strict: true,
   });
-  if (!values.out) usageError("Usage: export.ts --out <dir> (--supabase <project ref> | --url <postgres url>) [--page-size N] [--storage-ref <ref> | --storage-base <url>]");
+  if (!values.out) usageError("Usage: export.ts --out <dir> (--supabase <project ref> | --url <postgres url>) [--page-size N]");
   if (!values.supabase === !values.url) usageError("give exactly one of --supabase <ref> and --url <postgres url>");
   const pageSize = values["page-size"] === undefined ? 500 : Number(values["page-size"]);
   if (!Number.isInteger(pageSize) || pageSize < 1) usageError("--page-size must be a positive integer");
-  const ref = values.supabase ?? values["storage-ref"];
-  const storageBase = values["storage-base"] ?? (ref ? `https://${ref}.supabase.co/storage/v1/object/public` : undefined);
   const source = values.supabase
     ? managementApiSource({ ref: values.supabase, token: process.env.SUPABASE_ACCESS_TOKEN ?? "" })
     : await postgresSource(values.url!);
@@ -281,7 +242,6 @@ async function main(): Promise<boolean> {
       source,
       sourceInfo: values.supabase ? { kind: "supabase", ref: values.supabase } : { kind: "url" },
       pageSize,
-      storageBase,
       log: (line) => console.log(line),
     });
     console.log(`Exported to ${dir}`);

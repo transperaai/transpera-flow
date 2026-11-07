@@ -1060,45 +1060,6 @@ export async function loadSourceBody(db: Db, sourceId: string): Promise<string |
   return r?.body ?? null;
 }
 
-/** A workspace's logo as the route serves it: the bytes, their type and their SHA-256 (hex), which is also the ETag. */
-export interface WorkspaceLogo {
-  mime: string;
-  bytes: Buffer;
-  sha256: string;
-}
-
-/** The logo `public.workspace_logo` returns for a workspace (callable signed out), or null when it has none. */
-export async function loadWorkspaceLogo(db: Db, workspaceId: string): Promise<WorkspaceLogo | null> {
-  const { rows } = await sql<WorkspaceLogo>`select mime, bytes, sha256 from public.workspace_logo(${workspaceId}::uuid)`.execute(db);
-  return rows[0] ?? null;
-}
-
-/** The hash of a workspace's logo, or null: members read it from the table (RLS), so the shell can build the logo's URL. */
-export async function loadWorkspaceLogoSha(db: Db, workspaceId: string): Promise<string | null> {
-  const r = await db.selectFrom("workspace_logos").select("sha256").where("workspace_id", "=", workspaceId).executeTakeFirst();
-  return r?.sha256 ?? null;
-}
-
-/**
- * Keep a logo if the stored one is still `base` (its sha256, or null for none), as the signed-in user: RLS lets owners and agency
- * admins write. "conflict" means someone changed it first; a person who may not write gets the database's 42501.
- */
-export async function saveWorkspaceLogo(db: Db, workspaceId: string, base: string | null, logo: WorkspaceLogo): Promise<"saved" | "conflict"> {
-  const values = { mime: logo.mime, bytes: logo.bytes, sha256: logo.sha256, updated_at: new Date().toISOString() };
-  if (base === null) {
-    const r = await db.insertInto("workspace_logos").values({ workspace_id: workspaceId, ...values }).onConflict((oc) => oc.column("workspace_id").doNothing()).returning("workspace_id").execute();
-    return r.length ? "saved" : "conflict";
-  }
-  const r = await db.updateTable("workspace_logos").set(values).where("workspace_id", "=", workspaceId).where("sha256", "=", base).returning("workspace_id").execute();
-  return r.length ? "saved" : "conflict";
-}
-
-/** Remove the logo if the stored one is still `base`. */
-export async function deleteWorkspaceLogo(db: Db, workspaceId: string, base: string): Promise<"removed" | "conflict"> {
-  const r = await db.deleteFrom("workspace_logos").where("workspace_id", "=", workspaceId).where("sha256", "=", base).returning("workspace_id").execute();
-  return r.length ? "removed" : "conflict";
-}
-
 /** The tours of the editor the signed-in person has dismissed (`process`, `company`); RLS shows only their own. */
 export async function loadDismissedTours(db: Db): Promise<string[]> {
   const r = await db.selectFrom("user_tours").select("tour").execute();

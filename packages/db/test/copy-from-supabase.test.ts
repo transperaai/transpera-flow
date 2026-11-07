@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect as tcpConnect, type AddressInfo } from "node:net";
@@ -16,12 +16,12 @@ import { planLoad, type ForeignKey } from "../scripts/copy-from-supabase/foreign
 import { postgresSource, runExport } from "../scripts/copy-from-supabase/export.ts";
 import { formatReport, runImport, type ImportReport } from "../scripts/copy-from-supabase/import.ts";
 import { runVerify } from "../scripts/copy-from-supabase/verify.ts";
-import { COPY_BASE_VERSION, assertReadOnlySelect, brandingFile, managementApiSource, parseRowsExactly, type Manifest } from "../scripts/copy-from-supabase/shared.ts";
+import { COPY_BASE_VERSION, assertReadOnlySelect, managementApiSource, parseRowsExactly, type Manifest } from "../scripts/copy-from-supabase/shared.ts";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
 // Step 7a of the move off Supabase: scripts/copy-from-supabase/. The source is "Supabase-like": the shims and the migrations up to
 // 20261227000000 (production's row 72, before Better Auth, references and logos), with the seed, users, identities, memberships,
-// logos in storage.objects and a source with file columns. It is exported, imported into a fresh database at head by both
+// logo objects in storage.objects (never downloaded now: client logos were cut, D70) and a source with file columns. It is exported, imported into a fresh database at head by both
 // paths (the replica role, and the fallback for a database that refuses it), and verified. Nothing here touches Supabase: the
 // Management API and Storage are a local http server.
 
@@ -32,17 +32,12 @@ const SOURCE_HEAD = "20261227000000";
 const NORTHBEAM = "a0000000-0000-4000-8000-000000000001";
 const LARKSPUR = "a0000000-0000-4000-8001-000000000001";
 
-const sha = (b: Buffer) => createHash("sha256").update(b).digest("hex");
-const png = (size: number) => Buffer.concat([Buffer.from("89504e470d0a1a0a", "hex"), Buffer.alloc(size - 8, 7)]);
-
 let source: TestDb;
 let exportDir = "";
 let exportProblems: string[] = [];
 const targets: TestDb[] = [];
 const scratch: string[] = [];
-let storageServer: Server;
-let storageBase = "";
-const logos: Record<string, { workspace: string; path: string; bytes: Buffer; mime: string }> = {};
+const logos: Record<string, { workspace: string; path: string }> = {};
 const users: Record<string, { id: string; email: string; claims: Record<string, unknown> }> = {};
 let sourceAuditRows = 0;
 /** Queries whose answers must be the same, text for text, on the source and on every target: values a JavaScript number would change. */
@@ -131,52 +126,38 @@ beforeAll(async () => {
     { size: 1234, mimetype: "application/pdf" },
   ]);
 
-  // --- Logos in the public branding bucket --------------------------------------------------------------------------------------
-  const wsLogo = async (key: string, slug: string, ext: string, bytes: Buffer, mime: string, inStorage = true) => {
+  // --- Logo objects in the public branding bucket (listed in storage.json, never downloaded or copied) --------------------------------------------------------------------------------------
+  const wsLogo = async (key: string, slug: string, ext: string, size: number, mime: string, inStorage = true) => {
     const [{ id }] = await s("insert into workspaces (name, slug) values ($1, $1) returning id", [slug]);
     const path = `${id}/${randomUUID()}.${ext}`;
     await s("update workspaces set branding = $2 where id = $1", [id, { accent: "#112233", logo_path: path }]);
-    if (inStorage) await s("insert into storage.objects (bucket_id, name, metadata) values ('branding', $1, $2)", [path, { size: bytes.length, mimetype: mime }]);
-    logos[key] = { workspace: id as string, path, bytes, mime };
+    if (inStorage) await s("insert into storage.objects (bucket_id, name, metadata) values ('branding', $1, $2)", [path, { size, mimetype: mime }]);
+    logos[key] = { workspace: id as string, path };
   };
-  await wsLogo("fine", "logo-fine", "png", png(2000), "image/png");
-  await wsLogo("big", "logo-big", "png", png(600_000), "image/png");
-  await wsLogo("gif", "logo-gif", "webp", png(3000), "image/gif");
-  await wsLogo("gone", "logo-gone", "jpg", png(3000), "image/jpeg");
-  await wsLogo("unlisted", "logo-unlisted", "png", png(3000), "image/png", false);
+  await wsLogo("fine", "logo-fine", "png", 2000, "image/png");
+  await wsLogo("big", "logo-big", "png", 600_000, "image/png");
+  await wsLogo("gif", "logo-gif", "webp", 3000, "image/gif");
+  await wsLogo("gone", "logo-gone", "jpg", 3000, "image/jpeg");
+  await wsLogo("unlisted", "logo-unlisted", "png", 3000, "image/png", false);
   await s("update workspaces set branding = $2 where id = $1", [NORTHBEAM, { accent: "#aa00aa", accent_dark: "#00aaaa" }]);
   sourceAuditRows = await count(source, "audit_log");
   expect(sourceAuditRows).toBeGreaterThan(0);
 
-  // The public Storage URL, served locally: every logo's bytes but the "gone" one's.
-  storageServer = createServer((req, res) => {
-    const name = decodeURIComponent((req.url ?? "").replace(/^\/branding\//, ""));
-    const hit = Object.entries(logos).find(([key, l]) => l.path === name && key !== "gone");
-    if (!hit) {
-      res.writeHead(404).end();
-      return;
-    }
-    res.writeHead(200, { "content-type": hit[1].mime }).end(hit[1].bytes);
-  });
-  await new Promise<void>((r) => storageServer.listen(0, "127.0.0.1", r));
-  storageBase = `http://127.0.0.1:${(storageServer.address() as AddressInfo).port}`;
-
-  // Export through the script itself (--url), as a rehearsal would run it. The "gone" logo can't be downloaded, so it exits 1.
+  // Export through the script itself (--url), as a rehearsal would run it. It downloads nothing, so it exits 0.
   exportDir = join(tmp(), "export");
   const run = await execFileAsync(
     "node",
-    ["--experimental-strip-types", "--no-warnings", join(scripts, "export.ts"), "--out", exportDir, "--url", source.url, "--storage-base", storageBase, "--page-size", "40"],
+    ["--experimental-strip-types", "--no-warnings", join(scripts, "export.ts"), "--out", exportDir, "--url", source.url, "--page-size", "40"],
     { env: { ...process.env, SUPABASE_ACCESS_TOKEN: "" } },
   ).then(
     (r) => ({ code: 0, stderr: r.stderr }),
     (e: { code: number; stderr: string }) => ({ code: e.code, stderr: e.stderr }),
   );
   exportProblems = run.stderr.split("\n").filter((l) => l.startsWith("PROBLEM"));
-  expect(run.code).toBe(1);
+  expect(run.code).toBe(0);
 }, 120_000);
 
 afterAll(async () => {
-  storageServer?.close();
   for (const t of targets) await t.close();
   await source?.close();
   for (const d of scratch) rmSync(d, { recursive: true, force: true });
@@ -258,12 +239,12 @@ describe("export", () => {
     expect(Object.keys(manifest.tables)).not.toContain("public.schema_migrations");
     expect(manifest.tables["auth.users"]!.rows).toBe(7);
     expect(manifest.tables["public.person_capacity_factors"]).toBeDefined(); // no primary key: ordered by every column
-    expect(manifest.storage).toEqual({ objects: 5, brandingDownloaded: 3, brandingFailed: 1 });
+    expect(manifest.storage).toEqual({ objects: 5 });
     for (const [name, { rows }] of Object.entries(manifest.tables)) {
       const file = JSON.parse(readFileSync(join(exportDir, `${name}.json`), "utf8")) as unknown[];
       expect(file, name).toHaveLength(rows);
     }
-    expect(exportProblems).toEqual([expect.stringMatching(/^PROBLEM branding\/.*download answered 404/)]);
+    expect(exportProblems).toEqual([]);
   });
 
   it("keeps auth to the listed columns: no password hashes or tokens", () => {
@@ -282,20 +263,19 @@ describe("export", () => {
     expect(Object.keys((JSON.parse(readFileSync(join(exportDir, "auth.identities.json"), "utf8")) as Record<string, unknown>[])[0]!)).not.toContain("email");
   });
 
-  it("lists every storage object and downloads the branding ones only", () => {
+  it("lists every storage object and downloads none", () => {
     const storage = JSON.parse(readFileSync(join(exportDir, "storage.json"), "utf8")) as { bucket: string; name: string; size: number; contentType: string; file?: string; error?: string }[];
+    expect(storage).toHaveLength(5);
     expect(storage.filter((o) => o.bucket === "sources")).toHaveLength(1);
-    const fine = storage.find((o) => o.name === logos.fine!.path)!;
-    expect(fine).toMatchObject({ bucket: "branding", size: 2000, contentType: "image/png", file: brandingFile(logos.fine!.path) });
-    expect(readFileSync(join(exportDir, fine.file!)).equals(logos.fine!.bytes)).toBe(true);
-    expect(storage.find((o) => o.name === logos.gone!.path)).toMatchObject({ error: "download answered 404" });
-    expect(storage.find((o) => o.name === logos.gone!.path)!.file).toBeUndefined();
+    expect(storage.find((o) => o.name === logos.fine!.path)).toEqual({ bucket: "branding", name: logos.fine!.path, size: 2000, contentType: "image/png" });
+    expect(storage.some((o) => o.file !== undefined || o.error !== undefined)).toBe(false);
+    expect(existsSync(join(exportDir, "branding"))).toBe(false);
   });
 
   it("is owner-only: a 0700 directory and 0600 files", () => {
     expect(statSync(exportDir).mode & 0o777).toBe(0o700);
     expect(statSync(join(exportDir, "manifest.json")).mode & 0o777).toBe(0o600);
-    expect(statSync(join(exportDir, brandingFile(logos.fine!.path))).mode & 0o777).toBe(0o600);
+    expect(statSync(join(exportDir, "storage.json")).mode & 0o777).toBe(0o600);
   });
 
   it("refuses a directory inside the repository, and one that isn't empty", async () => {
@@ -515,22 +495,9 @@ async function expectCopied(target: TestDb, report: ImportReport, preexistingAud
   expect((await t(`select count(*)::int as n from better_auth.account`))[0]!.n).toBe(3);
   expect(report.betterAuth).toMatchObject({ users: 6, accounts: 3, otherProviders: { email: 1 }, skippedUsers: [{ id: users.noEmail!.id, reason: "no email" }] });
 
-  // Logos: the good one, with its hash; the rest reported, none loaded.
-  const fine = logos.fine!;
-  expect(await t("select workspace_id, mime, octet_length(bytes)::int as n, sha256 from workspace_logos order by 1")).toEqual([
-    { workspace_id: fine.workspace, mime: "image/png", n: 2000, sha256: sha(fine.bytes) },
-  ]);
-  expect((await t("select bytes from workspace_logos"))[0]!.bytes.equals(fine.bytes)).toBe(true);
-  expect(report.logos.loaded).toEqual([{ workspaceId: fine.workspace, mime: "image/png", bytes: 2000, sha256: sha(fine.bytes) }]);
-  expect(report.logos.oversized).toEqual([{ workspaceId: logos.big!.workspace, path: logos.big!.path, bytes: 600_000 }]);
-  expect(report.logos.skipped.map((l) => [l.workspaceId, l.reason]).sort()).toEqual(
-    [
-      [logos.gif!.workspace, "type image/gif is not PNG, JPEG or WebP"],
-      [logos.gone!.workspace, "its bytes are not in the export (download answered 404)"],
-      [logos.unlisted!.workspace, "no such object in storage.json"],
-    ].sort(),
-  );
-  expect(report.storageNotCopied).toEqual({ branding: 3, sources: 1 });
+  // Logos are not copied: the table is empty and every storage object is reported as not copied.
+  expect((await t("select count(*)::int as n from workspace_logos"))[0]!.n).toBe(0);
+  expect(report.storageNotCopied).toEqual({ branding: 4, sources: 1 });
 
   // The step-4 shape: file columns and logo_path are gone, the rest of the rows kept.
   const cols = await t("select column_name from information_schema.columns where table_schema = 'public' and table_name = 'sources'");
@@ -540,7 +507,7 @@ async function expectCopied(target: TestDb, report: ImportReport, preexistingAud
   expect(report.droppedColumns["public.sources"]).toEqual(["file_path", "file_name", "file_type", "file_size"]);
   expect(report.droppedColumns["auth.users"]).toEqual(["created_at", "updated_at"]);
   expect((await t("select count(*)::int as n from workspaces where branding ? 'logo_path'"))[0]!.n).toBe(0);
-  expect((await t("select branding from workspaces where id = $1", [fine.workspace]))[0]!.branding).toEqual({ accent: "#112233" });
+  expect((await t("select branding from workspaces where id = $1", [logos.fine!.workspace]))[0]!.branding).toEqual({ accent: "#112233" });
   expect((await t("select branding from workspaces where id = $1", [NORTHBEAM]))[0]!.branding).toEqual({ accent: "#aa00aa", accent_dark: "#00aaaa" });
 
   // Deployment access: admin, editor (owner or editor anywhere), viewer; a rule that was already there is kept.
@@ -606,7 +573,7 @@ describe.each([
     expect(formatReport(report).join("\n")).toContain(`path: ${report.path}`);
   });
 
-  it("copies the data, the Better Auth rows, the logo, the access rules, and none of the audit", async () => {
+  it("copies the data, the Better Auth rows, the access rules, and none of the audit", async () => {
     await expectCopied(target, report, 1);
     // The rule that was already there is kept, and reported.
     expect((await target.client.query("select role from deployment_access where value = 'viewer@acme.example.com'")).rows).toEqual([{ role: "editor" }]);
@@ -831,7 +798,7 @@ describe("verify", () => {
     const done = await run("import.ts", "--in", exportDir, "--url", target.url);
     expect(done.code).toBe(0);
     expect(done.out).toMatch(/Imported; path: replica/);
-    expect(done.out).toMatch(/OVERSIZED logo/);
+    expect(done.out).not.toMatch(/logo/i);
     expect(statSync(join(exportDir, "import-report.json")).mode & 0o777).toBe(0o600);
 
     const good = await run("verify.ts", "--in", exportDir, "--url", target.url);

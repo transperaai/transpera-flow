@@ -4,9 +4,9 @@ Three scripts, run from the repo root with `pnpm --filter @transpera-flow/db <sc
 
 | Script | What it does |
 |---|---|
-| `copy:export` | Reads the Supabase database (migration row 72) into a directory of JSON files, and downloads the public `branding` logos. Read-only. |
+| `copy:export` | Reads the Supabase database (migration row 72) into a directory of JSON files. Read-only. (It no longer downloads the `branding` logos: client logos were cut, D70.) |
 | `copy:import` | Loads an export into a database migrated `--up-to` the copy base (`20261231000000`, `COPY_BASE_VERSION`), in **one transaction**. Nothing is written if anything fails. Then `migrate` takes it to head, so later migrations transform the real data. |
-| `copy:verify` | Compares the target with the export: row counts, every exported row's values (compared in SQL from the file's own text), the Better Auth copies, access rules, logos, sequences, triggers, and a full check of every foreign key. Exits 1 on any problem. |
+| `copy:verify` | Compares the target with the export: row counts, every exported row's values (compared in SQL from the file's own text), the Better Auth copies, access rules, sequences, triggers, and a full check of every foreign key. Exits 1 on any problem. |
 
 The export directory holds real people's data. It must be **outside the repo** (`export.ts` refuses a path inside it), is created `0700`
 with `0600` files, and is deleted when the cutover is done (`rm -rf <dir>`).
@@ -88,14 +88,12 @@ Do not run the final `migrate` or go on to step 3 unless `copy:verify` printed `
 
 ## Options
 
-- `copy:export --out <dir> (--supabase <ref> | --url <postgres url>) [--page-size 500] [--storage-ref <ref> | --storage-base <url>]`.
+- `copy:export --out <dir> (--supabase <ref> | --url <postgres url>) [--page-size 500]`.
   `--supabase` uses the Management API (`POST /v1/projects/<ref>/database/query`, Bearer token, only `select`s: a guard refuses any
-  other statement) and downloads each `branding` object from `https://<ref>.supabase.co/storage/v1/object/public/branding/<name>`.
-  `--url` reads a Postgres database in one read-only repeatable-read transaction and downloads nothing unless `--storage-ref` or
-  `--storage-base` is given. Lower `--page-size` if the API answers with an error on the big tables (`reports.pdf` holds whole PDFs).
+  other statement). `--url` reads a Postgres database in one read-only repeatable-read transaction. Neither downloads storage objects. Lower `--page-size` if the API answers with an error on the big tables (`reports.pdf` holds whole PDFs).
   It refuses a role that row-level security applies to (rows would be missing and the counts would still agree). The script exits 1
   when a table changed while it was read (its count moved, or Postgres counted a write to it between the start and the end of the
-  export) or a logo could not be downloaded; the export is still written, and the logo is reported by the import. Postgres counts a
+  export); the export is still written. Postgres counts a
   write up to a few seconds late, so start the export a minute after the freeze begins; a write reported then means someone
   wrote (`api_tokens` moves on every MCP call), and the export must be run again.
 - `copy:import --in <dir> [--url <postgres url>] [--driver pg|neon-ws] [--dry-run] [--no-replica]`. Numbers are read from the
@@ -118,11 +116,10 @@ Do not run the final `migrate` or go on to step 3 unless `copy:verify` printed `
    other providers are reported, not copied.
 3. Columns the target no longer has (the `sources` file columns, `workspaces.branding.logo_path`) are dropped and listed. Columns the
    target has that the export did not are left to their defaults.
-4. Each workspace's current logo goes into `workspace_logos` with its sha256, if its bytes are in the export, are PNG, JPEG or WebP,
-   and are at most 512 KB. Anything else is listed as oversized or skipped, with the reason.
+4. Logos are not copied (D70); `workspaces.branding` is loaded without its `logo_path`, and the migration after the copy base drops the column.
 5. A `deployment_access` rule per user, by name: `admin` for agency admins, `editor` for anyone who is an active owner or editor in any
    workspace, `viewer` for everyone else. Guests are not seeded. An email that already has a rule keeps it.
 6. Sequences are set to the largest value in their column.
 
-Not copied: the private `sources` bucket (listed in `storage.json` so the files can be re-hosted as links), unused branding objects,
+Not copied: the private `sources` bucket (listed in `storage.json` so the files can be re-hosted as links), the `branding` bucket,
 sessions, passwords, and identities other than Google.

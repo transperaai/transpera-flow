@@ -1,10 +1,8 @@
 // Screenshots for Q11 group B (docs/plans/capacity/q11-shots/b): Set up and Settings pages on a bare page, built from the real components
 // in the same frame the pages use. Test only, nothing here ships.
 
-import Link from "next/link";
 import { createRoot } from "react-dom/client";
 import { build } from "../setup-harness/entry";
-import { BrandingSettings } from "@/components/branding/branding-settings";
 import { PurposesSettings } from "@/components/purposes/purposes-settings";
 import { TiersAndClients } from "@/components/setup/tiers-clients";
 import { PeopleAndRoles, PeopleHeaderActions } from "@/components/setup/people-roles";
@@ -13,7 +11,6 @@ import { SettingsPage } from "@/components/settings/settings-page";
 import { LinkRows } from "@/components/settings/link-rows";
 import { SectionCard } from "@/components/page-kit";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
-import { buttonVariants } from "@/components/ui/button";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { SimulationSettings } from "@/app/w/[slug]/settings/people-settings";
 import { SettingsSection } from "@/app/w/[slug]/settings/section";
@@ -21,7 +18,6 @@ import { HealthSettings } from "@/app/w/[slug]/settings/servicing-settings";
 import { WorkspaceDetails } from "@/app/w/[slug]/settings/workspace-details";
 import { saveOverheadMonthly } from "@/app/w/[slug]/settings/actions";
 import { saveWorkspaceCurrency, saveWorkspaceName } from "@/app/w/[slug]/settings/workspace-actions";
-import { readBranding } from "@/lib/branding/branding";
 
 declare global {
   interface Window {
@@ -59,10 +55,7 @@ window.mountQ11b = (what) => {
         <PhoneNotice />
         <SectionCard id="more-settings" title="More settings" description="The rest of Settings has a page each.">
           <LinkRows label="Settings pages" items={[
-            { href: "#", title: "Branding", description: "A logo and an accent colour that make this workspace look like the client's." },
             { href: "#", title: "Purposes", description: "The categories a step's \"What it achieves\" is chosen from." },
-            { href: "#", title: "Historical data", description: "Import past data, check it against the model and apply the changes you choose." },
-            { href: "#", title: "Change log", description: "Who changed the company model, and what they changed." },
           ]} />
         </SectionCard>
         <WorkspaceDetails workspaceId={data.workspace.id} name="Acme" currency="AUD" overheadMonthly={18000} canManage saveName={saveWorkspaceName} saveCurrency={saveWorkspaceCurrency} saveOverhead={saveOverheadMonthly} />
@@ -74,13 +67,6 @@ window.mountQ11b = (what) => {
           ]} />
         </SettingsSection>
         <HealthSettings data={data} />
-      </SettingsPage>
-    );
-  } else if (what === "branding") {
-    page = (
-      <SettingsPage title="Branding" eyebrow="Settings" description="Make this workspace look like the client's: a logo and an accent colour. Changes save as you go." actions={<Link href="#" className={buttonVariants({ variant: "outline" })}>Back to settings</Link>}>
-        <PhoneNotice />
-        <BrandingSettings mode="live" workspaceId={data.workspace.id} name="Acme" branding={readBranding({})} logoSha={null} logoUrl={null} saveAccent={async () => ({ status: "error", message: "n/a" })} removeLogo={async () => ({ status: "error", message: "n/a" })} />
       </SettingsPage>
     );
   } else if (what === "purposes") {

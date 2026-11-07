@@ -35,7 +35,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-const PAGES = ["setup-clients", "setup-people", "settings", "branding", "purposes"];
+const PAGES = ["setup-clients", "setup-people", "settings", "purposes"];
 const VIEWS = [
   { name: "light-1440", width: 1440, theme: "light" },
   { name: "dark-1440", width: 1440, theme: "dark" },
