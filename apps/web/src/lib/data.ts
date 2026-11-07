@@ -228,6 +228,11 @@ export async function loadProcessList(workspaceId: string): Promise<{ id: string
   return (await listProcesses(await getDb(), workspaceId)).map((p) => ({ id: p.id, name: p.name, kind: p.kind }));
 }
 
+/** The workspace's roles by name, for pills (RLS: everyone in the workspace can read them). */
+export async function loadWorkspaceRoleNames(workspaceId: string): Promise<{ id: string; name: string; color: string | null }[]> {
+  return getDb().then((db) => db.selectFrom("roles").select(["id", "name", "color"]).where("workspace_id", "=", workspaceId).orderBy("name").execute());
+}
+
 /** The workspace's block library, oldest first (RLS: everyone in the workspace can read it). */
 export async function loadWorkspaceBlocks(workspaceId: string): Promise<BlockRow[]> {
   return loadBlocks(await getDb(), workspaceId);

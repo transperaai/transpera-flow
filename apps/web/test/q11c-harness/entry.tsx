@@ -98,7 +98,7 @@ window.q11cMountSolution = ({ id, editor }) => {
 };
 
 window.q11cMountBlocks = ({ mode, empty }) =>
-  mount(<BlockLibrary blocks={[]} mode={empty && mode === "demo" ? "readonly" : mode} newHref={mode === "readonly" ? null : "/w/example/p/x/edit?mode=block"} usage={{}} />);
+  mount(<BlockLibrary blocks={[]} mode={empty && mode === "demo" ? "readonly" : mode} newHref={mode === "readonly" ? null : "/w/example/p/x/edit?mode=block"} editBase={mode === "readonly" ? null : "/w/example/p/x/edit"} libraryHref="/w/example/blocks" />);
 
 window.q11cMountHistory = ({ company, editor, empty }) => {
   const v = empty ? [] : versions(company ? 7 : 6);

@@ -214,19 +214,38 @@ describe("Solution page", () => {
 });
 
 describe("Block library", () => {
-  it("has a header card and a section card per block with its map, steps and usage", async () => {
+  it("has a header card and a list with a row per block: Open, Edit, a menu, and the map and steps when opened", async () => {
     const { page, errors } = await pageOf("blocks-library");
     const header = page.locator("[data-testid=blocks-header]");
     expect(await header.locator("h1").innerText()).toBe("Block library");
-    expect(await header.locator("[data-page-actions]").getByText("✎ New block").count()).toBe(1);
-    const cards = page.locator("li[data-block]");
-    expect(await cards.count()).toBeGreaterThan(1);
-    expect(await header.locator("[data-blocks-count]").innerText()).toBe(`${await cards.count()} blocks`);
-    const first = cards.first();
-    expect(await first.locator("[role=heading][aria-level='2']").count()).toBe(1);
-    expect(await first.locator("[data-used-in]").innerText()).toMatch(/^Used in \d+ solutions?$/);
-    expect(await first.locator("[data-block-steps]").count()).toBe(1);
+    expect(await page.locator("[data-list-toolbar] [data-new-block]").innerText()).toBe("+ New block");
+    const rows = page.locator("tr[data-block]");
+    expect(await rows.count()).toBeGreaterThan(1);
+    expect(await header.locator("[data-blocks-count]").innerText()).toBe(`${await rows.count()} blocks`);
+    const first = rows.first();
+    expect(await first.locator("[data-used-in], td[data-block-used]").first().innerText()).toMatch(/^\d+ solutions?$/);
+    expect(await first.locator("[data-block-edit]").count()).toBe(1);
+    expect(await first.locator("[data-block-menu]").count()).toBe(1);
+    expect(await page.locator("[data-block-panel]").count()).toBe(0);
+    await first.locator("[data-block-open]").click();
+    const panel = page.locator("[data-block-panel]");
+    expect(await panel.locator("[data-block-map]").count()).toBe(1);
+    expect(await panel.locator("[data-block-steps]").count()).toBe(1);
     expect(errors).toEqual([]);
+    await page.close();
+  }, 300_000);
+
+  it("searches the list and the menu offers Rename, Duplicate and Delete", async () => {
+    const { page } = await pageOf("blocks-library");
+    const before = await page.locator("tr[data-block]").count();
+    await page.getByLabel("Search blocks").fill("sign-off");
+    expect(await page.locator("tr[data-block]").count()).toBe(1);
+    await page.getByLabel("Search blocks").fill("");
+    await page.locator("[data-block-menu]").first().click();
+    expect(await page.getByRole("menuitem").allInnerTexts()).toEqual(["Rename…", "Duplicate", "Delete…"]);
+    await page.getByRole("menuitem", { name: "Duplicate" }).click();
+    await page.waitForFunction((n) => document.querySelectorAll("tr[data-block]").length === n + 1, before);
+    expect(await page.locator("[data-block-name]", { hasText: "(copy)" }).count()).toBe(1);
     await page.close();
   }, 300_000);
 
