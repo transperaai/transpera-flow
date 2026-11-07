@@ -201,6 +201,23 @@ describe("problems", () => {
     await page.context().close();
   }, 60_000);
 
+  it("blocks Publish while something is left to fix, and allows it once it is fixed", async () => {
+    const { page } = await open();
+    const publish = page.getByRole("button", { name: "Publish…" });
+    // A wait joined in after a step: a change, and nothing to fix.
+    await select(page, AUDIT);
+    await click(page, "+ Wait");
+    await page.waitForFunction(() => !document.querySelector("[data-problems-line]") && !document.querySelector("[data-tour=publish]")?.hasAttribute("disabled"));
+    expect(await publish.isEnabled()).toBe(true);
+    // A step with nothing leaving it: Publish waits.
+    await page.locator(".react-flow__pane").dispatchEvent("click");
+    await click(page, "+ Step");
+    await page.locator("[data-problems-line]").waitFor();
+    expect(await publish.isDisabled()).toBe(true);
+    expect(await publish.getAttribute("title")).toMatch(/Fix the/);
+    await page.context().close();
+  }, 60_000);
+
   it("shows no line when the process is fine", async () => {
     const { page } = await open();
     expect(await page.locator("[data-problems-line]").count()).toBe(0);

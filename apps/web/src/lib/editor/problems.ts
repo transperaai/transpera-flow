@@ -112,3 +112,8 @@ export function firstProblem(bundle: ProcessBundle, problems: NodeProblems): { k
   const edge = bundle.edges.find((e) => problems.edges.has(e.id));
   return edge ? { kind: "edge", id: edge.id } : null;
 }
+
+/** Why Publish waits on the problems, or null when there are none: Publish is blocked while anything stops the process simulating. */
+export function publishBlocker(total: number): string | null {
+  return total <= 0 ? null : `Fix the ${total === 1 ? "thing" : `${total} things`} marked in red first: a process that can't simulate can't be published.`;
+}

@@ -80,7 +80,10 @@ export function EditorBar({
   historyHref,
   history,
   problems = null,
+  publishBlocked = null,
 }: {
+  /** Why Publish has to wait on what is wrong with the process (see `publishBlocker`), or null. */
+  publishBlocked?: string | null;
   /** What stops the process simulating, as one line ("2 things to fix before this can simulate") that jumps to the first (editor brainstorm, item 4). */
   problems?: { line: string; onJump: () => void; canJump: boolean } | null;
   mode: EditorMode;
@@ -225,8 +228,8 @@ export function EditorBar({
                   size="sm"
                   className={cls}
                   data-tour="publish"
-                  disabled={busy || !drafts.draft || !changes}
-                  title={!changes ? "Nothing to publish yet." : undefined}
+                  disabled={busy || !drafts.draft || !changes || !!publishBlocked}
+                  title={!changes ? "Nothing to publish yet." : (publishBlocked ?? undefined)}
                   onClick={() => setConfirming("publish")}
                 >
                   {s.label}

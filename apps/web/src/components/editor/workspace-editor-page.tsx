@@ -86,6 +86,8 @@ export async function WorkspaceEditorPage({
       scenarios={scenarios}
       blocks={blocks}
       userId={viewer?.userId ?? null}
+      // Only those addPurpose would accept (Agency admins and the Owner, as on Settings -> Purposes) are offered "+ New purpose…".
+      canAddPurpose={canEdit}
       tourDismissed={tourDismissed}
       historyHref={`/w/${slug}/p/${processId}/history`}
       settingsHref={`/w/${slug}/settings`}

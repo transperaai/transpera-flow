@@ -18,7 +18,7 @@ import { createLibraryProcess } from "@/app/w/[slug]/library-actions";
 import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
 import { blockFromSteps, bundleFromBlock, turnIntoSteps, turnIntoStepsProblem } from "@/lib/blocks/blocks";
-import { firstProblem, nodeProblems, problemsLine } from "@/lib/editor/problems";
+import { firstProblem, nodeProblems, problemsLine, publishBlocker } from "@/lib/editor/problems";
 import type { PurposeTools } from "@/components/step-inspector";
 import { parseBlockInput } from "@/lib/blocks/save";
 import { newStepRow } from "@/lib/editor/commands";
@@ -474,6 +474,7 @@ export function EditorView({
         breaks={breaks}
         company={company}
         problems={problemLine ? { line: problemLine, onJump: jumpToProblem, canJump: !!problems && !!firstProblem(working, problems) } : null}
+        publishBlocked={problems ? publishBlocker(problems.total) : null}
         onTour={tour.start}
         historyHref={historyHref}
         history={{ undoLabel: state.undoLabel, redoLabel: state.redoLabel, onUndo: () => editor.undo(), onRedo: () => editor.redo() }}
