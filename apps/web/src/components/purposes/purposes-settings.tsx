@@ -1,6 +1,6 @@
 "use client";
 
-// Settings -> Purposes (sandbox G, phase 4): the categories a step's "What it achieves" is chosen from. Renaming, describing and moving
+// The Purposes section of Settings (sandbox G, phase 4): the categories a step's "What it achieves" is chosen from. Renaming, describing and moving
 // change the Sandbox's labels and order everywhere without a re-run (the engine only knows the keys). Five categories are fixed (renamed and
 // moved, never deleted): the Automatic rules, rework and client hours need them. Saved whole, checked against the list as it was loaded.
 
@@ -18,7 +18,6 @@ import {
 } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { SectionCard } from "@/components/page-kit";
-import { SettingsPage } from "@/components/settings/settings-page";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { ConfirmDialog } from "@/components/sandbox/scenario-bar";
 import { Button } from "@/components/ui/button";
@@ -142,25 +141,26 @@ export function PurposesSettings({
   };
 
   return (
-    <SettingsPage
+    <SectionCard
+      id="purposes"
       title="Purposes"
-      eyebrow="Settings"
-      description="What the work of each step achieves. A step's purpose is set in the editor; Automatic uses the process: sales pipelines are Winning work up to and including the step that decides the sale, and everything after it, and client work, move the client's job forward."
-      actions={
+      description="What the work of each step achieves. A step's purpose is set in the editor; Automatic uses the process: sales pipelines are Winning work up to and including the step that decides the sale, and everything after it, and client work, move the client's job forward. The order here is the order in the Sandbox's charts and tables."
+      actionClassName="flex flex-wrap items-center justify-end gap-2"
+      action={
         <>
           <span role="status" aria-live="polite" className="text-xs text-muted-foreground" data-save-status>
             {status.kind === "saving" ? "Saving…" : status.kind === "saved" ? "Saved" : dirty && canEdit ? "Not saved yet" : ""}
           </span>
-          <Button variant="outline" className={EDIT_ONLY} data-edit-entry disabled={!canEdit || same(list, DEFAULT_PURPOSES as PurposeCategory[])} onClick={reset}>
+          <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry disabled={!canEdit || same(list, DEFAULT_PURPOSES as PurposeCategory[])} onClick={reset}>
             Reset to the defaults
           </Button>
-          <Button className={EDIT_ONLY} data-edit-entry disabled={!canEdit || !dirty || problem !== null || status.kind === "saving"} onClick={() => void submit(base)}>
+          <Button size="sm" className={EDIT_ONLY} data-edit-entry disabled={!canEdit || !dirty || problem !== null || status.kind === "saving"} onClick={() => void submit(base)}>
             Save
           </Button>
         </>
       }
     >
-      <PhoneReadOnly>
+      <PhoneReadOnly notice={false}>
         {mode === "readonly" && (
           <p role="note" className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
             Only Agency admins and the Owner can change the categories. You can see them here.
@@ -204,7 +204,6 @@ export function PurposesSettings({
             {problem}
           </p>
         )}
-        <SectionCard id="categories" title="Categories" description="The order here is the order in the Sandbox's charts and tables.">
         <ol className="flex flex-col gap-2" data-purposes-list>
           {list.map((c, i) => {
             const n = use[c.key] ?? 0;
@@ -272,10 +271,9 @@ export function PurposesSettings({
             />
           </span>
         </div>
-        </SectionCard>
         {children}
       </PhoneReadOnly>
       {confirm ? <ConfirmDialog title={confirm.title} description={confirm.description} confirm={confirm.confirm} cancel="Cancel" destructive onConfirm={confirm.onConfirm} onCancel={() => setConfirm(null)} /> : null}
-    </SettingsPage>
+    </SectionCard>
   );
 }
