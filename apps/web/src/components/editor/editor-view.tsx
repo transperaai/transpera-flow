@@ -207,7 +207,8 @@ export function EditorView({
   const addedBranch = freshBranch && freshBranch.key === pickKey ? freshBranch.id : null;
 
   // What stops the process simulating, by step and by line: the red marks on the map, and the bar's line that jumps to the first.
-  const problems = useMemo(() => (company ? null : nodeProblems(working)), [company, working]);
+  // A block is a piece of a process, which is joined up where it is used: its loose ends are not things to fix, so it has no line (its steps keep the map's own marks).
+  const problems = useMemo(() => (company || blockMode ? null : nodeProblems(working)), [company, blockMode, working]);
   const problemLine = problems ? problemsLine(problems.total) : null;
   const jumpToProblem = () => {
     const first = problems ? firstProblem(working, problems) : null;

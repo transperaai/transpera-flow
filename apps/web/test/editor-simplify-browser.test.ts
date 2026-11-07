@@ -245,10 +245,10 @@ describe("a new purpose", () => {
     await page.locator("[data-new-purpose]").dispatchEvent("click");
     const form = page.locator("[data-new-purpose-form]");
     await form.waitFor();
-    expect(await form.getByLabel("Name").count()).toBe(1);
-    expect(await form.getByLabel("Description").count()).toBe(1);
-    await form.getByLabel("Name").fill("Chasing the client");
-    await form.getByLabel("Description").fill("Emails and calls to get answers");
+    expect(await form.getByRole("textbox", { name: "Name" }).count()).toBe(1);
+    expect(await form.getByRole("textbox", { name: "Description" }).count()).toBe(1);
+    await form.getByRole("textbox", { name: "Name" }).fill("Chasing the client");
+    await form.getByRole("textbox", { name: "Description" }).fill("Emails and calls to get answers");
     await form.getByRole("button", { name: "Add purpose" }).dispatchEvent("click");
     // The server action is stood in for by one that refuses; the page asked it, with the workspace's list as loaded.
     await form.getByRole("alert").waitFor();

@@ -6,6 +6,7 @@
 
 import { useId, useState } from "react";
 import { MAX_PURPOSES, MAX_PURPOSE_DESCRIPTION, MAX_PURPOSE_NAME } from "@transpera-flow/db";
+import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -64,15 +65,21 @@ export function NewPurpose({ adder, onAdded }: { adder: PurposeAdder; onAdded: (
     >
       <p className="text-xs text-fg-2">Added to your workspace&apos;s purposes (Settings → Purposes) and set on this step.</p>
       <div className="flex flex-col gap-1">
-        <label htmlFor={`${id}-name`} className="text-xs font-medium text-fg-2">
-          Name
-        </label>
+        <span className="flex items-center">
+          <label htmlFor={`${id}-name`} className="text-xs font-medium text-fg-2">
+            Name
+          </label>
+          <Help label="Name" description="What the purpose is called, in the lists and charts that add up working time by purpose." example="“Chasing the client”." />
+        </span>
         <Input id={`${id}-name`} autoFocus value={name} maxLength={MAX_PURPOSE_NAME} onChange={(e) => setName(e.target.value)} placeholder="Chasing the client" />
       </div>
       <div className="flex flex-col gap-1">
-        <label htmlFor={`${id}-description`} className="text-xs font-medium text-fg-2">
-          Description <span className="font-normal text-fg-3">(optional)</span>
-        </label>
+        <span className="flex items-center">
+          <label htmlFor={`${id}-description`} className="text-xs font-medium text-fg-2">
+            Description <span className="font-normal text-fg-3">(optional)</span>
+          </label>
+          <Help label="Description" description="A line to remind people what belongs under this purpose. It is shown in Settings, under Purposes." example="“Emails and calls to get answers or sign-off.”" />
+        </span>
         <Textarea id={`${id}-description`} rows={2} value={description} maxLength={MAX_PURPOSE_DESCRIPTION} onChange={(e) => setDescription(e.target.value)} />
       </div>
       {error && (
