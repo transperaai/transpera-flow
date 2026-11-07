@@ -46,8 +46,8 @@ afterAll(async () => {
 
 type Options = { payHidden?: boolean; noTiers?: boolean; missingWords?: boolean; badModel?: boolean; tierTotal?: "over" | "unassigned" };
 
-async function mount(options: Options = {}, width = 1440, scheme: "light" | "dark" = "light"): Promise<{ page: Page; errors: string[] }> {
-  const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: scheme });
+async function mount(options: Options = {}, width = 1440, scheme: "light" | "dark" = "light", scale = 1): Promise<{ page: Page; errors: string[] }> {
+  const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: scheme, deviceScaleFactor: scale });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -204,11 +204,13 @@ describe("Capacity page", { timeout: 180_000 }, () => {
     mkdirSync(shots!, { recursive: true });
     for (const scheme of ["light", "dark"] as const) {
       for (const width of [1440, 400]) {
-        const { page } = await mount({}, width, scheme);
+        const { page } = await mount({}, width, scheme, 2);
         await page.waitForSelector("[data-room]", { timeout: 120_000 });
         await allDone(page);
         await page.evaluate(() => document.fonts.ready);
         await page.screenshot({ path: `${shots}/capacity-${scheme}-${width}.png`, fullPage: true });
+        // Q19: the time-to-serve card on its own, its bars named by the workspace's purposes.
+        if (scheme === "light" && width === 1440) await page.locator("[data-time-to-serve]").screenshot({ path: `${shots}/capacity-time-to-serve-light-1440.png` });
         await page.close();
       }
     }

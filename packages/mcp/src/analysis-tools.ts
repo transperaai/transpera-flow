@@ -229,8 +229,6 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
             // Churn sensitivity and the health rules (issue #79).
             services: loaded.bundle.services,
             workspace: loaded.bundle.workspace.provenance,
-            // Calibrated lead volumes (issue #41): measured qualified leads are not perturbed.
-            leadSources: loaded.bundle.leadSources ?? [],
           },
           metric,
           currency: loaded.bundle.workspace.settings.currency,

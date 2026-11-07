@@ -159,18 +159,14 @@ export function untestedSoleHolders(model: EngineModel, test: AbsenceTest): stri
     .filter((id) => !tested.has(id));
 }
 
-/** Completed items for a person-step before a capacity factor counts as measured (PRD §6.3.7, D20). */
-export const CAPACITY_FACTOR_MIN_ITEMS = 10;
-
 /**
- * Whether a person's capacity factors may be shown (PRD §6.3.7, D20; #31). Only when the workspace has switched them on
- * and the factor is measured (at least 10 completed items for that person-step) or entered. C6 (#198) stores entered ones
- * (`person_capacity_factors`); calibration from a log that names people (#227) stores measured ones, with how many visits they
- * rest on (`measuredItems`), and proposes only from 10, so an applied one always shows.
+ * Whether a person's capacity factors may be shown (PRD §6.3.7, D20; #31): only when the workspace has switched them on. Every
+ * time is a person's own entry (`person_capacity_factors`, C6 #198); the measured ones that calibration stored were cut with
+ * Historical data (D71).
  */
-export function capacityFactorsShown<F extends { measuredItems: number; entered: boolean }>(settings: unknown, factors: readonly F[]): F[] {
+export function capacityFactorsShown<F>(settings: unknown, factors: readonly F[]): F[] {
   const on = typeof settings === "object" && settings !== null && (settings as { capacity_factor_enabled?: unknown }).capacity_factor_enabled === true;
-  return on ? factors.filter((f) => f.entered || f.measuredItems >= CAPACITY_FACTOR_MIN_ITEMS) : [];
+  return on ? [...factors] : [];
 }
 
 /** The (i) text for "Time on each step", the same in Settings and on the People page. */
@@ -200,9 +196,6 @@ export interface ShownFactor {
   stepId: string | null;
   stepName: string;
   factor: number;
-  /** Visits behind it when measured (#227); 0 for an entered one. */
-  measuredItems: number;
-  entered: boolean;
 }
 
 /**
@@ -228,13 +221,7 @@ export function stepsPersonCanDo<S extends { id: string; role_id: string | null 
  */
 export function personFactors(bundle: ProcessBundle, personId: string, stepNames: Map<string, string>): ShownFactor[] {
   const mine = (bundle.personCapacityFactors ?? []).filter((f) => f.person_id === personId);
-  const shown = (stepId: string | null, stepName: string, f: { factor: number; source: string; items?: number | null }): ShownFactor => ({
-    stepId,
-    stepName,
-    factor: Number(f.factor),
-    measuredItems: f.source === "measured" ? Number(f.items ?? 0) : 0,
-    entered: f.source !== "measured",
-  });
+  const shown = (stepId: string | null, stepName: string, f: { factor: number }): ShownFactor => ({ stepId, stepName, factor: Number(f.factor) });
   const out: ShownFactor[] = [];
   const every = mine.find((f) => f.step_id === null);
   if (every) out.push(shown(null, "Every step", every));

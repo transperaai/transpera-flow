@@ -21,9 +21,6 @@ export const EXPECTED_SOURCE_VERSION = "20261227000000";
  * `migrate --up-to` this version, verify, then `migrate` to head, so later migrations (the strip) run on the real data.
  */
 export const COPY_BASE_VERSION = "20261231000000";
-/** `workspace_logos_size`: 512 KB. */
-export const LOGO_MAX_BYTES = 524_288;
-export const LOGO_MIMES = ["image/png", "image/jpeg", "image/webp"];
 export const MANIFEST_FILE = "manifest.json";
 export const STORAGE_FILE = "storage.json";
 export const REPORT_FILE = "import-report.json";
@@ -44,9 +41,6 @@ export const splitName = (name: string): [string, string] => {
 /** `"schema"."table"`. */
 export const qualified = (name: string) => splitName(name).map(quoteIdent).join(".");
 export const tableFile = (name: string) => `${name}.json`;
-/** Where the exporter saves a `branding` object's bytes, relative to the export directory. One flat folder; `/` in the name is escaped. */
-export const brandingFile = (objectName: string) => `branding/${encodeURIComponent(objectName)}`;
-
 /** The columns exported from Supabase's own tables: this list, and not `select *`, so password hashes and tokens never leave it. */
 export const AUTH_COLUMNS: Record<string, string[]> = {
   "auth.users": [
@@ -74,7 +68,7 @@ export interface Manifest {
   /** The source's highest applied migration version, or null when it keeps no log. */
   maxMigration: string | null;
   tables: Record<string, { rows: number; columns: string[] }>;
-  storage: { objects: number; brandingDownloaded: number; brandingFailed: number };
+  storage: { objects: number };
 }
 
 export interface StorageObject {
@@ -82,10 +76,6 @@ export interface StorageObject {
   name: string;
   size: number | null;
   contentType: string | null;
-  /** Path of the downloaded bytes within the export directory (branding objects only). */
-  file?: string;
-  /** Why the bytes were not downloaded. */
-  error?: string;
 }
 
 export function readManifest(dir: string): Manifest {

@@ -98,7 +98,6 @@ describe("team_capacity per-person times (C6)", () => {
     step_id: string | null;
     workspace_id: string;
     factor: number;
-    source: string;
     [k: string]: unknown;
   }
   type WithFactors = { person_capacity_factors: Factor[]; [k: string]: unknown };
@@ -123,8 +122,7 @@ describe("team_capacity per-person times (C6)", () => {
       const f = await factorsAs(who);
       expect(f.map(key).sort()).toEqual(all);
       for (const row of f) {
-        expect(Object.keys(row).sort()).toEqual(["factor", "items", "person_id", "source", "step_id", "workspace_id"]);
-        expect(row.source).toBe("entered");
+        expect(Object.keys(row).sort()).toEqual(["factor", "person_id", "step_id", "workspace_id"]);
         expect(row.workspace_id).toBe(ws);
         expect(typeof row.factor).toBe("number");
       }

@@ -27,8 +27,10 @@ build briefs are written.**
 | Issues | Keep | Q2: where Austin anchors solutions and changes |
 | Solutions, block library | Keep | D12 (routing changes) |
 | Sources | Hide | Q3: a simple source label on each value instead |
-| Calibration | Keep | The only route to measured times (Monday.com export) |
-| MCP, API tokens, backup and restore, access, branding, change log, purposes | Keep | Low cost, and useful |
+| Calibration | Cut (D71) | Removed in Q19 with Historical data; measured values became ordinary entered values |
+| MCP, API tokens, backup and restore, access, purposes | Keep | Low cost, and useful |
+| Branding | Cut (D70) | Logo and colours are hardcoded before deploy |
+| Change log | Cut (D72) | The page only; the audit record stays |
 | Demo (`/demo`) | Cut | Q4: rebuild one client-shaped demo later |
 
 ## Page by page
@@ -79,8 +81,10 @@ build briefs are written.**
 | Clients (named roster) | Change | Adds tier, channels and **per-client overrides** (hand-holding hours per role, ad-hoc rate and size, meeting cadence and length, deliverables, bespoke tasks) (D5) |
 | People | Change | Adds tiers they can serve, reserved management share, salary (for DLER), ramp for new starters, offshore/contractor label, **portfolio** (named clients + counts per tier) (D4) |
 | Churn drivers, client health (servicing), demand, market | Keep | |
-| Access, branding, change log, purposes | Keep | |
-| Calibration (historical data imports) | Keep | Later: a Monday.com ticket-time import to measure step times |
+| Access, purposes | Keep | |
+| Branding | Cut (D70) | |
+| Change log | Cut (D72) | |
+| Calibration (historical data imports) | Cut (D71) | |
 | Levers (`settings/levers`) | Cut | Q1: only controls the older process-level levers |
 
 ### Sandbox (`w/[slug]/sandbox`)

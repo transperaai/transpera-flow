@@ -20,8 +20,6 @@ const { listAgencyWorkspaces, listWorkspaces, loadMemberNames, loadWorkspaceHead
 const { shellCounts } = await import("@/lib/company-data");
 const { saveCapacityFactor, saveCapacityFactorSwitch, saveField, saveFields, saveHealthRule, saveLinks } = await import("@/lib/fields/server");
 const { workspaceIsEmpty } = await import("@/lib/restore/empty");
-const { loadImports, loadLeadSourceOptions } = await import("@/lib/calibration/import-data");
-const { loadLatestChecks } = await import("@/lib/calibration/client-data");
 
 let tdb: TestDb;
 const ws = NORTHBEAM_WORKSPACE_ID;
@@ -232,21 +230,5 @@ describe("restore/empty", () => {
     expect(statements).toBe(1);
     await tdb.client.query("insert into issues (workspace_id, title, type) values ($1, 'An issue', 'delay')", [other]);
     expect(await workspaceIsEmpty(current, other)).toBe(false);
-  });
-});
-
-describe("calibration reads", () => {
-  it("lists a workspace's imports and lead sources", async () => {
-    actAs("viewer");
-    const imports = await loadImports(ws);
-    expect(imports.imports).toEqual([]);
-    const sources = await loadLeadSourceOptions(ws);
-    expect(sources.length).toBeGreaterThan(0);
-    expect(typeof sources[0]!.volumeWeek).toBe("number");
-  });
-
-  it("finds no latest client checks when none were saved", async () => {
-    actAs("viewer");
-    expect(await loadLatestChecks(ws)).toBeNull();
   });
 });

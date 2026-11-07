@@ -88,13 +88,8 @@ _Avoid_: Proposal (a visitor's proposal arrives as a suggestion)
 
 **Client group**:
 The clients of one service, counted but not named: how many, the fee, normal churn, typical stay and starting health. Example: "34 SEO clients paying $2,000 a month". A process whose services have clients counted simulates the groups, and named clients (Settings, Clients) are a record only there; any other process simulates the active named clients; a client who leaves is made inactive, never deleted (PRD D42).
-Normal churn can be measured from a clients file (Settings, Historical data), back-solved through today's churn drivers so late work isn't counted twice (PRD D44).
 _Avoid_: Client roster, client list, account
 Not to be confused with a **group**, which is a box of steps inside a process (above): a group holds steps, a client group counts clients.
-
-**Import**:
-A dataset: a file read on Settings → Historical data (a stage history, deals, time logs, leads, a clients file, a servicing log, jobs or tickets, or invoices), recorded with its kind, the columns that were matched, its row count and date. Its rows are never kept, so an earlier import can't be run again; its columns are offered the next time that kind is imported.
-_Avoid_: Upload (an upload is a process file or a source), dataset (in the UI)
 
 **Churn driver**:
 A reason clients leave, with a weight and an on/off switch. Example: "Late work", responsible for 40% of the clients lost this year.
@@ -105,7 +100,7 @@ The outside climate for demand: a preset (Boom, Stable, Soft, Downturn) or your 
 _Avoid_: Economy, scenario, seasonality (seasonality is a separate monthly demand pattern)
 
 **Per-person time** (capacity factor in code and the PRD):
-How long one person takes on a step compared with their role's normal time: 1 is normal, 0.8 is 20% faster, 1.25 is 25% slower, from 0.5 to 2. There is one optional time for every step they do and one optional time per step, which wins. Off by default (Settings → Simulation, "Per-person times"); owners and editors enter them under Settings → People. Each person sees only their own, and members' and viewers' simulations always use the role's normal time. Calibration can also measure them: a stage history or time log that names who did each visit gives each person's time on each step against the step's normal time, proposed (from 10 visits) to owners and editors, who tick what to apply; an applied one is marked measured, with how many visits it rests on. Never ranked, never compared across people, never in a share link. Example: Maya takes 0.8 on Kickoff.
+How long one person takes on a step compared with their role's normal time: 1 is normal, 0.8 is 20% faster, 1.25 is 25% slower, from 0.5 to 2. There is one optional time for every step they do and one optional time per step, which wins. Off by default (Settings → Simulation, "Per-person times"); owners and editors enter them under Settings → People. Each person sees only their own, and members' and viewers' simulations always use the role's normal time. Never ranked, never compared across people, never in a share link. Example: Maya takes 0.8 on Kickoff.
 _Avoid_: Speed, efficiency, performance (it is capacity, not performance), rating
 
 **Note (of a change)**:
