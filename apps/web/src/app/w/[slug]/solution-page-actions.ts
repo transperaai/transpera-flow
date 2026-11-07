@@ -1,7 +1,6 @@
 "use server";
 
 import { isSolutionStatus, type SolutionIssueRow, type SolutionStatus } from "@transpera-flow/db";
-import { rpc } from "@transpera-flow/db/client";
 import { saveField } from "@/lib/fields/server";
 import { MAX_NOTES } from "@/lib/solutions/cards";
 import { isId } from "@/lib/sources/validate";
@@ -93,33 +92,6 @@ export async function saveSolutionStatus(solutionId: unknown, base: unknown, nex
 }
 
 export type NotesResult ={ status: "ok"; notes: string } | { status: "error"; message: string };
-
-export type AdoptResult =
-  | { status: "ok"; processId: string; number: number }
-  | { status: "draft_exists"; number: number }
-  | { status: "error"; message: string };
-
-/**
- * Adopt a solution (Q12, D44): open the process's draft seeded with the solution's steps, for the person to review in the Editor and publish
- * themselves. Nothing is published here and live is not touched. A draft that already has work in it is kept (`draft_exists`) unless the
- * person said to replace it. The solution is marked Adopted when the draft is seeded, not when it is later published: publishing has no hook for it.
- */
-export async function adoptSolution(workspaceId: unknown, solutionId: unknown, replace: unknown): Promise<AdoptResult> {
-  if (!isId(workspaceId) || !isId(solutionId)) return invalid;
-  if (!(await getSessionUser())) return signedOut;
-  const db = await getDb();
-  const sol = await db.selectFrom("solutions").select(["id", "process_id"]).where("id", "=", solutionId).where("workspace_id", "=", workspaceId).executeTakeFirst().catch(() => undefined);
-  if (!sol) return { status: "error", message: "That solution isn't there any more." };
-  try {
-    const r = (await rpc(db, "adopt_solution", { p_solution: solutionId, p_replace: replace === true })) as { status?: string; number?: number } | null;
-    if (r?.status === "ok") return { status: "ok", processId: sol.process_id, number: Number(r.number) };
-    if (r?.status === "draft_exists") return { status: "draft_exists", number: Number(r.number) };
-    return forbidden;
-  } catch (e) {
-    if (pgCode(e) === "55000") return { status: "error", message: (e as { message?: string }).message ?? "That process is archived." };
-    return failure(e);
-  }
-}
 
 /** The notes on a solution as a whole (not on one issue). */
 export async function saveSolutionNotes(workspaceId: unknown, solutionId: unknown, notes: unknown): Promise<NotesResult> {

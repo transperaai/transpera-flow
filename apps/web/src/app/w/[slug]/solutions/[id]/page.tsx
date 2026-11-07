@@ -7,7 +7,7 @@ import { loadLiveProcess, loadMemberNames, loadSolutionBase, loadProcessNames, l
 import { isId } from "@/lib/sources/validate";
 
 /**
- * One solution (A50, descoped in Q12): its header with the issues it fixes and the ways on (Open in editor, Try it in the Sandbox, Adopt), what it
+ * One solution (A50, descoped in Q12): its header with the issues it fixes and the ways on (Open in editor, Try it in the Sandbox), what it
  * changes in plain lines, the live map and its map side by side, and its notes. `[id]` is the solution's id.
  */
 export default async function WorkspaceSolutionPage(props: PageProps<"/w/[slug]/solutions/[id]">) {

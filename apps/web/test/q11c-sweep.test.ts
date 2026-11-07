@@ -195,17 +195,17 @@ describe("Solution page", () => {
     await page.close();
   }, 300_000);
 
-  it("names the issue it fixes in the header, with Open in editor, Try it in the Sandbox and Adopt beside it", async () => {
+  it("names the issue it fixes in the header, with Open in editor and Try it in the Sandbox beside it, and no Adopt (D55)", async () => {
     const { page } = await pageOf("solution-page");
     expect(await page.locator("[data-solution-issues] [data-solves]").count()).toBe(1);
     const actions = page.locator("[data-testid=solution-header] [data-page-actions]");
     expect(await actions.locator("[data-open-in-editor]").innerText()).toContain("Open in editor");
     expect(await actions.locator("[data-try-in-sandbox]").getAttribute("href")).toMatch(/\/sandbox\?solution=/);
-    expect(await actions.locator("[data-adopt]").innerText()).toBe("Adopt");
+    expect(await page.locator("[data-adopt]").count()).toBe(0);
     await page.close();
   }, 300_000);
 
-  it("a reader gets no Open in editor or Adopt", async () => {
+  it("a reader gets no Open in editor", async () => {
     const { page } = await pageOf("solution-page", { editor: false });
     expect(await page.locator("[data-open-in-editor], [data-adopt]").count()).toBe(0);
     expect(await page.locator("[data-try-in-sandbox]").count()).toBe(1);

@@ -1,7 +1,7 @@
 "use client";
 
 // The Solution page (issue #115, A50; descoped in Q12, decision D44): the header (name, status, the issues it fixes, the process, and the
-// actions Open in editor, Try it in the Sandbox and Adopt), what it changes in plain lines, the live map and this solution's map side by
+// actions Open in editor, Try it in the Sandbox), what it changes in plain lines, the live map and this solution's map side by
 // side, and notes edited in place. The measures table, the revenue chart, the market stress test and the per-issue verdict cards are gone:
 // the numbers live in the Sandbox, and the per-issue verdicts stay in the database.
 
@@ -11,7 +11,6 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import type { IssueRow, ProcessBundle, SolutionRow, SolutionStatus } from "@transpera-flow/db";
 import { EditableText, EmptyState, HEADER_PILL, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
-import { AdoptSolution } from "@/components/solutions/adopt-solution";
 import { DeleteSolution } from "@/components/solutions/delete-solution";
 import { LinkIssueButton } from "@/components/solutions/new-solution";
 import { SolutionMaps } from "@/components/solutions/solution-maps";
@@ -156,14 +155,6 @@ export function SolutionPage(props: SolutionPageProps) {
             </Link>
             {canEdit && (
               <span className={cn("flex flex-wrap items-center gap-2", EDIT_ONLY)} data-edit-entry>
-                <AdoptSolution
-                  workspaceId={workspaceId}
-                  solutionId={solution.id}
-                  name={solution.name}
-                  processName={processName}
-                  draftHref={`${base}/p/${solution.process_id}/edit?from=${encodeURIComponent(here)}`}
-                  onAdopted={() => setLocal((d) => ({ ...d, solutions: d.solutions.map((s): SolutionRow => (s.id === solution.id ? { ...s, status: "adopted" } : s)) }))}
-                />
                 <DeleteSolution
                   name={solution.name}
                   linked={links.length}

@@ -138,16 +138,4 @@ describe("the Solution page's three ways on (D44)", () => {
     expect(read("components/solutions/solution-page.tsx")).toContain("&solution=${solution.id}");
   });
 
-  it("Adopt asks first, opens a draft through adopt_solution, asks before replacing a draft with work in it, and never publishes", () => {
-    const action = read("app/w/[slug]/solution-page-actions.ts");
-    expect(action).toContain('rpc(db, "adopt_solution"');
-    expect(action).not.toContain('rpc(db, "publish');
-    const dialog = read("components/solutions/adopt-solution.tsx");
-    expect(dialog).toContain("Nothing goes live until you do.");
-    expect(dialog).toContain("Replace the draft");
-    expect(dialog).toContain("Keep the draft");
-    const migration = read("../../../packages/db/migrations/20270132000000_adopt_solution.sql");
-    expect(migration).toContain("public.can_edit_workspace(sol.workspace_id)");
-    expect(migration).not.toMatch(/status = 'published'|live_revision_id = /);
-  });
 });
