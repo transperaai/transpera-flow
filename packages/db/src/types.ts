@@ -9,6 +9,7 @@ import type { Selectable } from "kysely";
 import type { DB } from "./db-types";
 import type { Viewer } from "./queries";
 import type { SandboxChange } from "./sandbox-levers";
+import type { StoredStepChange } from "./capacity-changes";
 
 /**
  * What `memberships.role` can hold (migration 20270103000000): `owner` is an Agency admin, `viewer` is a Viewer. The Owner needs
@@ -896,6 +897,8 @@ export interface SolutionRow {
   changed_step_ids: string[];
   /** Lever changes, as scenario patches. */
   lever_changes: ScenarioPatch[];
+  /** Automations and augmentations in this version of the process (D53). The Sandbox runs them from the month the version is picked. */
+  step_changes: StoredStepChange[];
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -1111,7 +1114,7 @@ export type _SchemaDriftChecks = [
   Assert<Matches<Omit<SourceLinkRow, "kind">, "source_links">>,
   // steps is jsonb; BlockBundle is its checked shape, and the check constraint limits type to BlockType.
   Assert<Matches<Omit<BlockRow, "steps" | "type">, "blocks">>,
-  // steps, changed_step_ids and lever_changes are jsonb; SolutionRow has their checked shapes. The verdicts are check-constrained.
-  Assert<Matches<Omit<SolutionRow, "steps" | "changed_step_ids" | "lever_changes">, "solutions">>,
+  // steps, changed_step_ids, lever_changes and step_changes are jsonb; SolutionRow has their checked shapes. The verdicts are check-constrained.
+  Assert<Matches<Omit<SolutionRow, "steps" | "changed_step_ids" | "lever_changes" | "step_changes">, "solutions">>,
   Assert<Matches<Omit<SolutionIssueRow, "auto_verdict" | "user_verdict">, "solution_issues">>,
 ];

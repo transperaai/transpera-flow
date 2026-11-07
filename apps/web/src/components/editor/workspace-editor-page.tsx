@@ -1,6 +1,5 @@
-import { changeStepIds, loadCapacityChanges } from "@transpera-flow/db";
+import { changeStepIds } from "@transpera-flow/db";
 import { bundleFromSolution } from "@transpera-flow/db/sandbox";
-import { getDb } from "@/lib/auth/session";
 import { notFound, redirect } from "next/navigation";
 import { EditorPhoneGate } from "@/components/editor/editor-phone-gate";
 import { EditorView } from "@/components/editor/editor-view";
@@ -48,14 +47,13 @@ export async function WorkspaceEditorPage({
   const canEdit = await canEditWorkspace(live.workspace.id);
   // An archived process (issue #182) is read only until it is restored: its page says so.
   if (!canEdit || live.process.archived_at) redirect(base);
-  const [scenarios, blocks, sources, viewer, tours, tierSetup, storedChanges, laneInput] = await Promise.all([
+  const [scenarios, blocks, sources, viewer, tours, tierSetup, laneInput] = await Promise.all([
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceBlocks(live.workspace.id),
     loadWorkspaceSources(live.workspace.id),
     currentViewer(),
     loadDismissedEditorTours(),
     loadTierSetup(live.workspace.id),
-    getDb().then((db) => loadCapacityChanges(db, live.workspace.id)).catch(() => []),
     company ? loadDepartmentLaneInput(live.workspace.id) : Promise.resolve(undefined),
   ]);
   const tourDismissed = tours.includes(company ? "company" : "process");
@@ -100,7 +98,8 @@ export async function WorkspaceEditorPage({
       library={company ? library : undefined}
       tierSetup={tierSetup}
       laneInput={laneInput}
-      changesOnSteps={{ sandboxHref: `/w/${slug}/sandbox`, changes: storedChanges.map((c) => ({ id: c.id, name: c.name, kind: c.kind, steps: changeStepIds(c) })) }}
+      // The changes in the solution this editor was opened on (D53): they are part of its version, tried by picking it in the Sandbox.
+      changesOnSteps={fromSolution ? { sandboxHref: `/w/${slug}/sandbox?solution=${fromSolution.id}`, changes: fromSolution.step_changes.map((c, i) => ({ id: c.id ?? `${fromSolution.id}:${i}`, name: c.name, kind: c.kind, steps: changeStepIds(c) })) } : undefined}
     />
     </SourceLinkingScope>
     </EditorPhoneGate>

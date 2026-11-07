@@ -43,6 +43,7 @@ const solution = (id: string, extra: Partial<SolutionRow> = {}): SolutionRow => 
   steps: solutionCopy(live),
   changed_step_ids: [ids.audit],
   lever_changes: [],
+  step_changes: [],
   created_at: stamp,
   updated_at: stamp,
   created_by: "u1",

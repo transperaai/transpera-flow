@@ -92,6 +92,7 @@ const solution = (id: string, extra: Partial<SolutionRow> = {}): SolutionRow => 
     steps: solutionCopy(live),
     changed_step_ids: [northbeamStepIds.audit],
     lever_changes: [],
+    step_changes: [],
     created_at: STAMP,
     updated_at: STAMP,
     created_by: "u1",

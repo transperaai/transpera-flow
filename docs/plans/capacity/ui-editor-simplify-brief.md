@@ -28,7 +28,9 @@ are the design.
    - The "Loose ends" panel goes.
    - Each node or line in `nodeProblems` gets a red mark, with its reasons on hover and on focus.
    - The editor bar shows the count line, which jumps to the first problem and selects it.
-   - Publish is blocked as today.
+   - **Publish is blocked while `nodeProblems(bundle).total` is above 0,** as well as by today's reasons (unsaved edits,
+     conflicts). This is stricter than today: branches that don't add up to 100% now block Publish too.
+   - Use `problemsLine` for the bar's text, and `firstProblem` for its jump.
 6. **Evidence leaves the editor.**
    - The `EvidencePanel` comes out of the step inspector, in the editor only.
    - Check that a step can still be linked to a source from the Sources library ("+ Link") and from the process page's
@@ -36,7 +38,8 @@ are the design.
 7. **Purpose** (settled item 1).
    - "What it achieves" gains "+ New purpose…" (a name and an optional description) through `addPurpose`. The step then
      takes the new key.
-   - It is hidden for viewers who can't edit the workspace.
+   - It is hidden for anyone `addPurpose` would refuse: only Agency admins and the Owner can add a purpose, as on
+     Settings → Purposes.
    - It says "You have 12 purposes, the most there can be" at the limit.
 8. **Help and the tour.** Update the (i) text and the editor tour for all of the above. Remove references to groups as
    nodes, the process library, loose ends and evidence.

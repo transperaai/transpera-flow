@@ -239,7 +239,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       title: "Run scenario",
       description:
         "Simulate a process on the server (Monte Carlo) and return means with 10th–90th percentile ranges. Same engine, model and seed as the browser, so the numbers match. " +
-        "With `scenario` (a saved Sandbox scenario's id or name, or \"No changes\"), runs it as the Sandbox does: the live company model month by month with the scenario's changes (timed ones included), returning monthly series, roles, time by purpose, totals and the difference from \"No changes\".",
+        "With `scenario` (a saved Sandbox scenario's id or name, or \"No changes\"), runs it as the Sandbox does: the live company model month by month with the scenario's changes (timed ones included; a solution put live also brings the automations and augmentations it holds, from its month), returning monthly series, roles, time by purpose, totals and the difference from \"No changes\".",
       inputSchema: {
         process: processArg,
         revision: revisionArg,
