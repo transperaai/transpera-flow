@@ -19,7 +19,6 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ClearFilters, EmptyState, FilterMenu, MetaLine, PageHeader, Toolbar, ToolbarSearch, type FilterOption } from "@/components/page-kit";
 import { Page } from "@/components/shell/page";
-import { SplitBar, SplitLegend } from "@/components/split-bar";
 import { readBlock } from "@/lib/blocks/blocks";
 import { duplicateDemoBlock, removeDemoBlock, renameDemoBlock, useDemoBlocks } from "@/lib/blocks/demo";
 import { blockListRow, blockUsers, filterBlockRows, formatBlockTime, relativeDate, usedInSentence, type BlockListRow } from "@/lib/blocks/rows";
@@ -28,6 +27,7 @@ import { EDIT_ONLY } from "@/lib/phone";
 import { solutionHref } from "@/lib/solutions/cards";
 import { cn } from "@/lib/utils";
 import { BlockMap } from "./block-map";
+import { BlockSteps } from "./block-steps";
 
 const NEW_BLOCK_LINK = cn(buttonVariants(), "bg-edit text-edit-fg hover:bg-edit/90");
 const MAX_PILLS = 3;
@@ -417,32 +417,6 @@ function BlockCard({ block }: { block: BlockRow }) {
         <BlockMap block={bundle} label={`Map of ${block.name}: ${steps} ${steps === 1 ? "step" : "steps"}`} />
       </div>
       <BlockSteps block={bundle} />
-    </div>
-  );
-}
-
-/** Each step of a block with its work split, tier multipliers and whether it goes to the client's manager: the base values a block carries. */
-export function BlockSteps({ block }: { block: ReturnType<typeof readBlock> }) {
-  const steps = block.steps.filter((s) => !isGroup(s));
-  if (!steps.length) return null;
-  const withSplit = steps.some((s) => s.split);
-  return (
-    <div className="flex flex-col gap-1.5" data-block-steps>
-      <ul className="flex flex-col gap-1.5">
-        {steps.map((s) => (
-          <li key={s.id} className="grid grid-cols-[minmax(0,1fr)_7rem] items-center gap-x-3 text-xs" data-block-step>
-            <span className="min-w-0 truncate">
-              {s.name}
-              {s.to_client_manager && <span className="ml-1.5 text-fg-2">· the client&apos;s manager</span>}
-              {s.tier_multiplier && Object.keys(s.tier_multiplier).length > 0 && (
-                <span className="ml-1.5 text-fg-2">· {Object.entries(s.tier_multiplier).map(([k, v]) => `${k} ×${v}`).join(", ")}</span>
-              )}
-            </span>
-            {s.split ? <SplitBar split={s.split} /> : <span className="text-fg-2">No split</span>}
-          </li>
-        ))}
-      </ul>
-      {withSplit && <SplitLegend />}
     </div>
   );
 }

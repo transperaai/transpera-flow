@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { northbeamStepIds as ids, toEngineModel, type BlockBundle, type ProcessBundle } from "@transpera-flow/db";
+import { northbeamStepIds as ids, toEngineModel, type BlockBundle, type BlockRow, type ProcessBundle } from "@transpera-flow/db";
 import { simulate } from "@transpera-flow/engine";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
-import { blockFromGroup, blockFromSteps, blockOfStep, blockProblem, blockStepCount, insertBlock, readBlock, replaceProblem, replaceWithBlock } from "@/lib/blocks/blocks";
+import { blockListRow, blockUsers, filterBlockRows, formatBlockTime, relativeDate, usedInSentence } from "@/lib/blocks/rows";
+import { blockFromGroup, blockFromSteps, bundleFromBlock, blockOfStep, blockProblem, blockStepCount, insertBlock, readBlock, replaceProblem, replaceWithBlock } from "@/lib/blocks/blocks";
 import { blockUsage } from "@/lib/blocks/usage";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
-import { BlockSteps } from "@/components/blocks/block-library";
+import { BlockSteps } from "@/components/blocks/block-steps";
 import { stepWarnings } from "@/lib/editor/commands";
 import { diffBundles } from "@/lib/drafts/diff";
 import { openGroupSize } from "@/lib/map/groups";
@@ -453,5 +454,56 @@ describe("used in N solutions", () => {
   it("counts each block on its own, and not a solution that holds none of them", () => {
     const usage = blockUsage([solutionWith(BLOCK), solutionWith(OTHER), solutionWith(null), { steps: { steps: [], edges: [], entry_step_id: null } } as never]);
     expect(usage).toEqual({ [BLOCK.id]: 1, [OTHER.id]: 1 });
+  });
+});
+
+// Q15: the list's numbers, and editing a block seeds the Editor's map and reads back the same bundle.
+describe("the block list's row summaries (Q15)", () => {
+  const split = { automatable: 0.5, augmentable: 0.25, manual: 0.25 };
+  const block = (steps: Record<string, unknown>[]): BlockRow =>
+    ({ id: "b", name: "B", description: "First line\nSecond", type: "manual", steps: { steps, edges: [], entry_step_id: null }, created_at: "", updated_at: "2026-11-01T00:00:00Z" }) as never;
+  const step = (id: string, extra: Record<string, unknown>) => ({ id, name: id, kind: "task", x: 0, y: 0, parent_step_id: null, work_hours: 1, work_params: {}, ...extra });
+
+  it("sums likely hours (the mode, else the mean), lists distinct roles and weights the automatable share by time", () => {
+    const row = blockListRow(
+      block([step("a", { role_id: "r1", work_hours: 2, work_params: { mode: 1 }, split }), step("b", { role_id: "r1", work_hours: 1 }), step("c", { role_id: "r2", work_hours: 2, split: { automatable: 0, augmentable: 0, manual: 1 } })]),
+    );
+    expect(row).toMatchObject({ steps: 3, roleIds: ["r1", "r2"], hours: 4, line: "First line" });
+    expect(row.automatable).toBeCloseTo(0.125);
+  });
+
+  it("has no automatable share when no step has a split, and counts a group's steps not the group", () => {
+    const row = blockListRow(block([{ ...step("g", { kind: "group" }), work_hours: 0 }, step("a", { parent_step_id: "g" })]));
+    expect(row.automatable).toBeNull();
+    expect(row.steps).toBe(1);
+  });
+
+  it("formats time, dates and where a block is used", () => {
+    expect([formatBlockTime(0), formatBlockTime(0.25), formatBlockTime(1), formatBlockTime(1.54)]).toEqual(["–", "15 min", "1 h", "1.5 h"]);
+    const now = new Date("2026-11-07T12:00:00Z");
+    expect([relativeDate("2026-11-07T01:00:00Z", now), relativeDate("2026-11-06T01:00:00Z", now), relativeDate("2026-11-01T00:00:00Z", now)]).toEqual(["today", "yesterday", "6 days ago"]);
+    expect(usedInSentence([{ name: "A" }, { name: "B" }])).toBe("Used in 2 solutions: “A” and “B”.");
+    expect(blockUsers([{ id: "s1", name: "S1", steps: { steps: [{ ...step("x", {}), provenance: { block: "b" } }], edges: [], entry_step_id: null } } as never])).toEqual({ b: [{ id: "s1", name: "S1" }] });
+  });
+
+  it("filters by search and by role", () => {
+    const rows = [blockListRow(block([step("a", { role_id: "r1" })])), { ...blockListRow(block([step("a", { role_id: "r2" })])), id: "c", name: "Other" }];
+    expect(filterBlockRows(rows, "other", []).map((r) => r.id)).toEqual(["c"]);
+    expect(filterBlockRows(rows, "", ["r1"]).map((r) => r.id)).toEqual(["b"]);
+    expect(filterBlockRows(rows, "second", [])).toHaveLength(0);
+  });
+});
+
+describe("editing a block (Q15)", () => {
+  it("seeds a map with the block's own ids, and saving it reads back the same steps and edges", () => {
+    const original = blockFromGroup(nested(), DEMO_GROUP_IDS.conversation)!;
+    const map = bundleFromBlock(flat(), original, "Sales conversation");
+    expect(map.steps.map((s) => s.id).sort()).toEqual(original.steps.map((s) => s.id).sort());
+    expect(map.edges.map((e) => e.id).sort()).toEqual(original.edges.map((e) => e.id).sort());
+    const back = blockFromSteps(map);
+    const byId = <T extends { id: string }>(xs: T[]) => [...xs].sort((a, b) => a.id.localeCompare(b.id));
+    expect(byId(back.steps).map((s) => [s.id, s.name, s.work_hours, s.role_id])).toEqual(byId(original.steps).map((s) => [s.id, s.name, s.work_hours, s.role_id]));
+    expect(byId(back.edges).map((e) => [e.id, e.from_step_id, e.to_step_id])).toEqual(byId(original.edges).map((e) => [e.id, e.from_step_id, e.to_step_id]));
+    expect(blockProblem(back)).toBeNull();
   });
 });
