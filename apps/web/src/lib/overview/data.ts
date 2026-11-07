@@ -1,5 +1,5 @@
 import "server-only";
-import { loadCompanyPartVersion, loadLiveCompanyPart, loadLiveParts as loadLivePartsOf, type ProcessPart } from "@transpera-flow/db";
+import { listCompanyRevisions as listCompanyRevisionsOf, loadCompanyPartRevision as loadCompanyPartRevisionOf, loadCompanyPartVersion, loadLiveCompanyPart, loadLiveParts as loadLivePartsOf, type ProcessPart } from "@transpera-flow/db";
 import { getDb } from "@/lib/auth/session";
 
 /**
@@ -7,6 +7,16 @@ import { getDb } from "@/lib/auth/session";
  * sits and the handoff lines. Null when there is none (the Overview then lays the map out as it always did). As the
  * signed-in user (RLS decides what is visible).
  */
+/** The company map's revisions for the Sandbox's "Company map" select (Q16): the open draft, the live version and the earlier published ones. */
+export async function listCompanyRevisions(workspaceId: string) {
+  return listCompanyRevisionsOf(await getDb(), workspaceId);
+}
+
+/** The company map at one of its revisions by id (the Sandbox's `?company=`). As the signed-in user. */
+export async function loadCompanyRevision(workspaceId: string, revisionId: string): Promise<ProcessPart | null> {
+  return loadCompanyPartRevisionOf(await getDb(), workspaceId, revisionId);
+}
+
 export async function loadLiveCompany(workspaceId: string): Promise<ProcessPart | null> {
   return loadLiveCompanyPart(await getDb(), workspaceId);
 }

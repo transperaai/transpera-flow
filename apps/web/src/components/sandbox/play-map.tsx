@@ -38,6 +38,7 @@ export function PlayMapCard({
   processes,
   months,
   canvas,
+  header,
 }: {
   play: PlayState;
   setPlay: (next: PlayState) => void;
@@ -45,6 +46,8 @@ export function PlayMapCard({
   months: PlayMonths;
   /** The company map, drawn by the page (the harness of the browser test draws a stand-in). */
   canvas?: (api: PlayMapApi) => ReactNode;
+  /** Above the summary line (the company map version select). */
+  header?: ReactNode;
 }) {
   const badges = versionBadges(play, processes);
   const [open, setOpen] = useState<{ processId: string; rect: { left: number; top: number; width: number; height: number } } | null>(null);
@@ -91,6 +94,7 @@ export function PlayMapCard({
         title="Company map"
         description="Every process in the business, with this run playing on it. Click a process to load another version of it. Nothing here changes live data."
       >
+        {header}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm" data-version-summary data-versions={on.length}>
           {on.length ? (
             <>

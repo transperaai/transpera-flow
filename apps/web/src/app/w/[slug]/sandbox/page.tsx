@@ -4,7 +4,7 @@ import { PlayPage } from "@/components/sandbox/play-page";
 import { SandboxView } from "@/components/sandbox/sandbox-view";
 import { SANDBOX_SCENARIOS_SHOWN } from "@/lib/sandbox/scenarios-shown";
 import { getDb } from "@/lib/auth/session";
-import { loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
+import { listCompanyRevisions, loadCompanyRevision, loadLiveCompany, loadLiveParts } from "@/lib/overview/data";
 import { loadDepartmentLaneInput } from "@/lib/overview/lanes-data";
 import { createProcess } from "@/app/w/[slug]/process-actions";
 import { PageHeader } from "@/components/page-kit";
@@ -23,7 +23,7 @@ import { loadLiveProcess, loadPublishState, loadWorkspaceIssues, loadWorkspaceSa
  */
 export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/sandbox">) {
   const { slug } = await props.params;
-  const { solution: solutionParam } = await props.searchParams;
+  const { solution: solutionParam, company: companyParam } = await props.searchParams;
   const live = await loadLiveProcess(slug);
   if (!live) {
     // Nothing is published (a new client): there is nothing to run forward. No scenarios are loaded.
@@ -46,7 +46,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
   const ws = live.workspace.id;
   if (!SANDBOX_SCENARIOS_SHOWN) {
     const db = await getDb();
-    const [setup, library, parts, company, issues, canEdit, solutions, laneInput] = await Promise.all([
+    const [setup, library, parts, liveCompany, issues, canEdit, solutions, laneInput, companyRevisions] = await Promise.all([
       loadCapacitySetup(db, ws),
       loadCapacityChanges(db, ws),
       loadLiveParts(ws),
@@ -55,11 +55,16 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
       canEditWorkspace(ws),
       loadWorkspaceSolutions(ws),
       loadDepartmentLaneInput(ws),
+      listCompanyRevisions(ws),
     ]);
     if (!setup) notFound();
+    // `?company=<revision id | draft>`: another version of the company map for the map card (the run doesn't use the company map, so it is the same run).
+    const chosen = typeof companyParam === "string" ? (companyParam === "draft" ? companyRevisions.find((r) => r.status === "draft") : companyRevisions.find((r) => r.id === companyParam)) : undefined;
+    const company = chosen && !chosen.live ? ((await loadCompanyRevision(ws, chosen.id)) ?? liveCompany) : liveCompany;
+    const companyRevisionId = chosen && company !== liveCompany ? chosen.id : (companyRevisions.find((r) => r.live)?.id ?? null);
     return (
       <Page title="Sandbox" width="max-w-6xl" hideHeader>
-        <PlayPage live={live} parts={parts} company={company} setup={setup} library={library} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} laneInput={laneInput} initialSolutionId={typeof solutionParam === "string" && isId(solutionParam) ? solutionParam : null} />
+        <PlayPage live={live} parts={parts} company={company} setup={setup} library={library} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} laneInput={laneInput} companyRevisions={companyRevisions} companyRevisionId={companyRevisionId} initialSolutionId={typeof solutionParam === "string" && isId(solutionParam) ? solutionParam : null} />
       </Page>
     );
   }

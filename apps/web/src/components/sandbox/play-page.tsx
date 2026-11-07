@@ -5,6 +5,7 @@
 // what the browser test mounts.
 
 import { useCallback, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   defaultPlay,
   partOf,
@@ -13,6 +14,7 @@ import {
   winMix,
   workspacePurposes,
   type CapacityChangeRow,
+  type CompanyRevisionListing,
   type CapacitySetup,
   type IssueRow,
   type PlayContext,
@@ -39,6 +41,8 @@ import { namedForViewer, viewerOf } from "@/lib/viewer";
 import type { PlayRuns } from "@/lib/sandbox/use-play-runs";
 import { SandboxExportMenu, type ExportData } from "./export-menu";
 import { PrintSummary, type PrintColumn } from "./print-summary";
+import { NativeSelect } from "@/components/ui/native-select";
+import { shortDate } from "@/lib/processes/rows";
 import { PlayView } from "./play-view";
 import type { PlayMapApi } from "./play-map";
 import type { PlayProcess } from "./play-types";
@@ -62,6 +66,9 @@ export interface PlayPageProps {
   initialSolutionId?: string | null;
   /** The departments, tier services and servicing links the map's lanes are worked out from (Q4). */
   laneInput?: DepartmentLaneInput;
+  /** The company map's revisions (draft, live, earlier versions) for the "Company map" select, and the one `company` is. */
+  companyRevisions?: CompanyRevisionListing[];
+  companyRevisionId?: string | null;
 }
 
 /** The processes of the company model with their steps and solutions, in words. */
@@ -88,7 +95,7 @@ export function playProcesses(live: ProcessBundle, solutions: readonly SolutionR
   }));
 }
 
-export function PlayPage({ live, parts, company, setup, library, solutions, solutionLinks, issues, canEdit, base, initialSolutionId, laneInput }: PlayPageProps) {
+export function PlayPage({ live, parts, company, setup, library, solutions, solutionLinks, issues, canEdit, base, initialSolutionId, laneInput, companyRevisions = [], companyRevisionId = null }: PlayPageProps) {
   const initialSolution = useMemo(() => {
     const s = initialSolutionId ? solutions.find((x) => x.id === initialSolutionId) : undefined;
     return s ? { id: s.id, processId: s.process_id } : null;
@@ -116,6 +123,31 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
     [laneInput, parts],
   );
   const cardTags = useMemo(() => new Map(parts.map((p) => [p.process.id, PROCESS_CATEGORY_LABELS[p.process.category]] as const)), [parts]);
+  const router = useRouter();
+  const pathname = usePathname();
+  const search = useSearchParams();
+  const pickCompany = (revisionId: string) => {
+    const next = new URLSearchParams(search.toString());
+    const picked = companyRevisions.find((r) => r.id === revisionId);
+    if (!picked || picked.live) next.delete("company");
+    else next.set("company", picked.status === "draft" ? "draft" : picked.id);
+    const qs = next.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
+  const companySelect =
+    companyRevisions.length > 1 ? (
+      <label className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm" data-company-version-select>
+        <span className="font-medium">Company map</span>
+        <NativeSelect value={companyRevisionId ?? ""} onChange={(e) => pickCompany(e.target.value)} aria-label="Company map version" className="w-auto min-w-44">
+          {companyRevisions.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.status === "draft" ? "Draft" : r.live ? `Live · version ${r.number}` : `Version ${r.number}${r.publishedAt ? ` · ${shortDate(r.publishedAt)}` : ""}`}
+            </option>
+          ))}
+        </NativeSelect>
+        <span className="text-xs text-muted-foreground">Another version changes the map&apos;s layout and handoff lines. The run is the same: the company map is a picture, and the processes in it are what is simulated.</span>
+      </label>
+    ) : null;
   const renderMap = (runs: PlayRuns, api: PlayMapApi) =>
     map.bundle.steps.length ? (
       <div className="overflow-hidden rounded-lg border" data-company-map>
@@ -158,6 +190,7 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
       today={base0}
       prepare={prepare}
       map={renderMap}
+      mapHeader={companySelect}
       canEdit={canEdit}
       saveChange={(id, input) => saveCapacityChange(live.workspace.id, id, input)}
       removeChange={(id) => deleteCapacityChange(live.workspace.id, id)}

@@ -564,6 +564,57 @@ export async function loadCompanyPartVersion(db: Db, workspaceId: string, number
   return loadCompanyPartAt(db, workspaceId, number);
 }
 
+/** A revision of the company map as the Sandbox's "Company map" select lists it (Q16). */
+export interface CompanyRevisionListing {
+  id: string;
+  number: number;
+  /** "draft" is the open draft; "published" the live one; "superseded" an earlier published version. */
+  status: "draft" | "published" | "superseded";
+  /** An ISO date, for a published one. */
+  publishedAt: string | null;
+  live: boolean;
+}
+
+/** The company map's revisions, newest first: the open draft, the live version and the earlier published ones. Empty when there is no company map. */
+export async function listCompanyRevisions(db: Db, workspaceId: string): Promise<CompanyRevisionListing[]> {
+  const company = await db.selectFrom("processes").select(["id", "live_revision_id", "draft_revision_id"]).where("workspace_id", "=", workspaceId).where("is_company", "=", true).executeTakeFirst();
+  if (!company) return [];
+  const revisions = await db
+    .selectFrom("process_revisions")
+    .select(["id", "number", "status", "published_at"])
+    .where("process_id", "=", company.id)
+    .where("status", "in", ["draft", "published", "superseded"])
+    .orderBy("number", "desc")
+    .execute();
+  return revisions
+    .filter((r) => r.status !== "draft" || r.id === company.draft_revision_id)
+    .map((r) => ({ id: r.id, number: r.number, status: r.status as CompanyRevisionListing["status"], publishedAt: r.published_at, live: r.id === company.live_revision_id }));
+}
+
+/**
+ * The company map at one of its revisions by id (the open draft, the live one or an earlier published version), as the History page's "View" and the
+ * Editor's draft build it. Layout and handoff lines only: nothing in the company map is simulated. Null when `revisionId` isn't one of the company map's.
+ */
+export async function loadCompanyPartRevision(db: Db, workspaceId: string, revisionId: string): Promise<ProcessPart | null> {
+  const found = await db.selectFrom("processes").select([...columns(PROCESS_COLUMNS), "draft_revision_id"]).where("workspace_id", "=", workspaceId).where("is_company", "=", true).executeTakeFirst();
+  const company = (found ?? null) as unknown as (ProcessRow & { draft_revision_id: string | null }) | null;
+  if (!company) return null;
+  const revision = await db
+    .selectFrom("process_revisions")
+    .select(["id", "workspace_id", "process_id", "number", "status"])
+    .where("id", "=", revisionId)
+    .where("process_id", "=", company.id)
+    .where("status", "in", ["draft", "published", "superseded"])
+    .executeTakeFirst();
+  if (!revision) return null;
+  const [steps, edges] = await Promise.all([
+    db.selectFrom("steps").selectAll().where("revision_id", "=", revision.id).orderBy("y").orderBy("x").orderBy("id").execute(),
+    db.selectFrom("edges").selectAll().where("revision_id", "=", revision.id).orderBy("id").execute(),
+  ]);
+  const { draft_revision_id: _draft, ...process } = company;
+  return { process, revision: revision as ProcessRevisionRow, steps: steps as unknown as StepRow[], edges: edges as unknown as EdgeRow[] };
+}
+
 async function loadCompanyPartAt(db: Db, workspaceId: string, number: number | null): Promise<ProcessPart | null> {
   const found = await db
     .selectFrom("processes")

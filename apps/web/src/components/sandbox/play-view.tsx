@@ -42,6 +42,8 @@ export interface PlayViewProps {
   prepare: (play: PlayState, library: readonly CapacityChangeRow[]) => PreparedPlay;
   /** The company map, drawn by the page: the run playing on it, the new-version badges and a click on a process (which opens its version popover). */
   map?: (runs: PlayRuns, api: PlayMapApi) => ReactNode;
+  /** Above the map card's summary line: the "Company map" version select. */
+  mapHeader?: ReactNode;
   /** Agency admins and the Owner: add, edit and remove changes. */
   canEdit: boolean;
   saveChange?: (id: string | null, input: CapacityChangeInput) => Promise<SaveChangeResult>;
@@ -91,7 +93,7 @@ export function PlayView(props: PlayViewProps) {
           The company can&apos;t be simulated yet: {modelError}
         </div>
       )}
-      <PlayMapCard play={play} setPlay={setPlay} processes={processes} months={months} canvas={props.map ? (api) => props.map!(runs, api) : undefined} />
+      <PlayMapCard play={play} setPlay={setPlay} processes={processes} months={months} header={props.mapHeader} canvas={props.map ? (api) => props.map!(runs, api) : undefined} />
 
       <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <div className="min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto" data-play-levers-column>
