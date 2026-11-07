@@ -101,7 +101,8 @@ describe("provenanceOf", () => {
     const prov = northbeamBundle().leadSources![0]!.provenance;
     expect(provenanceOf(prov, "volume_week")).toBe("estimated");
     expect(provenanceOf({ volume_week: { source: "entered" } }, "volume_week")).toBe("entered");
-    expect(provenanceOf({ multiplier: { source: "measured" } }, "multiplier")).toBe("measured");
+    // "measured" was calibration's (cut, D71): an old entry reads as an estimate.
+    expect(provenanceOf({ multiplier: { source: "measured" } }, "multiplier")).toBe("estimated");
     expect(provenanceOf({}, "multiplier")).toBe("estimated");
     expect(provenanceOf(null, "growth_monthly")).toBe("estimated");
   });

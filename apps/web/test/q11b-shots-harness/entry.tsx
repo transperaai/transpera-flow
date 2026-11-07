@@ -3,6 +3,7 @@
 
 import { createRoot } from "react-dom/client";
 import { build } from "../setup-harness/entry";
+import { WorkspaceShell } from "@/components/shell/workspace-shell";
 import { PurposesSettings } from "@/components/purposes/purposes-settings";
 import { TiersAndClients } from "@/components/setup/tiers-clients";
 import { PeopleAndRoles, PeopleHeaderActions } from "@/components/setup/people-roles";
@@ -26,6 +27,24 @@ declare global {
 }
 
 window.mountQ11b = (what) => {
+  if (what === "sidebar") {
+    // Q19: the workspace tile is always the monogram. The live shell, as the layout builds it, around a stand-in page.
+    createRoot(document.getElementById("root")!).render(
+      <WorkspaceShell
+        mode="live"
+        defaultOpen
+        slug="northbeam"
+        workspaceName="Northbeam Digital"
+        workspaces={[{ name: "Northbeam Digital", href: "/w/northbeam" }, { name: "Larkspur Studio", href: "/w/larkspur" }]}
+        canManage
+        counts={{ processes: 6, openIssues: 3 }}
+        viewer={{ name: "Olive Owner", email: "olive@northbeam.example" }}
+      >
+        <main className="p-6 text-sm text-muted-foreground">The page goes here.</main>
+      </WorkspaceShell>,
+    );
+    return;
+  }
   const { setup, data, roster } = build("owner", 0);
   let page: React.ReactNode = null;
   if (what === "setup-clients") {
