@@ -120,7 +120,7 @@ P1 alone; then P4, P6, P7, P8 in parallel.
   brief in `docs/plans/capacity/`. The preview alias `transpera-flow-next.vercel.app` follows this branch.
 - **Not yet on the handover branch:** the QA work since [transperaai/transpera-flow#255](https://github.com/transperaai/transpera-flow/pull/255).
   One PR brings it across when Austin wants.
-- **Preview database** (Neon `main`): every migration up to `20270134000000_map_drives_run.sql`. Example agency 2
+- **Preview database** (Neon `main`): every migration up to `20270136000000_changes_into_solutions.sql` (and Q19's `20270200000000`). Example agency 2
   (`example-agency-2`) holds the made-up agency, 8 issues, 4 solutions and 4 blocks, for QA.
 - **Decisions:** D1–D51 are in `docs/plans/client-requirements.md` (D51: the company map drives the run; D50 amended).
 - **`main` and production:** untouched, on Supabase (see the 31 Oct section for why).
@@ -168,6 +168,21 @@ P1 alone; then P4, P6, P7, P8 in parallel.
      - Tick the second Neon check in `docs/supabase-notes.md`: a person's publish flips the flag. Do it on a QA
        workspace when one is next published.
      - A browser check of the Sandbox's Company map notes, which Chat B can fold into Sandbox QA.
+1b. **7 Nov, later: Austin's editor and Sandbox QA.** At Austin's request this chat also took on Chat B's page work for these.
+   - **Merged:**
+     - the editor model, [transperaai/transpera-flow#291](https://github.com/transperaai/transpera-flow/pull/291);
+     - the Sandbox results as charts (D54), [transperaai/transpera-flow#293](https://github.com/transperaai/transpera-flow/pull/293);
+     - the editor quick fixes (D52), [transperaai/transpera-flow#294](https://github.com/transperaai/transpera-flow/pull/294). Undo and redo live only in the editor bar now.
+     - D53 part A: automations and augmentations move into solutions,
+       [transperaai/transpera-flow#296](https://github.com/transperaai/transpera-flow/pull/296). It is applied to the preview, with 26 changes moved into
+       solutions.
+   - **In flight:** the simpler editor screens (`docs/plans/capacity/ui-editor-simplify-brief.md`, branch
+     `claude/ui-editor-simplify`). Screenshots go to Austin before merging.
+   - **Next:** D53 part B, "Automate…" and "Augment…" in the editor's step panel (`eng-changes-into-solutions-brief.md`).
+   - **Known:**
+     - `test/overview-browser.test.ts` "Stop button" is flaky on the integration branch.
+     - `pnpm --filter @transpera-flow/db capacity:example` fails with `ERR_MODULE_NOT_FOUND`, an extensionless import.
+     - `capacity_changes` is read-only; drop it in a later release.
 2. **Get Joe's deployment ready:** his own Neon database and Vercel project (`docs/new-client.md`), `capacity:starter`,
    and his Owner sign-in. Confirm with Austin before creating anything.
 3. **Production cutover** to Neon (runbook `packages/db/scripts/copy-from-supabase/README.md`), with Austin present. Then
