@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 // Links into a section of Settings (`/settings#roles-heading`) land on the section's heading, whose id is `<section id>-heading`
 // (SettingsSection). A link to `#workspace` or `#simulation` (the section id without "-heading") pointed at nothing, so the page
-// opened at the top instead of the section: the Sandbox's "Set them in Settings, under Workspace" and the calibration panels'.
+// opened at the top instead of the section: the Sandbox's "Set them in Settings, under Workspace".
 
 const SRC = new URL("../src/", import.meta.url).pathname;
 const SETTINGS = join(SRC, "app/w/[slug]/settings");
@@ -26,7 +26,7 @@ describe("links into Settings", () => {
 
   it("point at a section heading that exists", () => {
     const links = files(SRC).flatMap((f) => [...readFileSync(f, "utf8").matchAll(/(?:\/settings|[pP]eopleHref\})#([a-z0-9-]+)/g)].map((m) => ({ file: f.slice(SRC.length), anchor: m[1]! })));
-    expect(links.length).toBeGreaterThan(5);
+    expect(links.length).toBeGreaterThanOrEqual(5);
     for (const l of links) expect(sections.has(l.anchor), `${l.file}: #${l.anchor}`).toBe(true);
   });
 });

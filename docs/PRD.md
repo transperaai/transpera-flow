@@ -118,9 +118,11 @@ v1 scope is **not cut** (decision D3). It is delivered in three milestones (§11
 - People: name, email (optional), roles (one or more), FTE fraction, capacity hours/week, cost rate, steps they can perform (skills), capacity factor per step (only when enabled, default 1.0), leave periods, start/end date. Active flag.
 - **Clients (roster)**: name, services, start date, MRR, assigned person per role, current health (entered or estimated), notes. Paste from CSV supported. Replaces v0.2's `person_assignments.client_count`; per-person client counts are derived.
 - Demand: lead sources (name, volume/week, conversion to qualified), seasonality curve (12 monthly multipliers), growth assumption.
+- **Cut by D71 (Q19): Settings → Historical data (the CSV import wizard and calibration, §6.6) is removed from the app, with its tables and engine code.**
 - Historical data: CSV import for leads, deals, jobs/tickets, time logs, invoices. Column mapper. Calibration job (§6.6) writes measured parameters with provenance.
   **The import wizard (C1, #40, D45).** One wizard on Settings → Historical data (inline in each card) reads a CSV, TSV or TXT file of up to 20 MB and 200,000 rows in a Web Worker, so a big file doesn't freeze the page. Three steps: *Choose the file* (kind, file or pasted rows, delimiter, the row that holds the column names), *Match the columns* (suggested from the earlier import's choice, then the column names, then whole words; every column correctable; a sample of the values, with clients and people counted not shown, and amounts shown to owners and editors only), *Check the rows* (a preview of the first 20 rows, the rows left out by line and reason, and the file's step, stage, service, task or lead source names matched to the model's). Eight kinds, each read in its own columns: a **stage history** (step log), **deals** and **time logs** (both converted into a step log, so they calibrate a process: time logs only hands-on time), a **clients file** and a **servicing log**, **jobs or tickets** (converted into a servicing log), **leads** (leads a week for each lead source beside Settings, a check only) and **invoices** (counts and the share paid late, a summary only). Each import is recorded under its own kind with its column map, row count, date and a counts-only `details`; the **Imports** card lists every record, and the next import of a kind starts from its column choices. No rows, files, client ids, person names or amounts are stored (D27, #30).
 - Human edits to the company model apply live (they record facts). MCP edits to the company model arrive as **suggestions** (§7.1c). Everything is audit-logged; saved runs and forecasts show a "model changed since this run" banner listing what changed.
+  **The Settings → Change log page was cut by D72 (Q19); the audit record underneath stays (version History, Restore, the workspace list's Last activity).**
 
 **Process editor (canvas)**
 - Drag-and-drop node canvas: add step, connect steps (drag from port to port), branch with probabilities, delete, reroute, group into swimlanes by role.
@@ -216,6 +218,7 @@ Postgres via Supabase. Every table has `workspace_id` and RLS policies (§10). `
 
 ```
 workspaces          id, name, slug, plan, branding jsonb (logo_url, accent, report_colors),
+> **Cut by D70 (Q19): the `branding` column and the `workspace_logos` table are dropped.**
                     settings jsonb (hours_per_week, working_days, currency, fy_start, overhead_monthly, target_margin,
                     overtime_cap default 0, availability_floor default 0.08, utilisation_threshold default 0.85,
                     capacity_factor_enabled default false)                                   (changed)
@@ -284,6 +287,7 @@ datasets            id, workspace_id, kind (step_log|clients|servicing_log|leads
                     column_map jsonb (column id -> the file's header), row_count, details jsonb (counts and model ids only, at most 20,000 bytes; C1), imported_at
                     insert-only; no file_url: the file and its rows are never kept (D45)
 calibrations        id, workspace_id, dataset_id, results jsonb (what changed, before/after), applied bool
+> **Cut by D71 (Q19): `datasets`, `calibrations` and `capacity_factor_proposals` are dropped; stored `measured` provenance became `entered`.**
 audit_log           id, workspace_id, actor_id, actor_kind (user|mcp|system), action, target_table, target_id, diff jsonb
 ```
 
@@ -373,6 +377,7 @@ All headline metrics are reported as **mean with 10–90% band across replicatio
 - Execution: browser worker pool (one worker per core, minus one) with progress; server-side (Node, time-capped) for MCP and PDF. Target 10–30 s in the browser for a 40-step / 25-person / 25-client model. Cached by (model hash, scenario hash, parameter, perturbation).
 
 ### 6.6 Calibration (from historical data)
+> **Cut by D71 (Q19): calibration from historical data is removed (page, engine code, tables and functions). Measured values already stored became ordinary entered values.**
 Given mapped datasets, compute and propose: arrival rates per source, conversion at each decision step, service time distributions per step (and per person where time logs have a person column; capacity factors only if enabled), wait times (timestamps between stages), rework rates (re-opened jobs), churn per service, and servicing SLA performance. Show proposed vs current side by side; user applies all or some. Applied values get `provenance.source = measured`.
 
 **Churn and servicing checks (D44).** A clients file (`client, service, started, ended`) and a servicing log (`task, client, due, done`, optionally `requested`) are read in the browser; client ids are used only to count and join and are never stored (D27). Churn is measured per service as leavers over client-months in the last 52 weeks before the "counted up to" date (at least 13 weeks, 10 clients and 3 leavers; one-off services are not measured). The measured figure already includes what today's churn drivers add, so it is **back-solved**: the model is simulated without its market and any planned price rise, today's driver pressure (the multiplier on normal churn) is read from the run, and the proposal is the measured churn divided by it, found in at most four runs. The proposal is never above the measured figure, and it is written to the client group's normal churn, live and `measured`. The share of servicing work done late or missed, the response time to ad-hoc requests and the onboarding speed are shown beside the simulated values as **checks only**: they are never applied and never feed the run. Late payments stay out of the market baseline until the engine has a cash model. Per-person times are a separate ticket.
@@ -545,6 +550,7 @@ UI quality is a primary requirement, not a finish. The stack is chosen so every 
 - **Layout.** Ops-console: KPI strip on top, canvas left, control rail right with tabs. Command palette (⌘K) for jumping to any step, person, client, scenario or issue. Responsive to tablet; phone is read-only.
 - **Typography and density.** Tabular numerals everywhere digits align; a fixed type scale; dense but breathable rows (32–36 px) for tables; generous canvas whitespace.
 - **Client branding (v1).** Workspace-level logo, accent colour and report colours. Accent validated for contrast on both themes at save time.
+  **Cut by D70 (Q19): no branding in the app; the logo and colours are hardcoded before deploy.**
 - **Empty and loading states are designed**, not default.
 - **Storybook** for every component and chart in both themes; visual regression via Playwright screenshots on each PR.
 - **Accessibility floor.** WCAG AA contrast, full keyboard operation of canvas and rail, focus rings visible, ARIA on custom nodes.

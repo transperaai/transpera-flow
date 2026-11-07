@@ -35,6 +35,7 @@ const solution: SolutionRow = (() => {
     steps: { steps, edges: bundle.edges.map((e) => strip(e)), entry_step_id: null },
     changed_step_ids: [northbeamStepIds.ppc],
     lever_changes: [],
+    step_changes: [],
     created_at: "2026-10-05T00:00:00.000Z",
     updated_at: "2026-10-05T00:00:00.000Z",
     created_by: null,

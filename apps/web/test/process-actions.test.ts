@@ -28,15 +28,15 @@ afterAll(async () => {
   await world?.tdb.close();
 });
 
-const form = (name: string, kind: string | null = "servicing") => {
+const form = (name: string, category: string | null = "routine_client_work") => {
   const f = new FormData();
   f.set("name", name);
-  if (kind !== null) f.set("kind", kind);
+  if (category !== null) f.set("category", category);
   return f;
 };
 
 const named = async (name: string) =>
-  (await world.tdb.client.query("select id, kind, is_company, entity_name from processes where workspace_id = $1 and lower(name) = lower($2)", [WS, name])).rows;
+  (await world.tdb.client.query("select id, kind, category, is_company, entity_name from processes where workspace_id = $1 and lower(name) = lower($2)", [WS, name])).rows;
 
 describe("createProcess", () => {
   it("lets a process be called 'Company map', but not the name of an ordinary one", async () => {
@@ -47,14 +47,31 @@ describe("createProcess", () => {
     expect(await named("Sales")).toHaveLength(1);
   });
 
-  it("asks for the kind, and lets a new process take an archived one's name", async () => {
-    expect(await createProcess(WS, "northbeam", {}, form("Quarterly review", null))).toEqual({ error: "Choose Sales pipeline or Client work." });
-    expect(await createProcess(WS, "northbeam", {}, form("Quarterly review", "company"))).toEqual({ error: "Choose Sales pipeline or Client work." });
+  it("asks for the category, and lets a new process take an archived one's name", async () => {
+    const wrong = { error: "Choose what kind of process it is." };
+    expect(await createProcess(WS, "northbeam", {}, form("Quarterly review", null))).toEqual(wrong);
+    expect(await createProcess(WS, "northbeam", {}, form("Quarterly review", "pipeline"))).toEqual(wrong);
+    expect(await createProcess(WS, "northbeam", {}, form("Quarterly review", "company"))).toEqual(wrong);
     expect(await named("Quarterly review")).toHaveLength(0);
     // "Old audit" is archived, so its name is free.
-    expect(await createProcess(WS, "northbeam", {}, form("old AUDIT", "pipeline"))).toBeUndefined();
+    expect(await createProcess(WS, "northbeam", {}, form("old AUDIT", "sales"))).toBeUndefined();
     const made = (await named("old audit")).filter((p) => p.kind === "pipeline");
     expect(made).toHaveLength(2);
     expect(made.some((p) => p.entity_name === "lead")).toBe(true);
+  });
+
+  // D52: the category picks the engine kind; Sales and Onboarding are pipelines, the rest servicing. The start and end names come from the kind.
+  it.each([
+    ["sales", "pipeline", "New lead", "Won"],
+    ["onboarding", "pipeline", "New lead", "Won"],
+    ["routine_client_work", "servicing", "Task due", "Done"],
+    ["ad_hoc", "servicing", "Task due", "Done"],
+    ["internal", "servicing", "Task due", "Done"],
+  ])("makes a %s process a %s", async (category, kind, start, end) => {
+    expect(await createProcess(WS, "northbeam", {}, form(`Made as ${category}`, category))).toBeUndefined();
+    const [p] = await named(`Made as ${category}`);
+    expect(p).toMatchObject({ kind, category });
+    const steps = (await world.tdb.client.query("select name from steps where process_id = $1 order by x", [p.id])).rows.map((r) => r.name);
+    expect(steps).toEqual([start, end]);
   });
 });

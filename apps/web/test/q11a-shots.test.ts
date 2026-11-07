@@ -86,8 +86,8 @@ describe("Q11 group A screenshots", { timeout: 600_000 }, () => {
   });
   it.skipIf(!dir)("Sandbox", async () => {
     await shoot("sandbox", scripts.play!, "mountPlay", async (page) => {
-      await page.waitForSelector("[data-verdict-line]", { timeout: 120_000 });
-      await page.waitForSelector('[data-play-chart="Busy share of the five busiest teams"]', { timeout: 60_000 });
+      await page.waitForSelector("[data-play-heatmap]", { timeout: 120_000 });
+      await page.waitForSelector('[data-play-chart="DLER by department"]', { timeout: 60_000 });
     });
   });
 });

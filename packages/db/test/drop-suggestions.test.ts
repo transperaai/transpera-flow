@@ -92,9 +92,8 @@ describe("what the migration drops", () => {
 });
 
 describe("what it keeps and rewrites", () => {
-  it("keeps capacity_factor_proposals: in-app calibration writes it, and it still refuses an API token", async () => {
-    expect(await names("select tablename n from pg_tables where schemaname = 'public' and tablename = 'capacity_factor_proposals'")).toEqual(["capacity_factor_proposals"]);
-    expect(await names("select tgname n from pg_trigger where not tgisinternal and tgrelid = 'public.capacity_factor_proposals'::regclass order by 1")).toContain("needs_review");
+  it("capacity_factor_proposals was kept by this migration and dropped by the Historical data cut (Q19, D71)", async () => {
+    expect(await names("select tablename n from pg_tables where schemaname = 'public' and tablename = 'capacity_factor_proposals'")).toEqual([]);
   });
 
   it("the audit log is written as before for the company model, and carries no suggestion_id even if the old setting is still around", async () => {

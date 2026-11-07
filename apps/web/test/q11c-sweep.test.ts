@@ -131,14 +131,14 @@ describe("Solutions list", () => {
     const { page, errors } = await pageOf("solutions-list");
     const header = page.locator("[data-testid=solutions-header]");
     expect(await header.locator("h1").innerText()).toBe("Solutions");
-    expect(await header.locator("[data-solutions-count]").innerText()).toBe("3 solutions");
+    expect(await header.locator("[data-solutions-count]").innerText()).toBe("16 solutions"); // the 3 the example has by hand and the 13 that hold its changes (D53)
     expect(await header.locator("[data-page-actions]").getByText("✎ New solution").count()).toBe(1);
     expect(await page.locator("[role=toolbar] [data-toolbar-search]").count()).toBe(1);
     expect(await page.locator("[data-filter=status]").count()).toBe(1);
     expect(await page.locator("[data-filter=process]").count()).toBe(1);
     expect(await page.locator("[data-filter=issue]").count()).toBe(1);
     const cards = page.locator("[data-testid=solution-row]");
-    expect(await cards.count()).toBe(3);
+    expect(await cards.count()).toBe(16);
     const pills = await cards.evaluateAll((els) => els.map((e) => e.querySelector("[data-status]")?.getAttribute("data-status")));
     expect(pills).not.toContain(undefined);
     expect(pills).toContain("works");
@@ -154,17 +154,17 @@ describe("Solutions list", () => {
     expect(await page.locator("[data-testid=solution-row]").count()).toBe(1);
     expect(await page.locator("[data-testid=solution-row]").innerText()).toContain("Vetting by a second person");
     await page.locator("[data-clear-filters]").click();
-    expect(await page.locator("[data-testid=solution-row]").count()).toBe(3);
+    expect(await page.locator("[data-testid=solution-row]").count()).toBe(16);
     await page.getByRole("searchbox", { name: "Search solutions" }).fill("budget");
     expect(await page.locator("[data-testid=solution-row]").count()).toBe(1);
     await page.getByRole("searchbox", { name: "Search solutions" }).fill("zzzz");
     expect(await page.locator("[data-testid=solutions-empty][data-filtered]").innerText()).toContain("No solutions match these filters.");
     await page.locator("[data-testid=solutions-empty] [data-clear-filters]").click();
-    expect(await page.locator("[data-testid=solution-row]").count()).toBe(3);
+    expect(await page.locator("[data-testid=solution-row]").count()).toBe(16);
     await page.locator("[data-filter=process]").click();
     const first = page.locator("[data-filter-menu=process] input[type=checkbox]").first();
     await first.check();
-    expect(await page.locator("[data-testid=solution-row]").count()).toBeLessThan(3);
+    expect(await page.locator("[data-testid=solution-row]").count()).toBeLessThan(16);
     await page.close();
   }, 300_000);
 

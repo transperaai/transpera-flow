@@ -1,7 +1,11 @@
+"use client";
+
 // One of the free-play Sandbox's four charts (capacity build P7; the prototype's `lineChart`): a few lines month by month, today's path dashed in
 // the colour of the line it is the path of, an optional goal line, and a legend with an entry for today's path. Drawn by hand in SVG from the theme's
 // tokens (so light and dark follow), sized by its viewBox so it fits a phone, with the same numbers as a table for a screen reader.
 
+import { useState, type ReactNode } from "react";
+import { FloatingTip } from "@/components/ui/floating-tip";
 import { labelIndexes, niceTicks } from "@/lib/overview/axis";
 
 export interface PlayChartSeries {
@@ -13,8 +17,6 @@ export interface PlayChartSeries {
   dashed?: boolean;
   /** Leave out of the legend (a dashed line shares its name with the line it is the path of). */
   hideFromLegend?: boolean;
-  /** A line of its own for this series (a team's "too busy" line), drawn faint in the series' colour. */
-  line?: number;
 }
 
 export interface PlayChartProps {
@@ -28,16 +30,21 @@ export interface PlayChartProps {
   min?: number;
   /** Name for the dashed lines in the legend. */
   todayLabel?: string;
+  /** Three of these sit in a row: a narrower drawing, so the text stays readable when it is scaled down. */
+  narrow?: boolean;
+  /** Extra lines under a month's values in the tooltip (clients won and lost). */
+  tipExtra?: (month: number) => ReactNode;
 }
 
-const W = 520;
-const H = 230;
-const M = { l: 62, r: 14, t: 14, b: 28 };
+const WIDE = { W: 520, H: 230, M: { l: 62, r: 14, t: 14, b: 28 } };
+const NARROW = { W: 300, H: 220, M: { l: 52, r: 10, t: 14, b: 28 } };
 
-export function PlayChart({ title, months, series, format, goal, min, todayLabel = "Today's path" }: PlayChartProps) {
+export function PlayChart({ title, months, series, format, goal, min, todayLabel = "Today's path", narrow = false, tipExtra }: PlayChartProps) {
+  const { W, H, M } = narrow ? NARROW : WIDE;
+  const [tip, setTip] = useState<{ i: number; at: { x: number; y: number } } | null>(null);
   const n = months.length;
   const values = series.flatMap((s) => s.values).filter((v): v is number => v !== null);
-  const extra = [goal?.value, ...series.map((s) => s.line)].filter((v): v is number => v !== undefined);
+  const extra = [goal?.value].filter((v): v is number => v !== undefined);
   const all = [...values, ...extra];
   let lo = min ?? Math.min(...all, 0);
   let hi = Math.max(...all, lo + 1e-6);
@@ -70,10 +77,25 @@ export function PlayChart({ title, months, series, format, goal, min, todayLabel
   };
   const hasToday = series.some((s) => s.dashed);
   const legend = series.filter((s) => !s.dashed && !s.hideFromLegend);
-  const label = labelIndexes(n, 4);
+  const label = labelIndexes(n, narrow ? 3 : 4);
+  const nearest = (e: React.PointerEvent<SVGSVGElement>) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    const px = ((e.clientX - box.left) / box.width) * W;
+    const i = Math.round(((px - M.l) / (W - M.l - M.r || 1)) * (n - 1));
+    setTip({ i: Math.max(0, Math.min(n - 1, i)), at: { x: e.clientX, y: e.clientY } });
+  };
+  const today = (name: string) => series.find((s) => s.dashed && s.name === name);
   return (
     <figure className="m-0 flex flex-col gap-2" data-play-chart={title}>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${title}, month by month`} className="h-auto w-full overflow-visible text-[11px]">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        role="img"
+        aria-label={`${title}, month by month`}
+        className="h-auto w-full touch-pan-y overflow-visible text-[11px]"
+        onPointerMove={nearest}
+        onPointerDown={nearest}
+        onPointerLeave={() => setTip(null)}
+      >
         {ticks.map((v) => (
           <g key={v}>
             <line x1={M.l} x2={W - M.r} y1={y(v)} y2={y(v)} stroke="var(--line)" />
@@ -90,14 +112,12 @@ export function PlayChart({ title, months, series, format, goal, min, todayLabel
             </text>
           </g>
         )}
-        {series.map((s, i) =>
-          s.line === undefined ? null : <line key={`l${i}`} x1={M.l} x2={W - M.r} y1={y(s.line)} y2={y(s.line)} stroke={s.color} strokeOpacity={0.45} strokeDasharray="1 4" strokeWidth={1.5} data-team-line={s.name} />,
-        )}
         {label.map((i) => (
           <text key={i} x={x(i)} y={H - 7} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} className="fill-muted-foreground">
             {months[i]}
           </text>
         ))}
+        {tip && <line x1={x(tip.i)} x2={x(tip.i)} y1={M.t} y2={H - M.b} stroke="var(--fg-3)" strokeWidth={1} data-crosshair />}
         {series.map((s, i) => (
           <g key={i}>
             <path d={path(s.values)} fill="none" stroke={s.color} strokeWidth={s.dashed ? 1.5 : 2.5} {...(s.dashed ? { strokeDasharray: "5 4", opacity: 0.7 } : {})} data-line={s.dashed ? "today" : "changed"} data-series={s.name} />
@@ -105,6 +125,32 @@ export function PlayChart({ title, months, series, format, goal, min, todayLabel
           </g>
         ))}
       </svg>
+      {tip && (
+        <FloatingTip at={tip.at} placement="side" className="min-w-40">
+          <div data-play-tip className="flex flex-col gap-1">
+            <div className="font-semibold">{months[tip.i]}</div>
+            {series
+              .filter((s) => !s.dashed)
+              .map((s) => {
+                const v = s.values[tip.i];
+                const was = today(s.name)?.values[tip.i];
+                return (
+                  <div key={s.name} className="flex items-center justify-between gap-4 tabular-nums">
+                    <span className="inline-flex items-center gap-1.5">
+                      <i aria-hidden className="inline-block size-2 rounded-full" style={{ background: s.color }} />
+                      {s.name}
+                    </span>
+                    <span>
+                      <b className="font-semibold">{v == null ? "n/a" : format(v)}</b>
+                      {was != null && <span className="text-muted-foreground"> (today {format(was)})</span>}
+                    </span>
+                  </div>
+                );
+              })}
+            {tipExtra?.(tip.i)}
+          </div>
+        </FloatingTip>
+      )}
       <figcaption className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" data-legend>
         {legend.map((s) => (
           <span key={s.name} className="inline-flex items-center gap-1.5">

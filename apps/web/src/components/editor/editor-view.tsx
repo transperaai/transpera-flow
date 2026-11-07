@@ -190,6 +190,8 @@ export function EditorView({
   }, [working, selection]);
 
   const { commands, inspectFocus, clearInspectFocus } = useEditCommands({ editor, bundle: working, selected, setSelection });
+  // Where the map is looking, for the palette (new steps appear there).
+  const viewRef = useRef<(() => ViewHint | null) | null>(null);
   const blockTools = useBlockTools({
     mode: mode === "demo" ? "demo" : "live",
     workspaceId: live.workspace.id,
@@ -199,6 +201,7 @@ export function EditorView({
     selected,
     setSelection,
     processName: initialLive.process.name,
+    viewRef,
   });
 
   // Block mode: what the block is called, and saving it. Nothing is written until then.
@@ -225,8 +228,6 @@ export function EditorView({
   // Solution mode: what the solution is called, the automatic verdict against the issue's target, and saving. Nothing is
   // written until then, and then only the solution's own rows: not live, not the draft.
   const [solutionName, setSolutionName] = useState(() => (solutionSeed ? `Copy of ${solutionSeed.name}` : ""));
-  // Where the map is looking, for the palette (new steps appear there).
-  const viewRef = useRef<(() => ViewHint | null) | null>(null);
   const [solutionSaving, setSolutionSaving] = useState(false);
   const [solutionError, setSolutionError] = useState<string | null>(null);
   // Set when the save was refused because no issue is linked: the two ways out are offered beside the message.
@@ -392,6 +393,7 @@ export function EditorView({
         company={company}
         onTour={tour.start}
         historyHref={historyHref}
+        history={{ undoLabel: state.undoLabel, redoLabel: state.redoLabel, onUndo: () => editor.undo(), onRedo: () => editor.redo() }}
         simulating={simulating}
         onSimulate={simulate}
         onReview={select}

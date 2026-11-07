@@ -13,7 +13,6 @@ import {
 } from "@transpera-flow/engine";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import {
-  CAPACITY_FACTOR_MIN_ITEMS,
   absenceCoverage,
   absenceRows,
   capacityFactorsShown,
@@ -156,25 +155,19 @@ describe("a member's own absence result", () => {
 });
 
 describe("capacityFactorsShown", () => {
-  const nine = { measuredItems: 9, entered: false };
-  const ten = { measuredItems: CAPACITY_FACTOR_MIN_ITEMS, entered: false };
-  const entered = { measuredItems: 0, entered: true };
+  const one = { factor: 0.8 };
   const on = { capacity_factor_enabled: true };
 
   it("shows nothing when the setting is off, whatever the factors", () => {
-    expect(capacityFactorsShown({}, [ten, entered])).toEqual([]);
-    expect(capacityFactorsShown({ capacity_factor_enabled: false }, [ten, entered])).toEqual([]);
-    expect(capacityFactorsShown(null, [ten])).toEqual([]);
-    expect(capacityFactorsShown(undefined, [ten])).toEqual([]);
+    expect(capacityFactorsShown({}, [one])).toEqual([]);
+    expect(capacityFactorsShown({ capacity_factor_enabled: false }, [one])).toEqual([]);
+    expect(capacityFactorsShown(null, [one])).toEqual([]);
+    expect(capacityFactorsShown(undefined, [one])).toEqual([]);
   });
-  it("needs 10 measured items when on", () => {
-    expect(capacityFactorsShown(on, [nine])).toEqual([]);
-    expect(capacityFactorsShown(on, [nine, ten])).toEqual([ten]);
-  });
-  it("shows an entered factor when on", () => expect(capacityFactorsShown(on, [entered])).toEqual([entered]));
+  it("shows every factor when on", () => expect(capacityFactorsShown(on, [one, { factor: 1.2 }])).toEqual([one, { factor: 1.2 }]));
   it("reads only a real true", () => {
-    expect(capacityFactorsShown({ capacity_factor_enabled: "true" }, [ten, entered])).toEqual([]);
-    expect(capacityFactorsShown({ capacity_factor_enabled: 1 }, [ten])).toEqual([]);
+    expect(capacityFactorsShown({ capacity_factor_enabled: "true" }, [one])).toEqual([]);
+    expect(capacityFactorsShown({ capacity_factor_enabled: 1 }, [one])).toEqual([]);
   });
   it("shows nothing with no factors", () => expect(capacityFactorsShown(on, [])).toEqual([]));
 
@@ -182,34 +175,13 @@ describe("capacityFactorsShown", () => {
     const b = larkspurBundle();
     const [first, second] = b.steps;
     b.personCapacityFactors = [
-      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: second!.id, factor: 1.25, source: "entered" },
-      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: null, factor: 0.9, source: "entered" },
-      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: first!.id, factor: 0.8, source: "entered" },
+      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: second!.id, factor: 1.25 },
+      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: null, factor: 0.9 },
+      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: first!.id, factor: 0.8 },
     ];
     const names = new Map(b.steps.map((s) => [s.id, s.name]));
     expect(capacityFactorsShown(b.workspace.settings, personFactors(b, id.jess!, names))).toEqual([]);
     expect(capacityFactorsShown({ ...b.workspace.settings, capacity_factor_enabled: true }, personFactors(b, id.jess!, names))).toHaveLength(3);
-  });
-});
-
-describe("measured times (#227)", () => {
-  it("shows a measured time from 10 visits, with how many it rests on, and hides one from fewer", () => {
-    const b = larkspurBundle();
-    const [first, second] = b.steps;
-    b.workspace = { ...b.workspace, settings: { ...b.workspace.settings, capacity_factor_enabled: true } };
-    b.personCapacityFactors = [
-      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: first!.id, factor: 0.8, source: "measured", items: 12 },
-      { person_id: id.jess!, workspace_id: b.workspace.id, step_id: second!.id, factor: 1.2, source: "measured", items: 4 },
-    ];
-    const names = new Map(b.steps.map((s) => [s.id, s.name]));
-    const all = personFactors(b, id.jess!, names);
-    expect(all.map((f) => [f.measuredItems, f.entered])).toEqual([
-      [12, false],
-      [4, false],
-    ]);
-    const shown = capacityFactorsShown(b.workspace.settings, all);
-    expect(shown).toHaveLength(1);
-    expect(shown[0]).toMatchObject({ factor: 0.8, measuredItems: 12 });
   });
 });
 
@@ -228,7 +200,7 @@ describe("personFactors", () => {
   const b = larkspurBundle();
   const [s1, s2, s3] = b.steps;
   const names = new Map([s1!, s2!, s3!].map((s) => [s.id, s.name]));
-  const row = (person: string, step: string | null, factor: number, source = "entered") => ({ person_id: person, workspace_id: b.workspace.id, step_id: step, factor, source });
+  const row = (person: string, step: string | null, factor: number) => ({ person_id: person, workspace_id: b.workspace.id, step_id: step, factor });
 
   it("puts the default first and then the steps in the process's order, never by value, and drops steps it doesn't know", () => {
     const withRows = {
@@ -238,15 +210,14 @@ describe("personFactors", () => {
     const shown = personFactors(withRows, id.jess!, names);
     expect(shown.map((f) => f.stepName)).toEqual(["Every step", s1!.name, s3!.name]);
     expect(shown.map((f) => f.factor)).toEqual([1.1, 1.9, 0.6]);
-    expect(shown[0]).toMatchObject({ stepId: null, measuredItems: 0, entered: true });
+    expect(shown[0]).toMatchObject({ stepId: null, factor: 1.1 });
     // Someone else's rows never appear for this person.
     expect(personFactors(withRows, id.hana!, names).map((f) => f.factor)).toEqual([0.7]);
   });
 
-  it("has nothing for a person with no rows, or a bundle with no list; a measured source is not 'entered'", () => {
+  it("has nothing for a person with no rows, or a bundle with no list", () => {
     expect(personFactors(b, id.jess!, names)).toEqual([]);
     expect(personFactors({ ...b, personCapacityFactors: [] }, id.jess!, names)).toEqual([]);
-    expect(personFactors({ ...b, personCapacityFactors: [row(id.jess!, null, 0.9, "measured")] }, id.jess!, names)[0]!.entered).toBe(false);
   });
 });
 

@@ -51,6 +51,8 @@ describe("with Supabase's default table privileges", () => {
       { table_name: "solutions", column_name: "name" },
       { table_name: "solutions", column_name: "notes" },
       { table_name: "solutions", column_name: "status" },
+      // The editor (D53) writes the automations and augmentations a version holds.
+      { table_name: "solutions", column_name: "step_changes" },
     ]);
   });
 

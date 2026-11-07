@@ -110,7 +110,9 @@ describe("wonClients", () => {
     expect(b.kpi.won.mean).toBeGreaterThanOrEqual(a.kpi.won.mean + 3);
   });
 
-  it("on the capacity example, 2 clients a month for 3 months bring 6 clients and their work", () => {
+  // Two four-month runs of the capacity example with person time: about 2 s here, 6 s on a loaded CI runner. The timeout bounds the
+  // harness, not the target (as in forecast.test.ts).
+  it("on the capacity example, 2 clients a month for 3 months bring 6 clients and their work", { timeout: 20_000 }, () => {
     const base = capacityModel();
     const plus: EngineModel = { ...base, wonClients: [{ service: "org-T2", month: 2, count: 2 }, { service: "org-T2", month: 3, count: 2 }, { service: "org-T2", month: 4, count: 2 }] };
     const opts = { monthly: true, personTime: true, monthStarts: undefined } as const;

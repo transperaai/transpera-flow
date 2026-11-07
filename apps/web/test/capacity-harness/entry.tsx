@@ -5,7 +5,7 @@
 // `Worker` is replaced by one that starts the bundled script the test hands over as `window.workerScripts`.
 
 import { createRoot } from "react-dom/client";
-import { capacitySetupFromModel } from "@transpera-flow/db";
+import { capacitySetupFromModel, DEFAULT_PURPOSES } from "@transpera-flow/db";
 import { capacityModel } from "@transpera-flow/engine";
 import { CapacityView } from "@/components/capacity/capacity-view";
 
@@ -28,6 +28,9 @@ window.Worker = class extends NativeWorker {
 
 window.mountCapacity = ({ payHidden, noTiers, missingWords, badModel, tierTotal } = {}) => {
   const model = capacityModel();
+  // The engine fixture labels steps with free text; steps made in the app carry the workspace's purpose keys, so the time-to-serve bars name them.
+  const keys = DEFAULT_PURPOSES.map((p) => p.key);
+  model.steps = model.steps.map((st, i) => ({ ...st, purpose: keys[i % 4]! }));
   const setup = capacitySetupFromModel(model, { payHidden });
   if (noTiers) setup.services = [];
   if (missingWords) setup.services[0]!.words = null;

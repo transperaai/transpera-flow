@@ -37,3 +37,11 @@ export function defaultProcessCategory(kind: "pipeline" | "servicing", links: re
   if (kind === "pipeline") return "sales";
   return links.some((l) => isAdHocRecurrence(l.recurrence)) ? "ad_hoc" : "routine_client_work";
 }
+
+/**
+ * The engine kind a category runs as (D52): Sales and Onboarding are pipelines (an onboarding pipeline runs when the company map hands
+ * won clients to it); Routine client work, Ad hoc and Internal are servicing.
+ */
+export function kindForCategory(category: ProcessCategory): "pipeline" | "servicing" {
+  return category === "sales" || category === "onboarding" ? "pipeline" : "servicing";
+}

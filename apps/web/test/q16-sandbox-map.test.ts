@@ -4,7 +4,7 @@ import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { loadCapacityChanges, loadCapacitySetup, loadIssuesForReader, loadLiveCompanyPart, loadLiveParts, loadLiveProcessBySlug, loadSolutionIssues, loadSolutions } from "@transpera-flow/db";
+import { loadCapacitySetup, loadIssuesForReader, loadLiveCompanyPart, loadLiveParts, loadLiveProcessBySlug, loadSolutionIssues, loadSolutions } from "@transpera-flow/db";
 import { loadCapacityExample } from "../../../packages/db/src/fixtures/capacity-example";
 import { addExampleIssues } from "../../../packages/db/src/fixtures/capacity-example-issues";
 import { createTestDb, createUser, type TestDb } from "../../../packages/db/test/harness";
@@ -13,8 +13,8 @@ import type { Q16Data } from "./q16-harness/entry";
 
 // Q16, the Sandbox as the company map, in a real browser on the example agency (with its solutions) in a throwaway database with the real migrations: the
 // real company map canvas (lanes, category tags) in a "Company map" card with one line above it; a click on a process card opens the version popover
-// (Today, each solution with its status); picking one gives the card a badge and outline, a chip and a run on it; Reset to today; an automation switched
-// on; `?solution=` still picks a version when the page opens; and nothing sideways at 400 px.
+// (Today, each solution with its status); picking one gives the card a badge and outline, a chip and a run on it; Reset to today; a solution that holds an
+// automation (D53) runs it from the month it is picked; the levers have no automation section; `?solution=` still picks a version when the page opens; and nothing sideways at 400 px.
 // With Q16_SHOTS=<dir> it also saves the screenshots (1440 px light and dark and 400 px; a version popover and a swapped process).
 
 let tdb: TestDb;
@@ -53,12 +53,11 @@ beforeAll(async () => {
   expect(added.applied).toBe(true);
   await tdb.client.query("commit");
   const db = tdb.dbAs({ ...admin.claims, role: "authenticated" });
-  const [live, parts, company, setup, library, issues, solutions, solutionLinks] = await Promise.all([
+  const [live, parts, company, setup, issues, solutions, solutionLinks] = await Promise.all([
     loadLiveProcessBySlug(db, "q16"),
     loadLiveParts(db, ws),
     loadLiveCompanyPart(db, ws),
     loadCapacitySetup(db, ws),
-    loadCapacityChanges(db, ws),
     loadIssuesForReader(db, ws),
     loadSolutions(db, ws),
     loadSolutionIssues(db, ws),
@@ -68,7 +67,7 @@ beforeAll(async () => {
     db.selectFrom("services").select(["id", "department_id", "tier_id"]).where("workspace_id", "=", ws).where("tier_id", "is not", null).execute(),
     db.selectFrom("service_servicing").select(["process_id", "service_id"]).where("workspace_id", "=", ws).execute(),
   ]);
-  data = JSON.parse(JSON.stringify({ live, parts, company, setup, library, issues, solutions, solutionLinks, laneInput: { departments, services, links } })) as Q16Data;
+  data = JSON.parse(JSON.stringify({ live, parts, company, setup, issues, solutions, solutionLinks, laneInput: { departments, services, links } })) as Q16Data;
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 }, 300_000);
 
@@ -86,7 +85,7 @@ async function mount(o: { width?: number; scheme?: "light" | "dark"; solution?: 
   await page.addScriptTag({ content: script });
   await page.evaluate(([d, opt]) => window.mountQ16(d as Q16Data, opt as { solution?: string }), [data, { solution: o.solution }] as const);
   await page.waitForSelector("[data-company-map] .react-flow__node-group", { timeout: 120_000 });
-  await page.waitForSelector("[data-verdict-line]", { timeout: 60_000 }).catch(async (e: Error) => {
+  await page.waitForSelector("[data-play-heatmap]", { timeout: 60_000 }).catch(async (e: Error) => {
     // Say what the page shows instead of a bare timeout.
     const seen = await page.evaluate(() => [document.querySelector("[data-model-error]")?.textContent, document.querySelector("[data-run-error]")?.textContent, document.querySelector("[data-run-status]")?.textContent].join(" | "), []).catch(() => "");
     throw new Error(`${e.message}\n${seen}\n${errors.join("\n")}`);
@@ -162,16 +161,22 @@ describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
     await page.close();
   });
 
-  it("an automation switched on is a lever: it names its steps, runs from its month and moves the run", async () => {
+  it("a solution that holds an automation runs it from the month it is picked; the levers have no automation section", async () => {
     const { page, errors } = await mount();
-    const row = page.locator("[data-automation]").first();
-    const id = (await row.getAttribute("data-automation"))!;
-    expect(await row.locator("[data-automation-steps]").innerText()).toMatch(/, acts on .+/);
-    await page.locator(`[data-automation-switch="${id}"]`).click();
-    await page.locator(`[data-lever="automation:${id}"]`).selectOption("1");
+    expect(await page.locator('[data-lever-group="automation"], [data-automation-switch], [data-changes-manage], [data-change-add]').count()).toBe(0);
+    expect(await page.locator("[data-play-levers]").innerText()).not.toMatch(/Automation and augmentation/);
+    const held = data.solutions.find((s) => s.step_changes.length > 0)!;
+    expect(held.step_changes[0]!.name).toBeTruthy();
+    await card(page, held.process_id).click();
+    const popover = page.locator(`[data-version-popover="${held.process_id}"]`);
+    await popover.waitFor();
+    await popover.locator(`[data-version-option="${held.id}"]`).click();
+    await page.locator(`[data-version-month="${held.process_id}"]`).selectOption("1");
+    await page.keyboard.press("Escape");
     await settled(page);
     expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("true");
-    await page.locator(`[data-automation-switch="${id}"]`).click();
+    expect(await page.locator("[data-run-error]").count()).toBe(0);
+    await page.locator("[data-versions-reset]").click();
     await settled(page);
     expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("false");
     expect(errors).toEqual([]);
@@ -198,7 +203,6 @@ describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
     const { solution, processId } = withSolution();
     for (const [width, scheme] of [[1440, "light"], [1440, "dark"], [400, "light"]] as const) {
       const { page } = await mount({ width, scheme });
-      await page.locator("[data-automation-switch]").first().click();
       await card(page, processId).click();
       await page.locator(`[data-version-popover="${processId}"]`).waitFor();
       await page.waitForTimeout(300);
@@ -206,7 +210,7 @@ describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
       await page.locator(`[data-version-option="${solution.id}"]`).click();
       await page.keyboard.press("Escape");
       await settled(page);
-      await page.waitForSelector("[data-verdict-line]", { timeout: 120_000 });
+      await page.waitForSelector("[data-play-heatmap]", { timeout: 120_000 });
       await page.evaluate(() => (window.scrollTo(0, 0), document.querySelector("[data-play-levers-column]")?.scrollTo(0, 0), document.fonts.ready));
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
       await page.waitForTimeout(500);

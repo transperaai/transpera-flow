@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { simulate } from "@transpera-flow/engine";
-import { loadCapacityChanges, loadIssues, loadProcessBySlug, toEngineModel, type ProcessBundle, type SolutionRow } from "../src";
+import { loadIssues, loadProcessBySlug, toEngineModel, type ProcessBundle, type SolutionRow } from "../src";
 import { withSolution } from "../src/sandbox";
 import { loadCapacityExample } from "../src/fixtures/capacity-example";
 import { addExampleIssues } from "../src/fixtures/capacity-example-issues";
@@ -60,29 +60,34 @@ describe("adding the example issues to a freshly loaded example workspace", () =
     expect(onboarding.evidence).toContain("no onboarding process");
   });
 
-  it("points each linked change at its issue, and leaves the rest alone", async () => {
+  it("links the solutions that hold the changes to the issue each fixes, and leaves the rest alone", async () => {
     const issues = await loadIssues(dbAs, ws);
     const idOf = (title: string) => issues.find((i) => i.title === title)!.id;
-    const changes = await loadCapacityChanges(dbAs, ws);
-    const link = (name: string) => changes.find((c) => c.name === name)!.issue_id;
-    expect(link("Unified pacing with alerts")).toBe(idOf("Pacing lives in three places"));
-    expect(link("Anomaly and threshold alerts")).toBe(idOf("Pacing lives in three places"));
-    expect(link("AI link-domain pre-vetting")).toBe(idOf("Link team runs near its line"));
-    expect(link("Link health monitor, publisher CRM, invoice chasing")).toBe(idOf("Link team runs near its line"));
-    expect(link("Content brief automation and freelancer handoff")).toBe(idOf("Content briefs are re-typed for freelancers"));
-    expect(link("Pre-call data collation and talking points")).toBe(idOf("Meeting prep is data hunting"));
-    expect(link("Pre-call data collation (Organic)")).toBe(idOf("Meeting prep is data hunting"));
-    expect(link("Review slides for small clients")).toBe(idOf("Onboarding crowds out monthly work"));
-    expect(link('Report "work completed / planned" page')).toBe(idOf("Monthly plans wait on client approval"));
-    expect(link("Meta ad QA checker")).toBe(idOf("Ad QA repeats checks done at build"));
-    expect(changes.filter((c) => c.issue_id).length).toBe(10);
-    expect(changes).toHaveLength(13);
+    // A change is one solution for each process it acts on; a solution that holds a change is named after it and has a step_changes list of one.
+    const held = await q(
+      `select s.name, l.issue_id from solutions s left join solution_issues l on l.solution_id = s.id where s.workspace_id = $1 and s.step_changes <> '[]'::jsonb order by s.name`,
+      [ws],
+    );
+    const linked = (name: string) => held.filter((h) => h.name === name).map((h) => h.issue_id);
+    expect(new Set(held.map((h) => h.name)).size).toBe(13);
+    expect(linked("Unified pacing with alerts")).toEqual([idOf("Pacing lives in three places")]);
+    expect(linked("Anomaly and threshold alerts")).toEqual([idOf("Pacing lives in three places")]);
+    expect(linked("AI link-domain pre-vetting")).toEqual([idOf("Link team runs near its line")]);
+    expect(linked("Link health monitor, publisher CRM, invoice chasing")).toEqual([idOf("Link team runs near its line")]);
+    expect(linked("Content brief automation and freelancer handoff")).toEqual([idOf("Content briefs are re-typed for freelancers")]);
+    expect(linked("Pre-call data collation and talking points")).toEqual([idOf("Meeting prep is data hunting")]);
+    expect(linked("Pre-call data collation (Organic)")).toEqual([idOf("Meeting prep is data hunting")]);
+    expect(linked("Review slides for small clients")).toEqual([idOf("Onboarding crowds out monthly work")]);
+    expect(linked('Report "work completed / planned" page')).toEqual([idOf("Monthly plans wait on client approval")]);
+    expect(linked("Meta ad QA checker")).toEqual([idOf("Ad QA repeats checks done at build")]);
+    expect(new Set(held.filter((h) => h.issue_id).map((h) => h.name)).size).toBe(10);
+    expect(held.filter((h) => !h.issue_id).length).toBeGreaterThan(0);
   });
 
   it("saves three solutions, each linked to an issue at a different stage", async () => {
     const rows = await q(
       `select s.name, s.status as solution_status, i.title, i.status, coalesce(i.resolved_solution_id = s.id, false) as fixed, l.user_verdict
-         from solutions s join solution_issues l on l.solution_id = s.id join issues i on i.id = l.issue_id where s.workspace_id = $1 order by s.name`,
+         from solutions s join solution_issues l on l.solution_id = s.id join issues i on i.id = l.issue_id where s.workspace_id = $1 and s.step_changes = '[]'::jsonb order by s.name`,
       [ws],
     );
     expect(rows).toEqual([
@@ -93,7 +98,7 @@ describe("adding the example issues to a freshly loaded example workspace", () =
   });
 
   it("gives each solution a valid map that simulates, with routing odds that sum to 1", async () => {
-    const solutions = (await q("select * from solutions where workspace_id = $1", [ws])) as unknown as SolutionRow[];
+    const solutions = (await q("select * from solutions where workspace_id = $1 and step_changes = '[]'::jsonb", [ws])) as unknown as SolutionRow[];
     expect(solutions).toHaveLength(3);
     const pipeline = (await q("select id from processes where workspace_id = $1 and kind = 'pipeline' and is_company is not true", [ws]))[0]!.id as string;
     const bundle = (await loadProcessBySlug(dbAs, SLUG, { draft: false, processId: pipeline }))!.live as ProcessBundle;

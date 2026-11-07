@@ -1,6 +1,6 @@
 // Checks a target after import.ts (docs/plans/supabase-exit-brief.md, step 7a): the manifest's row counts, that every exported
 // row is in the target with the same values (compared in SQL from the file's own text, so not through JavaScript), the Better Auth
-// copies, the deployment-access rules, the logos, the sequences, that no trigger was left off, and that every foreign key
+// copies, the deployment-access rules, the sequences, that no trigger was left off, and that every foreign key
 // resolves (a full anti-join per key: a constraint that was loaded unchecked is marked valid, so VALIDATE CONSTRAINT would skip it).
 //   node --experimental-strip-types scripts/copy-from-supabase/verify.ts --in <dir> [--url <target postgres url>] [--driver pg|neon-ws]
 // Exits 1 when anything is wrong. It only reads.
@@ -24,7 +24,7 @@ export interface VerifyResult {
 }
 
 /** Tables the import adds rows to beyond the export, so the target may hold more than the manifest says. */
-const ADDED_TABLES = new Set(["public.workspace_logos", "public.deployment_access"]);
+const ADDED_TABLES = new Set(["public.deployment_access"]);
 const EMAIL_RULE = "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$";
 
 export async function runVerify(client: Queryable, dir: string): Promise<VerifyResult> {
@@ -63,7 +63,7 @@ export async function runVerify(client: Queryable, dir: string): Promise<VerifyR
 
   // Content: every exported row, read into the target's row type from the file's own text, has an identical row in the target
   // (compared as the row's text, so 1.50 and 1.5 differ). Columns the target lacks are left out (the import drops them), and so
-  // are those it generates; workspaces.branding is compared without logo_path, which the import moves to workspace_logos.
+  // are those it generates; workspaces.branding is compared without logo_path, which the import drops (client logos were cut, D70).
   const targetColumns = await comparableColumns(client);
   for (const [name, { rows, columns }] of Object.entries(manifest.tables)) {
     if (rows === 0) continue;
@@ -117,15 +117,6 @@ export async function runVerify(client: Queryable, dir: string): Promise<VerifyR
     const want = report.deploymentAccess.added.length + report.deploymentAccess.existing.length;
     check(rules >= want, `deployment_access: ${rules} rules, import added ${report.deploymentAccess.added.length} and found ${report.deploymentAccess.existing.length}`);
   } else info(`deployment_access: ${rules} rules`);
-
-  // Logos
-  const logos = await one(`select count(*)::int as n from public.workspace_logos`);
-  const badLogos = await one(
-    `select count(*)::int as n from public.workspace_logos where sha256 <> encode(pg_catalog.sha256(bytes), 'hex') or octet_length(bytes) > 524288`,
-  );
-  check(badLogos === 0, `${badLogos} logos whose hash or size is wrong`);
-  if (report) check(logos === report.logos.loaded.length, `workspace_logos: ${logos} rows, import loaded ${report.logos.loaded.length}`);
-  else info(`workspace_logos: ${logos} rows`);
 
   // Sequences
   const seqs = (

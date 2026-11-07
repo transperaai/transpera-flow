@@ -1,7 +1,7 @@
 "use client";
 
 // The free-play Sandbox, on the workspace's own data (capacity build P7): builds what `PlayView` needs from the live process bundle, Set up and the
-// workspace's solutions and changes. The company map is the Overview's, with its controls (D25), playing the run on screen. The model-driven `PlayView` is
+// workspace's solutions (their step changes, D53, run when a version is picked). The company map is the Overview's, with its controls (D25), playing the run on screen. The model-driven `PlayView` is
 // what the browser test mounts.
 
 import { useCallback, useMemo, useState } from "react";
@@ -15,7 +15,6 @@ import {
   playIsDefault,
   winMix,
   workspacePurposes,
-  type CapacityChangeRow,
   type CompanyRevisionListing,
   type CapacitySetup,
   type CompanyRunNote,
@@ -31,7 +30,6 @@ import { preparePlay } from "@transpera-flow/db/sandbox";
 import { ENGINE_VERSION, toRatingConfig } from "@transpera-flow/engine";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
 import { EmptyState } from "@/components/page-kit";
-import { deleteCapacityChange, saveCapacityChange } from "@/app/w/[slug]/capacity-change-actions";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { today as todayIso, DEFAULT_FORECAST_MONTHS } from "@/lib/forecast/forecast";
 import { timelineMonths } from "@/lib/forecast/timeline";
@@ -60,7 +58,6 @@ export interface PlayPageProps {
   /** The company map process at its live revision: where each process sits and the handoff lines. */
   company: ProcessPart | null;
   setup: CapacitySetup;
-  library: CapacityChangeRow[];
   solutions: SolutionRow[];
   solutionLinks: SolutionIssueRow[];
   issues: IssueRow[];
@@ -100,7 +97,7 @@ export function playProcesses(live: ProcessBundle, solutions: readonly SolutionR
   }));
 }
 
-export function PlayPage({ live, parts, company, setup, library, solutions, solutionLinks, issues, canEdit, base, initialSolutionId, laneInput, companyRevisions = [], companyRevisionId = null }: PlayPageProps) {
+export function PlayPage({ live, parts, company, setup, solutions, solutionLinks, issues, canEdit, base, initialSolutionId, laneInput, companyRevisions = [], companyRevisionId = null }: PlayPageProps) {
   const initialSolution = useMemo(() => {
     const s = initialSolutionId ? solutions.find((x) => x.id === initialSolutionId) : undefined;
     return s ? { id: s.id, processId: s.process_id } : null;
@@ -123,18 +120,21 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
   }, [made, mapKey, mapDrives, live]);
   const processes = useMemo(() => playProcesses(run, solutions, solutionLinks, issues), [run, solutions, solutionLinks, issues]);
 
+  // The issue each solution is for (the first it is linked to): put on its step changes in the engine's input, as a change's issue was (reporting only).
+  const issueOf = useCallback((solutionId: string) => solutionLinks.find((l) => l.solution_id === solutionId)?.issue_id, [solutionLinks]);
+
   // Today's path, and the way to prepare the levers' path. The model of today's path gives the win mix for "Win new clients".
   const base0 = useMemo(() => {
-    const ctx: PlayContext = { startDate: start, setup, library, winMix: () => ({}) };
+    const ctx: PlayContext = { startDate: start, setup, issueOf, winMix: () => ({}) };
     return preparePlay(live, defaultPlay(), ctx, solutions, DEFAULT_FORECAST_MONTHS);
-  }, [live, start, setup, library, solutions]);
+  }, [live, start, setup, issueOf, solutions]);
   const ctx: PlayContext = useMemo(() => {
     const model = base0.segments[0]?.model;
-    return { startDate: start, setup, library, winMix: (d) => (model ? winMix(setup, model, d) : {}) };
-  }, [base0, start, setup, library]);
+    return { startDate: start, setup, issueOf, winMix: (d) => (model ? winMix(setup, model, d) : {}) };
+  }, [base0, start, setup, issueOf]);
   const prepare = useCallback(
-    (play: PlayState, current: readonly CapacityChangeRow[]) => {
-      const prepared = preparePlay(run, play, { ...ctx, library: current }, solutions, DEFAULT_FORECAST_MONTHS);
+    (play: PlayState) => {
+      const prepared = preparePlay(run, play, ctx, solutions, DEFAULT_FORECAST_MONTHS);
       // A map the run can't start from (no sales pipeline on it) is an error of the levers' path, not of today's.
       return mapProblem !== null ? { ...prepared, segments: [], error: mapProblem } : prepared;
     },
@@ -230,16 +230,13 @@ export function PlayPage({ live, parts, company, setup, library, solutions, solu
   return (
     <PlayView
       setup={setup}
-      library={library}
       processes={processes}
       startDate={start}
+      purposes={workspacePurposes(live.workspace.settings)}
       today={base0}
       prepare={prepare}
       map={renderMap}
       mapHeader={companySelect}
-      canEdit={canEdit}
-      saveChange={(id, input) => saveCapacityChange(live.workspace.id, id, input)}
-      removeChange={(id) => deleteCapacityChange(live.workspace.id, id)}
       exportSlot={exportSlot}
       base={base}
       modelError={base0.error ?? mapProblem}

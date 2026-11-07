@@ -9,6 +9,7 @@ import type { Selectable } from "kysely";
 import type { DB } from "./db-types";
 import type { Viewer } from "./queries";
 import type { SandboxChange } from "./sandbox-levers";
+import type { StoredStepChange } from "./capacity-changes";
 
 /**
  * What `memberships.role` can hold (migration 20270103000000): `owner` is an Agency admin, `viewer` is a Viewer. The Owner needs
@@ -89,15 +90,12 @@ export interface WorkspaceSettings {
   dler_includes_leadership?: boolean | null;
 }
 
-/** One per-person time as `team_capacity` returns it (`step_id` null is the person's time on every step; `source` is entered or measured). */
+/** One per-person time as `team_capacity` returns it (`step_id` null is the person's time on every step). */
 export interface PersonCapacityFactorRow {
   person_id: string;
   workspace_id: string;
   step_id: string | null;
   factor: number;
-  source: string;
-  /** How many visits a measured time rests on; null or absent when entered (#227). */
-  items?: number | null;
 }
 
 export interface WorkspaceRow {
@@ -356,7 +354,7 @@ export interface ServiceRow {
 export type FallbackLoad = { [roleId: string]: number };
 
 /** Where a parameter's value came from (docs/PRD.md §3 Parameter provenance). */
-export type ProvenanceSource = "estimated" | "entered" | "measured";
+export type ProvenanceSource = "estimated" | "entered";
 
 /** The source labels a step's base values carry (requirements section 7), in `steps.provenance.{work|split|tier_multiplier}.source`. */
 export type StepSourceLabel = "interview" | "calculator" | "measured" | "estimate";
@@ -374,8 +372,6 @@ export type Provenance = {
   at?: string;
   /** User who set it. */
   by?: string;
-  /** Dataset a measured value came from. */
-  dataset_id?: string;
   /** Why the value is what it is (e.g. Claude's reasoning for an assumption). */
   note?: string;
   /** Filled in without a source (a default or an inference); listed for confirmation until someone confirms it. */
@@ -901,6 +897,8 @@ export interface SolutionRow {
   changed_step_ids: string[];
   /** Lever changes, as scenario patches. */
   lever_changes: ScenarioPatch[];
+  /** Automations and augmentations in this version of the process (D53). The Sandbox runs them from the month the version is picked. */
+  step_changes: StoredStepChange[];
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -1116,7 +1114,7 @@ export type _SchemaDriftChecks = [
   Assert<Matches<Omit<SourceLinkRow, "kind">, "source_links">>,
   // steps is jsonb; BlockBundle is its checked shape, and the check constraint limits type to BlockType.
   Assert<Matches<Omit<BlockRow, "steps" | "type">, "blocks">>,
-  // steps, changed_step_ids and lever_changes are jsonb; SolutionRow has their checked shapes. The verdicts are check-constrained.
-  Assert<Matches<Omit<SolutionRow, "steps" | "changed_step_ids" | "lever_changes">, "solutions">>,
+  // steps, changed_step_ids, lever_changes and step_changes are jsonb; SolutionRow has their checked shapes. The verdicts are check-constrained.
+  Assert<Matches<Omit<SolutionRow, "steps" | "changed_step_ids" | "lever_changes" | "step_changes">, "solutions">>,
   Assert<Matches<Omit<SolutionIssueRow, "auto_verdict" | "user_verdict">, "solution_issues">>,
 ];

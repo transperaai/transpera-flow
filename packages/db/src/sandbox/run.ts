@@ -18,6 +18,7 @@ import { applyPatches, checkScenario, initialState, type EngineModel, type Initi
 import { retiredSteps } from "../retired";
 import { addDays, addMonths, calendarMonthStarts, horizonWeeks, hoursToDate, monthBounds } from "./months";
 import { bundleFromSolution } from "./solution";
+import { toEngineStepChanges } from "../capacity-changes";
 import { channelsOf, isChannelChange, overheadsCarried } from "./channels";
 import { applyBundleChanges, applyModelChanges } from "./edits";
 import type { EffectiveChange } from "./effective";
@@ -315,6 +316,8 @@ export interface ScenarioSegment {
   patches: ScenarioPatch[];
   /** The change each patch came from, one per patch (a solution's lever changes: the change that put it live). */
   patchChangeIds: string[];
+  /** The solutions whose versions are live by then (the latest for each process), each with the 1-based month its version went live: their step changes (D53) start then. */
+  live: { solution: SolutionRow; startMonth: number }[];
 }
 
 export interface SegmentsResult {
@@ -435,6 +438,7 @@ export function scenarioSegments(
     const winning = new Set([...winners.values()].map((i) => i.change.id));
     const patches: ScenarioPatch[] = [];
     const patchChangeIds: string[] = [];
+    const live = applied.filter((i) => winning.has(i.change.id)).map((i) => ({ solution: i.solution!, startMonth: i.month + 1 }));
     for (const i of items) {
       if (i.month > from) continue;
       if (i.kind === "patch") {
@@ -447,7 +451,7 @@ export function scenarioSegments(
         }
       }
     }
-    return { from, bundle: b, solutionIds, patches, patchChangeIds };
+    return { from, bundle: b, solutionIds, patches, patchChangeIds, live };
   });
   return { segments, problems, later, d4Unhandled, planPeople: people.planPeople, error: null };
 }
@@ -555,7 +559,15 @@ export function warmupOf(model: EngineModel): InitialState {
  * Everything a run of the scenario needs: its segments' models (channels in them), the pinned warm-up, and for a price rise the
  * paired run without it. Pure; the hook calls it in a memo. `pair: false` skips the price rise's pair (goal seek and the tornado don't need it).
  */
-export function prepareScenario(bundle: ProcessBundle, changes: readonly EffectiveChange[], solutions: readonly SolutionRow[], months: number, startDate: string, o: { pair?: boolean } = {}): PreparedScenario {
+export function prepareScenario(
+  bundle: ProcessBundle,
+  changes: readonly EffectiveChange[],
+  solutions: readonly SolutionRow[],
+  months: number,
+  startDate: string,
+  /** `issueOf`: the issue a solution is for, put on its step changes (reporting only). */
+  o: { pair?: boolean; issueOf?: (solutionId: string) => string | undefined } = {},
+): PreparedScenario {
   const retired = retiredSteps(bundle);
   const live = scenarioModel(bundle, months, startDate);
   const fail = (error: string, extra: Partial<PreparedScenario> = {}): PreparedScenario => ({ segments: [], pair: null, riseMonths: [], start: null, monthStarts: [], markersModel: null as unknown as EngineModel, planPeople: new Set(), problems: [], later: [], error, ...extra });
@@ -584,7 +596,9 @@ export function prepareScenario(bundle: ProcessBundle, changes: readonly Effecti
         seen.add(p.changeId + p.message);
         problems.push(p);
       }
-      segments.push({ from: seg.from, model: built.model });
+      // The step changes (D53) of the versions live by this segment start in the month each version went live; the same input a change switched on from that month was.
+      const stepChanges = seg.live.flatMap((l) => toEngineStepChanges(l.solution, l.startMonth, o.issueOf?.(l.solution.id)));
+      segments.push({ from: seg.from, model: stepChanges.length ? { ...built.model, changes: [...(built.model.changes ?? []), ...stepChanges] } : built.model });
     }
     return { error, plan, segments, problems };
   };

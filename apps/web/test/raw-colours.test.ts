@@ -23,7 +23,6 @@ const RULES: [string, RegExp][] = [
 const ALLOWED_FILES: Record<string, string> = {
   "styles/tokens.css": "the tokens themselves",
   "lib/export/map-image.ts": "the exported PNG is always drawn light (a file, not the screen)",
-  "lib/branding/contrast.ts": "contrast maths on the token values",
 };
 const ALLOWED_LINE = /like #[0-9a-fA-F]{6}/; // help text that shows how to type a colour
 

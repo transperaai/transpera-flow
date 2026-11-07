@@ -331,7 +331,7 @@ describe("demand tables: provenance", () => {
     });
   });
 
-  it("keeps provenance a writer sets along with the value (calibration's measured values)", async () => {
+  it("keeps provenance a writer sets along with the value", async () => {
     await db.as(users.editor!.claims, async (c) => {
       const measured = { source: "measured", at: "2026-10-01T00:00:00Z", dataset_id: "d1" };
       const { provenance } = (

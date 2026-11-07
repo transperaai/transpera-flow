@@ -2,45 +2,33 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { WorkspaceShell } from "@/components/shell/workspace-shell";
 import { canManageWorkspace, currentViewer } from "@/lib/access-data";
-import { brandingCss, logoUrl, readBranding } from "@/lib/branding/branding";
 import { shellCounts } from "@/lib/company-data";
-import { listWorkspaces, loadLogoSha, loadWorkspaceHead } from "@/lib/data";
+import { listWorkspaces, loadWorkspaceHead } from "@/lib/data";
 
 /** The sidebar around every page of a workspace (issue #93). Fetched once per visit: navigation inside the workspace doesn't re-render it. */
 export default async function WorkspaceLayout(props: LayoutProps<"/w/[slug]">) {
   const { slug } = await props.params;
   const workspace = await loadWorkspaceHead(slug);
   if (!workspace) notFound();
-  const [workspaces, canManage, shell, viewer, logoSha] = await Promise.all([
+  const [workspaces, canManage, shell, viewer] = await Promise.all([
     listWorkspaces(),
     canManageWorkspace(workspace.id),
     shellCounts(workspace.id),
     currentViewer(),
-    loadLogoSha(workspace.id),
   ]);
   const defaultOpen = (await cookies()).get("sidebar_state")?.value !== "false";
-  // Client branding (issue #34): the accent tokens for this workspace, or nothing (an unbranded workspace renders exactly as
-  // before). A plain <style>, with no `href` or `precedence`: React hoists a <style precedence> into <head> and never removes
-  // it, so moving to an unbranded workspace would keep the old colours. This one goes when the layout re-renders for another
-  // slug. It sits outside the shell, so the full-screen Editor is branded too.
-  const branding = readBranding(workspace.branding);
-  const css = brandingCss(branding);
   return (
-    <>
-      {css && <style data-brand="">{css}</style>}
-      <WorkspaceShell
-        mode="live"
-        defaultOpen={defaultOpen}
-        slug={slug}
-        workspaceName={workspace.name}
-        logoUrl={logoUrl(workspace.id, logoSha)}
-        workspaces={workspaces.map((w) => ({ name: w.name, href: `/w/${w.slug}` }))}
-        canManage={canManage}
-        counts={{ processes: shell.processes, openIssues: shell.openIssues }}
-        viewer={viewer ? { name: viewer.name, email: viewer.email } : null}
-      >
-        {props.children}
-      </WorkspaceShell>
-    </>
+    <WorkspaceShell
+      mode="live"
+      defaultOpen={defaultOpen}
+      slug={slug}
+      workspaceName={workspace.name}
+      workspaces={workspaces.map((w) => ({ name: w.name, href: `/w/${w.slug}` }))}
+      canManage={canManage}
+      counts={{ processes: shell.processes, openIssues: shell.openIssues }}
+      viewer={viewer ? { name: viewer.name, email: viewer.email } : null}
+    >
+      {props.children}
+    </WorkspaceShell>
   );
 }

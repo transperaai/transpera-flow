@@ -1,5 +1,5 @@
 // The free-play Sandbox's view on a bare page, for ../play-browser.test.ts: the real components with their simulations in a real Web Worker, fed with the
-// engine fixture `capacityModel()` as today's model (its changes taken out, as a real workspace has none swapped in, and kept as the library) and the Set up
+// engine fixture `capacityModel()` as today's model (its changes taken out: a real workspace's changes are part of solutions, D53) and the Set up
 // data that agrees with it (made-up data). Next's modules are stood in for by ../build-harness.ts. Nothing here ships.
 //
 // A bare page has no workspace bundle, so the levers the runner takes through the bundle (hires, someone leaving, a map version) are done here on the model, in
@@ -7,7 +7,7 @@
 // test hands over as `window.workerScripts`.
 
 import { createRoot, type Root } from "react-dom/client";
-import { applyPlay, capacitySetupFromModel, defaultPlay, hireIds, winMix, type CapacityChangeRow, type PlayContext, type PlayState } from "@transpera-flow/db";
+import { applyPlay, capacitySetupFromModel, defaultPlay, hireIds, winMix, type PlayContext, type PlayState } from "@transpera-flow/db";
 import { calendarMonthStarts, warmupOf, type PreparedPlay } from "@transpera-flow/db/sandbox";
 import { capacityModel, type EngineModel } from "@transpera-flow/engine";
 import { PlayView } from "@/components/sandbox/play-view";
@@ -16,9 +16,8 @@ import type { PlayProcess } from "@/components/sandbox/play-types";
 declare global {
   interface Window {
     workerScripts: Record<string, string>;
-    mountPlay: (options?: { viewer?: boolean; payHidden?: boolean }) => void;
+    mountPlay: (options?: { payHidden?: boolean }) => void;
     unmountPlay: () => void;
-    __saved: CapacityChangeRow[];
   }
 }
 
@@ -34,22 +33,11 @@ window.Worker = class extends NativeWorker {
 
 const START = "2026-11-02";
 const full = capacityModel();
-const { changes: engineChanges, ...today } = full;
-const model: EngineModel = today;
-
-const library: CapacityChangeRow[] = (engineChanges ?? []).map((c) => ({
-  id: c.id,
-  name: c.name,
-  kind: c.kind,
-  effects: c.effects,
-  adoption: c.adoption,
-  ramp_months: c.rampMonths,
-  tiers: c.tiers ?? null,
-  cost_monthly: null,
-  issue_id: null,
-  source: "estimate",
-  provenance: {},
-}));
+const { changes: _changes, ...today } = full;
+void _changes;
+// The fixture's steps name no purpose; give them the workspace's, in turn, so "Where the time goes" has something to split.
+const PURPOSES = ["client_job", "required", "winning", "coordination", "fixing", "removable"];
+const model: EngineModel = { ...today, steps: today.steps.map((s, i) => ({ ...s, purpose: PURPOSES[i % PURPOSES.length] })) };
 
 const stepName = new Map(model.steps.map((s) => [s.id, s.name]));
 const roleName = (id: string | null) => (id ? (model.roles[id]?.name ?? id) : "No one assigned");
@@ -110,22 +98,20 @@ function halve(m: EngineModel, processId: string): EngineModel {
 
 let root: Root | null = null;
 
-window.mountPlay = ({ viewer, payHidden } = {}) => {
-  window.__saved = [];
+window.mountPlay = ({ payHidden } = {}) => {
   const setup = capacitySetupFromModel(model, { payHidden });
   for (const s of setup.services) s.price_rise_churn = 0.5;
-  const ctx: PlayContext = { startDate: START, setup, library, winMix: (d) => winMix(setup, model, d) };
+  const ctx: PlayContext = { startDate: START, setup, winMix: (d) => winMix(setup, model, d) };
   const todayPlan = prepareOnModel(defaultPlay(), ctx);
   root = createRoot(document.getElementById("root")!);
   root.render(
     <div className="p-4">
       <PlayView
         setup={setup}
-        library={library}
         processes={processes}
         startDate={START}
         today={todayPlan}
-        prepare={(play, current) => prepareOnModel(play, { ...ctx, library: current })}
+        prepare={(play) => prepareOnModel(play, ctx)}
         // A stand-in for the company map's canvas (a bare page has no workspace bundle): a card per process, the page's click and badge hooks.
         map={(_runs, api) => (
           <div data-company-map className="flex flex-wrap gap-6 rounded-lg border p-6">
@@ -145,16 +131,6 @@ window.mountPlay = ({ viewer, payHidden } = {}) => {
             ))}
           </div>
         )}
-        canEdit={!viewer}
-        saveChange={async (id, input) => {
-          const row: CapacityChangeRow = { id: id ?? `new-${window.__saved.length}`, provenance: {}, ...input };
-          window.__saved = [...window.__saved.filter((r) => r.id !== row.id), row];
-          return { status: "ok", change: row };
-        }}
-        removeChange={async (id) => {
-          window.__saved = window.__saved.filter((r) => r.id !== id);
-          return { status: "ok" };
-        }}
         base="/w/example"
       />
     </div>,

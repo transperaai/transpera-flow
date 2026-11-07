@@ -1,16 +1,16 @@
 "use client";
 
+import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { useActionState, useState } from "react";
 import type { CreateProcessResult } from "@/app/w/[slug]/process-actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { PROCESS_KIND_CHOICES } from "@/lib/processes/admin";
 import { EDIT_ONLY } from "@/lib/phone";
 
 export type CreateProcess = (prev: CreateProcessResult, form: FormData) => Promise<CreateProcessResult>;
 
-/** The Processes page's "New process" button: asks for a name and the kind, then opens the new process in a draft. */
+/** The Processes page's "New process" button: asks for a name and the category (which picks the engine kind, D52), then opens the new process in a draft. */
 export function NewProcessButton({ create }: { create: CreateProcess }) {
   const [open, setOpen] = useState(false);
   return (
@@ -50,12 +50,12 @@ function NewProcessForm({ create, onCancel }: { create: CreateProcess; onCancel:
       </div>
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-xs font-medium text-muted-foreground uppercase">Type</legend>
-        {PROCESS_KIND_CHOICES.map((k) => (
-          <label key={k.value} className="flex cursor-pointer items-start gap-2 rounded-token border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
-            <input type="radio" name="kind" value={k.value} required className="mt-1 accent-[var(--accent)]" />
+        {PROCESS_CATEGORIES.map((c) => (
+          <label key={c} className="flex cursor-pointer items-start gap-2 rounded-token border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
+            <input type="radio" name="category" value={c} required className="mt-1 accent-[var(--accent)]" />
             <span>
-              <span className="font-semibold">{k.label}</span>
-              <span className="block text-xs text-muted-foreground">{k.description}</span>
+              <span className="font-semibold">{PROCESS_CATEGORY_LABELS[c]}</span>
+              <span className="block text-xs text-muted-foreground">{PROCESS_CATEGORY_HELP[c]}</span>
             </span>
           </label>
         ))}

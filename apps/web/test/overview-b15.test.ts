@@ -221,6 +221,7 @@ const solution = (over: Partial<SolutionRow>): SolutionRow => ({
   steps: solutionCopy(live),
   changed_step_ids: [],
   lever_changes: [],
+  step_changes: [],
   created_at: "2026-10-01T00:00:00Z",
   updated_at: "2026-10-01T00:00:00Z",
   created_by: null,

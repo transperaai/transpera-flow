@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { peakOver, verdict, verdictText, type PlaySeries, type VerdictContext } from "../src";
+import { overByMonth, peakOver, verdict, verdictText, type PlaySeries, type VerdictContext } from "../src";
 import type { HiringAdvice } from "../src";
 
 // The verdict, hand-checked on small literal series (three months where the prototype used twelve; `last` is the final month).
@@ -88,6 +88,13 @@ describe("verdict", () => {
     const run: PlaySeries = { ...today, people: [person("ann", "Ann", [0.7, null, null], 0.7), person("bo", "Bo", [0.9, 0.9, 0.9], 0.95)] };
     expect(peakOver(run.people)).toBe(1);
     expect(peakOver([])).toBe(0);
+  });
+
+  test("people over their line are counted month by month, for the paired bars", () => {
+    const people = [person("ann", "Ann", [0.9, 0.9, 0.5]), person("bo", "Bo", [0.5, 0.9, null]), person("cy", "Cy", [0.5, 0.9, 0.5], 0.9)];
+    expect(overByMonth(people)).toEqual([1, 3, 0]);
+    expect(overByMonth(people, 4)).toEqual([1, 3, 0, 0]);
+    expect(overByMonth([])).toEqual([]);
   });
 
   test("the last line counts the worst month's people over their line", () => {

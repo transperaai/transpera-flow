@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { capacityModel, checkCapacityInputs, simulate, type EngineModel } from "@transpera-flow/engine";
-import { LARKSPUR_WORKSPACE_ID, NORTHBEAM_WORKSPACE_ID, loadCapacityChanges, loadProcessBySlug, toEngineModel, toEngineStepChange } from "../src";
+import { LARKSPUR_WORKSPACE_ID, NORTHBEAM_WORKSPACE_ID, loadProcessBySlug, loadSolutions, toEngineModel, toEngineStepChanges } from "../src";
 import { EXAMPLE_BOTH, fixedRecurrence, loadCapacityExample } from "../src/fixtures/capacity-example";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
@@ -208,12 +208,12 @@ describe("busy shares against the engine fixture capacityModel()", () => {
 
   it("each person's busy share is within 15 percentage points of the fixture's; the differences are reported", async () => {
     const theirs = share(fixture, fixture);
-    // The model as the database gives it has no changes; the stored ones are swapped in from the first month, as the Sandbox swaps them.
-    const stored = await loadCapacityChanges(dbAs, ws);
-    expect(stored).toHaveLength(13);
+    // The model as the database gives it has no changes; the solutions that hold them are picked from the first month, as the Sandbox picks them (D53).
+    const stored = (await loadSolutions(dbAs, ws)).filter((s) => s.step_changes.length);
+    expect(new Set(stored.map((s) => s.step_changes[0]!.name)).size).toBe(13);
     table("as the database gives it (no change swapped in)", share(model, model), theirs);
-    const m: EngineModel = { ...model, changes: stored.map((c) => toEngineStepChange(c, 1)) };
-    const worst = table("with the stored changes swapped in from month 1", share(m, m), theirs);
+    const m: EngineModel = { ...model, changes: stored.flatMap((s) => toEngineStepChanges(s, 1)) };
+    const worst = table("with the solutions' changes live from month 1", share(m, m), theirs);
     expect(worst).toBeLessThanOrEqual(15);
   }, 300_000);
 });

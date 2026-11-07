@@ -8,7 +8,7 @@
 // placeholder that keeps the order of the old ids (the engine sorts by id, so a restore must not reshuffle them).
 //
 // Not restored (decisions 1 to 4 on #39): history and older versions, the company map (the new workspace keeps its own),
-// solutions, suggestions (removed 28 Oct 2026; an older backup still holds them), detections, issue history, source files and everything about who made what. Per-person times
+// solutions (with the automations and augmentations they hold, D53; the old `capacity_changes` rows are not restored either), suggestions (removed 28 Oct 2026; an older backup still holds them), detections, issue history, source files and everything about who made what. Per-person times
 // (C6, `person_capacity_factors`) are restored (#228), so a restored workspace simulates like the original; the switch itself
 // is restored like any setting.
 
@@ -813,7 +813,8 @@ export function planWorkspaceImport(
     sandbox_scenarios: sandbox.rows.map((r) => pick(r, IMPORT_COLUMNS.sandbox_scenarios)),
     blocks: flat("blocks", bundle.blocks).sort(byCreated),
     issues: issueRows,
-    capacity_changes: flat("capacity_changes", company("capacity_changes"), IMPORT_REFS.capacity_changes).sort(byCreated),
+    // D53: changes are part of solutions now (`solutions.step_changes`), which a restore leaves out, so the old table is not restored (it is read-only and read by nothing).
+    capacity_changes: [],
     services: flat("services", company("services"), IMPORT_REFS.services).map(pairOrNone),
     service_servicing: flat("service_servicing", company("service_servicing"), IMPORT_REFS.service_servicing),
     client_groups: flat("client_groups", company("client_groups"), IMPORT_REFS.client_groups).sort(byCreated),
@@ -861,6 +862,9 @@ export function planWorkspaceImport(
 
   const sourceChars = sources.reduce((n, s) => n + (typeof s.body === "string" ? s.body.length : 0), 0);
   const line = (key: string, count: number, label = LABELS[key] ?? key): SummaryLine => ({ key, label, count });
+  // Changes held by the solutions (D53), else the old table's rows in a backup that has no solution holding them.
+  const stepChangeCount = bundle.solutions.reduce((n, s) => n + (Array.isArray(s.step_changes) ? s.step_changes.length : 0), 0);
+  const legacyChanges = company("capacity_changes").length;
   const restored = [
     line("processes", processes.length, "processes, as drafts"),
     ...(["roles", "people", "services", "clients", "client_groups", "lead_sources", "churn_drivers", "market_conditions", "blocks", "issues", "sources"] as const).map((k) => line(k, plan[k].length)),
@@ -868,7 +872,6 @@ export function planWorkspaceImport(
     line("person_capacity_factors", plan.person_capacity_factors.length),
     line("departments", plan.departments.length),
     line("tiers", plan.tiers.length),
-    line("capacity_changes", plan.capacity_changes.length),
     line("person_portfolio", plan.person_portfolio.length),
   ].filter((l) => l.count > 0);
   const leftOut = [
@@ -876,6 +879,7 @@ export function planWorkspaceImport(
     line("company_map", companyVersions, "versions of the company map (the new workspace keeps its own)"),
     line("unpublished_drafts", unpublishedDrafts, "unpublished drafts"),
     line("solutions", bundle.solutions.length + solutionLinks, "solutions and their links"),
+    line("capacity_changes", stepChangeCount > 0 ? stepChangeCount : legacyChanges, "automations and augmentations (they are part of solutions now)"),
     line("suggestions_removed", legacySuggestions, "suggestions and visitor ideas (Suggestions were removed, so none is restored)"),
     line("detections", detections, "detected insights (they show again until dismissed)"),
     line("step_links", stepLinksGone, "source links to steps no longer in the process"),

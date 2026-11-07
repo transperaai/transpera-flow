@@ -30,19 +30,12 @@ import {
   type DriverPatch,
   type DriverState,
 } from "@/lib/churn-drivers";
-import { historyNote } from "@/lib/calibration/client-view";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { cn } from "@/lib/utils";
 import { addChurnDriver, removeChurnDriver, saveChurnDriver } from "./churn-drivers-actions";
 import { SettingsSection } from "./section";
 
 export type DriversMode = "live" | "readonly" | "demo";
-
-/** What the latest clients-and-servicing calibration saw (the date it was counted up to, and each check). */
-export interface DriverHistory {
-  asOf: number;
-  checks: readonly { id: string; n: number; value: number | null; enough: boolean }[];
-}
 
 type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "saved" } | { kind: "error"; message: string };
 
@@ -53,7 +46,6 @@ export function ChurnDriversSettings({
   workspaceId,
   bundle,
   rows,
-  history = null,
 }: {
   mode: DriversMode;
   workspaceId: string | null;
@@ -61,8 +53,6 @@ export function ChurnDriversSettings({
   bundle: ProcessBundle | null;
   /** The drivers the workspace has set; a built-in with no row is at its default. */
   rows: readonly ChurnDriverRow[];
-  /** The latest clients-and-servicing calibration's checks (Settings → Historical data): shown beside what the simulation measures, never fed to it. */
-  history?: DriverHistory | null;
 }) {
   const canEdit = mode !== "readonly";
   const [states, setStates] = useState<DriverState[]>(() => driverStates(rows));
@@ -245,7 +235,6 @@ export function ChurnDriversSettings({
               key={d.key}
               d={d}
               cause={causeOf(d)}
-              history={history}
               model={model}
               viewer={bundle?.viewer}
               share={projection ? (projection.shares[engineIdOf(d)] ?? 0) : null}
@@ -286,7 +275,6 @@ function SaveStatus({ state }: { state: SaveState }) {
 function DriverRow({
   d,
   cause,
-  history,
   model,
   viewer,
   share,
@@ -296,7 +284,6 @@ function DriverRow({
 }: {
   d: DriverState;
   cause: ChurnCauses["causes"][number] | undefined;
-  history: DriverHistory | null;
   model: EngineModel | null;
   viewer?: Viewer;
   share: number | null;
@@ -325,7 +312,6 @@ function DriverRow({
         )}
         <span className="text-xs text-muted-foreground">
           {sourceLabel(d)} · now: {valueNow(d, cause, model, viewer)}
-          {d.builtin ? historyNote(d.builtin, history) : ""}
         </span>
         {d.builtin !== "tenure" && d.builtin !== "market" && (
           <ChanceControls d={d} cause={cause} canEdit={canEdit} onChange={onChange} />
