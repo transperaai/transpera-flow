@@ -676,6 +676,12 @@ export interface ServiceServicingRow {
   provenance: ProvenanceMap;
 }
 
+/** One hand-off line of the company map the run honours: work won or done in process `from` goes on in process `to` (both process ids). */
+export interface CompanyHandoff {
+  from: string;
+  to: string;
+}
+
 /** One process at one revision: what a run needs of a process other than the one on screen. */
 export interface ProcessPart {
   process: ProcessRow;
@@ -757,6 +763,14 @@ export interface ProcessBundle {
    */
   servicingLinks?: ServiceServicingRow[];
   otherProcesses?: ProcessPart[];
+  /**
+   * Hand-offs between pipelines (Q17, ADR 0023), set only by `companyBundle` when the company map has a line from a pipeline to another
+   * pipeline: in order from the sales pipeline (`process`), each says that every client won in `from` carries on into `to`. Each `to` is in
+   * `otherProcesses`. Absent: nothing is handed on and `toEngineModel` takes the path it always took.
+   */
+  handoffs?: CompanyHandoff[];
+  /** Set by `companyBundle`: the name of every process on the company map, for notes about one that isn't in the run. */
+  companyNames?: Record<string, string>;
   /**
    * The capacity Set up data the engine reads (P1's columns, mapped by P2b: `docs/plans/capacity/p2b-mapping-brief.md`). Present only
    * for a workspace that has at least one tier service (a service with a department and a tier); absent, the model is exactly the

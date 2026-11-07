@@ -266,6 +266,11 @@ export function speedsNormalisedFor(b: ProcessBundle): boolean {
  *   simulation, doesn't depend on database row order.
  */
 export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {}): EngineModel {
+  return engineModelOf(bundle, options).model;
+}
+
+/** `toEngineModel`, and the steps of the processes the company map hands work on to (after the sale, for purposes). */
+function engineModelOf(bundle: ProcessBundle, options: ModelOptions): { model: EngineModel; handed: ReadonlySet<string> } {
   const { workspace, roles } = bundle;
   const s = workspace.settings;
   // The company map's steps are holders of whole processes, laid out as a picture: nothing to simulate (B11).
@@ -285,13 +290,15 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     // The database requires an outcome on every end step; "done" is the harmless reading of a missing one.
     if (step.id !== sinks.won && step.id !== sinks.lost) ends[step.id] = { outcome: step.outcome ?? "done" };
   }
+  // The company map's hand-off lines (Q17): processes the pipeline's won clients carry on into. Nothing without `bundle.handoffs`.
+  const handed = handedOn(bundle, held, Boolean(baseServices), endSteps, ends);
 
   const servicing = engineServicing(bundle, baseServices, held);
   // A workspace with a tier service feeds the capacity Set up data to the engine (capacity-model.ts); any other is mapped as before.
   const tier = tierContext(bundle);
   const services = tier && servicing.services ? withTierServices(servicing.services, tier) : servicing.services;
-  const working = [...pipelineSteps, ...servicing.steps];
-  const groups = { ...pipelineGroups, ...servicing.groups };
+  const working = [...pipelineSteps, ...handed.steps, ...servicing.steps];
+  const groups = { ...pipelineGroups, ...handed.groups, ...servicing.groups };
   Object.assign(ends, servicing.ends);
 
   const engineRoles: EngineModel["roles"] = {};
@@ -358,7 +365,8 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
   // Groups and child processes are a view: the engine's model is the leaf steps (a no-op without any).
   try {
     const flat = flattenModel(model);
-    return options.purposes ? withStepPurposes(flat, bundle) : flat;
+    const handedIds = new Set(handed.steps.map((st) => st.id));
+    return { model: options.purposes ? withStepPurposes(flat, bundle, handedIds) : flat, handed: handedIds };
   } catch (err) {
     // A group with nowhere to go, or a loop of groups, is a problem with the process, as any other bad graph is.
     if (err instanceof NestingError) {
@@ -400,7 +408,8 @@ function resolveAll(bundle: ProcessBundle, afterSale: ReadonlySet<string>): Map<
 export function resolveBundlePurposes(bundle: ProcessBundle): Map<string, { key: string; source: PurposeSource }> {
   let afterSale: ReadonlySet<string> = new Set();
   try {
-    afterSale = afterSaleSteps(toEngineModel(bundle, { startDate: "2026-01-05" }));
+    const { model, handed } = engineModelOf(bundle, { startDate: "2026-01-05" });
+    afterSale = new Set([...afterSaleSteps(model), ...handed]);
   } catch {
     // Not a model yet.
   }
@@ -411,9 +420,47 @@ export function resolveBundlePurposes(bundle: ProcessBundle): Map<string, { key:
  * The model with a purpose key on every working step (`resolvePurpose`, with Austin's 29 Oct defaults): each step is looked up in
  * the bundle's processes for its row and its process's kind, and the sale side of the pipeline comes from the engine. Pure.
  */
-function withStepPurposes(model: EngineModel, bundle: ProcessBundle): EngineModel {
-  const resolved = resolveAll(bundle, afterSaleSteps(model));
+function withStepPurposes(model: EngineModel, bundle: ProcessBundle, handed: ReadonlySet<string> = new Set()): EngineModel {
+  // Steps of a process the company map hands work on to are after the sale, though no win comes after them (the engine reads won-or-lost reach).
+  const resolved = resolveAll(bundle, new Set([...afterSaleSteps(model), ...handed]));
   return { ...model, steps: model.steps.map((s) => (resolved.has(s.id) ? { ...s, purpose: resolved.get(s.id)!.key } : s)) };
+}
+
+/**
+ * The company map's hand-offs (Q17, ADR 0023) as the engine runs them: in order, each process's graph is resolved as a held child's is, its
+ * steps join the model, and the ends of the process before it carry on at its entry (`EngineEnd.handoff`): the sales pipeline's won ends
+ * (the won sink among them), then every end of a handed-to process, which are all `done` here (a win sticks in the engine, so a client who
+ * reaches a lost or won end of onboarding is not lost and not won again). `ends` gets the won sink too when it carries a hand-off.
+ * Nothing (the same arrays, no ends touched) for a bundle with no `handoffs`.
+ */
+function handedOn(
+  bundle: ProcessBundle,
+  held: ReadonlyMap<string, ProcessPart>,
+  tags: boolean,
+  rootEnds: readonly StepRow[],
+  ends: Record<string, EngineEnd>,
+): { steps: EngineStep[]; groups: Record<string, EngineGroup> } {
+  const out: { steps: EngineStep[]; groups: Record<string, EngineGroup> } = { steps: [], groups: {} };
+  let before = rootEnds.filter((e) => e.outcome === "won").map((e) => e.id);
+  let outcome: EngineEnd["outcome"] = "won";
+  for (const hand of bundle.handoffs ?? []) {
+    const part = held.get(hand.to);
+    const name = bundle.companyNames?.[hand.to] ?? part?.process.name ?? "A process";
+    if (!part) throw new ModelError(`Publish '${name}' first: the company map hands work on to it, and it has no published version yet`);
+    let graph: Graph;
+    try {
+      graph = resolveGraph(part.steps, part.edges, tags, { parts: held, stack: [part.process.id] });
+    } catch (err) {
+      throw err instanceof ModelError ? new ModelError(`Process '${name}', handed work on from the company map: ${err.message}`) : err;
+    }
+    for (const id of before) ends[id] = { outcome, handoff: graph.entry };
+    out.steps.push(...graph.working);
+    Object.assign(out.groups, graph.groups);
+    before = graph.endSteps.map((e) => e.id);
+    outcome = "done";
+    for (const id of before) ends[id] = { outcome };
+  }
+  return out;
 }
 
 /**
