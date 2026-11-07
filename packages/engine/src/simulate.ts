@@ -3472,7 +3472,7 @@ export function runOnce(
     for (const i of order) schedule(injectionTimes[i]!, "inject");
     injections.splice(0, injections.length, ...sorted);
   }
-  // Where an injected client goes: the first step after the sale (onboarding), or straight to a won client when the pipeline has none.
+  // Where an injected client goes: the first step after the sale (onboarding), the won end's hand-off when it has one, or straight to a won client when the pipeline has none.
   let injectHead: Target | null = null;
   if (injections.length) {
     const after = afterSaleSteps(model);
@@ -3480,6 +3480,9 @@ export function runOnce(
     for (const sid of after) for (const n of stepById.get(sid)?.next ?? []) if (after.has(n.to)) pointed.add(n.to);
     const head = model.steps.find((st) => after.has(st.id) && !pointed.has(st.id));
     if (head) injectHead = targetFor(head.id);
+    // No step after the sale, but the won end hands on (the company map's line to an onboarding process): the client enters at the won end, is
+    // counted won there and carries on at the hand-off, as a client won in the pipeline does. Unset `handoff`: straight to a won client, as before.
+    else if (ends.get(model.sinks.won)?.handoff) injectHead = targetFor(model.sinks.won);
   }
   // Weekly churn ticks.
   for (let w = 1; w <= model.horizonWeeks; w++) schedule(w * model.hoursPerWeek, "week");
