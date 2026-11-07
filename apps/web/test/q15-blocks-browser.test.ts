@@ -90,8 +90,8 @@ async function open(o: { call: string; arg: object; width?: number; scheme?: "li
   return { page, errors };
 }
 
-const library = (o: { width?: number; scheme?: "light" | "dark"; editor?: boolean; empty?: boolean } = {}) =>
-  open({ call: "q15MountLibrary", arg: { editor: o.editor ?? true, empty: o.empty }, width: o.width, scheme: o.scheme, ready: o.empty ? "[data-testid=blocks-empty]" : "tr[data-block]" });
+const library = (o: { width?: number; scheme?: "light" | "dark"; editor?: boolean; empty?: boolean; base?: "ok" | "none" | "fail" } = {}) =>
+  open({ call: "q15MountLibrary", arg: { editor: o.editor ?? true, empty: o.empty, base: o.base }, width: o.width, scheme: o.scheme, ready: o.empty ? "[data-testid=blocks-empty]" : "tr[data-block]" });
 const editor = (o: { width?: number; scheme?: "light" | "dark" } = {}) =>
   open({ call: "q15MountEditor", arg: { blockId: approval.id }, width: o.width, scheme: o.scheme, ready: o.width && o.width < 640 ? "[data-phone-gate]" : ".react-flow__node" });
 
@@ -123,19 +123,20 @@ describe("Block library list", () => {
     expect(await row.locator("[data-block-steps-count]").evaluate((e) => getComputedStyle(e).textAlign)).toBe("center");
     expect(await row.locator("[data-block-name]").evaluate((e) => getComputedStyle(e.closest("td")!).textAlign)).not.toBe("center");
     // Dropped: the type, the creator, the long description and the step list.
-    expect(await page.locator("li[data-block], [data-block-steps]").count()).toBe(0);
+    expect(await page.locator("li[data-block], [data-block-steps], [data-block-step]").count()).toBe(0);
     expect(errors).toEqual([]);
     await page.close();
   }, 300_000);
 
-  it("Open shows the map and the steps with their split bars; Edit goes to the block's Editor; the usage opens a list of links", async () => {
+  it("Open shows the real map, read-only, with no step list; Edit goes to the block's Editor; the usage opens a list of links", async () => {
     const { page } = await library();
     const row = rowOf(page, "Client approval loop");
     await row.locator("[data-block-open]").click();
     const panel = page.locator("[data-block-panel]");
-    expect(await panel.locator("[data-block-map]").count()).toBe(1);
-    expect(await panel.locator("[data-block-step]").count()).toBe(3);
-    expect(await panel.locator("[data-split-bar]").count()).toBeGreaterThan(0);
+    await panel.locator(".react-flow__node[data-id]").first().waitFor();
+    expect(await panel.locator(".react-flow__node[data-id]").count()).toBe(3);
+    expect(await panel.locator(".react-flow__edge").count()).toBeGreaterThan(0);
+    expect(await panel.locator("[data-block-map], [data-block-steps], [data-block-step]").count()).toBe(0);
     await row.locator("[data-block-open]").click();
     expect(await page.locator("[data-block-panel]").count()).toBe(0);
     expect(await row.locator("[data-block-edit]").getAttribute("href")).toBe(`/w/example/p/x/edit?mode=block&block=${approval.id}&from=%2Fw%2Fexample%2Fblocks`);
@@ -143,6 +144,25 @@ describe("Block library list", () => {
     const link = page.locator(`[data-used-in-list="${approval.id}"] a`);
     expect(await link.innerText()).toBe("One approval loop for monthly plans");
     expect(await link.getAttribute("href")).toMatch(/^\/w\/example\/solutions\/[0-9a-f-]{36}$/);
+    await page.close();
+  }, 300_000);
+
+  it("with no process to draw on, an opened row keeps the small picture of its steps", async () => {
+    const { page } = await library({ base: "none" });
+    await rowOf(page, "Client approval loop").locator("[data-block-open]").click();
+    const panel = page.locator("[data-block-panel]");
+    expect(await panel.locator("[data-block-map]").count()).toBe(1);
+    expect(await panel.locator(".react-flow__node").count()).toBe(0);
+    await page.close();
+  }, 300_000);
+
+  it("when the map can't be loaded, an opened row says so", async () => {
+    const { page } = await library({ base: "fail" });
+    await rowOf(page, "Client approval loop").locator("[data-block-open]").click();
+    const alert = page.locator("[data-block-panel] [role=alert]");
+    await alert.waitFor();
+    expect(await alert.innerText()).toBe("Couldn't load the map. Close the row and open it again.");
+    expect(await page.locator("[data-block-panel] .react-flow__node").count()).toBe(0);
     await page.close();
   }, 300_000);
 

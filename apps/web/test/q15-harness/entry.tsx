@@ -21,7 +21,7 @@ declare global {
       workspaceId: string;
       bundle: ProcessBundle;
     };
-    q15MountLibrary: (o: { editor: boolean; empty?: boolean }) => void;
+    q15MountLibrary: (o: { editor: boolean; empty?: boolean; base?: "ok" | "none" | "fail" }) => void;
     q15MountEditor: (o: { blockId: string }) => void;
   }
 }
@@ -35,8 +35,13 @@ window.Worker = class extends NativeWorker {
   }
 } as typeof Worker;
 
-window.q15MountLibrary = ({ editor, empty }) => {
+window.q15MountLibrary = ({ editor, empty, base = "ok" }) => {
   const d = window.q15Data;
+  // Stands in for the Server Action that loads the live bundle of the workspace's first process.
+  const openBase = async () => {
+    if (base === "fail") throw new Error("down");
+    return d.bundle;
+  };
   createRoot(document.getElementById("root")!).render(
     <SidebarProvider>
       <div className="mx-auto w-full min-w-0 max-w-6xl p-4">
@@ -50,6 +55,9 @@ window.q15MountLibrary = ({ editor, empty }) => {
           solutionsBase="/w/example"
           users={d.users}
           roles={d.roles}
+          slug="example"
+          baseProcessId={base === "none" ? null : d.bundle.process.id}
+          openBase={openBase}
         />
       </div>
     </SidebarProvider>,

@@ -5,9 +5,6 @@ import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { blockListRow, blockUsers, filterBlockRows, formatBlockTime, relativeDate, usedInSentence } from "@/lib/blocks/rows";
 import { blockFromGroup, blockFromSteps, bundleFromBlock, blockOfStep, blockProblem, blockStepCount, insertBlock, readBlock, replaceProblem, replaceWithBlock } from "@/lib/blocks/blocks";
 import { blockUsage } from "@/lib/blocks/usage";
-import { renderToStaticMarkup } from "react-dom/server";
-import { createElement } from "react";
-import { BlockSteps } from "@/components/blocks/block-steps";
 import { stepWarnings } from "@/lib/editor/commands";
 import { diffBundles } from "@/lib/drafts/diff";
 import { openGroupSize } from "@/lib/map/groups";
@@ -412,15 +409,6 @@ describe("base values travel with a block", () => {
     const copy = after.steps.find((x) => x.name === "Discovery call" && x.id !== ids.discovery)!;
     expect(copy.split ?? null).toBeNull();
     expect(copy.to_client_manager === true).toBe(false);
-  });
-
-  it("the block page draws each step's split bar", () => {
-    const block = readBlock(JSON.parse(JSON.stringify(blockFromGroup(withBase(), DEMO_GROUP_IDS.conversation)!)));
-    const html = renderToStaticMarkup(createElement(BlockSteps, { block }));
-    expect((html.match(/data-split-bar/g) ?? []).length).toBe(2);
-    expect(html).toContain("Automatable 40%");
-    expect(html).toContain("T1 ×1.5");
-    expect(html).toContain("the client&#x27;s manager");
   });
 });
 

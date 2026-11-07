@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { openBlockBase } from "./actions";
 import { BlockLibrary } from "@/components/blocks/block-library";
 import { blockUsers } from "@/lib/blocks/rows";
 import { canEditWorkspace } from "@/lib/access-data";
@@ -34,6 +35,9 @@ export default async function WorkspaceBlocksPage(props: PageProps<"/w/[slug]/bl
       solutionsBase={`/w/${slug}`}
       users={blockUsers(solutions.solutions)}
       roles={roles}
+      slug={slug}
+      baseProcessId={first?.id ?? null}
+      openBase={openBlockBase}
     />
   );
 }
