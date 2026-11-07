@@ -1132,7 +1132,18 @@ function Canvas({
           const size = measured.get(ghostId(c.live!.id)) ?? (c.live!.kind === "start" || c.live!.kind === "end" ? TERMINAL_SIZE : CARD_SIZE);
           return { x: Number(c.live!.x), y: Number(c.live!.y), width: size.width, height: size.height };
         });
-      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, visible: { left: from.x, top: from.y, right: to.x, bottom: to.y }, sizes: measured, occupied };
+      // Pan to a step that was just added if it is not wholly on screen (it is drawn a moment after the edit).
+      const reveal = (id: string) =>
+        setTimeout(() => {
+          const node = flow.getNodes().find((n) => n.id === id);
+          const panel = wrapper.current?.querySelector(".react-flow")?.getBoundingClientRect();
+          if (!node || !panel) return;
+          const b = flow.getNodesBounds([node]);
+          const view = flow.getViewport();
+          const inView = b.x * view.zoom + view.x >= 0 && (b.x + b.width) * view.zoom + view.x <= panel.width && b.y * view.zoom + view.y >= 0 && (b.y + b.height) * view.zoom + view.y <= panel.height;
+          if (!inView) void flow.setCenter(b.x + b.width / 2, b.y + b.height / 2, { zoom: view.zoom, duration: 200 });
+        }, 60);
+      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, visible: { left: from.x, top: from.y, right: to.x, bottom: to.y }, sizes: measured, occupied, reveal };
     };
     return () => {
       viewRef.current = null;
@@ -1814,7 +1825,7 @@ function Canvas({
           {/* Before the map in the page, so Tab reaches the toolbar first. */}
           {editable && editorState && (
             <div className="absolute top-2.5 left-2.5 z-10 max-w-[calc(100%-1.25rem)]">
-              <Toolbar bundle={bundle} editor={editor} state={editorState} onAdd={addFromToolbar} hideAdd={hideAdd} savedLabel={savedLabel} />
+              <Toolbar bundle={bundle} state={editorState} onAdd={addFromToolbar} hideAdd={hideAdd} savedLabel={savedLabel} />
             </div>
           )}
           {/* Nothing to draw means nothing for a run to change on the map: the empty state says enough. */}
@@ -2055,17 +2066,15 @@ function LaneToggle({
   );
 }
 
-/** Add a step, undo, redo, the swimlane view, and whether edits are saved. */
+/** Add a step, the swimlane view, and whether edits are saved (undo and redo are in the editor bar). */
 function Toolbar({
   bundle,
-  editor,
   state,
   onAdd,
   hideAdd,
   savedLabel,
 }: {
   bundle: ProcessBundle;
-  editor: ProcessEditor;
   state: EditorState;
   onAdd: (kind: NewStepKind, outcome: StepOutcome | null) => void;
   hideAdd: boolean;
@@ -2128,25 +2137,7 @@ function Toolbar({
       <span aria-hidden className="mx-0.5 h-5 w-px bg-line" />
 </>
 )}
-      <button
-        type="button"
-        onClick={() => editor.undo()}
-        disabled={!state.undoLabel}
-        title={state.undoLabel ? `Undo: ${state.undoLabel} (${mod}Z)` : "Nothing to undo"}
-        className={toolButton}
-      >
-        Undo
-      </button>
-      <button
-        type="button"
-        onClick={() => editor.redo()}
-        disabled={!state.redoLabel}
-        title={state.redoLabel ? `Redo: ${state.redoLabel} (${mac ? "⇧⌘Z" : "Ctrl+Y"})` : "Nothing to redo"}
-        className={toolButton}
-      >
-        Redo
-      </button>
-      <span aria-hidden className="mx-0.5 h-5 w-px bg-line" />
+      {/* Undo and redo are buttons in the editor bar (editor quick fixes); the keys still work here. */}
       <KeysHelp mod={mod} />
       <span className="px-1 text-fg-3" aria-live="polite">
         {state.saving ? "Saving…" : savedLabel}

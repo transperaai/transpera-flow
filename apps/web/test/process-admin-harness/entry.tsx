@@ -77,8 +77,8 @@ function Harness({ canEdit, refuseArchive }: { canEdit: boolean; refuseArchive?:
       {canEdit && (
         <NewProcessButton
           create={async (_prev, form) => {
-            log("create", form.get("name"), form.get("kind"));
-            return form.get("kind") ? {} : { error: "Choose Sales pipeline or Client work." };
+            log("create", form.get("name"), form.get("category"));
+            return form.get("category") ? {} : { error: "Choose what kind of process it is." };
           }}
         />
       )}
