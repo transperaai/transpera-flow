@@ -54,7 +54,7 @@ const BLOCK_EDIT_TITLE = "Edit block";
 const BLOCK_EDIT_HINT = "You're editing a block in the library. Nothing changes until you press Save changes, and solutions that already use the block keep their own copy. Cancel goes back to the library.";
 const COMPANY_TITLE = "Draft of the company map";
 const COMPANY_HINT =
-  "You're editing a draft of the company map. Move cards, draw and label handoff lines, or put cards in groups. Handoff lines are pictures: they never change a simulation. The live map doesn't change until you publish.";
+  "You're editing a draft of the company map. Move cards, draw and label handoff lines, or put cards in groups. A line from one pipeline to another (Sales to Onboarding, say) carries each won client on into it; a line to client work is drawn only, because its service runs it. The live map doesn't change until you publish.";
 
 export function EditorBar({
   mode,
@@ -79,7 +79,13 @@ export function EditorBar({
   onTour,
   historyHref,
   history,
+  problems = null,
+  publishBlocked = null,
 }: {
+  /** Why Publish has to wait on what is wrong with the process (see `publishBlocker`), or null. */
+  publishBlocked?: string | null;
+  /** What stops the process simulating, as one line ("2 things to fix before this can simulate") that jumps to the first (editor brainstorm, item 4). */
+  problems?: { line: string; onJump: () => void; canJump: boolean } | null;
   mode: EditorMode;
   /** What is being edited: the process's name. */
   subject: string;
@@ -110,7 +116,7 @@ export function EditorBar({
   solutionForm?: SolutionForm;
   /** Solution mode only: the issue the solution is built for, if any. */
   issue?: SolutionIssue | null;
-  /** The company map (B11): a picture of the business, so nothing to simulate and the words say "map". */
+  /** The company map (B11): the business as a map of processes (the Sandbox simulates what is on it), so no Simulate here and the words say "map". */
   company?: boolean;
   /** Starts the written tour of the Editor (B18); without it there is no "Take the tour" link. */
   onTour?: () => void;
@@ -222,8 +228,8 @@ export function EditorBar({
                   size="sm"
                   className={cls}
                   data-tour="publish"
-                  disabled={busy || !drafts.draft || !changes}
-                  title={!changes ? "Nothing to publish yet." : undefined}
+                  disabled={busy || !drafts.draft || !changes || !!publishBlocked}
+                  title={!changes ? "Nothing to publish yet." : (publishBlocked ?? undefined)}
                   onClick={() => setConfirming("publish")}
                 >
                   {s.label}
@@ -304,6 +310,21 @@ export function EditorBar({
       </div>
       <p className="border-b border-line bg-edit-soft px-4 py-1.5 text-[12.5px]" role="note">
         {mode === "solution" && issue ? SOLUTION_FOR_ISSUE.hint : company ? COMPANY_HINT : mode === "block" && blockForm?.editing ? BLOCK_EDIT_HINT : info.hint}
+        {problems && (
+          <button
+            type="button"
+            data-problems-line
+            disabled={!problems.canJump}
+            onClick={problems.onJump}
+            title={problems.canJump ? "Show the first one" : undefined}
+            className="mr-2 inline-flex items-center gap-1.5 rounded-full border border-crit bg-panel px-2 py-0.5 font-semibold text-crit enabled:hover:bg-crit-soft"
+          >
+            <span aria-hidden className="inline-flex size-4 items-center justify-center rounded-full bg-crit text-[10px] font-bold text-crit-fg">
+              !
+            </span>
+            {problems.line}
+          </button>
+        )}
         {onTour && (
           <button type="button" className="ml-2 font-semibold underline" onClick={onTour} data-take-tour>
             Take the tour

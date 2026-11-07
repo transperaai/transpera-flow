@@ -396,11 +396,14 @@ describe("processes", () => {
   it("makes a library process (and a draft with a start and an end), then renames, retypes, archives and restores it", async () => {
     const { createLibraryProcess } = await import("@/app/w/[slug]/library-actions");
     const { renameProcess, changeProcessKind, archiveProcess, restoreProcess } = await import("@/app/w/[slug]/process-admin-actions");
-    const made = await createLibraryProcess(WS, { kind: "new", name: "Onboarding checklist", processKind: "servicing" } as never);
+    const made = await createLibraryProcess(WS, { kind: "new", name: "Onboarding checklist", category: "internal" } as never);
     if (!made.process) throw new Error(JSON.stringify(made));
     const id = made.process.id;
+    // Made by category (D52): the category is stored and the engine kind follows from it.
+    expect(made.process.kind).toBe("servicing");
+    expect(await one("select category, kind from processes where id = $1", [id])).toEqual({ category: "internal", kind: "servicing" });
     expect((await one("select count(*)::int as n from steps where process_id = $1", [id])).n).toBe(2);
-    expect(await createLibraryProcess(WS, { kind: "new", name: "onboarding CHECKLIST", processKind: "servicing" } as never)).toEqual({ error: "There is already a process called 'onboarding CHECKLIST'. Give it another name." });
+    expect(await createLibraryProcess(WS, { kind: "new", name: "onboarding CHECKLIST", category: "internal" } as never)).toEqual({ error: "There is already a process called 'onboarding CHECKLIST'. Give it another name." });
     expect(await renameProcess(id, "Onboarding steps")).toEqual({ status: "ok" });
     expect(await renameProcess(id, "Onboarding steps")).toEqual({ status: "ok" });
     const taken = (await one("select name from processes where workspace_id = $1 and id <> $2 and not is_company and archived_at is null limit 1", [WS, id])).name as string;

@@ -30,10 +30,11 @@ export async function WorkspaceEditorPage({
   const process = await loadProcessForEditing(slug, processId, { includeCompany: true });
   if (!process) notFound();
   const company = process.live.process.is_company === true;
-  // The map's cards draw from the processes they link to (live), which the Editor is not editing. In any other editor the process
-  // library (B12) can link any process into the draft, so every live process is at hand to draw and simulate through its link;
-  // the ones the run already carries keep their place (the pipeline first), the rest follow, and only a link brings one in.
-  const [parts, library] = await Promise.all([loadLiveParts(process.live.workspace.id), loadLibrary(process.live.workspace.id)]);
+  // The map's cards draw from the processes they link to (live), which the Editor is not editing. A process's own editor makes no new links
+  // (editor brainstorm, item 3), but a step that already holds one is drawn from it and can be turned into steps, so every live process is
+  // at hand; the ones the run already carries keep their place (the pipeline first), the rest follow, and only a link brings one in.
+  // The process library (B12) is the company map's palette alone.
+  const [parts, library] = await Promise.all([loadLiveParts(process.live.workspace.id), company ? loadLibrary(process.live.workspace.id) : Promise.resolve(undefined)]);
   const withParts = (b: typeof process.live) => {
     if (company) return { ...b, otherProcesses: parts };
     const have = new Set([b.process.id, ...(b.otherProcesses ?? []).map((p) => p.process.id)]);
@@ -82,11 +83,11 @@ export async function WorkspaceEditorPage({
       issue={issueRow && issueAboutProcess(issueRow, live.process.id) ? solutionIssueOf(issueRow, live.process.id, live.steps) : null}
       scenarios={scenarios}
       blocks={blocks}
-      sources={sources}
       userId={viewer?.userId ?? null}
+      // Only those addPurpose would accept (Agency admins and the Owner, as on Settings -> Purposes) are offered "+ New purpose…".
+      canAddPurpose={canEdit}
       tourDismissed={tourDismissed}
       historyHref={`/w/${slug}/p/${processId}/history`}
-      sourcesHref={`/w/${slug}/sources`}
       settingsHref={`/w/${slug}/settings`}
       exitHref={exit}
       solutionSeed={fromSolution ? { bundle: bundleFromSolution(live, fromSolution), name: fromSolution.name } : undefined}
@@ -94,7 +95,7 @@ export async function WorkspaceEditorPage({
       editBlock={editRow ? { id: editRow.id, name: editRow.name, description: editRow.description, bundle: readBlock(editRow.steps) } : undefined}
       blockEditorHref={`${base}/edit?mode=block&from=${encodeURIComponent(exit)}`}
       horizonMonths={parseHorizon(searchParams.horizon)}
-      library={editorMode === "draft" ? library : undefined}
+      library={company ? library : undefined}
       tierSetup={tierSetup}
       laneInput={laneInput}
       // The changes in the solution this editor was opened on (D53): they are part of its version, tried by picking it in the Sandbox.

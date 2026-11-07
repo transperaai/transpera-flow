@@ -316,6 +316,10 @@ describe("the backfill", () => {
       ...["check_step_nesting", "company_add_holder", "company_map_apply", "company_map_membership"].map((n) => defn(editing, `private\\.${n}`)),
       defn(editing, "public\\.restore_version"),
     ].join("\n");
+    // 20270137000000 replaced create_library_process with a seven-argument one; this rollback (older) drops the six-argument one it made, so put that back first.
+    await db.client.query("drop function public.create_library_process(uuid, text, text, text, text, text, text)");
+    await db.client.query(defn(readFileSync(new URL("../migrations/20261204000000_process_admin_source_files.sql", import.meta.url), "utf8"), "public\\.create_library_process"));
+    await db.client.query("grant execute on function public.create_library_process(uuid, text, text, text, text, text) to authenticated");
     await db.client.query(
       rollback(everywhere, "-- ---------------------------------------------------------------------------\n-- Where a process sits", "20261130000000", "-- ROLLBACK").replace(
         "drop function private.live_holder",

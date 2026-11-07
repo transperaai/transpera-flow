@@ -6,6 +6,7 @@
 // to confirm against the client's reality. Roles are left open: templates
 // can't know a workspace's roles.
 
+import type { ProcessCategory } from "../process-category";
 import type { ImportEdge, ImportStep } from "./building";
 
 export interface ProcessTemplate {
@@ -13,6 +14,8 @@ export interface ProcessTemplate {
   name: string;
   industry: string;
   kind: "pipeline" | "servicing";
+  /** What the process is for (D52). The kind stays what it runs as: Client onboarding is servicing (it runs per new client through its service link). */
+  category: ProcessCategory;
   entity_name: string;
   description: string;
   steps: ImportStep[];
@@ -27,6 +30,7 @@ export const PROCESS_TEMPLATES: readonly ProcessTemplate[] = [
     name: "Agency sales pipeline",
     industry: "Marketing and creative agencies",
     kind: "pipeline",
+    category: "sales",
     entity_name: "lead",
     description: "From a qualified enquiry to a signed retainer or a lost deal: discovery, audit and proposal, then the decision.",
     steps: [
@@ -53,6 +57,7 @@ export const PROCESS_TEMPLATES: readonly ProcessTemplate[] = [
     name: "Client onboarding",
     industry: "Service businesses",
     kind: "servicing",
+    category: "onboarding",
     entity_name: "new client",
     description: "From a signed contract to the first delivered piece of work: kickoff, access and setup, first deliverable.",
     steps: [
@@ -74,6 +79,7 @@ export const PROCESS_TEMPLATES: readonly ProcessTemplate[] = [
     name: "Monthly client reporting",
     industry: "Service businesses",
     kind: "servicing",
+    category: "routine_client_work",
     entity_name: "report",
     description: "The recurring monthly report: gather the data, draft it, review it, send it.",
     steps: [

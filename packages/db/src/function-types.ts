@@ -15,7 +15,7 @@ export interface Functions {
   can_read_workspace: { Args: { ws: string }; Returns: boolean };
   can_see_people: { Args: { ws: string }; Returns: boolean };
   can_see_person: { Args: { ws: string; person: string }; Returns: boolean };
-  create_library_process: { Args: { p_workspace: string; p_name: string; p_kind: string; p_entity_name?: string; p_description?: string; p_source?: string }; Returns: Json };
+  create_library_process: { Args: { p_workspace: string; p_name: string; p_kind: string; p_entity_name?: string; p_description?: string; p_source?: string; p_category?: string }; Returns: Json };
   create_workspace: { Args: { ws_name: string; ws_slug: string; ws_settings?: Json }; Returns: string };
   discard_draft: { Args: { target_process: string }; Returns: Json };
   duplicate_version: { Args: { source_revision: string; new_name: string }; Returns: Json };

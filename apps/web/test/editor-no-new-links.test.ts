@@ -57,9 +57,9 @@ describe("editor commands make no links", () => {
   });
 
   it("is the process library alone that links one", () => {
-    const placed = placeProcesses(b, [], null, [{ id: "11111111-1111-4111-8111-111111111111", name: "Delivery", kind: "servicing", live: true, holder: null }]);
+    const placed = placeProcesses(b, [], null, [{ id: "11111111-1111-4111-8111-111111111111", name: "Delivery", kind: "servicing", category: "routine_client_work", live: true, holder: null }]);
     expect(placed).toBeNull();
-    const out = placeProcesses(b, ["11111111-1111-4111-8111-111111111111"], null, [{ id: "11111111-1111-4111-8111-111111111111", name: "Delivery", kind: "servicing", live: true, holder: null }]);
+    const out = placeProcesses(b, ["11111111-1111-4111-8111-111111111111"], null, [{ id: "11111111-1111-4111-8111-111111111111", name: "Delivery", kind: "servicing", category: "routine_client_work", live: true, holder: null }]);
     expect(links(applyEdit(b, out!.edit))).toHaveLength(1);
   });
 });

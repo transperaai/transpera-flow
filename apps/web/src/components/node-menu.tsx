@@ -3,7 +3,7 @@
 // A step's context menu (issue #8): right-click a step, or focus it and press
 // Shift+F10 or the context-menu key. Every item acts on the step the menu was
 // opened on (or on the whole selection, when that step is part of one). The
-// choices with a list (kind, pinned person, rework target) open in place with
+// choices with a list (kind, pinned person) open in place with
 // a Back item, so the menu stays one list for the keyboard: arrow keys move,
 // Enter picks, Escape goes back or closes, and focus returns to the step.
 
@@ -15,8 +15,6 @@ import {
   STEP_KINDS,
   kindProblem,
   pinPerson,
-  reworkTargets,
-  setReworkTarget,
   setStepKind,
 } from "@/lib/editor/commands";
 import type { ProcessEditor } from "@/lib/editor/editor";
@@ -43,7 +41,7 @@ export interface MenuState {
   y: number;
 }
 
-type View = "main" | "kind" | "person" | "rework";
+type View = "main" | "kind" | "person";
 
 const mod = () => (typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+");
 
@@ -191,11 +189,6 @@ export function NodeMenu({
             Pin to person
           </Item>
         )}
-        {working && (
-          <Item view="rework" onSelect={() => setView("rework")} submenu>
-            Rework goes back to
-          </Item>
-        )}
         <Separator />
         <Item onSelect={run(() => commands.remove([step.id]))} shortcut="Del" danger>
           Delete
@@ -251,30 +244,6 @@ export function NodeMenu({
             </Item>
           );
         })}
-      </>
-    );
-  } else {
-    const rate = Number(step.rework_rate);
-    body = (
-      <>
-        <Back onBack={() => setView("main")}>Rework goes back to</Back>
-        <p className="px-2.5 pb-1 text-[11px] text-fg-3">
-          {rate > 0
-            ? `${Math.round(rate * 1000) / 10}% of items need rework.`
-            : "Rework rate is 0%: set one in the inspector for this to matter."}
-        </p>
-        <Item checked={!step.rework_to_step_id} onSelect={run(() => editor.run((b) => setReworkTarget(b, step.id, null)))}>
-          This step (repeat it)
-        </Item>
-        {reworkTargets(bundle, step.id).map((s) => (
-          <Item
-            key={s.id}
-            checked={step.rework_to_step_id === s.id}
-            onSelect={run(() => editor.run((b) => setReworkTarget(b, step.id, s.id)))}
-          >
-            {s.name}
-          </Item>
-        ))}
       </>
     );
   }

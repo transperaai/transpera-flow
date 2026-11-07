@@ -1,17 +1,19 @@
 "use client";
 
 // The Editor's right column (issue #104): the inspector for the selected step (today's Step tab), what a selected
-// group adds (first step, ungroup, save as a block), and the loose ends the editor can see.
+// group adds (first step, ungroup, save as a block), what a selected decision adds (its branches), and a linked process's card.
+// What is wrong shows as red marks on the map and a line in the editor bar, not here (editor brainstorm, item 4).
 
 import { useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { isGroup, UPKEEP_PURPOSE, workspacePurposes, type EvidenceStamp, type ProcessBundle, type SourceRow, type StepRow } from "@transpera-flow/db";
+import { isGroup, UPKEEP_PURPOSE, workspacePurposes, type EvidenceStamp, type ProcessBundle, type PurposeCategory, type StepRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { LinkedSources } from "@/components/sources/linking-context";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NO_SELECTION, type Selection } from "@/components/process-canvas";
-import { StepInspector, type DraftInfo } from "@/components/step-inspector";
-import { deleteSelection, hasPurpose, setStepPurposes, stepWarnings } from "@/lib/editor/commands";
+import { StepInspector, type DraftInfo, type PurposeTools } from "@/components/step-inspector";
+import { deleteSelection, hasPurpose, setStepPurposes } from "@/lib/editor/commands";
+import { LinkedProcessCard } from "./linked-process-card";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { membersOf, setGroupEntry, ungroup } from "@/lib/editor/groups";
 import type { BlockTools } from "./use-blocks";
@@ -25,16 +27,25 @@ export function Inspector({
   setSelection,
   inspectFocus,
   onFocused,
-  sources,
   stamp,
-  sourcesHref,
   draft,
   blocks,
   company = false,
   tierSetup,
   changesOnSteps,
   settingsHref,
+  purposes,
+  branchFocus = null,
+  onFocusBranch,
+  turnInto,
 }: {
+  /** The workspace's purposes as the Editor sees them, and how to add one. Without it, the bundle's list and no adding. */
+  purposes?: PurposeTools;
+  /** A decision selected by clicking one of its branches: that branch's fields take focus. */
+  branchFocus?: string | null;
+  onFocusBranch?: (edgeId: string | null) => void;
+  /** Turning a step that holds a linked process into steps: why it can't be (null: it can), doing it, and what the last try said. */
+  turnInto?: { problem: (stepId: string) => string | null; run: (stepId: string) => void; said: string | null };
   tierSetup?: TierSetup;
   changesOnSteps?: ChangesOnSteps;
   settingsHref?: string;
@@ -44,19 +55,15 @@ export function Inspector({
   setSelection: Dispatch<SetStateAction<Selection>>;
   inspectFocus: string | null;
   onFocused: () => void;
-  sources: readonly SourceRow[];
   stamp: () => EvidenceStamp;
-  sourcesHref?: string;
   /** How the draft changes a step against live, as the inspector shows it; null when there is no draft. */
   draft: ((step: StepRow) => DraftInfo) | null;
   /** The block library as the Editor uses it: a selected group can be saved as a block. */
   blocks: BlockTools;
-  /** The company map (B11): no loose ends to chase, no blocks. */
+  /** The company map (B11): no blocks, no branches or purposes to edit. */
   company?: boolean;
 }) {
   const step = selected.steps.length === 1 && !selected.edges.length ? bundle.steps.find((s) => s.id === selected.steps[0]) : undefined;
-  const warnings = useMemo(() => (company ? new Map<string, string>() : stepWarnings(bundle)), [bundle, company]);
-  const loose = useMemo(() => bundle.steps.filter((s) => warnings.has(s.id)), [bundle.steps, warnings]);
   return (
     <>
       {step ? (
@@ -73,9 +80,15 @@ export function Inspector({
               editor.run((b) => deleteSelection(b, [step.id], []));
               setSelection(NO_SELECTION);
             }}
-            sources={sources}
             stamp={stamp}
-            sourcesHref={sourcesHref}
+            purposes={purposes}
+            branchFocus={branchFocus}
+            onFocusBranch={onFocusBranch}
+            holderCard={
+              turnInto && step.child_process_id && !company ? (
+                <LinkedProcessCard name={step.name} problem={turnInto.problem(step.id)} said={turnInto.said} onTurnInto={() => turnInto.run(step.id)} />
+              ) : undefined
+            }
             draft={draft ? draft(step) : null}
             tierSetup={tierSetup}
             changesOnSteps={changesOnSteps}
@@ -88,7 +101,6 @@ export function Inspector({
             empty="None linked"
           />
           {isGroup(step) && <GroupPanel bundle={bundle} editor={editor} group={step} setSelection={setSelection} blocks={blocks} company={company} />}
-          {warnings.get(step.id) && <p role="note" className="rounded-token border border-warn bg-warn-soft px-2 py-1.5 text-xs">{warnings.get(step.id)}</p>}
         </>
       ) : (
         <section aria-label="Inspector" className="flex flex-col gap-2">
@@ -98,36 +110,10 @@ export function Inspector({
               ? `${selected.steps.length} steps selected. Group them from the left, or press Delete to remove them.`
               : "Select a step or group on the canvas to edit it."}
           </p>
-          {selected.steps.length > 1 && !company && <ManyPurposes bundle={bundle} editor={editor} ids={selected.steps} />}
+          {selected.steps.length > 1 && !company && <ManyPurposes bundle={bundle} editor={editor} ids={selected.steps} categories={purposes?.list ?? workspacePurposes(bundle.workspace.settings)} />}
         </section>
       )}
 
-      {loose.length > 0 && (
-        <section aria-label="Loose ends" className="flex flex-col gap-1.5">
-          <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
-            Loose ends ({loose.length})
-            <Help
-              label="Loose ends"
-              description="Steps or groups the process can't leave, or whose branches don't add up to 100%. A process with one can't be simulated properly."
-              example="A new group with nothing leaving it: drag from its right edge to the step that comes next."
-            />
-          </h2>
-          <ul className="flex flex-col gap-1">
-            {loose.map((s) => (
-              <li key={s.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelection({ steps: [s.id], edges: [] })}
-                  className="w-full rounded-token border border-line bg-panel px-2 py-1 text-left text-xs hover:bg-panel-2"
-                >
-                  <span className="font-semibold">{s.name}</span>
-                  <span className="block text-fg-2">{warnings.get(s.id)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
     </>
   );
 }
@@ -136,8 +122,8 @@ const MIXED = "__mixed";
 const AUTOMATIC = "__automatic";
 
 /** "What they achieve" for several steps at once: one undoable edit, holders and starts and ends skipped. */
-function ManyPurposes({ bundle, editor, ids }: { bundle: ProcessBundle; editor: ProcessEditor; ids: readonly string[] }) {
-  const categories = useMemo(() => workspacePurposes(bundle.workspace.settings).filter((c) => c.key !== UPKEEP_PURPOSE), [bundle.workspace.settings]);
+function ManyPurposes({ bundle, editor, ids, categories: all }: { bundle: ProcessBundle; editor: ProcessEditor; ids: readonly string[]; categories: readonly PurposeCategory[] }) {
+  const categories = useMemo(() => all.filter((c) => c.key !== UPKEEP_PURPOSE), [all]);
   const working = bundle.steps.filter((s) => ids.includes(s.id) && hasPurpose(s));
   if (!working.length) return <p className="text-xs text-muted-foreground">None of these steps has hands-on time to say the purpose of.</p>;
   const skipped = ids.length - working.length;

@@ -67,6 +67,7 @@ describe("every (i) on the Editor screen", () => {
   const files = [
     "components/editor/palette.tsx",
     "components/editor/inspector.tsx",
+    "components/editor/decision-panel.tsx",
     "components/editor/simulate-footer.tsx",
     "components/editor/editor-bar.tsx",
     "components/editor/issue-area.tsx",
@@ -90,7 +91,8 @@ describe("every (i) on the Editor screen", () => {
 
   it("keeps each named (i), so deleting one is caught", () => {
     const expected: Record<string, string[]> = {
-      "components/editor/inspector.tsx": ["Loose ends", "What they achieve", "First step", "Save this group as a block"],
+      "components/editor/inspector.tsx": ["What they achieve", "First step", "Save this group as a block"],
+      "components/editor/decision-panel.tsx": ["Branches", "Goes to"],
       "components/editor/palette.tsx": ["The company map", "Add", "Groups", "Blocks", "Insert", "Replace selected"],
       "components/editor/editor-bar.tsx": ["Simulate", "Save to library", "Save solution", "Block name", "Description", "Solution name"],
       "components/editor/simulate-footer.tsx": ["Compared with live", "Automatic verdict"],

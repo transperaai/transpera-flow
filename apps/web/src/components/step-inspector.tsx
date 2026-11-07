@@ -4,7 +4,7 @@
 // on its own through the process editor, so each change is undoable and
 // re-runs the simulation.
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
   EVIDENCE_COLUMNS,
   isOpenAssumption,
@@ -15,21 +15,20 @@ import {
   type Distribution,
   type EvidenceStamp,
   type ProcessBundle,
-  type SourceRow,
+  type PurposeCategory,
   type StepKind,
   type StepRow,
 } from "@transpera-flow/db";
-import { EvidencePanel } from "@/components/evidence";
+import { DecisionPanel } from "@/components/editor/decision-panel";
+import { NewPurpose, type PurposeAdder } from "@/components/editor/new-purpose";
+import { TYPE_CHOICES, TYPE_LABELS } from "@/lib/editor/node-types";
 import { StepBaseValues, type ChangesOnSteps } from "@/components/step-base-values";
 import type { TierSetup } from "@/lib/tier-setup";
 import { NumberField, SelectField, TextField, type SelectOption } from "@/components/fields";
 import { ProvenanceBadge } from "@/components/provenance-badge";
 import {
-  KIND_LABELS,
   OUTCOME_LABELS,
-  STEP_KINDS,
   kindProblem,
-  reworkTargets,
   setDistribution,
   setRangePoint,
   setStepKind,
@@ -55,10 +54,18 @@ const DIST_OPTIONS: SelectOption[] = [
 /** Engine defaults for a lognormal duration's spread (packages/engine simulate.ts). */
 const DEFAULT_CV: Record<Phase, number> = { work: 0.35, wait: 0.3 };
 
-/** "What it achieves" (sandbox phase 4): the workspace's categories, or Automatic with the name it resolves to and why. */
-function PurposeField({ bundle, step, save }: { bundle: ProcessBundle; step: StepRow; save: Saver<string | null> }) {
-  const categories = useMemo(() => workspacePurposes(bundle.workspace.settings), [bundle.workspace.settings]);
-  const resolved = useMemo(() => resolveBundlePurposes(bundle).get(step.id), [bundle, step.id]);
+/** The workspace's purposes as the Editor sees them now (it can add one), and how to add one (absent: this person can't). */
+export interface PurposeTools {
+  list: PurposeCategory[];
+  /** The bundle's workspace settings with `list` in them, so a purpose added a moment ago is known to the step. */
+  settings: ProcessBundle["workspace"]["settings"];
+  adder: PurposeAdder | null;
+}
+
+/** "What it achieves" (sandbox phase 4): the workspace's categories, or Automatic with the name it resolves to and why. "+ New purpose…" adds one (editor brainstorm, item 1). */
+function PurposeField({ bundle, step, save, purposes }: { bundle: ProcessBundle; step: StepRow; save: Saver<string | null>; purposes: PurposeTools }) {
+  const categories = purposes.list;
+  const resolved = useMemo(() => resolveBundlePurposes({ ...bundle, workspace: { ...bundle.workspace, settings: purposes.settings } }).get(step.id), [bundle, purposes.settings, step.id]);
   const nameOf = new Map(categories.map((c) => [c.key, c.name]));
   const automatic = resolved ? (nameOf.get(resolved.key) ?? resolved.key) : "";
   const hint =
@@ -74,19 +81,22 @@ function PurposeField({ bundle, step, save }: { bundle: ProcessBundle; step: Ste
             : "Sales pipeline process, up to and including the sale decision"
         : null;
   return (
-    <SelectField
-      label="What it achieves"
-      help={{
-        description:
-          "What this step's hands-on time achieves. The Sandbox adds up working time by these, so you can see how much goes on the client's job, on winning work, on fixing, and on steps that could go. Rework on any step always counts as Fixing.",
-        example: "“Send weekly status email” is Coordination; “Write the monthly report” moves the client's job forward.",
-      }}
-      value={step.purpose ?? null}
-      options={categories.filter((c) => c.key !== UPKEEP_PURPOSE).map((c) => ({ value: c.key, label: c.name }))}
-      noneLabel={`Automatic: ${automatic}`}
-      save={save}
-      hint={hint}
-    />
+    <div className="flex flex-col gap-1.5">
+      <SelectField
+        label="What it achieves"
+        help={{
+          description:
+            "What this step's hands-on time achieves. The Sandbox adds up working time by these, so you can see how much goes on the client's job, on winning work, on fixing, and on steps that could go. Rework on any step always counts as Fixing.",
+          example: "“Send weekly status email” is Coordination; “Write the monthly report” moves the client's job forward.",
+        }}
+        value={step.purpose ?? null}
+        options={categories.filter((c) => c.key !== UPKEEP_PURPOSE).map((c) => ({ value: c.key, label: c.name }))}
+        noneLabel={`Automatic: ${automatic}`}
+        save={save}
+        hint={hint}
+      />
+      {purposes.adder && <NewPurpose adder={purposes.adder} onAdded={(key) => void save(step.purpose ?? null, key)} />}
+    </div>
   );
 }
 
@@ -101,13 +111,15 @@ export function StepInspector({
   onClose,
   onDelete,
   draft = null,
-  sources = [],
   stamp,
-  sourcesHref,
   tierSetup,
   changesOnSteps,
   settingsHref,
   readOnly = false,
+  purposes,
+  branchFocus = null,
+  onFocusBranch,
+  holderCard,
 }: {
   bundle: ProcessBundle;
   step: StepRow;
@@ -125,11 +137,15 @@ export function StepInspector({
   onDelete: () => void;
   /** In a draft (issue #9): how the draft changed this step against live, and undoing that. */
   draft?: DraftInfo | null;
-  /** The workspace's sources, to cite (issue #21). */
-  sources?: readonly SourceRow[];
-  /** Who and when, for citing and confirming. */
+  /** Who and when, for confirming. */
   stamp?: () => EvidenceStamp;
-  sourcesHref?: string;
+  /** The workspace's purposes and how to add one. Without it "What it achieves" uses the bundle's. */
+  purposes?: PurposeTools;
+  /** A decision: the branch whose fields are in focus, and how to move the focus. */
+  branchFocus?: string | null;
+  onFocusBranch?: (edgeId: string | null) => void;
+  /** A step that holds a linked process: the card that says so and offers "Turn into steps" (the Editor's own). */
+  holderCard?: ReactNode;
 }) {
   const id = step.id;
   const ref = useRef<HTMLElement>(null);
@@ -148,17 +164,25 @@ export function StepInspector({
   const field = <T extends Scalar>(name: string) => via<T>((b, v) => updateStep(b, id, { [name]: v }));
   // A group (or a step holding a child process) has no numbers of its own: the steps inside it do the work.
   const holder = step.kind === "group" || step.child_process_id !== null;
-  const working = step.kind !== "start" && step.kind !== "end" && !holder;
+  // A decision is its question and its branches, a wait is how long it takes, and the Start is fixed: only a step has the rest.
+  const decision = step.kind === "decision" && !holder;
+  const wait = step.kind === "wait" && !holder;
+  const working = step.kind !== "start" && step.kind !== "end" && !holder && !decision;
+  const stepOnly = working && !wait;
+  const ownPurposes = useMemo<PurposeTools>(() => {
+    const settings = bundle.workspace.settings;
+    return { list: workspacePurposes(settings), settings, adder: null };
+  }, [bundle.workspace.settings]);
   // A process placed here by a link (B11, B12): named after it. It is taken out with Remove from this map, which leaves the process itself alone.
   const placed = step.child_process_id !== null && step.child_process_id !== undefined;
   const company = bundle.process.is_company === true;
 
-  const kindOptions: SelectOption[] = [...STEP_KINDS, ...(step.kind === "subprocess" || step.kind === "group" ? [step.kind] : [])]
+  const kindOptions: SelectOption[] = [...TYPE_CHOICES, ...(step.kind === "subprocess" || step.kind === "group" ? [step.kind] : [])]
     .filter((k) => k === step.kind || !kindProblem(bundle, id, k))
     .map((k) => ({
-    value: k,
-    label: KIND_LABELS[k],
-  }));
+      value: k,
+      label: TYPE_LABELS[k],
+    }));
   const roleOptions = selectableRoles(bundle.roles, [step.role_id]).map((r) => ({ value: r.id, label: r.name }));
   const roleNames = new Map(bundle.roles.map((r) => [r.id, r.name]));
   const personOptions = bundle.people
@@ -168,7 +192,6 @@ export function StepInspector({
       return { value: p.id, label: roles.length ? `${p.name} (${roles.join(", ")})` : p.name };
     })
     .sort((a, b) => a.label.localeCompare(b.label));
-  const reworkOptions = reworkTargets(bundle, id).map((s) => ({ value: s.id, label: s.name }));
 
   return (
     <aside
@@ -183,7 +206,7 @@ export function StepInspector({
       className="flex flex-col gap-3"
     >
       <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-base font-bold">Step</h2>
+        <h2 className="text-base font-bold">{TYPE_LABELS[step.kind]}</h2>
         <button type="button" onClick={onClose} className="text-fg-2 hover:underline">
           Close
         </button>
@@ -204,26 +227,45 @@ export function StepInspector({
           </button>
         </div>
       )}
-      <TextField
-        label="Name"
-        value={step.name}
-        disabled={placed}
-        hint={placed ? "Named after its process. Rename the process on its own page." : undefined}
-        save={field<string | null>("name")}
-        help={{ description: "What this step is called on the map and in the analysis.", example: "“Discovery call” or “Send proposal”." }}
-      />
-      <div className="grid grid-cols-2 gap-2">
-        <SelectField
-          label="Kind"
-          help={{
-            description: "What sort of step it is: work someone does, a wait, a decision with branches, or a box that groups other steps.",
-            example: "A “Client decision” is a Decision with two branches: signs, or walks away.",
-          }}
-          value={step.kind}
-          options={kindOptions}
-          disabled={placed}
-          save={via<string | null>((b, v) => (v ? setStepKind(b, id, v as StepKind) : null))}
+      {decision ? (
+        <TextField
+          label="Question"
+          value={step.name}
+          save={field<string | null>("name")}
+          help={{ description: "The question this decision asks. Its branches, below, are the possible answers.", example: "“Does the client sign?”" }}
         />
+      ) : (
+        <TextField
+          label="Name"
+          value={step.name}
+          disabled={placed}
+          hint={placed ? "Named after its process. Rename the process on its own page." : undefined}
+          save={field<string | null>("name")}
+          help={{ description: "What this step is called on the map and in the analysis.", example: "“Discovery call” or “Send proposal”." }}
+        />
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        {step.kind === "start" ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-fg-2">Type</span>
+            <p data-fixed-type className="flex h-8 items-center text-sm">
+              Start
+            </p>
+            <p className="text-xs text-muted-foreground">Every process has one start, and it stays.</p>
+          </div>
+        ) : (
+          <SelectField
+            label="Type"
+            help={{
+              description: "What sort of node it is: a step someone does, a wait where time passes and nobody works, a decision where the work splits, or an end. To loop back to an earlier step, use a decision's “Goes to” menu.",
+              example: "A “Client decision” is a Decision with two branches: signs, or walks away.",
+            }}
+            value={step.kind}
+            options={kindOptions}
+            disabled={placed}
+            save={via<string | null>((b, v) => (v ? setStepKind(b, id, v as StepKind) : null))}
+          />
+        )}
         {step.kind === "end" && (
           <SelectField
             label="Outcome"
@@ -235,17 +277,27 @@ export function StepInspector({
         )}
       </div>
 
-      {holder && (
+      {holder && holderCard && !(placed && company) && step.kind !== "group" ? (
+        holderCard
+      ) : holder ? (
         <p className="rounded-token border border-line bg-panel-2 px-2 py-1.5 text-xs text-fg-2">
           {step.kind === "group"
             ? "A group is a box of steps. It has no hours, role or rework of its own: the steps inside it do the work, and the numbers are the same whether it is open or closed on the map."
             : placed && company
-              ? "This card is a process placed on the company map. Moving it, or joining it to another with a handoff line, changes only this map: the process itself is never edited here. Open its page to change it."
+              ? "This card is a process placed on the company map. The process itself is never edited here. Having it on the map is what the Sandbox simulates, and joining a pipeline to another with a handoff line sends each won client on into it. Open its page to change the process."
               : "This step is a link to another process, with its own page and versions. The numbers are those of its steps, and changes to it show here. The process itself is never edited here."}
         </p>
+      ) : null}
+
+      {decision && !company && onFocusBranch && <DecisionPanel bundle={bundle} editor={editor} decision={step} focus={branchFocus} onFocusBranch={onFocusBranch} />}
+
+      {wait && (
+        <div className={sectionClass}>
+          <Duration phase="wait" title="How long" step={step} via={via} field={field} />
+        </div>
       )}
 
-      {working && (
+      {stepOnly && (
         <>
           <div className={sectionClass}>
             <SelectField
@@ -280,27 +332,20 @@ export function StepInspector({
             settingsHref={settingsHref}
           />
           <div className={sectionClass}>
-            <div className="grid grid-cols-2 gap-2">
-              <NumberField
-                label="Rework %"
-                help={{ description: "How often work has to be done again.", example: "8 out of every 100 proposals have to be redone." }}
-                value={Number(step.rework_rate)}
-                scale={100}
-                unit="%"
-                min={0}
-                max={100}
-                step={1}
-                save={field("rework_rate")}
-              />
-              <SelectField
-                label="Goes back to"
-                help={{ description: "Rework goes back to this step when work has to be redone. “This step” means it is simply repeated.", example: "A rejected proposal goes back to “Write proposal”, not to the start." }}
-                value={step.rework_to_step_id}
-                options={reworkOptions}
-                noneLabel="This step"
-                save={field("rework_to_step_id")}
-              />
-            </div>
+            <NumberField
+              label="Done again"
+              help={{
+                description: "Use this for a step that is sometimes redone. When work goes back to an earlier step, add a decision with a “Go back to…” branch instead.",
+                example: "8 out of every 100 proposals have to be written again, so enter 8.",
+              }}
+              value={Number(step.rework_rate)}
+              scale={100}
+              unit="% of the time"
+              min={0}
+              max={100}
+              step={1}
+              save={field("rework_rate")}
+            />
             <div className="grid grid-cols-2 gap-2">
               <NumberField
                 label="Promised time"
@@ -324,8 +369,7 @@ export function StepInspector({
               />
             </div>
             <p className="text-xs text-fg-3">
-              Work already in progress is what sits at this step now. Where to send rework and the promised time are
-              saved but don&apos;t change the numbers yet.
+              Work already in progress is what sits at this step now. The promised time is saved but doesn&apos;t change the numbers yet.
             </p>
             <TextField
               label="Tool"
@@ -334,7 +378,7 @@ export function StepInspector({
               optional
               save={field("tool")}
             />
-            <PurposeField bundle={bundle} step={step} save={field("purpose")} />
+            <PurposeField bundle={bundle} step={step} save={field("purpose")} purposes={purposes ?? ownPurposes} />
           </div>
           <div className={sectionClass}>
             <p className="text-xs font-semibold text-fg-2">Analysis rules</p>
@@ -414,10 +458,6 @@ export function StepInspector({
         </div>
       )}
 
-      {working && (
-        <EvidencePanel step={step} editor={editor} sources={sources} stamp={stamp ?? (() => ({ at: new Date().toISOString() }))} sourcesHref={sourcesHref} />
-      )}
-
       <div className={sectionClass}>
         <TextField
           label="Notes"
@@ -436,9 +476,11 @@ export function StepInspector({
               {PLACED_REMOVE_NOTE}
             </p>
           </>
+        ) : step.kind === "start" ? (
+          <p className="text-xs text-muted-foreground">The start can&apos;t be deleted.</p>
         ) : (
           <button type="button" onClick={onDelete} className="self-start rounded-token border border-crit px-2.5 py-1 text-crit hover:bg-crit-soft">
-            Delete step
+            {decision ? "Delete decision" : wait ? "Delete wait" : "Delete step"}
           </button>
         )}
       </div>

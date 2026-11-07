@@ -132,3 +132,12 @@ describe("nodeProblems and Publish", () => {
     expect(stepWarnings(off).size).toBe(1);
   });
 });
+
+describe("the Publish gate", () => {
+  it("blocks while anything stops the process simulating, and says how many", async () => {
+    const { publishBlocker } = await import("@/lib/editor/problems");
+    expect(publishBlocker(0)).toBeNull();
+    expect(publishBlocker(1)).toMatch(/Fix the thing marked in red/);
+    expect(publishBlocker(3)).toMatch(/Fix the 3 things marked in red/);
+  });
+});

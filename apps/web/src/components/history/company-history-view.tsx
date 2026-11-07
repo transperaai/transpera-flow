@@ -12,7 +12,7 @@ import { EDIT_ONLY } from "@/lib/phone";
 
 /**
  * The company map's History (B11): every published version of the map, newest first, with what changed and who made it.
- * The map is a picture of the business, not a process, so there are no simulated numbers here. A version made by the
+ * The map is the business as a set of processes, not a process, so there are no simulated numbers here (the Sandbox simulates the company from it). A version made by the
  * system (a process was added, renamed or taken off the map) says so in words. Editors can restore a version into the
  * map's draft; it can't be duplicated (a copy of a map is not a process).
  */

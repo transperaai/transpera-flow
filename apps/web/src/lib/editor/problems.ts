@@ -76,7 +76,7 @@ function pin(bundle: ProcessBundle, message: string, out: NodeProblems): boolean
 
 export function nodeProblems(bundle: ProcessBundle): NodeProblems {
   const out: NodeProblems = { steps: new Map(), edges: new Map(), process: [], total: 0 };
-  // The company map is a picture of the business: nothing on it is simulated, so nothing on it is a problem (as the editor treats it).
+  // The company map is not simulated from the editor (the Sandbox runs the company from it), and its lines have no shares to add up, so nothing on it is a problem (as the editor treats it).
   if (bundle.process.is_company) return out;
 
   for (const [id, message] of stepWarnings(bundle)) add(out.steps, id, message);
@@ -111,4 +111,9 @@ export function firstProblem(bundle: ProcessBundle, problems: NodeProblems): { k
   if (step) return { kind: "step", id: step.id };
   const edge = bundle.edges.find((e) => problems.edges.has(e.id));
   return edge ? { kind: "edge", id: edge.id } : null;
+}
+
+/** Why Publish waits on the problems, or null when there are none: Publish is blocked while anything stops the process simulating. */
+export function publishBlocker(total: number): string | null {
+  return total <= 0 ? null : `Fix the ${total === 1 ? "thing" : `${total} things`} marked in red first: a process that can't simulate can't be published.`;
 }

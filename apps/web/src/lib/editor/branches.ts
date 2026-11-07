@@ -229,3 +229,28 @@ export function setBranchCondition(bundle: ProcessBundle, edgeId: string, condit
   const edit = updateEdge(bundle, edgeId, { condition_tag: tag || null });
   return edit && { ...edit, label: tag ? `Set a branch to only when ${tag}` : "Cleared a branch's condition" };
 }
+
+/**
+ * Take a branch off a decision. The last branch (in line order) takes what is left, so the shares still add up to 100%: the removed
+ * branch's share goes to the branch that is last after it goes. A decision with one branch left keeps it (at 100%); it never loses
+ * its last branch this way. Null when the line isn't a branch, or is the only one.
+ */
+export function removeBranch(bundle: ProcessBundle, edgeId: string): Edit | null {
+  const edge = bundle.edges.find((e) => e.id === edgeId);
+  const decision = edge && stepOf(bundle, edge.from_step_id);
+  if (!edge || !decision) return null;
+  const branches = branchesOf(bundle, decision.id);
+  if (branches.length < 2) return null;
+  const rest = branches.filter((e) => e.id !== edgeId);
+  const shares = rest.map((e) => toPercent(e.probability));
+  const lastAt = rest.length - 1;
+  shares[lastAt] = 100 - shares.slice(0, lastAt).reduce((n, v) => n + v, 0);
+  if (shares[lastAt]! < 0) return null;
+  const ops: Op[] = [{ kind: "remove", steps: [], edges: [edge] }];
+  const last = rest[lastAt]!;
+  if (Number(last.probability) !== shares[lastAt]! / 100) {
+    ops.push({ kind: "update", changes: [{ table: "edges", id: last.id, before: { probability: last.probability }, after: { probability: shares[lastAt]! / 100 } }] });
+  }
+  const name = edge.label?.trim() || stepOf(bundle, edge.to_step_id)?.name || "branch";
+  return { label: `Removed the ${name} branch from ${decision.name}`, ops };
+}
