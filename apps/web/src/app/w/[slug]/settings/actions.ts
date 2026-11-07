@@ -4,7 +4,7 @@ import { refresh } from "next/cache";
 import type { MarketFactorKey } from "@transpera-flow/engine";
 import type { SaveOutcome } from "@/lib/fields/field-controller";
 import { saveCapacityFactor, saveCapacityFactorSwitch, saveField, saveFields, saveLinks } from "@/lib/fields/server";
-import { parsePurposes, type PurposeCategory } from "@transpera-flow/db";
+import { DEFAULT_PURPOSES, MAX_PURPOSE_DESCRIPTION, MAX_PURPOSE_NAME, MAX_PURPOSES, newPurposeKey, parsePurposes, type PurposeCategory } from "@transpera-flow/db";
 import { isGrowth, isMonth, isMultiplier, parseLeadSourceField, parseNewLeadSource, type LeadSourceField } from "@/lib/demand";
 import { copyName, parseChange, parseConditionField } from "@/lib/market";
 import { parseNewRole, parseRoleField, type RoleField } from "@/lib/roles";
@@ -148,6 +148,33 @@ export async function savePurposes(workspaceId: string, base: PurposeCategory[] 
   }
   if (out.status === "conflict") return { status: "conflict", theirs: out.theirs["settings.purposes"] ?? null };
   return out;
+}
+
+export type AddPurposeOutcome =
+  /** `key` is the new purpose's key: the editor sets the step's purpose with it. `purposes` is the list now stored. */
+  | { status: "saved"; key: string; purposes: PurposeCategory[] }
+  | Exclude<PurposesOutcome, { status: "saved" }>;
+
+/**
+ * Add one purpose to the workspace's list straight from the process editor ("+ New purpose…", editor brainstorm item 1). It is
+ * `savePurposes` with the list as loaded (`base`; null while the workspace uses the defaults) plus one category at the end, so it has the
+ * same compare-and-set (someone else's save in between is a conflict that returns theirs), the same permission (the database's, as
+ * `can_edit_workspace`: Agency admins and the Owner; anyone else is refused) and the same limits: 12 purposes at most, a name of 1 to 60
+ * characters that no other purpose has, a description of at most 200. It makes no step edit: the editor sets the step's purpose with
+ * the key it gets back. Refreshes on a save, like `savePurposes`.
+ */
+export async function addPurpose(workspaceId: string, base: PurposeCategory[] | null, input: { name: string; description?: string }): Promise<AddPurposeOutcome> {
+  const current = base === null ? DEFAULT_PURPOSES.map((c) => ({ ...c })) : parsePurposes(base).ok ? base : null;
+  if (!isId(workspaceId) || !current || !input || typeof input.name !== "string" || !(input.description === undefined || typeof input.description === "string")) return invalid;
+  const name = input.name.trim();
+  const description = (input.description ?? "").trim();
+  if (!name || [...name].length > MAX_PURPOSE_NAME) return { status: "error", message: `A purpose's name is 1 to ${MAX_PURPOSE_NAME} characters.` };
+  if ([...description].length > MAX_PURPOSE_DESCRIPTION) return { status: "error", message: `A description is at most ${MAX_PURPOSE_DESCRIPTION} characters.` };
+  if (current.length >= MAX_PURPOSES) return { status: "error", message: `A workspace can have at most ${MAX_PURPOSES} purposes. Remove one in Settings first.` };
+  if (current.some((c) => c.name.trim().toLowerCase() === name.toLowerCase())) return { status: "error", message: `There is already a purpose called "${name}".` };
+  const key = newPurposeKey(current.map((c) => c.key));
+  const out = await savePurposes(workspaceId, base, [...current, { key, name, description }]);
+  return out.status === "saved" ? { status: "saved", key, purposes: out.purposes } : out;
 }
 
 /**
