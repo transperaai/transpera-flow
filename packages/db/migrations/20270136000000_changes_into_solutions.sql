@@ -17,15 +17,15 @@
 --      - Effects on steps that are not in any live version (deleted, or only in a draft) are dropped. A change with none left makes no solution.
 --        Both counts are in the notice.
 --      - The issue link follows the app's own rules (private.solution_issues_before_insert): not a detection, and about the solution's process (its
---        `process_id` or one of its links). An open or in-progress issue is linked as the app links it, so an open issue moves to Testing solutions
---        and logs `solution_tested`. A resolved, won't-fix or dismissed issue is linked with those two triggers off, so it is not reopened or logged.
---        A link the rules refuse is skipped (counted); the solution is still made.
+--        `process_id` or one of its links). A link the rules refuse is skipped (counted); the solution is still made. The link is a record: the two
+--        solution_issues insert triggers are off for it, so NO issue changes status and none logs a `solution_tested` event (an open issue stays open,
+--        a resolved one stays resolved).
 --   4. `capacity_changes` stays, READ-ONLY, for one release (a table comment says it goes): the insert and update policies are dropped (the select
 --      and delete policies stay, so a workspace can still be cleaned up; foreign-key actions bypass row security). Nothing reads it after this
 --      package. A backup restore sends no changes (`import_workspace_bundle` is not redefined: an empty section needs no row-level permission).
 --
 -- Safe on a database that holds real data: nothing is deleted or rewritten except the two dropped policies and the added column; the move only
--- inserts solutions and links; one transaction.
+-- inserts solutions and links, changing no issue; one transaction.
 --
 -- Preflight:    select count(*) from public.schema_migrations where version >= '20270136000000';   -- expect 0
 --               select count(*) from public.capacity_changes;                                         -- how many changes there are to move
@@ -51,7 +51,6 @@
 --   create policy "update capacity_changes" on public.capacity_changes for update to authenticated using (public.can_edit_workspace(workspace_id)) with check (public.can_edit_workspace(workspace_id));
 --   delete from public.schema_migrations where version = '20270136000000';
 --   commit;
---   (Issues the move put in Testing solutions stay there; put them back by hand if wanted.)
 
 -- 1. The shape of a solution's step changes. One change first (a CASE, so each test runs only after the ones before it passed), then the list.
 create or replace function private.is_step_change(x jsonb) returns boolean
@@ -83,7 +82,6 @@ as $$
     else true
   end;
 $$;
-revoke all on function private.is_step_change(jsonb) from public, anon, authenticated;
 
 create or replace function private.is_step_changes(c jsonb) returns boolean
 language sql
@@ -97,7 +95,6 @@ as $$
     else not exists (select 1 from pg_catalog.jsonb_array_elements(c) x where not private.is_step_change(x.value))
   end;
 $$;
-revoke all on function private.is_step_changes(jsonb) from public, anon, authenticated;
 
 alter table public.solutions
   add column step_changes jsonb not null default '[]' constraint solutions_step_changes check (private.is_step_changes(step_changes));
@@ -115,7 +112,6 @@ declare
   n_no_process integer := 0;
   n_dropped integer := 0;
   n_linked integer := 0;
-  n_linked_closed integer := 0;
   n_skipped integer := 0;
   n_no_issue integer := 0;
 begin
@@ -178,24 +174,17 @@ begin
      and (i.process_id = m.process_id or exists (select 1 from public.issue_links l where l.issue_id = i.id and l.workspace_id = i.workspace_id and l.process_id = m.process_id));
   select count(*) into n_skipped from _cc_made m where m.issue_id is not null and not exists (select 1 from _cc_links k where k.solution_id = m.solution_id);
 
-  -- Open and in-progress issues: as the app links them (an open issue moves to Testing solutions).
+  -- Linked as a record: the insert checks (applied by hand in _cc_links above) and the "tested" log are off, so no issue changes status or gets an event from this move.
+  alter table public.solution_issues disable trigger solution_issues_before_insert;
+  alter table public.solution_issues disable trigger solution_issue_tested;
   insert into public.solution_issues (solution_id, issue_id, workspace_id, created_by)
-  select k.solution_id, k.issue_id, k.workspace_id, k.created_by from _cc_links k where k.status in ('open', 'in_progress');
+  select k.solution_id, k.issue_id, k.workspace_id, k.created_by from _cc_links k;
   get diagnostics n_linked = row_count;
+  alter table public.solution_issues enable trigger solution_issues_before_insert;
+  alter table public.solution_issues enable trigger solution_issue_tested;
 
-  -- Any other status: linked as a record, with the closing checks and the "tested" log off so the issue stays as it is.
-  if exists (select 1 from _cc_links k where k.status not in ('open', 'in_progress')) then
-    alter table public.solution_issues disable trigger solution_issues_before_insert;
-    alter table public.solution_issues disable trigger solution_issue_tested;
-    insert into public.solution_issues (solution_id, issue_id, workspace_id, created_by)
-    select k.solution_id, k.issue_id, k.workspace_id, k.created_by from _cc_links k where k.status not in ('open', 'in_progress');
-    get diagnostics n_linked_closed = row_count;
-    alter table public.solution_issues enable trigger solution_issues_before_insert;
-    alter table public.solution_issues enable trigger solution_issue_tested;
-  end if;
-
-  raise notice 'changes into solutions: % changes read; % solutions made; % issue links (% to closed issues); % links skipped (detection or another process); % solutions with no issue; % effects dropped (step not in a live version); % changes with no solution',
-    n_changes, n_solutions, n_linked + n_linked_closed, n_linked_closed, n_skipped, n_no_issue, n_dropped, n_no_process;
+  raise notice 'changes into solutions: % changes read; % solutions made; % issue links; % links skipped (detection or another process); % solutions with no issue; % effects dropped (step not in a live version); % changes with no solution',
+    n_changes, n_solutions, n_linked, n_skipped, n_no_issue, n_dropped, n_no_process;
 end;
 $$;
 

@@ -8,12 +8,12 @@ import {
   playIsDefault,
   priceDriverEffect,
   splitWhole,
-  toEngineStepChange,
+  toEngineStepChanges,
   winEntries,
   winMix,
   PLAY_MONTHS,
   PRICE_REACTION,
-  type CapacityChangeRow,
+  type StoredStepChange,
   type PlayContext,
   type PlayState,
 } from "@transpera-flow/db";
@@ -23,30 +23,17 @@ import { DEMO_FORECAST_SOLUTION, DEMO_FORECAST_START, demoForecastBundle } from 
 
 // The free-play Sandbox's levers (capacity build P7, docs/plans/capacity/p7-sandbox-brief.md section 3): each prototype lever becomes the
 // expected registry change or model edit, "Win new clients" lands N x k clients by tier, "Clients react" doubles from Barely to Normally,
-// a swapped block takes the step's hours down by what the engine says it freed, a named client leaves, and a map version runs its map.
+// a named client leaves, and a map version runs its map and the automations and augmentations it holds (D53), from its month.
 
 const START = "2026-11-02";
 
-/** Today's example agency (no change swapped in: `changes` is unset, as in a real workspace) and the changes it had as the library. */
-const full = capacityModel();
-const { changes: engineChanges, ...today } = full;
+/** Today's example agency (no change in force: `changes` is unset, as in a real workspace, whose changes are part of solutions). */
+const { changes: _changes, ...today } = capacityModel();
+void _changes;
 const model: EngineModel = today;
-const library: CapacityChangeRow[] = (engineChanges ?? []).map((c) => ({
-  id: c.id,
-  name: c.name,
-  kind: c.kind,
-  effects: c.effects,
-  adoption: c.adoption,
-  ramp_months: c.rampMonths,
-  tiers: c.tiers ?? null,
-  cost_monthly: null,
-  issue_id: null,
-  source: "estimate",
-  provenance: {},
-}));
 const setup = capacitySetupFromModel(model);
 for (const s of setup.services) s.price_rise_churn = 0.5;
-const ctx: PlayContext = { startDate: START, setup, library, winMix: (d) => winMix(setup, model, d) };
+const ctx: PlayContext = { startDate: START, setup, winMix: (d) => winMix(setup, model, d) };
 const play = (over: Partial<PlayState> = {}): PlayState => ({ ...defaultPlay(), ...over });
 
 describe("the levers become registry changes", () => {
@@ -179,37 +166,6 @@ describe("Clients react to a price rise (D36)", () => {
   });
 });
 
-describe("a block swapped in for a step", () => {
-  const pacing = library.find((c) => c.id === "pacing")!;
-
-  it("becomes an engine change starting in the chosen month (1-based), with its adoption and ramp", () => {
-    const m = applyPlay(model, play({ blocks: { pacing: 2 } }), ctx);
-    expect(m.changes).toHaveLength(1);
-    expect(m.changes![0]).toEqual(toEngineStepChange(pacing, 3));
-    expect(m.changes![0]).toMatchObject({ id: "pacing", startMonth: 3, adoption: 0.9, kind: "automation" });
-    expect(model.changes).toBeUndefined();
-  });
-
-  it("takes the swapped step's hours down by the hours the engine says the block freed, and no other step's", () => {
-    const m = applyPlay(model, play({ blocks: { pacing: 0 } }), ctx);
-    const a = simulate(model, 2, 1, { personTime: true });
-    const b = simulate(m, 2, 1, { personTime: true });
-    const byStep = (r: typeof a) => {
-      const o: Record<string, number> = {};
-      for (const per of Object.values(r.personTime!.stepHours)) for (const [s, h] of Object.entries(per)) o[s] = (o[s] ?? 0) + h;
-      return o;
-    };
-    const before = byStep(a);
-    const after = byStep(b);
-    const freed = b.personTime!.freed!;
-    expect(freed.byChange.pacing).toBeGreaterThan(0);
-    expect(before.p1! - after.p1!).toBeCloseTo(freed.byChange.pacing!, 0);
-    expect(after.p1!).toBeLessThan(before.p1! * 0.6);
-    // Other steps keep their hours, give or take the few clients that leave sooner or later when a team is less busy (the load driver).
-    for (const s of Object.keys(before)) if (s !== "p1") expect(Math.abs(after[s]! / before[s]! - 1), s).toBeLessThan(0.03);
-  });
-});
-
 describe("a named client leaves in a month", () => {
   it("sets leavesMonth on that client only", () => {
     const id = Object.keys(model.clients!)[0]!;
@@ -275,5 +231,64 @@ describe("a map version per process", () => {
     const prepared = prepareScenario(bundle, c.map((change) => ({ change, scenarioId: "play", scenarioName: "Free play", inherited: false })), [DEMO_FORECAST_SOLUTION], 12, DEMO_FORECAST_START, { pair: false });
     expect(prepared.segments).toHaveLength(1);
     expect(prepared.segments[0]!.model.steps.find((s) => s.id === DEMO_FORECAST_SOLUTION.changed_step_ids[0])!.work).toBe(4);
+  });
+});
+
+describe("the automations and augmentations a map version holds (D53)", () => {
+  const bundle = demoForecastBundle();
+  const demoCtx: PlayContext = { ...ctx, startDate: DEMO_FORECAST_START };
+  const ppc = DEMO_FORECAST_SOLUTION.changed_step_ids[0]!;
+  const change: StoredStepChange = {
+    id: "5c000000-0000-4000-8000-000000000001",
+    name: "Draft set-ups with a template",
+    kind: "automation",
+    effects: [{ step: ppc, part: "automatable", remove: 0.5, residualHours: 0.25 }],
+    adoption: 0.8,
+    ramp_months: 2,
+    tiers: ["T1"],
+    cost_monthly: 90,
+  };
+  const holding = { ...DEMO_FORECAST_SOLUTION, step_changes: [change] };
+  const prepare = (months: number, solutions = [holding], issueOf?: PlayContext["issueOf"]) => {
+    const c = playChanges(play({ versions: { [holding.process_id]: { solution: holding.id, month: months } } }), demoCtx);
+    return prepareScenario(bundle, c.map((x) => ({ change: x, scenarioId: "play", scenarioName: "Free play", inherited: false })), solutions, 12, DEMO_FORECAST_START, { pair: false, ...(issueOf ? { issueOf } : {}) });
+  };
+
+  it("become engine changes starting in the month the version is picked (1-based), in the segments from then on and not before", () => {
+    const prepared = prepare(3);
+    expect(prepared.segments.map((s) => s.from)).toEqual([0, 3]);
+    expect(prepared.segments[0]!.model.changes).toBeUndefined();
+    expect(prepared.segments[1]!.model.changes).toEqual(toEngineStepChanges(holding, 4));
+    expect(prepared.segments[1]!.model.changes).toEqual([
+      { id: change.id, name: change.name, kind: "automation", effects: change.effects, adoption: 0.8, startMonth: 4, rampMonths: 2, tiers: ["T1"] },
+    ]);
+  });
+
+  it("from the first month it is one run with the change starting in month 1", () => {
+    const prepared = prepare(0);
+    expect(prepared.segments).toHaveLength(1);
+    expect(prepared.segments[0]!.model.changes).toMatchObject([{ id: change.id, startMonth: 1 }]);
+  });
+
+  it("carry the issue the solution is for, as the change did (reporting only), and a missing id falls back to the solution's", () => {
+    expect(prepare(0, [holding], (id) => (id === holding.id ? "issue-1" : undefined)).segments[0]!.model.changes).toMatchObject([{ issueId: "issue-1" }]);
+    const bare = { ...holding, step_changes: [{ ...change, id: undefined }] };
+    expect(prepare(0, [bare]).segments[0]!.model.changes![0]!.id).toBe(`${holding.id}:0`);
+  });
+
+  it("are not in force when the version is not picked, and only the latest version of a process counts", () => {
+    const none = prepareScenario(bundle, [], [holding], 12, DEMO_FORECAST_START, { pair: false });
+    expect(none.segments).toHaveLength(1);
+    expect(none.segments[0]!.model.changes).toBeUndefined();
+    // Two versions of the process picked from different months: the later one's changes alone.
+    const second = { ...holding, id: "00000000-0000-4000-8000-0000000f0202", step_changes: [{ ...change, id: "5c000000-0000-4000-8000-000000000002", name: "Second" }] };
+    const c = [
+      ...playChanges(play({ versions: { [holding.process_id]: { solution: holding.id, month: 2 } } }), demoCtx),
+      ...playChanges(play({ versions: { other: { solution: second.id, month: 5 } } }), demoCtx),
+    ];
+    const prepared = prepareScenario(bundle, c.map((x, i) => ({ change: { ...x, id: `${x.id}${i}` }, scenarioId: "play", scenarioName: "Free play", inherited: false })), [holding, second], 12, DEMO_FORECAST_START, { pair: false });
+    const last = prepared.segments[prepared.segments.length - 1]!.model.changes!;
+    expect(last.map((x) => x.name)).toEqual(["Second"]);
+    expect(last[0]!.startMonth).toBe(6);
   });
 });

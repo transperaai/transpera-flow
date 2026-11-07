@@ -1,18 +1,17 @@
 "use client";
 
-// Add or edit one change of the Sandbox's list (capacity build P7, brief section 1): an automation or augmentation, as the engine's effects on parts of
-// steps, with its adoption, its ramp, the tiers it applies to, what it costs a month, the issue it fixes and where its numbers came from.
+// The fields of one step change (capacity build P7; D53): an automation or augmentation, as the engine's effects on parts of steps, with its adoption,
+// its ramp, the tiers it applies to and what it costs a month. It is saved into a solution's `step_changes`. Nothing in the Sandbox opens it any more
+// (the levers' "Automation and augmentation" section is gone): the editor's "Automate…" and "Augment…" (Part B of the changes-into-solutions brief) reuse it.
 
 import { useState } from "react";
-import { checkCapacityChange, CHANGE_SOURCES, MAX_CHANGE_EFFECTS, type CapacityChangeInput, type CapacityChangeRow } from "@transpera-flow/db";
-import type { SourceLabel, StepChangeEffect } from "@transpera-flow/engine";
+import { checkStepChange, MAX_CHANGE_EFFECTS, type StepChangeInput, type StoredStepChange } from "@transpera-flow/db";
+import type { StepChangeEffect } from "@transpera-flow/engine";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import type { PlayProcess } from "./play-types";
-
-const SOURCE_WORDS: Record<SourceLabel, string> = { interview: "An interview", calculator: "The calculator", measured: "Measured", estimate: "An estimate" };
 
 interface EffectRow {
   key: number;
@@ -47,28 +46,27 @@ export function PlayChangeDialog({
   onRemove,
   onClose,
 }: {
-  existing: CapacityChangeRow | null;
+  existing: StoredStepChange | null;
   processes: PlayProcess[];
   tiers: { key: string; name: string }[];
   /** Saves; returns why not, or null when it saved (the dialog closes). */
-  onSave: (input: CapacityChangeInput) => Promise<string | null>;
+  onSave: (input: StepChangeInput) => Promise<string | null>;
   onRemove?: () => Promise<string | null>;
   onClose: () => void;
 }) {
   const steps = processes.flatMap((p) => p.steps.map((s) => ({ id: s.id, label: processes.length > 1 ? `${p.name}: ${s.name}` : s.name })));
   const [name, setName] = useState(existing?.name ?? "");
-  const [kind, setKind] = useState<CapacityChangeInput["kind"]>(existing?.kind ?? "automation");
+  const [kind, setKind] = useState<StepChangeInput["kind"]>(existing?.kind ?? "automation");
   const [rows, setRows] = useState<EffectRow[]>(() => (existing ? existing.effects.map(toRow) : [{ key: 1, step: steps[0]?.id ?? "", part: "automatable", remove: "80", residualMinutes: "", factor: "1.5" }]));
   const [adoption, setAdoption] = useState(String(Math.round((existing?.adoption ?? 0.8) * 100)));
   const [ramp, setRamp] = useState(String(existing?.ramp_months ?? 0));
   const [picked, setPicked] = useState<string[]>(existing?.tiers ?? []);
   const [cost, setCost] = useState(existing?.cost_monthly != null ? String(existing.cost_monthly) : "");
-  const [source, setSource] = useState<SourceLabel>(existing?.source ?? "estimate");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [nextKey, setNextKey] = useState(100);
 
-  const input = (): CapacityChangeInput => ({
+  const input = (): StepChangeInput => ({
     name,
     kind,
     effects: rows.map(toEffect),
@@ -76,14 +74,11 @@ export function PlayChangeDialog({
     ramp_months: num(ramp),
     tiers: picked.length ? picked : null,
     cost_monthly: cost.trim() === "" ? null : num(cost),
-    // Changes are not linked to issues (D42); a link an older change already has is kept as it was.
-    issue_id: existing?.issue_id ?? null,
-    source,
   });
 
   async function save() {
     const value = input();
-    const problem = checkCapacityChange(value, new Set(steps.map((s) => s.id)));
+    const problem = checkStepChange(value, new Set(steps.map((s) => s.id)));
     if (problem) return setError(problem);
     setBusy(true);
     setError(null);
@@ -203,18 +198,6 @@ export function PlayChangeDialog({
             <span className="text-xs text-muted-foreground">{picked.length ? "" : "None ticked: every tier."}</span>
           </fieldset>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className={field}>
-              Where the numbers came from
-              <NativeSelect value={source} onChange={(e) => setSource(e.target.value as SourceLabel)}>
-                {CHANGE_SOURCES.map((s) => (
-                  <option key={s} value={s}>
-                    {SOURCE_WORDS[s]}
-                  </option>
-                ))}
-              </NativeSelect>
-            </label>
-          </div>
           {error && (
             <p role="alert" className="text-sm text-crit" data-change-error>
               {error}

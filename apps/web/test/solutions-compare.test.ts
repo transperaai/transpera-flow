@@ -25,6 +25,7 @@ const solution: SolutionRow = {
   steps: solutionCopy(edited),
   changed_step_ids: [ids.audit],
   lever_changes: [],
+  step_changes: [],
   created_at: stamp,
   updated_at: stamp,
   created_by: null,

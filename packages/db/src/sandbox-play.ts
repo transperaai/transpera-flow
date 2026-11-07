@@ -8,12 +8,12 @@
 //        Churn %                                    B3 (base churn, a multiple, whole run)
 //        Prices, change % by tier, from a month     B5 (price rise) per service of the tier
 //        Someone leaves in a month                  D2        Hire a role from a month   D1 (one FTE)
-//        Map version of a process from a month      E6 (a solution goes live from a month; spliced, so a switch part-way through a run works)
+//        Map version of a process from a month      E6 (a solution goes live from a month; spliced, so a switch part-way through a run works). The
+//                                                   version's own step changes (automations and augmentations, D53) start in that month (`prepareScenario`).
 //   2. `applyPlay` does what the registry has no lever for, as edits to each run's model (`EngineModel`):
 //        Win new clients                            `wonClients` (engine optional field: clients that skip the sales steps), least-busy placement
 //        A named client leaves in a month           `EngineClient.leavesMonth`
 //        Clients react to a price rise (D36)        the price churn driver in chance mode: effect = the tier's `price_rise_churn` x 0.5 / 1 / 2
-//        A block swapped in for a step              `EngineModel.changes`, one `EngineStepChange` per swapped change, `startMonth` = the month
 //        A hire's ramp                              `EnginePerson.ramp` = the workspace default
 //
 // Months in a `PlayState` are 0-based indexes of the twelve months of the run (0 is the first); the engine's `startMonth`, `month` and `leavesMonth` are 1-based.
@@ -21,7 +21,6 @@
 import { MARKET_PRESETS, STABLE_MARKET, type EngineChurnDriver, type EngineModel, type MarketFactors, type MarketPresetKey, type WonClientsEntry } from "@transpera-flow/engine";
 import type { CapacitySetup } from "./capacity-setup";
 import { tierCount } from "./capacity-setup";
-import { toEngineStepChange, type CapacityChangeRow } from "./capacity-changes";
 import type { SandboxChange } from "./sandbox-levers";
 
 /** The months a free-play run covers. */
@@ -62,8 +61,6 @@ export interface PlayState {
   hires: { role: string; month: number }[];
   /** Named clients (client ids) who leave in a month. */
   lose: { id: string; month: number }[];
-  /** Blocks swapped in: capacity change id -> the month it starts. */
-  blocks: Record<string, number>;
   /** Map versions: process id -> a solution of that process live from a month. A process not listed runs today's map. */
   versions: Record<string, { solution: string; month: number }>;
 }
@@ -86,7 +83,6 @@ export function defaultPlay(): PlayState {
     leavers: [],
     hires: [],
     lose: [],
-    blocks: {},
     versions: {},
   };
 }
@@ -96,7 +92,7 @@ export function playIsDefault(p: PlayState): boolean {
   const d = defaultPlay();
   return (
     p.market === d.market && !p.leads && !p.win && !p.churn && !Object.values(p.add).some((n) => n > 0) && !p.price && !p.leavers.length && !p.hires.length && !p.lose.length &&
-    !Object.keys(p.blocks).length && !Object.keys(p.versions).length
+    !Object.keys(p.versions).length
   );
 }
 
@@ -105,8 +101,8 @@ export interface PlayContext {
   /** The ISO date the run starts on (its first month is this date's month). */
   startDate: string;
   setup: Pick<CapacitySetup, "departments" | "tiers" | "services" | "groups" | "clients" | "portfolio" | "rampDefault">;
-  /** The workspace's changes (the library the block pickers draw on). */
-  library: readonly CapacityChangeRow[];
+  /** The issue each solution is for (by solution id), put on its step changes in the engine's input (reporting only). */
+  issueOf?: (solutionId: string) => string | undefined;
   /** A department's usual win mix: its tier services' share of wins, by service id (`winMix`). */
   winMix: (departmentId: string) => Record<string, number>;
 }
@@ -273,8 +269,6 @@ export function applyPlay(model: EngineModel, play: PlayState, ctx: PlayContext,
   if (play.market !== "today") m = { ...m, market: marketFrom(m, play.market, clampMonth(play.marketFrom)) };
   const wins = winEntries(play, ctx);
   if (wins.length) m = { ...m, wonClients: [...(m.wonClients ?? []), ...wins], placeNewClients: m.placeNewClients ?? "least-busy" };
-  const swapped = ctx.library.filter((c) => play.blocks[c.id] !== undefined);
-  if (swapped.length) m = { ...m, changes: [...(m.changes ?? []), ...swapped.map((c) => toEngineStepChange(c, clampMonth(play.blocks[c.id]!) + 1))] };
   if (play.lose.length && m.clients) {
     const clients = { ...m.clients };
     for (const l of play.lose) if (clients[l.id]) clients[l.id] = { ...clients[l.id]!, leavesMonth: clampMonth(l.month) + 1 };

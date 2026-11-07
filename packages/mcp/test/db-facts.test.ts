@@ -128,13 +128,27 @@ describe("the facts, issues, sources and solutions over the connector", () => {
       revision,
       JSON.stringify({ steps: [{ id: "s", name: "A big copied map" }], edges: [] }),
     ]);
+    // A solution that holds an automation (D53): `step_changes` is listed.
+    const change = { id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Draft the report", kind: "automation", effects: [{ step: "00000000-0000-4000-8000-0000000000a1", part: "automatable", remove: 0.8 }], adoption: 0.9, ramp_months: 2, tiers: null, cost_monthly: 120 };
+    await admin.query("insert into solutions (workspace_id, process_id, base_revision_id, name, steps, step_changes, status) values ($1, $2, $3, 'Automate the report', $4, $5::jsonb, 'works')", [
+      ids.ws,
+      ids.process,
+      revision,
+      JSON.stringify({ steps: [], edges: [] }),
+      JSON.stringify([change]),
+    ]);
     await admin.query("commit");
     const sol = await call<{ solutions: Record<string, unknown>[] }>(mcp, "list_solutions", {});
     expect(sol.ok, JSON.stringify(sol)).toBe(true);
-    expect(sol.data.solutions).toHaveLength(1);
-    expect(sol.data.solutions[0]).toMatchObject({ name: "Hire a second strategist", changed_step_ids: [], issues: [] });
-    expect(sol.data.solutions[0]).not.toHaveProperty("steps");
-    expect(sol.data.solutions[0]).not.toHaveProperty("workspace_id");
+    expect(sol.data.solutions).toHaveLength(2);
+    // (Both were written in one transaction, so they share a created_at: find them by name.)
+    const named = (name: string) => sol.data.solutions.find((x) => x.name === name);
+    expect(named("Hire a second strategist")).toMatchObject({ changed_step_ids: [], issues: [], status: "testing", step_changes: [] });
+    expect(named("Automate the report")).toMatchObject({ status: "works", step_changes: [change] });
+    for (const s of sol.data.solutions) {
+      expect(s).not.toHaveProperty("steps");
+      expect(s).not.toHaveProperty("workspace_id");
+    }
     await mcp.close();
   }, 120_000);
 

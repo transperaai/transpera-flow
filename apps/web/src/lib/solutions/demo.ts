@@ -29,6 +29,7 @@ export function addDemoSolution(input: SolutionInput): { solution: SolutionRow; 
     steps: structuredClone(input.copy),
     changed_step_ids: [...input.changedStepIds],
     lever_changes: structuredClone(input.levers),
+    step_changes: [],
     created_at: now,
     updated_at: now,
     created_by: null,

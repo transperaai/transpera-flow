@@ -1291,7 +1291,7 @@ export async function loadRun(db: Db, id: string): Promise<RunRow | null> {
   return (r ?? null) as unknown as RunRow | null;
 }
 
-export const SOLUTION_COLUMNS = "id, workspace_id, process_id, base_revision_id, name, notes, status, steps, changed_step_ids, lever_changes, created_at, updated_at, created_by" as const;
+export const SOLUTION_COLUMNS = "id, workspace_id, process_id, base_revision_id, name, notes, status, steps, changed_step_ids, lever_changes, step_changes, created_at, updated_at, created_by" as const;
 export const SOLUTION_ISSUE_COLUMNS = "solution_id, issue_id, workspace_id, auto_verdict, holds_pct, auto_note, user_verdict, user_notes, created_at, updated_at, created_by" as const;
 
 /** A workspace's solutions, newest first: optionally only those that change one process. */

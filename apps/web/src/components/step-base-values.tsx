@@ -101,7 +101,7 @@ export function StepBaseValues({
   tierSetup?: TierSetup;
   readOnly?: boolean;
   settingsHref?: string;
-  /** The workspace's stored changes (capacity P7) and the Sandbox's address, for the list of changes that act on this step. */
+  /** The changes in the solution being edited (D53) and the Sandbox's address for it, for the list of changes that act on this step. */
   changesOnSteps?: ChangesOnSteps;
 }) {
   const servicing = bundle.process.kind === "servicing";
@@ -283,19 +283,19 @@ export function StepBaseValues({
         <SourceSelect step={step} value="work" disabled={readOnly} save={(l) => run((b) => setSourceLabel(b, step.id, "work", l as never, stamp()))} />
       </div>
 
-      {/* Changes that act on this step are stored by the Sandbox (P7); this slot is left for them. */}
+      {/* Changes that act on this step are part of the solution's version (D53). */}
       <ChangesOnStep stepId={step.id} data={changesOnSteps} />
     </div>
   );
 }
 
-/** The stored changes that can act on steps, with where the Sandbox is (capacity P7). */
+/** The changes in a solution's version, with where the Sandbox picks that version (capacity P7; D53). */
 export interface ChangesOnSteps {
   sandboxHref: string;
   changes: { id: string; name: string; kind: "automation" | "augmentation"; steps: string[] }[];
 }
 
-/** "Changes that act on this step": read only, with a link to the Sandbox, where a change is swapped in or edited. */
+/** "Changes that act on this step": read only, with a link to the Sandbox, where the version is picked from a month. */
 function ChangesOnStep({ stepId, data }: { stepId: string; data?: ChangesOnSteps }) {
   const mine = (data?.changes ?? []).filter((c) => c.steps.includes(stepId));
   if (!data || !mine.length) return <div data-slot="changes-on-step" hidden />;
@@ -310,7 +310,7 @@ function ChangesOnStep({ stepId, data }: { stepId: string; data?: ChangesOnSteps
         ))}
       </ul>
       <a href={data.sandboxHref} className="text-xs font-medium text-accent hover:underline">
-        Swap one in or edit it in the Sandbox
+        Try this version in the Sandbox
       </a>
     </div>
   );
