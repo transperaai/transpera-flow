@@ -195,7 +195,7 @@ export async function loadTeam(db: Db, workspaceId: string): Promise<TeamInputs>
     personLeave: t.person_leave,
     clientAssignments: t.client_assignments,
     // numeric comes back as a number from jsonb.
-    personCapacityFactors: (t.person_capacity_factors ?? []).map((r) => ({ ...r, factor: Number(r.factor), items: r.items == null ? null : Number(r.items) })),
+    personCapacityFactors: (t.person_capacity_factors ?? []).map((r) => ({ ...r, factor: Number(r.factor) })),
   };
 }
 

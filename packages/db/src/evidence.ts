@@ -5,7 +5,7 @@
 // value column, a provenance entry (the §5 shape, see types.ts `Provenance`):
 //
 //   provenance.work_hours = {
-//     source: "estimated" | "entered" | "measured", at, by,
+//     source: "estimated" | "entered", at, by,
 //     note?,                          // the reasoning behind an assumption
 //     assumption?: true,              // filled in without a source: confirm it
 //     evidence?: [{source_id, speaker, quote, timestamp, value?}],
@@ -15,7 +15,7 @@
 // When citations state different values, the value is a conflict: an estimate
 // becomes a triangular range (min, most likely, max) over what was said, and
 // the step is flagged `conflict: true`, which publishing counts. A value a
-// person entered or measured is never overwritten: it keeps its value and is
+// person entered is never overwritten: it keeps its value and is
 // flagged. Confirming a value (or settling a conflict) makes it `entered`.
 // Sources that differ by 2× or more are a perception gap, logged as an issue
 // (the database does it in `private.log_perception_gaps`, this file mirrors
@@ -165,17 +165,17 @@ function others(step: StepRow, column: string) {
  * evidence; then, from every value the evidence states:
  *
  * - they agree (or none is stated): an estimate takes the stated value and
- *   stays an assumption to confirm; an entered or measured value that agrees
+ *   stays an assumption to confirm; an entered value that agrees
  *   is just corroborated;
  * - they disagree: the column becomes a conflict over the stated values (and
- *   an entered or measured value, which is never overwritten). An estimated
+ *   an entered value, which is never overwritten). An estimated
  *   duration becomes the triangular range over them, and another estimate
  *   the most likely value. The step is flagged `conflict`.
  */
 export function citeEvidence(step: StepRow, column: EvidenceColumn, citation: EvidenceCitation, stamp: EvidenceStamp): StepPatch {
   const entry: Provenance = columnProvenance(step, column) ?? { source: "estimated", at: stamp.at, ...(stamp.by ? { by: stamp.by } : {}) };
   const evidence = [...evidenceOf(step, column), clean(citation)];
-  const known = entry.source === "entered" || entry.source === "measured";
+  const known = entry.source === "entered";
   const current = stepValue(step, column);
 
   // Once someone settled a conflict, only what is said after that can reopen it.

@@ -147,7 +147,7 @@ export function compareScenarios({ model, a, b, reps, seed, currency }: CompareI
 /**
  * Parameters to perturb: every estimated one. Steps, services and the
  * workspace settings (the health rules; issue #79) carry provenance, and
- * entered or measured values are not perturbed; a health rule the workspace
+ * entered values are not perturbed; a health rule the workspace
  * hasn't set is the estimated default. Demand and roles carry none the check
  * reads, so theirs are all estimated. The same rule as the app's (apps/web
  * lib/robustness/session.ts `robustnessParameters`).
@@ -178,7 +178,7 @@ export function checkScenarioRobustness({ model, scenario, provenance, metric, c
   );
   if (!parameters.length) {
     return {
-      verdict: "Every input is entered or measured, so there is nothing estimated to check.",
+      verdict: "Every input is entered, so there is nothing estimated to check.",
       details: [] as string[],
       sensitive: [] as { label: string; effect: string; flips: boolean }[],
       complete: true,

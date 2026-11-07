@@ -215,7 +215,7 @@ export function EvidencePanel({
                 <strong>{capital(EVIDENCE_LABELS[column])}</strong> {show(column, stepValue(step, column))}
               </span>
               <span className="text-fg-3">
-                {conflict ? "Conflict" : assumption ? "Assumption" : entry?.source === "entered" ? "Entered" : entry?.source === "measured" ? "Measured" : "Estimated"}
+                {conflict ? "Conflict" : assumption ? "Assumption" : entry?.source === "entered" ? "Entered" : "Estimated"}
               </span>
             </p>
             {conflict && (

@@ -444,18 +444,6 @@ export interface WorkspaceSettingsData {
   marketSchedule: MarketScheduleRow[];
 }
 
-/** `entered` or `measured`, from `provenance.factor.source` (entered when there is none). */
-function factorSource(provenance: unknown): string {
-  const f = (provenance as { factor?: { source?: unknown } } | null)?.factor;
-  return typeof f?.source === "string" ? f.source : "entered";
-}
-
-/** How many visits a measured time rests on (`provenance.factor.n`); null when entered or when none is recorded (#227). */
-function factorItems(provenance: unknown): number | null {
-  const f = (provenance as { factor?: { source?: unknown; n?: unknown } } | null)?.factor;
-  return f?.source === "measured" && typeof f.n === "number" && Number.isFinite(f.n) ? Math.round(f.n) : null;
-}
-
 export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSettingsData | null> {
   const db = await getDb();
   const workspace = await db.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).where("slug", "=", slug).executeTakeFirst();
@@ -546,8 +534,6 @@ export async function loadWorkspaceSettings(slug: string): Promise<WorkspaceSett
       workspace_id: r.workspace_id,
       step_id: r.step_id,
       factor: Number(r.factor),
-      source: factorSource(r.provenance),
-      items: factorItems(r.provenance),
     })),
     // The cast narrows pricing_model, which a check constraint limits.
     services: services as unknown as ServiceRow[],

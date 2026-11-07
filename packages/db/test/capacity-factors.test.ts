@@ -403,7 +403,9 @@ describe("the migration file", () => {
     expect(/public\.team_capacity ([0-9a-f]{32}) t \{search_path=""\}:/.exec(latest)![1]).toBe(next);
     const live = /new md5 ([0-9a-f]{32})\./.exec(latest.slice(latest.indexOf("Replaces the body of 20261223000000")))![1]!;
     const md5 = async () => (await db.client.query("select md5(prosrc) as m from pg_proc where pronamespace = 'public'::regnamespace and proname = 'team_capacity'")).rows[0].m;
-    expect(await md5()).toBe(live);
+    // Q19 (20270200000000) replaced it once more, dropping calibration's `source` and `items`: the live body is no longer 20261227's.
+    expect(await md5()).not.toBe(live);
+    expect((await db.client.query("select prosrc from pg_proc where pronamespace = 'public'::regnamespace and proname = 'team_capacity'")).rows[0].prosrc).not.toContain("measured");
   });
 
   it("the header's rollback, run as written, leaves the old team_capacity (md5 as the preflight states) and nothing else of it behind", async () => {

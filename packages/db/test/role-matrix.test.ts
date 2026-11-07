@@ -44,7 +44,7 @@ const owns: Record<string, Record<string, number>> = {};
 /** `settings.health_recover` as stored when the matrix starts (Northbeam: absent, so null), the base a save is made against. */
 let healthRecover = "null";
 const headlineNumbers = JSON.stringify({ flow_efficiency: 0.4, processes_attention: 1, processes_total: 4, client_groups_at_risk: 0, client_groups_total: 2 });
-const ids = { client: "", svcSeed: "", svcProbe: "", condition: "", seedDataset: "", probeDataset: "", seedCal: "" };
+const ids = { client: "", svcSeed: "", svcProbe: "", condition: "" };
 
 /** A SQL statement and its parameters. */
 type Q = [sql: string, params: unknown[]];
@@ -252,12 +252,6 @@ const TABLES: TableCase[] = [
     update: ["update client_services set service_id = service_id where workspace_id = $1 and service_id = $2", [ws, "seed"]],
     delete: ["delete from client_services where workspace_id = $1 and service_id = $2", [ws, "seed"]],
   },
-  {
-    table: "datasets",
-    insert: (tag) => ["insert into datasets (workspace_id, kind, file_name, row_count) values ($1, 'step_log', $2, 1)", [ws, `x ${tag}.csv`]],
-    update: null,
-    delete: null,
-  },
   // The agency list's headline numbers (B1 3/3): every reader reads, Agency admins and the Owner write, nobody deletes.
   {
     table: "workspace_headlines",
@@ -267,38 +261,6 @@ const TABLES: TableCase[] = [
     ],
     update: ["update workspace_headlines set horizon_weeks = horizon_weeks where workspace_id = $1", [ws]],
     delete: null,
-  },
-  {
-    table: "calibrations",
-    insert: (tag) => [
-      "insert into calibrations (workspace_id, dataset_id, process_id, results) values ($1, $2, $3, $4::jsonb)",
-      [ws, tag === "seed" ? ids.seedDataset : ids.probeDataset, NORTHBEAM_PROCESS_ID, JSON.stringify({ proposals: [] })],
-    ],
-    update: null,
-    delete: null,
-  },
-  // #227: per-person proposals measured from a log. Agency admins and the Owner read and insert; nobody updates or deletes.
-  // The spare person's proposal on one step is the seed row, on another the probe, both under the seed calibration.
-  {
-    table: "capacity_factor_proposals",
-    // The seed finds the seed calibration; the probe names it by id (a select would find nothing for a caller who can't read calibrations).
-    insert: (tag) => {
-      const proposal = "jsonb_build_object('kind', 'capacity_factor', 'target', jsonb_build_object('table', 'person_capacity_factors', 'id', $2::text, 'step_id', $3::text))";
-      return tag === "seed"
-        ? [
-            `insert into capacity_factor_proposals (calibration_id, workspace_id, person_id, step_id, proposal)
-             select c.id, $1::uuid, $2::uuid, $3::uuid, ${proposal} from calibrations c where c.dataset_id = $4`,
-            [ws, person.spare, northbeamStepIds.discovery, ids.seedDataset],
-          ]
-        : [
-            `insert into capacity_factor_proposals (calibration_id, workspace_id, person_id, step_id, proposal)
-             values ($4::uuid, $1::uuid, $2::uuid, $3::uuid, ${proposal})`,
-            [ws, person.spare, northbeamStepIds.audit, ids.seedCal],
-          ];
-    },
-    update: null,
-    delete: null,
-    reads: "editors",
   },
 ];
 
@@ -356,11 +318,6 @@ beforeAll(async () => {
   ids.svcSeed = await svc("Matrix seed service");
   ids.svcProbe = await svc("Matrix probe service");
   ids.condition = (await db.client.query("select id from market_conditions where workspace_id = $1 limit 1", [ws])).rows[0].id;
-  const dataset = async (name: string) =>
-    (await db.client.query("insert into datasets (workspace_id, kind, file_name, row_count) values ($1, 'step_log', $2, 1) returning id", [ws, name])).rows[0].id as string;
-  ids.seedDataset = await dataset("seed-ds.csv");
-  ids.probeDataset = await dataset("probe-ds.csv");
-
   // (Filled once the seed rows below exist.)
   // Every table gets a seed row (as the superuser), so a read count above zero and a refused update or delete mean something.
   ids.client = (await db.client.query("insert into clients (workspace_id, name) values ($1, 'x seed') returning id", [ws])).rows[0].id;
@@ -369,7 +326,6 @@ beforeAll(async () => {
     const [sql, params] = t.insert("seed");
     await db.client.query(sql.includes("on conflict") ? sql : `${sql} on conflict do nothing`, params);
   }
-  ids.seedCal = (await db.client.query("select id from calibrations where dataset_id = $1", [ids.seedDataset])).rows[0].id;
   // Each linked person holds a skill and a leave entry (the spare person's come from the table cases above).
   for (const role of ["viewer, Leah", "viewer, Dan", "admin, linked"] as const) {
     await db.client.query("insert into person_skills (person_id, step_id, workspace_id) values ($1, $2, $3)", [person[role], northbeamStepIds.audit, ws]);
@@ -491,9 +447,9 @@ describe("writes", () => {
     });
   }
 
-  it("nobody can write to a table that has no grant for it: datasets and calibrations are insert-only, clients and headlines are never deleted", async () => {
+  it("nobody can write to a table that has no grant for it: clients and headlines are never deleted", async () => {
     await db.as(callers.admin!.claims, async (c) => {
-      for (const [table, verb] of [["datasets", "delete from datasets"], ["datasets", "update datasets set row_count = 2"], ["datasets", "update datasets set details = '{}'"], ["calibrations", "delete from calibrations"], ["capacity_factor_proposals", "delete from capacity_factor_proposals"], ["capacity_factor_proposals", "update capacity_factor_proposals set step_id = step_id"], ["clients", "delete from clients"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
+      for (const [table, verb] of [["clients", "delete from clients"], ["workspace_headlines", "delete from workspace_headlines"]] as const) {
         expect(await refused(c, () => c.query(verb)), table).toBe("refused");
       }
     });

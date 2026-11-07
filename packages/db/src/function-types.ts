@@ -10,7 +10,6 @@ export interface Functions {
   add_tier: { Args: { p_workspace: string }; Returns: string };
   adopt_solution: { Args: { p_solution: string; p_replace?: boolean }; Returns: Json };
   agency_workspace_list: { Args: never; Returns: { id: string; name: string; slug: string; open_risk_issues: number; last_activity: string | null; numbers: Json | null; computed_at: string | null }[] };
-  apply_calibration: { Args: { p_calibration: string; p_keys: string[] }; Returns: Json };
   can_edit_workspace: { Args: { ws: string }; Returns: boolean };
   can_manage_workspace: { Args: { ws: string }; Returns: boolean };
   can_read_workspace: { Args: { ws: string }; Returns: boolean };
@@ -31,10 +30,6 @@ export interface Functions {
   my_person_id: { Args: { ws: string }; Returns: string };
   open_draft: { Args: { target_process: string }; Returns: Json };
   publish_process: { Args: { target_process: string; accept_estimates?: boolean }; Returns: Json };
-  record_calibration: { Args: { p_workspace: string; p_process: string; p_file_name: string; p_column_map: Json; p_row_count: number; p_results: Json; p_keys: string[] }; Returns: Json };
-  record_calibration_import: { Args: { p_workspace: string; p_process: string; p_kind: string; p_file_name: string; p_column_map: Json; p_row_count: number; p_details: Json; p_results: Json; p_keys: string[] }; Returns: Json };
-  record_client_calibration: { Args: { p_workspace: string; p_clients: Json; p_log: Json; p_results: Json; p_keys: string[] }; Returns: Json };
-  record_dataset: { Args: { p_workspace: string; p_kind: string; p_file_name: string; p_column_map: Json; p_row_count: number; p_details: Json }; Returns: string };
   remove_tier: { Args: { p_tier: string }; Returns: null };
   resolve_issue: { Args: { p_workspace: string; p_id: string; p_how: string; p_note?: string; p_status?: string }; Returns: Json }
     | { Args: { p_workspace: string; p_id: string; p_how: string; p_note: string; p_status: string; p_solution: string }; Returns: Json };
@@ -52,7 +47,6 @@ export interface Functions {
   team_capacity: { Args: { ws: string }; Returns: Json };
   unlinked_source_count: { Args: { p_workspace: string }; Returns: number };
   use_api_token: { Args: { token: string }; Returns: Json };
-  workspace_logo: { Args: { p_workspace: string }; Returns: { mime: string; bytes: string; sha256: string }[] };
   workspace_members: { Args: { ws: string }; Returns: { membership_id: string; user_id: string; email: string | null; role: "agency_admin" | "owner" | "editor" | "member" | "viewer"; active: boolean; person_id: string | null; last_sign_in_at: string | null; created_at: string }[] };
   workspace_role: { Args: { ws: string }; Returns: "agency_admin" | "owner" | "editor" | "member" | "viewer" };
 }
