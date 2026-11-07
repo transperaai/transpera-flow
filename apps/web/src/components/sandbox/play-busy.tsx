@@ -30,8 +30,9 @@ export function Heatmap({ rows, months, view }: { rows: HeatRow[]; months: strin
           <span role="columnheader" className="sr-only">
             Team
           </span>
+          <span aria-hidden />
           {months.map((m, i) => (
-            <span key={i} role="columnheader" className={cn("truncate text-center text-2xs", i % 2 === 1 && "max-sm:invisible")}>
+            <span key={i} role="columnheader" className={cn("overflow-visible text-center text-2xs whitespace-nowrap", i % 3 !== 0 && "max-sm:invisible")}>
               {m}
             </span>
           ))}
@@ -115,48 +116,36 @@ export function Heatmap({ rows, months, view }: { rows: HeatRow[]; months: strin
   );
 }
 
-const W = 520;
-const H = 120;
-const M = { l: 34, r: 6, t: 8, b: 22 };
+const BAR_H = 72;
 
-/** For each month, the people over their line: today in grey, this scene in colour. Only today's bar when `scene` is null. */
+/** For each month, the people over their line: today in grey, this scene in colour. Only today's bar when `scene` is null. Aligned to the heatmap's columns. */
 export function OverBars({ months, today, scene }: { months: string[]; today: number[]; scene: number[] | null }) {
   const [tip, setTip] = useState<{ m: number; at: { x: number; y: number } } | null>(null);
-  const n = months.length;
   const top = Math.max(1, ...today, ...(scene ?? []));
-  const ticks = top <= 4 ? Array.from({ length: top + 1 }, (_, i) => i) : [0, Math.ceil(top / 2), top];
-  const slot = (W - M.l - M.r) / n;
-  const y = (v: number) => M.t + (1 - v / top) * (H - M.t - M.b);
-  const bar = scene ? slot * 0.34 : slot * 0.5;
+  const grid = { display: "grid", gridTemplateColumns: `minmax(4.5rem, 7.5rem) repeat(${months.length}, minmax(0, 1fr))` } as const;
+  const h = (v: number) => `${(v / top) * 100}%`;
   return (
     <figure className="m-0 flex flex-col gap-1" data-play-over-bars>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="People over their line, month by month" className="h-auto w-full text-[11px]" onPointerLeave={() => setTip(null)}>
-        {ticks.map((v) => (
-          <g key={v}>
-            <line x1={M.l} x2={W - M.r} y1={y(v)} y2={y(v)} stroke="var(--line)" />
-            <text x={M.l - 6} y={y(v) + 3} textAnchor="end" className="fill-muted-foreground">
-              {v}
-            </text>
-          </g>
+      <div className="gap-0.5 text-xs" style={grid} role="img" aria-label="People over their line, month by month">
+        <div className="flex flex-col justify-between pr-1 text-2xs text-muted-foreground" style={{ height: BAR_H }}>
+          <span>{top} people</span>
+          <span>0</span>
+        </div>
+        {months.map((m, i) => (
+          <div
+            key={i}
+            className="flex min-w-0 flex-col"
+            onPointerMove={(e) => setTip({ m: i, at: { x: e.clientX, y: e.clientY } })}
+            onPointerDown={(e) => setTip({ m: i, at: { x: e.clientX, y: e.clientY } })}
+            onPointerLeave={() => setTip(null)}
+          >
+            <div className="flex items-end justify-center gap-px border-b border-line" style={{ height: BAR_H }}>
+              <i data-over-bar="today" className="block w-1/3 max-w-3 min-w-[3px] rounded-t-[3px]" style={{ height: h(today[i]!), background: "var(--fg-3)", opacity: 0.55 }} />
+              {scene && <i data-over-bar="scene" className="block w-1/3 max-w-3 min-w-[3px] rounded-t-[3px]" style={{ height: h(scene[i]!), background: "var(--chart-1)" }} />}
+            </div>
+          </div>
         ))}
-        {months.map((m, i) => {
-          const cx = M.l + slot * (i + 0.5);
-          const bars = scene ? [{ v: today[i]!, x: cx - bar - 1, fill: "var(--fg-3)", k: "today" }, { v: scene[i]!, x: cx + 1, fill: "var(--chart-1)", k: "scene" }] : [{ v: today[i]!, x: cx - bar / 2, fill: "var(--fg-3)", k: "today" }];
-          return (
-            <g key={i}>
-              {bars.map((b) => (
-                <rect key={b.k} data-over-bar={b.k} x={b.x} y={y(b.v)} width={bar} height={Math.max(0, y(0) - y(b.v))} fill={b.fill} rx={2} />
-              ))}
-              {(i === 0 || i === n - 1 || (n > 6 && i % 3 === 0)) && (
-                <text x={cx} y={H - 6} textAnchor="middle" className="fill-muted-foreground">
-                  {m}
-                </text>
-              )}
-              <rect x={cx - slot / 2} y={M.t} width={slot} height={H - M.t - M.b} fill="transparent" onPointerMove={(e) => setTip({ m: i, at: { x: e.clientX, y: e.clientY } })} onPointerDown={(e) => setTip({ m: i, at: { x: e.clientX, y: e.clientY } })} />
-            </g>
-          );
-        })}
-      </svg>
+      </div>
       {tip && (
         <FloatingTip at={tip.at} placement="side">
           <div data-play-tip className="flex flex-col gap-0.5">
@@ -168,7 +157,7 @@ export function OverBars({ months, today, scene }: { months: string[]; today: nu
               </div>
             )}
             <div className="flex items-center gap-1.5">
-              <i aria-hidden className="inline-block size-2 rounded-sm" style={{ background: "var(--fg-3)" }} />
+              <i aria-hidden className="inline-block size-2 rounded-sm" style={{ background: "var(--fg-3)", opacity: 0.55 }} />
               Today: <b className="font-semibold">{today[tip.m]}</b>
             </div>
             <div className="text-muted-foreground">people over their line</div>
@@ -176,7 +165,7 @@ export function OverBars({ months, today, scene }: { months: string[]; today: nu
         </FloatingTip>
       )}
       <figcaption className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" data-legend>
-        <span>People over their line</span>
+        <span>People over their line, each month</span>
         {scene && (
           <span className="inline-flex items-center gap-1.5">
             <i aria-hidden className="inline-block size-2.5 rounded-sm" style={{ background: "var(--chart-1)" }} />
@@ -184,7 +173,7 @@ export function OverBars({ months, today, scene }: { months: string[]; today: nu
           </span>
         )}
         <span className="inline-flex items-center gap-1.5">
-          <i aria-hidden className="inline-block size-2.5 rounded-sm" style={{ background: "var(--fg-3)" }} />
+          <i aria-hidden className="inline-block size-2.5 rounded-sm" style={{ background: "var(--fg-3)", opacity: 0.55 }} />
           Today
         </span>
       </figcaption>

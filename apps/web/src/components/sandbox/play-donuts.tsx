@@ -18,16 +18,16 @@ export function Donut({ title, slices, order }: { title: string; slices: Purpose
   const [tip, setTip] = useState<{ s: PurposeSlice; at: { x: number; y: number } } | null>(null);
   const sorted = order.map((id) => slices.find((s) => s.id === id)).filter((s): s is PurposeSlice => !!s && s.hours > 0);
   const total = sorted.reduce((a, s) => a + s.hours, 0);
-  let acc = 0;
+  const starts = sorted.map((_, i) => (sorted.slice(0, i).reduce((a, s) => a + s.hours, 0) / (total || 1)) * C);
   return (
     <figure className="m-0 flex min-w-0 flex-col items-center gap-1" data-play-donut={title}>
       <svg viewBox="0 0 120 120" role="img" aria-label={`${title}: ${sorted.map((s) => `${s.name} ${formatNumber(s.hours, 0)} hours a month`).join(", ")}`} className="h-auto w-full max-w-40" onPointerLeave={() => setTip(null)}>
         <g transform="rotate(-90 60 60)">
           {total === 0 && <circle cx={60} cy={60} r={R} fill="none" stroke="var(--panel-2)" strokeWidth={STROKE} />}
-          {sorted.map((s) => {
+          {sorted.map((s, i) => {
             const len = (s.hours / total) * C;
             const gap = sorted.length > 1 ? Math.min(2, len / 2) : 0;
-            const el = (
+            return (
               <circle
                 key={s.id}
                 data-donut-slice={s.id}
@@ -38,13 +38,11 @@ export function Donut({ title, slices, order }: { title: string; slices: Purpose
                 stroke={purposeColor(s.id)}
                 strokeWidth={STROKE}
                 strokeDasharray={`${Math.max(0, len - gap)} ${C - Math.max(0, len - gap)}`}
-                strokeDashoffset={-acc}
+                strokeDashoffset={-starts[i]!}
                 onPointerMove={(e) => setTip({ s, at: { x: e.clientX, y: e.clientY } })}
                 onPointerDown={(e) => setTip({ s, at: { x: e.clientX, y: e.clientY } })}
               />
             );
-            acc += len;
-            return el;
           })}
         </g>
         <text x={60} y={58} textAnchor="middle" className="fill-foreground text-[15px] font-semibold">

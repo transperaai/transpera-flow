@@ -47,7 +47,7 @@ afterAll(async () => {
 type Options = { viewer?: boolean; payHidden?: boolean };
 
 async function mount(options: Options = {}, width = 1440, scheme: "light" | "dark" = "light"): Promise<{ page: Page; errors: string[] }> {
-  const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: scheme });
+  const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: scheme, deviceScaleFactor: process.env.PLAY_SHOTS ? 2 : 1 });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
@@ -370,6 +370,11 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
         const shotPopover = true;
         const { page } = await mount({}, width, scheme);
         await ready(page);
+        // Today's path first: the charts with no change.
+        await page.waitForSelector("[data-play-donut]");
+        await page.evaluate(() => document.fonts.ready);
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: `${shots}/sandbox-today-${scheme}-${width}.png`, fullPage: true });
         await page.locator('[data-lever="add:org"]').fill("2");
         await page.locator('[data-lever="add:perf"]').fill("1");
         await page.locator('[data-lever="addMonths"]').selectOption("6");
