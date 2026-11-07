@@ -1,16 +1,18 @@
 "use client";
 
 // The Editor's top: the "✎ Editor" bar in the edit colour (so you can always tell you are editing), the draft or live
-// banner, the hint for the mode, and the buttons that save. Publish and Discard ask first (issue #104).
+// banner, the hint for the mode, Undo and Redo, and the buttons that save. Publish and Discard ask first (issue #104).
 
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Redo2, Undo2 } from "lucide-react";
 import type { StepRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BreaksWarning } from "@/components/draft-panels";
 import type { DraftSession, DraftState } from "@/lib/drafts/session";
 import { MODE_INFO, SOLUTION_FOR_ISSUE, type EditorMode } from "@/lib/editor/modes";
@@ -18,6 +20,38 @@ import type { SolutionIssue } from "@/lib/solutions/area";
 import type { BreakingScenario } from "@/lib/scenarios/broken";
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** What Undo or Redo says: the edit it takes back or puts back ("Undo: Added Discovery call"), or that there is none. */
+export const historyTip = (which: "Undo" | "Redo", label: string | null) => (label ? `${which}: ${label}` : `Nothing to ${which.toLowerCase()}`);
+
+/**
+ * Undo and Redo as icon buttons on the edit-coloured bar (⌘Z and ⇧⌘Z do the same). Each is disabled when there is nothing to
+ * take back or put back; its tooltip names the edit. The tooltip sits on a wrapper, so it still shows on a disabled button.
+ */
+export function UndoRedo({ undoLabel, redoLabel, onUndo, onRedo }: { undoLabel: string | null; redoLabel: string | null; onUndo: () => void; onRedo: () => void }) {
+  const buttons = [
+    { which: "Undo" as const, label: undoLabel, run: onUndo, Icon: Undo2 },
+    { which: "Redo" as const, label: redoLabel, run: onRedo, Icon: Redo2 },
+  ];
+  return (
+    <TooltipProvider delayDuration={300}>
+      <span className="flex items-center gap-1" data-undo-redo>
+        {buttons.map(({ which, label, run, Icon }) => (
+          <Tooltip key={which}>
+            <TooltipTrigger asChild>
+              <span className="inline-flex" data-history-tip={which.toLowerCase()}>
+                <Button type="button" variant="outline" size="icon-sm" className={onBar} aria-label={historyTip(which, label)} disabled={!label} onClick={run} data-history={which.toLowerCase()}>
+                  <Icon aria-hidden />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{historyTip(which, label)}</TooltipContent>
+          </Tooltip>
+        ))}
+      </span>
+    </TooltipProvider>
+  );
+}
 
 /** A button on the edit-coloured bar: outlined in its text colour, or solid (the main action). */
 const onBar = "border-edit-fg/50 bg-transparent text-edit-fg hover:bg-edit-fg/15 hover:text-edit-fg dark:bg-transparent dark:hover:bg-edit-fg/15";
@@ -77,6 +111,8 @@ export function EditorBar({
   company = false,
   onTour,
   historyHref,
+  undoLabel = null,
+  redoLabel = null,
 }: {
   mode: EditorMode;
   /** What is being edited: the process's name. */
@@ -114,6 +150,9 @@ export function EditorBar({
   onTour?: () => void;
   /** The History page of what is edited: shows a History button that goes there (after the last edits are saved). */
   historyHref?: string;
+  /** The edit Undo takes back and Redo puts back (the editor's `undoLabel` and `redoLabel`), or null when there is none. */
+  undoLabel?: string | null;
+  redoLabel?: string | null;
 }) {
   const info = MODE_INFO[mode];
   const router = useRouter();
@@ -145,6 +184,8 @@ export function EditorBar({
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
+          <UndoRedo undoLabel={undoLabel} redoLabel={redoLabel} onUndo={() => session.editor.undo()} onRedo={() => session.editor.redo()} />
+          <span aria-hidden className="mx-0.5 h-5 w-px bg-edit-fg/30" />
           {mode !== "block" && !company && (
             <>
             <Button type="button" variant="outline" size="sm" className={onBar} data-tour="simulate" onClick={onSimulate} disabled={simulating || !!blocked} title={blocked ?? undefined}>

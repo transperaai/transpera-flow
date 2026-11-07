@@ -387,6 +387,8 @@ export function EditorView({
         drafts={drafts}
         changes={publishableChanges(diff)}
         saving={state.saving}
+        undoLabel={state.undoLabel}
+        redoLabel={state.redoLabel}
         blocked={blocked}
         unresolved={unresolved}
         breaks={breaks}
