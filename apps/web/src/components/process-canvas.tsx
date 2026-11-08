@@ -80,6 +80,7 @@ import {
   deleteEdges,
   moveSteps,
   nextOutcome,
+  bendEdge,
   reconnectEdge,
   stepWarnings,
   updateEdge,
@@ -102,6 +103,7 @@ import { TagPill } from "./tag-pill";
 import { ProblemMark } from "./editor/problem-mark";
 import type { NodeProblems } from "@/lib/editor/problems";
 import { GO_BACK_LINK_PREFIX, branchRows, edgeOfGoBackNode, goBackNodes, isGoBackNodeId, type BranchRow } from "@/lib/editor/branch-view";
+import { addBranch, goBackProblem, setBranchShare, setBranchTarget, type BranchTarget } from "@/lib/editor/branches";
 import { Help } from "./help";
 import { FirstRunStatus } from "./map/map-placeholder";
 import { EmptyState } from "./shell/empty-state";
@@ -135,7 +137,7 @@ type StepNodeData = {
   bottleneck: boolean;
   /** What stops the process simulating, on this step (the Editor's red mark); empty when nothing does. */
   problems: readonly string[];
-  /** A decision in the Editor: its branches, one row each on the card; null for any other step. */
+  /** A decision on a map with branch rows (`branchNodes`): its branches, one row each on the card, each with its own dot; null for any other step. */
   branches: BranchRow[] | null;
   /** The branch of this decision that is selected (its line or its row was clicked), if any. */
   branchSelected: string | null;
@@ -237,10 +239,16 @@ type BranchData = {
   rolled?: boolean;
   /** A handoff line's label, on the company map. */
   label?: string | null;
+  /** On the company map, a branch of a decision: it shows its share, not a handoff label. */
+  decided?: boolean;
   /** What stops the process simulating, on this line (the Editor's red mark). */
   problems?: readonly string[];
   /** A branch of a decision in the Editor: its name shows with its share, and it is edited from the decision's panel, not on the line. */
   branch?: { name: string } | null;
+  /** How far the line's middle segment is moved from where it sits automatically (`center_dx`, `center_dy`); null: automatic. */
+  bend?: { x: number; y: number } | null;
+  /** The line's middle can be dragged (an editable map, a line drawn as itself, not a go back): its grab handle shows when selected. */
+  bendable?: boolean;
 };
 type BranchFlowEdge = Edge<BranchData, "branch">;
 
@@ -424,12 +432,24 @@ const tileClass = "relative rounded-lg shadow-token transition-[box-shadow,opaci
 const headlineRowClass = "mt-1 flex min-h-[18px] min-w-0 items-baseline gap-1.5";
 const footClass = "mt-1.5 flex items-baseline justify-between gap-2 border-t pt-1 text-xs text-fg-2";
 
-/** A decision in the Editor: the question, then a row for each branch (its name and share). A click on a row selects that branch. */
+/** The id of a decision card's "+" dot: a line drawn from it is a new branch (round 2, item 12). A branch's own dot has the branch's line id. */
+const ADD_BRANCH_HANDLE = "add-branch";
+
+/**
+ * A decision with branch rows: the question, then a row for each branch (its name and share), each with its own dot on the right edge
+ * that its line leaves from (round 2, item 12). One dot for every line made it hard to see which line was which, and dragging it could
+ * only add a line. In the Editor a click on a row selects that branch, a click on its % edits the share in place, dragging a row's dot
+ * to a step sends that branch there, and dragging the "+" dot under the rows adds a branch to that step. On a read-only map the rows
+ * and dots are a picture only.
+ */
 function DecisionCard({ data, selected }: NodeProps<StepFlowNode>) {
   const { step, branches, problems, editable } = data;
-  const { selectBranch } = useContext(CanvasContext);
+  const { selectBranch, editor } = useContext(CanvasContext);
   const flagged = data.bottleneck;
   const colours = tileColours(data.rating, flagged);
+  const rows = branches!;
+  // A single branch is always 100%, so its share is not offered for editing.
+  const shareEditable = editable && !!editor && rows.length > 1;
   return (
     <div
       data-lit={data.lit ?? undefined}
@@ -441,6 +461,8 @@ function DecisionCard({ data, selected }: NodeProps<StepFlowNode>) {
       <TopPills change={data.change} bottleneck={flagged} />
       <FlagPills estimate={data.estimate} conflict={data.conflict} quote={data.quote} />
       <Handle type="target" position={Position.Left} className={handleClass(editable)} />
+      {/* First, so a line given no dot of its own (one the draft removed) is drawn from here. Not for drawing lines from. */}
+      <Handle type="source" position={Position.Right} isConnectable={false} className="!pointer-events-none !size-1 !border-0 !opacity-0" />
       <p className="flex items-center gap-1 text-[11px] leading-[14px] font-semibold tracking-[0.06em] text-fg-2 uppercase">
         <Split aria-hidden className="size-3" /> Decision
       </p>
@@ -449,34 +471,139 @@ function DecisionCard({ data, selected }: NodeProps<StepFlowNode>) {
         {step.name}
       </p>
       <ul aria-label={`Branches of ${step.name}`} className="mt-1.5 flex flex-col gap-0.5 border-t pt-1.5" style={{ borderTopColor: colours.divider }}>
-        {branches!.map((row) => (
-          <li key={row.id}>
-            <button
-              type="button"
-              data-branch-row={row.id}
-              aria-pressed={data.branchSelected === row.id}
-              aria-label={`${row.name}, ${row.percent}%${row.goBack ? ", goes back" : ""}. Edit this branch`}
-              onClick={(e) => {
-                e.stopPropagation();
-                selectBranch(row.id);
-              }}
-              onDoubleClick={(e) => e.stopPropagation()}
-              className={`nodrag nopan flex w-full items-baseline justify-between gap-2 rounded px-1 py-0.5 text-left text-xs hover:bg-panel-2 ${data.branchSelected === row.id ? "bg-panel-2 outline-1 outline-edit" : ""}`}
-            >
-              <span className="min-w-0 truncate">
+        {rows.map((row) => (
+          <li key={row.id} data-branch-li={row.id} className="relative flex items-baseline gap-1">
+            {editable ? (
+              <button
+                type="button"
+                data-branch-row={row.id}
+                aria-pressed={data.branchSelected === row.id}
+                aria-label={`${row.name}, ${row.percent}%${row.goBack ? ", goes back" : ""}. Edit this branch`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  selectBranch(row.id);
+                }}
+                onDoubleClick={(e) => e.stopPropagation()}
+                className={`nodrag nopan min-w-0 flex-1 truncate rounded px-1 py-0.5 text-left text-xs hover:bg-panel-2 ${data.branchSelected === row.id ? "bg-panel-2 outline-1 outline-edit" : ""}`}
+              >
+                {row.name}
+                {row.goBack && <span aria-hidden> ↩</span>}
+              </button>
+            ) : (
+              <span data-branch-row={row.id} aria-label={`${row.name}, ${row.percent}%${row.goBack ? ", goes back" : ""}`} className="min-w-0 flex-1 truncate px-1 py-0.5 text-xs">
                 {row.name}
                 {row.goBack && <span aria-hidden> ↩</span>}
               </span>
-              <span className="shrink-0 font-mono tabular-nums text-fg-2">{row.percent}%</span>
-            </button>
+            )}
+            {shareEditable ? (
+              <BranchShare decisionId={step.id} row={row} editor={editor!} />
+            ) : (
+              <span className="shrink-0 px-1 font-mono text-xs tabular-nums text-fg-2">{row.percent}%</span>
+            )}
+            {/* The branch's own dot, level with its row: its line leaves from here, and dragging it sends the branch elsewhere. */}
+            <Handle
+              id={row.id}
+              type="source"
+              position={Position.Right}
+              isConnectable={editable}
+              data-branch-handle={row.id}
+              title={`${row.name}, ${row.percent}%`}
+              aria-label={`${row.name}, ${row.percent}%`}
+              className={handleClass(editable)}
+              // Out to the card's right edge, past the card's padding and border.
+              style={{ right: -11.5 }}
+            />
           </li>
         ))}
       </ul>
+      {editable && editor && (
+        <div className="relative mt-0.5 flex h-4 items-center justify-end text-[11px] text-fg-3">
+          <span aria-hidden className="pr-2">
+            Drag + to add a branch
+          </span>
+          {/* Keyboard users add a branch with the side panel's "+ Add branch". */}
+          <Handle
+            id={ADD_BRANCH_HANDLE}
+            type="source"
+            position={Position.Right}
+            data-add-branch-handle
+            title="Drag to a step to add a branch to it"
+            className="!flex !size-3.5 !items-center !justify-center !border !border-dashed !border-fg-3 !bg-panel !text-[10px] !leading-none !text-fg-2 hover:!border-accent hover:!text-accent"
+            style={{ right: -11.5 }}
+          >
+            <span aria-hidden className="pointer-events-none">
+              +
+            </span>
+          </Handle>
+        </div>
+      )}
       <ProblemMark problems={problems} />
-      <Handle type="source" position={Position.Right} className={handleClass(editable)} />
       {/* Where a branch that goes back leaves from, to its "Go back to…" node below. Not for drawing lines from. */}
       <Handle id="back" type="source" position={Position.Bottom} isConnectable={false} className="!pointer-events-none !size-1 !border-0 !opacity-0" />
     </div>
+  );
+}
+
+/**
+ * A branch's share on a decision card: its % as a button that turns into a small number field. Enter or leaving the field saves (one
+ * undo step, the other branches making room in proportion); Escape puts it back.
+ */
+function BranchShare({ decisionId, row, editor }: { decisionId: string; row: BranchRow; editor: ProcessEditor }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  // Enter saves and closes the field, and closing it can blur it too: save once.
+  const settled = useRef(false);
+  const close = (save: boolean) => {
+    if (settled.current || draft === null) return;
+    settled.current = true;
+    const value = Number(draft);
+    if (save && draft.trim() !== "" && Number.isFinite(value)) editor.run((b) => setBranchShare(b, decisionId, row.id, Math.min(100, Math.max(0, value))));
+    setDraft(null);
+  };
+  if (draft === null) {
+    return (
+      <button
+        type="button"
+        data-branch-share={row.id}
+        aria-label={`Share of ${row.name}, ${row.percent}%. Change it`}
+        title="Change this share: the other branches make room in proportion"
+        onClick={(e) => {
+          e.stopPropagation();
+          settled.current = false;
+          setDraft(String(row.percent));
+        }}
+        onDoubleClick={(e) => e.stopPropagation()}
+        className="nodrag nopan shrink-0 rounded px-1 py-0.5 font-mono text-xs tabular-nums text-fg-2 hover:bg-panel-2 hover:text-fg"
+      >
+        {row.percent}%
+      </button>
+    );
+  }
+  return (
+    <span className="nodrag nopan nokey flex shrink-0 items-center gap-0.5 font-mono text-xs">
+      <input
+        type="number"
+        data-branch-share-input={row.id}
+        aria-label={`Share of ${row.name}, percent`}
+        min={0}
+        max={100}
+        step={1}
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onClick={(e) => e.stopPropagation()}
+        onDoubleClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          // The map's own keys (Delete, arrows, undo) are not for this field.
+          e.stopPropagation();
+          if (e.key === "Enter") close(true);
+          else if (e.key === "Escape") close(false);
+        }}
+        onBlur={() => close(true)}
+        className="w-11 rounded border border-edit bg-bg px-1 py-0 text-right tabular-nums"
+      />
+      %
+    </span>
   );
 }
 
@@ -728,14 +855,34 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
   const { id, data, selected, markerEnd, style } = props;
   const { editor, handoffs } = useContext(CanvasContext);
   const zoom = useStore((s) => s.transform[2]);
-  const [path, labelX, labelY] = getSmoothStepPath(props);
+  // While the grab handle is dragged, the offset under the pointer (saved once, on release).
+  const [dragged, setDragged] = useState<{ x: number; y: number } | null>(null);
+  const offset = dragged ?? data?.bend ?? null;
+  const auto = getSmoothStepPath(props);
+  const [path, labelX, labelY] = !offset || data?.rolled ? auto : getSmoothStepPath({ ...props, ...bentCenter(props, auto[1], auto[2], offset) });
+  // The grab handle, on the line's middle, for a line of an editable map while it is selected.
+  const grab =
+    data?.bendable && editor && selected && !data.rolled ? (
+      <EdgeLabelRenderer>
+        <BendHandle
+          editor={editor}
+          edgeId={id}
+          at={{ x: labelX, y: labelY }}
+          zoom={zoom}
+          offset={offset}
+          // Where the centre sits automatically: the saved offset is measured from here.
+          autoAt={{ x: auto[1], y: auto[2] }}
+          onDrag={setDragged}
+        />
+      </EdgeLabelRenderer>
+    ) : null;
   const p = data?.probability ?? 1;
   const tag = data?.tag ?? null;
   // A branch of a decision is edited from the decision's panel; any other line, on the line.
   const editing = selected && data?.alone && editor && !data?.branch;
   const problems = data?.problems ?? [];
   // A handoff line says what is handed over, not a share of the work.
-  const text = handoffs ? (data?.label ?? "") : [data?.branch?.name, p < 1 || data?.branch ? percent(p) : null, tag].filter(Boolean).join(" · ");
+  const text = handoffs && !data?.branch && !data?.decided ? (data?.label ?? "") : [data?.branch?.name, p < 1 || data?.branch ? percent(p) : null, tag].filter(Boolean).join(" · ");
   const ghost = data?.ghost ?? false;
   const was = data?.was ?? null;
   if (data?.rolled) return <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} interactionWidth={0} />;
@@ -769,16 +916,22 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
                 pointerEvents: "all",
               }}
             >
-              {handoffs ? <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} /> : <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} />}
+              {handoffs ? (
+                <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} bent={!!data?.bend} />
+              ) : (
+                <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} bent={!!data?.bend} />
+              )}
             </div>
           </EdgeLabelRenderer>
         )}
+        {grab}
       </>
     );
   }
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} interactionWidth={18} />
+      {grab}
       {(editing || text || problems.length > 0) && (
         <EdgeLabelRenderer>
           <div
@@ -787,10 +940,14 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
               // The editor stays readable at any zoom and sits above the nodes.
               // Read-only, the label sits just above the line at its start, in the gap beside the card, not on one at the middle of a short link.
               transform: editing
-                ? `translate(${labelX}px, ${labelY}px) scale(${1 / zoom}) translate(-50%, -50%)`
+                ? grab
+                  ? // Just below the grab handle on the line's middle, so both can be used.
+                    `translate(${labelX}px, ${labelY}px) scale(${1 / zoom}) translate(-50%, 12px)`
+                  : `translate(${labelX}px, ${labelY}px) scale(${1 / zoom}) translate(-50%, -50%)`
                 : data?.branch
-                  ? // A branch of a decision: its name and share on the line itself, where the lines out of one decision have drawn apart.
-                    `translate(${labelX}px, ${labelY}px) translate(-50%, -50%)`
+                  ? // A branch of a decision: its name and share on the line itself, where the lines out of one decision have drawn apart
+                    // (just above the grab handle while it shows).
+                    `translate(${labelX}px, ${labelY}px) translate(-50%, ${grab ? "calc(-100% - 8px)" : "-50%"})`
                   : `translate(${props.sourceX + 4}px, ${props.sourceY - 2}px) translate(0, -100%)`,
               transformOrigin: "0 0",
               zIndex: editing ? 1002 : undefined,
@@ -798,7 +955,11 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
             }}
           >
             {editing ? (
-              handoffs ? <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} /> : <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} />
+              handoffs ? (
+                <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} bent={!!data?.bend} />
+              ) : (
+                <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} bent={!!data?.bend} />
+              )
             ) : (
               <span className="flex items-center">
                 {text && <span title={text} className={`block truncate rounded-token bg-panel px-1 text-[11px] text-fg-2 ${handoffs ? "max-w-[9rem] font-sans" : data?.branch ? "max-w-[8rem] font-sans" : "max-w-[5.5rem] font-mono tabular-nums"}`}>{text}</span>}
@@ -812,8 +973,115 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
   );
 }
 
+/** How far one press of an arrow key moves a line's middle. */
+const BEND_STEP = 10;
+
+/**
+ * Where a bent line's centre goes: the automatic centre plus the offset. A smooth step between a card's right side and another's left
+ * only follows one axis of its centre (the middle segment's x for a line going forwards, its y for one going back), so the other axis
+ * is kept on the middle segment: that is where the label and grab handle sit, and they stay on the line.
+ */
+function bentCenter(
+  ends: Pick<EdgeProps, "sourceX" | "sourceY" | "targetX" | "targetY" | "sourcePosition" | "targetPosition">,
+  autoX: number,
+  autoY: number,
+  offset: { x: number; y: number },
+): { centerX: number; centerY: number } {
+  const x = autoX + offset.x;
+  const y = autoY + offset.y;
+  if (ends.sourcePosition !== Position.Right || ends.targetPosition !== Position.Left) return { centerX: x, centerY: y };
+  // The smooth step's own gap (React Flow's default offset) out of each card before the first turn.
+  const from = ends.sourceX + 20;
+  const to = ends.targetX - 20;
+  const clamp = (v: number, a: number, b: number) => Math.min(Math.max(v, Math.min(a, b)), Math.max(a, b));
+  return from < to ? { centerX: x, centerY: clamp(y, ends.sourceY, ends.targetY) } : { centerX: clamp(x, from, to), centerY: y };
+}
+
+/**
+ * The round handle on a selected line's middle: drag it (or press the arrow keys on it) to move the middle segment, e.g. around
+ * another card; double-click it to put the line back where it sits automatically. A drag redraws the line as it goes and is saved
+ * once, on release, as one edit (one undo).
+ */
+function BendHandle({
+  editor,
+  edgeId,
+  at,
+  autoAt,
+  zoom,
+  offset,
+  onDrag,
+}: {
+  editor: ProcessEditor;
+  edgeId: string;
+  at: { x: number; y: number };
+  autoAt: { x: number; y: number };
+  zoom: number;
+  offset: { x: number; y: number } | null;
+  onDrag: (offset: { x: number; y: number } | null) => void;
+}) {
+  const { screenToFlowPosition } = useReactFlow();
+  // Where the pointer went down (map units) and the offset then; null when not dragging.
+  const start = useRef<{ x: number; y: number; from: { x: number; y: number } } | null>(null);
+  const save = (next: { x: number; y: number } | null) => editor.run((b) => bendEdge(b, edgeId, next));
+  return (
+    <button
+      type="button"
+      data-bend-handle={edgeId}
+      aria-label="Drag to move this line"
+      title="Drag to move this line (arrow keys nudge it). Double-click to put it back."
+      className="nodrag nopan nowheel absolute size-3.5 cursor-move touch-none rounded-full border-2 border-edit bg-panel shadow-token hover:bg-edit-soft focus-visible:outline-2 focus-visible:outline-edit"
+      style={{
+        transform: `translate(${at.x}px, ${at.y}px) scale(${1 / zoom}) translate(-50%, -50%)`,
+        transformOrigin: "0 0",
+        zIndex: 1003,
+        pointerEvents: "all",
+      }}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        start.current = { x: p.x, y: p.y, from: offset ?? { x: 0, y: 0 } };
+      }}
+      onPointerMove={(e) => {
+        const s = start.current;
+        if (!s) return;
+        const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        onDrag({ x: s.from.x + p.x - s.x, y: s.from.y + p.y - s.y });
+      }}
+      onPointerUp={(e) => {
+        const s = start.current;
+        if (!s) return;
+        start.current = null;
+        e.currentTarget.releasePointerCapture(e.pointerId);
+        const p = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        // A click without a move saves nothing. What is saved is where the handle was last drawn: kept on the line's middle segment.
+        if (p.x !== s.x || p.y !== s.y) save({ x: at.x - autoAt.x, y: at.y - autoAt.y });
+        onDrag(null);
+      }}
+      onPointerCancel={() => {
+        start.current = null;
+        onDrag(null);
+      }}
+      onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        save(null);
+      }}
+      onKeyDown={(e) => {
+        const move = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+        if (!move) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const from = offset ?? { x: 0, y: 0 };
+        save({ x: from.x + move[0]! * BEND_STEP, y: from.y + move[1]! * BEND_STEP });
+      }}
+    />
+  );
+}
+
 /** A handoff line's label and removal, on the company map: no share or tag: a hand-off takes every won client. */
-function HandoffEditor({ editor, edgeId, label }: { editor: ProcessEditor; edgeId: string; label: string | null }) {
+function HandoffEditor({ editor, edgeId, label, bent = false }: { editor: ProcessEditor; edgeId: string; label: string | null; bent?: boolean }) {
   const [text, setText] = useState(label ?? "");
   // Take the stored value when it changes (a save, an undo), without remounting under the cursor.
   const [seen, setSeen] = useState(label);
@@ -858,9 +1126,12 @@ function HandoffEditor({ editor, edgeId, label }: { editor: ProcessEditor; edgeI
           className={`${edgeInputClass} w-40`}
         />
       </label>
-      <button type="button" onClick={() => editor.run((b) => deleteEdges(b, [edgeId]))} className="self-start text-crit hover:underline">
-        Remove handoff
-      </button>
+      <span className="flex items-center gap-3">
+        <button type="button" onClick={() => editor.run((b) => deleteEdges(b, [edgeId]))} className="text-crit hover:underline">
+          Remove handoff
+        </button>
+        {bent && <ResetLineButton editor={editor} edgeId={edgeId} />}
+      </span>
     </div>
   );
 }
@@ -870,7 +1141,28 @@ const edgeInputClass = "rounded-token border border-line bg-panel px-1.5 py-0.5 
 /** Put focus back on an edge of the map. */
 const focusEdge = (id: string) => document.querySelector<SVGGElement>(`.react-flow__edge[data-id="${id}"]`)?.focus();
 
-function BranchEditor({ editor, edgeId, probability, tag }: { editor: ProcessEditor; edgeId: string; probability: number; tag: string | null }) {
+/** Puts a line whose middle was dragged back where it sits automatically. */
+function ResetLineButton({ editor, edgeId }: { editor: ProcessEditor; edgeId: string }) {
+  return (
+    <button type="button" title="Put this line back where it sits automatically" onClick={() => editor.run((b) => bendEdge(b, edgeId, null))} className="text-fg-2 hover:underline">
+      Reset line
+    </button>
+  );
+}
+
+function BranchEditor({
+  editor,
+  edgeId,
+  probability,
+  tag,
+  bent = false,
+}: {
+  editor: ProcessEditor;
+  edgeId: string;
+  probability: number;
+  tag: string | null;
+  bent?: boolean;
+}) {
   const shown = String(Math.round(probability * 1000) / 10);
   const [pct, setPct] = useState(shown);
   const [tagText, setTagText] = useState(tag ?? "");
@@ -956,13 +1248,12 @@ function BranchEditor({ editor, edgeId, probability, tag }: { editor: ProcessEdi
           {error}
         </p>
       )}
-      <button
-        type="button"
-        onClick={() => editor.run((b) => deleteEdges(b, [edgeId]))}
-        className="self-start text-crit hover:underline"
-      >
-        Remove connection
-      </button>
+      <span className="flex items-center gap-3">
+        <button type="button" onClick={() => editor.run((b) => deleteEdges(b, [edgeId]))} className="text-crit hover:underline">
+          Remove connection
+        </button>
+        {bent && <ResetLineButton editor={editor} edgeId={edgeId} />}
+      </span>
     </div>
   );
 }
@@ -1042,7 +1333,8 @@ interface CanvasProps {
   /**
    * The simpler Editor's node types (editor brainstorm, items 2, 5 and 6): Step, Wait, Decision, Start and End each look their own way, a decision
    * lists its branches on the card, and a branch that goes back to an earlier step ends in a "Go back to X" node. A click on a branch's row or
-   * on a go back node selects that branch's line. Needs `editor`.
+   * on a go back node selects that branch's line. Needs `editor`; on a read-only map only the decision's card applies (its branch rows, each
+   * with its own dot, round 2 item 12).
    */
   branchNodes?: boolean;
   /** "Turn into steps" on the card of a step that holds a linked process (the Editor, branchNodes only). */
@@ -1259,6 +1551,11 @@ function Canvas({
     [setExpanded],
   );
   const typed = branchNodes && editable && !handoffs;
+  // A decision's card lists its branches, each with its own dot, on a read-only map too (round 2, item 12); there they can't be dragged.
+  // The company map's decisions have them too (round 2, item 7): its lines are handoffs, but a decision's are branches.
+  const rowed = branchNodes || handoffs;
+  // Where a decision's branches are picked and edited from its card and panel.
+  const decides = rowed && editable;
   const selectBranch = useCallback((edgeId: string) => onSelectionChange({ steps: [], edges: [edgeId] }), [onSelectionChange]);
   const canvasContext = useMemo(
     () => ({ editor, restore: editor ? onRestore : null, toggleGroup, handoffs, selectBranch, turnInto: typed ? onTurnIntoSteps : null }),
@@ -1426,8 +1723,8 @@ function Canvas({
           avgWait: result?.steps[step.id]?.avgWait ?? null,
           bottleneck: result?.bnStep === step.id,
           problems: problemsOf.steps.get(step.id) ?? NONE,
-          branches: typed && step.kind === "decision" ? branchRows(bundle, step.id) : null,
-          branchSelected: typed && step.kind === "decision" ? (selection.edges.find((id) => bundle.edges.some((e) => e.id === id && e.from_step_id === step.id)) ?? null) : null,
+          branches: rowed && step.kind === "decision" ? branchRows(bundle, step.id) : null,
+          branchSelected: decides && step.kind === "decision" ? (selection.edges.find((id) => bundle.edges.some((e) => e.id === id && e.from_step_id === step.id)) ?? null) : null,
           typed,
           editable,
           reworkTo: step.rework_to_step_id ? (names.get(step.rework_to_step_id) ?? null) : null,
@@ -1553,7 +1850,7 @@ function Canvas({
       };
     });
     return [...ghosts, ...drafted, ...goNodes];
-  }, [bundle, result, selection.steps, selection.edges, typed, goBacks, problemsOf, NONE, dragging, measured, editable, order, layout, editing, editingId, nodeCache, playback.pulsing, diff, drawn, lit, openIssues, rating, handoffs, cardTags, cardBadges]);
+  }, [bundle, result, selection.steps, selection.edges, typed, rowed, decides, goBacks, problemsOf, NONE, dragging, measured, editable, order, layout, editing, editingId, nodeCache, playback.pulsing, diff, drawn, lit, openIssues, rating, handoffs, cardTags, cardBadges]);
 
   const edges = useMemo(() => {
     const selected = new Set(selection.edges);
@@ -1575,18 +1872,26 @@ function Canvas({
     const drafted = shown
       .sort((a, b) => rank(a) - rank(b))
       .map((e): BranchFlowEdge => {
-        const change = e.rolled ? undefined : diff?.edges.get(e.id);
+        // A line whose middle was only dragged is not highlighted as changed (layout, like a moved step).
+        const listed = e.rolled ? undefined : diff?.edges.get(e.id);
+        const change = listed?.kind === "changed" && !listed.fields.length ? undefined : listed;
         const goBack = goBackOf.get(e.id);
         const problems = problemsOf.edges.get(e.id) ?? NONE;
-        const relabelled = change?.kind === "changed" && change.fields.some((f) => (handoffs ? f.field === "label" : f.field === "probability" || f.field === "condition_tag"));
-        const was = relabelled ? (handoffs ? (change.live!.label ?? "no label") : labelOf(Number(change.live!.probability), change.live!.condition_tag)) : null;
+        const handoff = handoffs && !decisions.has(e.from_step_id);
+        const relabelled = change?.kind === "changed" && change.fields.some((f) => (handoff ? f.field === "label" : f.field === "probability" || f.field === "condition_tag"));
+        const was = relabelled ? (handoff ? (change.live!.label ?? "no label") : labelOf(Number(change.live!.probability), change.live!.condition_tag)) : null;
         const tone = selected.has(e.id) || change ? "var(--edit)" : problems.length ? "var(--crit)" : "var(--line-2)";
         return {
           id: e.id,
           source: e.from_step_id,
           // A branch that goes back ends at its "Go back to X" node, below the decision.
           target: goBack ? goBack.id : e.to_step_id,
-          ...(goBack ? { sourceHandle: "back", targetHandle: "in" } : {}),
+          ...(goBack
+            ? { sourceHandle: "back", targetHandle: "in" }
+            : // A branch leaves from its own dot on the decision's card (not while the card is being edited in place: it is a plain card then).
+              rowed && decisions.has(e.from_step_id) && editingId !== e.from_step_id
+              ? { sourceHandle: e.id }
+              : {}),
           type: "branch",
           selected: selected.has(e.id),
           ...(e.rolled ? { selectable: false, focusable: false, deletable: false, reconnectable: false } : {}),
@@ -1600,8 +1905,12 @@ function Canvas({
             restorable: false,
             rolled: e.rolled,
             label: e.label,
+            decided: handoffs && decisions.has(e.from_step_id),
             problems,
-            branch: typed && !e.rolled && decisions.has(e.from_step_id) ? { name: e.label?.trim() || names.get(e.to_step_id) || "Branch" } : null,
+            branch: decides && !e.rolled && decisions.has(e.from_step_id) ? { name: e.label?.trim() || names.get(e.to_step_id) || "Branch" } : null,
+            // A go back's line ends at its own node below the decision, and a line drawn to a closed group is not the line itself: neither bends.
+            bend: !e.rolled && !goBack && (e.center_dx != null || e.center_dy != null) ? { x: Number(e.center_dx ?? 0), y: Number(e.center_dy ?? 0) } : null,
+            bendable: editable && !e.rolled && !goBack,
           },
           style: {
             stroke: tone,
@@ -1609,7 +1918,7 @@ function Canvas({
             ...(change?.kind === "added" ? { strokeDasharray: "6 4" } : e.rolled ? { strokeDasharray: "2 4" } : {}),
           },
           markerEnd: { type: MarkerType.ArrowClosed, color: tone },
-          ariaLabel: handoffs
+          ariaLabel: handoff
             ? `Handoff from ${names.get(e.from_step_id)} to ${names.get(e.to_step_id)}${e.label ? `: ${e.label}` : ""}${change?.kind === "added" ? ", new in this draft" : change ? `, changed in this draft${was ? `, was ${was}` : ""}` : ""}`
             : `Connection from ${names.get(e.from_step_id)} to ${names.get(e.to_step_id)}, ${percent(Number(e.probability))}${e.condition_tag ? `, tag ${e.condition_tag}` : ""}${
             change?.kind === "added" ? ", new in this draft" : change ? `, changed in this draft${was ? `, was ${was}` : ""}` : ""
@@ -1661,7 +1970,7 @@ function Canvas({
         };
       });
     return [...ghosts, ...drafted, ...links];
-  }, [bundle, selection.edges, selection.steps.length, order, diff, editable, drawn, handoffs, typed, goBacks, problemsOf, NONE]);
+  }, [bundle, selection.edges, selection.steps.length, order, diff, editable, drawn, handoffs, rowed, decides, editingId, goBacks, problemsOf, NONE]);
 
   const onNodesChange = (changes: NodeChange<FlowNode>[]) => {
     const moves: { id: string; x: number; y: number }[] = [];
@@ -1709,7 +2018,19 @@ function Canvas({
 
   const onConnect = (c: Connection) => {
     let id: string | null = null;
+    const decision = rowed && bundle.steps.find((st) => st.id === c.source)?.kind === "decision";
     editor?.run((b) => {
+      if (decision) {
+        // From a decision's card: its "+" dot adds a branch to the step, a branch's own dot sends that branch there (round 2,
+        // item 12), the same edits as the side panel's "+ Add branch" and "Goes to". A step that leads back to the decision makes
+        // the branch a go back.
+        const target: BranchTarget = goBackProblem(b, c.source, c.target) === null ? { goBackTo: c.target } : c.target;
+        const branch = c.sourceHandle && c.sourceHandle !== ADD_BRANCH_HANDLE && b.edges.some((e) => e.id === c.sourceHandle && e.from_step_id === c.source);
+        const made = branch ? setBranchTarget(b, c.sourceHandle!, target) : addBranch(b, c.source, target);
+        if (!made || "problem" in made) return null;
+        id = made.id;
+        return made.edit;
+      }
       const made = addEdge(b, c.source, c.target);
       id = made?.id ?? null;
       return made?.edit ?? null;

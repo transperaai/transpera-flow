@@ -1,6 +1,6 @@
 "use client";
 
-// The two maps of the Solution page (Q12, D44): the live map and this solution's map side by side, read-only. They open and close their groups
+// The two maps of the Solution page (Q12, D44): the live map above this solution's map, read-only. They open and close their groups
 // together, open on what changed, and mark new or changed steps on the solution's map. No numbers are worked out here.
 
 import dynamic from "next/dynamic";
@@ -31,7 +31,7 @@ export function SolutionMaps({ comparison, notes }: { comparison: Comparison; no
           </p>
         ))}
       </div>
-      <div className="grid min-w-0 gap-3 lg:grid-cols-2" data-maps>
+      <div className="flex min-w-0 flex-col gap-4" data-maps>
         {(
           [
             ["live", "Live", comparison.base, null],
@@ -53,6 +53,7 @@ export function SolutionMaps({ comparison, notes }: { comparison: Comparison; no
                 focus={comparison.changed}
                 height="auto"
                 stepDetail={false}
+                branchNodes
               />
             </div>
           </div>

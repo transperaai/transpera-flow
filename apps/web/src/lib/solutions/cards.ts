@@ -3,7 +3,7 @@
 // The components render the results.
 
 import type { IssueRow, SolutionIssueRow, SolutionRow, SolutionsData, SolutionVerdict } from "@transpera-flow/db";
-import { shortDate, type SolutionSummary, type SolutionTest } from "@/lib/issues/pages";
+import { shortDate, type SolutionSummary } from "@/lib/issues/pages";
 
 // The type lives in `packages/db` (a share link's snapshot holds it, B3); re-exported so nothing else changes.
 export type { SolutionsData };
@@ -29,13 +29,16 @@ export function builtBy(createdBy: string | null, viewerId: string | null | unde
   return createdBy === viewerId ? "You" : (names[createdBy] ?? "A team member");
 }
 
-/** The verdict that counts for a link: the person's own, else the automatic one, else none. */
-export const effectiveVerdict = (l: Pick<SolutionIssueRow, "auto_verdict" | "user_verdict">): SolutionVerdict | null => l.user_verdict ?? l.auto_verdict;
+/** The verdict that counts for a link: the person's own, else none (QA round 2: no automatic verdict, even one stored before). */
+export const effectiveVerdict = (l: Pick<SolutionIssueRow, "user_verdict">): SolutionVerdict | null => l.user_verdict;
 
 export const VERDICT_WORDS: Record<SolutionVerdict, string> = { pass: "Pass", fail: "Fail" };
 
 /** The automatic verdict as a word: "Pass", "Fail" or "Not checked" (the issue's target could not be turned into a number). */
 export const autoWord = (v: SolutionVerdict | null): string => (v ? VERDICT_WORDS[v] : "Not checked");
+
+/** The date a solution was last edited: "5 Oct". */
+export const editedDate = (s: Pick<SolutionRow, "updated_at">, now?: Date): string => shortDate(s.updated_at, now);
 
 /** The date a solution was built: "5 Oct". */
 export const builtDate = (s: Pick<SolutionRow, "created_at">, now?: Date): string => shortDate(s.created_at, now);
@@ -85,19 +88,6 @@ export function linkableIssues(issues: readonly IssueRow[], processId: string, a
 
 /** The longest note a solution or a verdict can hold (the table checks the same). */
 export const MAX_NOTES = 4000;
-
-/** The solutions tested for one issue, as the Issue page's table wants them. */
-export function solutionTests(issueId: string, data: SolutionsData, base: string, now?: Date): SolutionTest[] {
-  return solutionsForIssue(data, issueId).map(({ solution, link }) => ({
-    id: solution.id,
-    name: solution.name,
-    built: builtDate(solution, now),
-    auto: link.auto_verdict ?? "unchecked",
-    holds: link.holds_pct === null ? null : link.holds_pct / 100,
-    yours: link.user_verdict,
-    href: solutionHref(base, solution.id),
-  }));
-}
 
 /** Each issue's summary for the Issues list, by issue id: how many solutions were tested, and whether one passed. */
 export function solutionSummaries(data: SolutionsData): Record<string, SolutionSummary> {

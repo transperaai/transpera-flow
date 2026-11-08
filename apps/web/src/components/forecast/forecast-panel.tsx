@@ -79,11 +79,11 @@ export function ForecastPanel({
             ))}
           </ul>
         ) : (
-          <p className="text-sm text-muted-foreground">Nobody crosses the {Math.round(busyLine * 100)}% line in the next {span}.</p>
+          <p className="text-sm text-muted-foreground">Nobody crosses the {Math.round(busyLine * 100)}% utilisation threshold in the next {span}.</p>
         )}
         <TimelineLegend busyLine={busyLine} hasUncovered={data?.roles.some((r) => r.uncovered) ?? false} hasMarkers={(data?.markers.length ?? 0) > 0} hasMarket={(data?.market.length ?? 0) > 0} />
         {data ? (
-          <ForecastTimeline data={data} rows="people" cutoffs={cutoffs} label={`How busy each person is per month over the next ${span}, against the ${Math.round(busyLine * 100)}% too busy line.`} />
+          <ForecastTimeline data={data} rows="people" cutoffs={cutoffs} label={`How busy each person is per month over the next ${span}, against the ${Math.round(busyLine * 100)}% utilisation threshold.`} />
         ) : sim.status === "error" ? (
           <p className="text-sm text-muted-foreground">The forecast couldn&apos;t be worked out: {sim.error}</p>
         ) : (

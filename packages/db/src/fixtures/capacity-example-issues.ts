@@ -49,9 +49,9 @@ const ISSUES: IssueSpec[] = [
     changes: ["Unified pacing with alerts", "Anomaly and threshold alerts"],
   },
   {
-    key: "links", title: "Link team runs near its line", process: "org-links", steps: [{ process: "org-links", step: "Link outreach" }],
+    key: "links", title: "Link team runs near its utilisation threshold", process: "org-links", steps: [{ process: "org-links", step: "Link outreach" }],
     type: "capacity", severity: "warning", owner: "karl",
-    evidence: "About 300 links a month with two outreach specialists. The team's busy share sits close to the 85% line, so a busy month tips it over.",
+    evidence: "About 300 links a month with two outreach specialists. The team's busy share sits close to the 85% utilisation threshold, so a busy month tips it over.",
     changes: ["AI link-domain pre-vetting", "Link health monitor, publisher CRM, invoice chasing"],
   },
   {

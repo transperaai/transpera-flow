@@ -137,14 +137,13 @@ describe("D24: unacknowledged insights never reach the map", () => {
     expect(feed.ratings).toEqual({});
   });
 
-  it("badges the step only once the insight is acknowledged", async () => {
+  it("an acknowledged insight becomes an issue of the process, not of the step it was found at (QA round 2)", async () => {
     const store = new MemoryIssueStore("w1");
     const [i] = buildInsights(registerEntries([], found));
     const row = await acknowledgeInsight(state(store), i!, ctx);
+    expect(row!.links.every((l) => l.step_id === null)).toBe(true);
     const feed = mapFeed(registerEntries([row!], found));
-    expect(Object.keys(feed.badges)).toEqual([uuid("a")]);
-    expect(feed.badges[uuid("a")]!.count).toBe(1);
-    expect(feed.ratings[uuid("a")]!.rating).toBe("risk");
+    expect(feed.badges).toEqual({});
   });
 
   it("a dismissed insight adds no badge and no colour", async () => {

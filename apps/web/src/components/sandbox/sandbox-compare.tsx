@@ -329,7 +329,7 @@ export function SandboxCompare({ live, startDate, months, scenarios, solutions, 
                 names={names}
                 format={formatPercent}
                 formatDiff={(v) => signed(v, (x) => `${Math.round(x * 100)} points`)}
-                reference={{ value: cutoffs[1], label: `${formatPercent(cutoffs[1])} “Too busy” line` }}
+                reference={{ value: cutoffs[1], label: `${formatPercent(cutoffs[1])} utilisation threshold` }}
                 minTop={1}
               />
             ))}

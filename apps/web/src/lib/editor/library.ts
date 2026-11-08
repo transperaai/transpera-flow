@@ -27,16 +27,6 @@ export interface LibraryProcess {
   holder: { id: string; name: string; company: boolean } | null;
 }
 
-/** A template the library can make a new process from (create_from_template's list). */
-export interface LibraryTemplate {
-  id: string;
-  name: string;
-  kind: ProcessRow["kind"];
-  /** What it is for: what the template's process is made as (D52). */
-  category: ProcessCategory;
-  description: string;
-}
-
 export interface LibraryEntry {
   id: string;
   name: string;

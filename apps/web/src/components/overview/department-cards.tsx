@@ -1,103 +1,208 @@
 "use client";
 
-// The Overview's department cards (capacity build P6; the prototype's Overview, `pageOverview`): one card per department with its
-// headline figures, its busiest people and where its time goes, then the whole business. Figures that come from Set up (clients, per
-// employee, DLER) show at once; the ones that need a simulation (who is at their line, room for more clients, busiest people, where the
-// time goes) come from the Capacity page's "Today" run, in the same worker and cache (lib/capacity/runs.ts), so opening the Overview after
-// Capacity costs nothing. Never run on the server.
+// The Overview's money answer and the figures behind its people widgets (capacity build P6; redesigned to the Overview options WB1 and DS1).
+// Figures that come from Set up (clients, MRR, MRR ÷ people, DLER) show at once; the ones that need a simulation (who is over their
+// utilisation threshold, room for more clients, busiest people, where the time goes) come from the Capacity page's "Today" run, in the
+// same worker and cache (lib/capacity/runs.ts), so opening the Overview after Capacity costs nothing. Never run on the server.
+//
+// - `useDepartmentFigures`: the one Today run and every department's figures, for the Money and People sections alike.
+// - `WholeBusinessHero` (WB1): three hero numbers, only DLER coloured, against its goal.
+// - `DepartmentTiles` (DS1): the departments side by side, a status tile for each figure.
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { busyShares, departmentCeiling, limitedBy, roomPulse, departmentTime, modelProcessOfStep, dler, perEmployee, serviceLines, todayModel, wholeBusiness, type CapacitySetup, type DlerRow } from "@transpera-flow/db";
-import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
-import { BusyBar, Kpi, Section, TONE_TEXT } from "@/components/capacity/widgets";
+import { useMemo, type ReactNode } from "react";
+import {
+  busyShares,
+  departmentCeiling,
+  departmentRetainers,
+  departmentTime,
+  dler,
+  DLER_GOAL,
+  limitedBy,
+  modelProcessOfStep,
+  perEmployee,
+  roomPulse,
+  serviceLines,
+  todayModel,
+  wholeBusiness,
+  type CapacitySetup,
+  type DepartmentCeiling,
+  type DepartmentTimePart,
+  type DlerRow,
+  type PerEmployee,
+  type PersonBusy,
+  type RoomPulse,
+} from "@transpera-flow/db";
+import type { EngineModel } from "@transpera-flow/engine";
+import { HeroKpi, How, Section, type KpiStatus } from "@/components/capacity/widgets";
+import { SectionCard } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
+import { formatNumber, formatWholeCurrency } from "@/lib/format";
 import { useCapacityRuns } from "@/lib/sim/use-capacity-runs";
+import { cn } from "@/lib/utils";
 
 const f0 = (v: number) => formatNumber(v, 0);
 const f1 = (v: number) => formatNumber(v, 1);
 
-/** What the busy line is: "Busy above 85%", or the range when roles differ: "Busy above 80–85% (each role's line)". Undefined with nobody in the department. */
+/** What the busy line is: "Busy above 85%", or the range when roles differ: "Busy above 80–85% (each role's utilisation threshold)". Undefined with nobody in the department. */
 export function busyLineNote(lines: readonly number[]): string | undefined {
   if (!lines.length) return undefined;
   const pct = (v: number) => Math.round(v * 100);
   const low = pct(Math.min(...lines));
   const high = pct(Math.max(...lines));
-  return low === high ? `Busy above ${low}%` : `Busy above ${low}–${high}% (each role's line)`;
+  return low === high ? `Busy above ${low}%` : `Busy above ${low}–${high}% (each role's utilisation threshold)`;
 }
 
-export interface DepartmentCardsProps {
-  setup: CapacitySetup;
+/** The Capacity page's DLER rule: at or above the goal is good, below it is a warning. Null when there is no ratio to judge (hidden or no salaries). */
+export function dlerStatus(row: Pick<DlerRow, "ratio" | "hidden">): KpiStatus | null {
+  if (row.hidden || row.ratio === null) return null;
+  return row.ratio >= DLER_GOAL ? { tone: "good", words: `At or above the ${f1(DLER_GOAL)} goal` } : { tone: "warn", words: `Below the ${f1(DLER_GOAL)} goal` };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The figures
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** A person from the Today run, with the name of their department (null for someone outside any). */
+export type BusyPerson = PersonBusy & { departmentName: string | null };
+
+export interface DepartmentTimeSplit {
+  total: number;
+  parts: DepartmentTimePart[];
+}
+
+export interface DepartmentFigure {
+  id: string;
+  name: string;
+  per: PerEmployee;
+  dler: DlerRow;
+  /** Clients who also take another department's services, and what that department is called. */
+  alsoTake: { count: number; other: string };
+  /** From the Today run; null until it is in (or when it can't run). */
+  run: {
+    people: BusyPerson[];
+    over: number;
+    lineNote: string | undefined;
+    ceiling: DepartmentCeiling;
+    pulse: RoomPulse;
+    time: { process: DepartmentTimeSplit; purpose: DepartmentTimeSplit };
+  } | null;
+}
+
+export interface DepartmentFigures {
+  /** The departments with at least one active tier service; none means Set up isn't far enough along (the start checklist). */
+  rows: DepartmentFigure[];
+  /** Everyone in the Today run, busiest first; null until it is in. */
+  people: BusyPerson[] | null;
+  /** The run is under way. */
+  running: boolean;
+  /** Why the run's figures can't be shown (the model can't be built, or the run failed); null when they can. */
+  failure: { kind: "model" | "run"; message: string } | null;
+}
+
+/**
+ * The Today run (the Capacity page's, through its cache) and every department's figures from it. `setup` null (no Set up data, as on the
+ * demo): nothing runs and there are no rows.
+ */
+export function useDepartmentFigures({
+  setup,
+  model,
+  modelError = null,
+  purposeNames = {},
+  processOfStep,
+}: {
+  setup: CapacitySetup | null;
   /** The workspace's model as the Capacity page builds it (`capacityBaseModel`); null when it can't be built (`modelError` says why). */
   model: EngineModel | null;
   modelError?: string | null;
   /** Purpose key → the words the workspace uses. */
   purposeNames?: Record<string, string>;
-  /** Step id → the name of the process it is in, for "Where the time goes" by process. Left out: worked out from the model. */
+  /** Step id → the name of the process it is in, for the time by process. Left out: worked out from the model. */
   processOfStep?: ReadonlyMap<string, string>;
-  /** `/w/<slug>`. */
-  base: string;
-}
-
-export function DepartmentCards({ setup, model, modelError = null, purposeNames = {}, processOfStep, base }: DepartmentCardsProps) {
-  const departments = useMemo(() => setup.departments.filter((d) => setup.services.some((s) => s.active && s.department_id === d.id && s.tier_id)), [setup]);
+}): DepartmentFigures {
+  const departments = useMemo(() => (setup ? setup.departments.filter((d) => setup.services.some((s) => s.active && s.department_id === d.id && s.tier_id)) : []), [setup]);
   const today = useMemo(() => (model && departments.length ? todayModel(model) : null), [model, departments.length]);
   const runs = useCapacityRuns(today, null, null);
-
-  if (!departments.length) return <StartChecklist setup={setup} base={base} />;
-
   const result = runs.today.status === "done" ? runs.today.run.result : null;
-  return (
-    <div className="flex min-w-0 flex-col gap-6" data-tier="departments">
-      {modelError && (
-        <div role="alert" data-model-error className="rounded-token border border-crit bg-crit-soft p-3 text-sm">
-          Who is at their line and who has room can&apos;t be worked out yet: {modelError}
-        </div>
-      )}
-      {runs.today.status === "error" && (
-        <div role="alert" data-run-error className="rounded-token border border-crit bg-crit-soft p-3 text-sm">
-          The simulation could not run: {runs.today.error}
-        </div>
-      )}
-      <WholeBusinessRow setup={setup} base={base} />
-      {departments.map((d) => (
-        <DepartmentCard
-          key={d.id}
-          setup={setup}
-          departmentId={d.id}
-          name={d.name}
-          base={base}
-          model={model}
-          result={result}
-          failed={!!modelError || runs.today.status === "error"}
-          purposeNames={purposeNames}
-          processOfStep={processOfStep}
-        />
-      ))}
+
+  const base = useMemo(() => {
+    if (!setup) return [];
+    const lines = serviceLines(setup);
+    const ratios = dler(setup).departments;
+    return departments.map((d) => {
+      const others = setup.departments.filter((x) => x.id !== d.id);
+      return {
+        id: d.id,
+        name: d.name,
+        per: perEmployee(setup, d.id),
+        dler: ratios.find((x) => x.departmentId === d.id)!,
+        alsoTake: { count: lines.both, other: others.length === 1 ? others[0]!.name : "another department" },
+      };
+    });
+  }, [setup, departments]);
+
+  const fromRun = useMemo(() => {
+    if (!setup || !model || !result) return null;
+    const nameOf = new Map(setup.departments.map((d) => [d.id, d.name]));
+    const people: BusyPerson[] = busyShares(setup, model, result)
+      .people.map((p) => ({ ...p, departmentName: p.departmentId ? (nameOf.get(p.departmentId) ?? null) : null }))
+      .sort((a, b) => b.busy - a.busy);
+    const steps = processOfStep ?? modelProcessOfStep(model);
+    const byDepartment = new Map(
+      departments.map((d) => {
+        const mine = people.filter((p) => p.departmentId === d.id);
+        const ceiling = departmentCeiling(setup, model, result, d.id);
+        return [
+          d.id,
+          {
+            people: mine,
+            over: mine.filter((p) => p.over).length,
+            lineNote: busyLineNote(mine.map((p) => p.line)),
+            ceiling,
+            pulse: roomPulse(ceiling.room, ceiling.clients),
+            time: {
+              process: departmentTime(setup, model, result, d.id, purposeNames, { processOfStep: steps }),
+              purpose: departmentTime(setup, model, result, d.id, purposeNames),
+            },
+          },
+        ] as const;
+      }),
+    );
+    return { people, byDepartment };
+  }, [setup, model, result, departments, purposeNames, processOfStep]);
+
+  const failure: DepartmentFigures["failure"] = modelError ? { kind: "model", message: modelError } : runs.today.status === "error" ? { kind: "run", message: runs.today.error } : null;
+  return {
+    rows: base.map((b) => ({ ...b, run: fromRun?.byDepartment.get(b.id) ?? null })),
+    people: fromRun?.people ?? null,
+    running: !failure && !fromRun && departments.length > 0,
+    failure,
+  };
+}
+
+/** Why the simulated figures are missing, said once at the top of the Money section. */
+export function DepartmentAlerts({ failure }: { failure: DepartmentFigures["failure"] }) {
+  if (!failure) return null;
+  return failure.kind === "model" ? (
+    <div role="alert" data-model-error className="rounded-token border border-crit bg-crit-soft p-3 text-sm">
+      Who is at their utilisation threshold and who has room can&apos;t be worked out yet: {failure.message}
+    </div>
+  ) : (
+    <div role="alert" data-run-error className="rounded-token border border-crit bg-crit-soft p-3 text-sm">
+      The simulation could not run: {failure.message}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// Start checklist (no tier services yet)
+// ---------------------------------------------------------------------------------------------------------------------
 
-function StartChecklist({ setup, base }: { setup: CapacitySetup; base: string }) {
+export function StartChecklist({ setup, base }: { setup: CapacitySetup; base: string }) {
   const items = [
-    {
-      label: "Add roles",
-      href: `${base}/settings/people#roles-heading`,
-      done: setup.roles.length > 0,
-    },
-    {
-      label: "Add people",
-      href: `${base}/settings/people#people-heading`,
-      done: setup.people.length > 0,
-    },
-    {
-      label: "Add tiers and services",
-      href: `${base}/settings/clients`,
-      done: setup.services.some((s) => s.active && s.tier_id),
-    },
+    { label: "Add roles", href: `${base}/settings/people#roles-heading`, done: setup.roles.length > 0 },
+    { label: "Add people", href: `${base}/settings/people#people-heading`, done: setup.people.length > 0 },
+    { label: "Add tiers and services", href: `${base}/settings/clients`, done: setup.services.some((s) => s.active && s.tier_id) },
     {
       label: "Enter how many clients are in each tier",
       href: `${base}/settings/clients#clients-heading`,
@@ -109,7 +214,7 @@ function StartChecklist({ setup, base }: { setup: CapacitySetup; base: string })
       title="No tiers and services are set up yet."
       data-no-tiers
       data-setup-checklist
-      description="Capacity by department is worked out from each department's tiers, the clients in them and the people who look after them. To start:"
+      description="Clients, MRR and DLER by department are worked out from each department's tiers, the clients in them and the people who look after them. To start:"
     >
       <ol className="flex flex-col gap-1 text-sm">
         {items.map((i) => (
@@ -128,199 +233,178 @@ function StartChecklist({ setup, base }: { setup: CapacitySetup; base: string })
   );
 }
 
-/** DLER as a card (D40): the average of each client-facing person's DLER; "Salaries not entered" with a link when nobody has one; "Hidden" when the viewer can't see pay. */
-function DlerKpi({ label, row, base }: { label: string; row: DlerRow; base: string }) {
-  if (row.hidden) return <Kpi label={label} value="Hidden" sub="Pay is hidden for your role" />;
-  if (!row.people || row.ratio === null) {
-    return (
-      <Kpi
-        label={label}
-        value="—"
-        sub={
-          <span data-salaries-missing>
-            Salaries not entered.{" "}
-            <Link href={`${base}/settings/people`} className="whitespace-nowrap font-medium text-accent hover:underline">
-              Enter them →
-            </Link>
-          </span>
-        }
-      />
-    );
-  }
-  return <Kpi label={label} value={f1(row.ratio)} sub={`Average of ${row.people} ${row.people === 1 ? "person's" : "people's"} DLER`} />;
+// ---------------------------------------------------------------------------------------------------------------------
+// WB1: the whole business
+// ---------------------------------------------------------------------------------------------------------------------
+
+/** DLER on a scale from 0, the bar in the status colour and a tick at the goal. */
+export function DlerScale({ ratio }: { ratio: number }) {
+  const W = 220;
+  const top = Math.max(6, ratio * 1.15, DLER_GOAL * 1.25);
+  const x = (v: number) => 4 + (Math.max(0, Math.min(v, top)) / top) * (W - 8);
+  const good = ratio >= DLER_GOAL;
+  const label = `DLER ${f1(ratio)} against a goal of ${f1(DLER_GOAL)}`;
+  return (
+    <svg viewBox={`0 0 ${W} 30`} className="mt-1 block h-auto w-full max-w-[220px]" role="img" aria-label={label} data-dler-scale>
+      <title>{label}</title>
+      <rect x={4} y={8} width={W - 8} height={8} rx={4} className="fill-panel-2" />
+      <rect x={4} y={8} width={Math.max(0, x(ratio) - 4)} height={8} rx={4} className={good ? "fill-good" : "fill-warn"} />
+      <line x1={x(DLER_GOAL)} x2={x(DLER_GOAL)} y1={3} y2={21} className="stroke-fg" strokeWidth={2} />
+      <text x={x(DLER_GOAL)} y={29} textAnchor="middle" className="fill-fg-2 text-[9px]">
+        goal {f1(DLER_GOAL)}
+      </text>
+    </svg>
+  );
 }
 
-function DepartmentCard({
-  setup,
-  departmentId,
-  name,
-  base,
-  model,
-  result,
-  failed,
-  purposeNames,
-  processOfStep,
-}: {
-  setup: CapacitySetup;
-  departmentId: string;
-  name: string;
-  base: string;
-  model: EngineModel | null;
-  result: SimulationResult | null;
-  failed: boolean;
-  purposeNames: Record<string, string>;
-  processOfStep?: ReadonlyMap<string, string>;
-}) {
-  const [timeBy, setTimeBy] = useState<"process" | "purpose">("process");
-  const per = useMemo(() => perEmployee(setup, departmentId), [setup, departmentId]);
-  const lines = useMemo(() => serviceLines(setup), [setup]);
-  const row = useMemo(() => dler(setup).departments.find((x) => x.departmentId === departmentId)!, [setup, departmentId]);
-  const others = setup.departments.filter((d) => d.id !== departmentId);
-  const money = (v: number) => formatWholeCurrency(v, setup.currency);
-
-  const figures = useMemo(() => {
-    if (!model || !result) return null;
-    const people = busyShares(setup, model, result).people.filter((p) => p.departmentId === departmentId);
-    const ordered = [...people].sort((a, b) => b.busy - a.busy);
-    const ceiling = departmentCeiling(setup, model, result, departmentId);
-    return {
-      busiest: ordered,
-      over: ordered.filter((p) => p.over),
-      lineNote: busyLineNote(ordered.map((p) => p.line)),
-      ceiling,
-      pulse: roomPulse(ceiling.room, ceiling.clients),
-      time: departmentTime(setup, model, result, departmentId, purposeNames, timeBy === "process" ? { processOfStep: processOfStep ?? modelProcessOfStep(model) } : undefined),
-    };
-  }, [setup, model, result, departmentId, purposeNames, processOfStep, timeBy]);
-
-  const pending = (value: string) => (failed ? "—" : <Skeleton className="mt-1 h-6 w-12" aria-busy="true" aria-label={`${value} is being worked out`} />);
+function SalariesMissing({ base }: { base: string }) {
   return (
-    <Section
-      title={name}
-      data-department={name}
-      aside={
+    <span data-salaries-missing>
+      Salaries not entered.{" "}
+      <Link href={`${base}/settings/people`} className="whitespace-nowrap font-medium text-accent hover:underline">
+        Enter them →
+      </Link>
+    </span>
+  );
+}
+
+/** WB1: clients, MRR ÷ N people and DLER as three hero numbers. Only DLER has a goal, so only DLER is coloured. */
+export function WholeBusinessHero({ setup, base }: { setup: CapacitySetup; base: string }) {
+  const w = useMemo(() => wholeBusiness(setup), [setup]);
+  const mrr = useMemo(() => setup.departments.reduce((a, d) => a + departmentRetainers(setup, d.id), 0), [setup]);
+  const money = (v: number) => formatWholeCurrency(v, setup.currency);
+  const status = dlerStatus(w.dler);
+  return (
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(13rem,100%),1fr))] gap-3" data-whole-business>
+      <HeroKpi label="Clients" value={f0(w.unique)} sub={`${w.byDepartment.map((d) => `${f0(d.clients)} ${d.name}`).join(" + ")} − ${f0(w.both)} taking both`} />
+      <HeroKpi label={`MRR ÷ ${w.employees} people`} value={w.revenuePerEmployee === null ? "—" : money(w.revenuePerEmployee)} sub={`a month, from ${money(mrr)} MRR`} />
+      <HeroKpi
+        label="DLER"
+        value={w.dler.hidden ? "Hidden" : w.dler.ratio === null ? "—" : f1(w.dler.ratio)}
+        status={status ?? undefined}
+        sub={
+          w.dler.hidden ? (
+            "Pay is hidden for your role"
+          ) : w.dler.ratio === null ? (
+            <SalariesMissing base={base} />
+          ) : (
+            <>
+              <DlerScale ratio={w.dler.ratio} />
+              <span className="block">
+                MRR ÷ salaries, the average of {w.dler.people} {w.dler.people === 1 ? "person's" : "people's"} DLER
+              </span>
+            </>
+          )
+        }
+      />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// DS1: the departments side by side
+// ---------------------------------------------------------------------------------------------------------------------
+
+type TileTone = "good" | "warn" | "bad" | null;
+const TILE_BG: Record<Exclude<TileTone, null>, string> = { good: "bg-good-soft", warn: "bg-warn-soft", bad: "bg-crit-soft" };
+
+function Tile({ label, value, sub, tone = null, className }: { label: string; value: ReactNode; sub?: ReactNode; tone?: TileTone; className?: string }) {
+  return (
+    <div className={cn("flex min-w-0 flex-col gap-0.5 rounded-token px-3 py-2.5", tone ? TILE_BG[tone] : "bg-panel-2", className)} data-kpi data-tone={tone ?? "none"}>
+      <div className="text-xs text-fg-2">{label}</div>
+      <div className="font-mono text-xl font-semibold tabular-nums">{value}</div>
+      {sub && <div className="text-xs text-fg-2">{sub}</div>}
+    </div>
+  );
+}
+
+/** The first sentence of the department tiles: who is below the DLER goal, and how many people are over their utilisation threshold. */
+export function departmentsAnswer(rows: readonly Pick<DepartmentFigure, "name" | "dler" | "run">[]): string {
+  const judged = rows.filter((r) => dlerStatus(r.dler));
+  const below = judged.filter((r) => dlerStatus(r.dler)!.tone === "warn").map((r) => r.name);
+  const goal = f1(DLER_GOAL);
+  const money = !judged.length
+    ? ""
+    : below.length === 0
+      ? `${judged.length === 1 ? judged[0]!.name + " is" : "Every department is"} at or above the ${goal} DLER goal.`
+      : below.length === judged.length && judged.length > 1
+        ? `Every department is below the ${goal} DLER goal.`
+        : `${below.join(" and ")} ${below.length === 1 ? "is" : "are"} below the ${goal} DLER goal.`;
+  if (rows.some((r) => !r.run)) return money || "The departments' figures.";
+  const over = rows.reduce((a, r) => a + r.run!.over, 0);
+  const people = over === 0 ? "Nobody is over their utilisation threshold." : `${over} ${over === 1 ? "person is" : "people are"} over their utilisation threshold.`;
+  return [money, people].filter(Boolean).join(" ");
+}
+
+export function DepartmentTiles({ figures, base, currency }: { figures: DepartmentFigures; base: string; currency: string }) {
+  const money = (v: number) => formatWholeCurrency(v, currency);
+  const pending = (what: string) => (figures.failure ? "—" : <Skeleton className="mt-1 h-6 w-14" aria-busy="true" aria-label={`${what} is being worked out`} />);
+  return (
+    <SectionCard
+      id="departments"
+      section="departments"
+      level={3}
+      title="Departments"
+      description={departmentsAnswer(figures.rows)}
+      action={
         <Link href={`${base}/capacity`} className="text-xs font-medium text-accent hover:underline" data-capacity-link>
           Capacity →
         </Link>
       }
     >
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-2.5" data-kpis>
-        <Kpi label="Clients" value={f0(per.clients)} sub={`${f0(lines.both)} also take ${others.length === 1 ? others[0]!.name : "another department"}`} />
-        <Kpi label="Revenue per employee" value={per.revenuePerEmployee === null ? "—" : money(per.revenuePerEmployee)} sub={`a month, retainers ÷ ${per.employees} people`} />
-        <DlerKpi label="DLER" row={row} base={base} />
-        <Kpi label="Past their busy line" value={figures ? f0(figures.over.length) : pending("Past their busy line")} sub={figures?.lineNote} />
-        <Kpi
-          label="Room for more clients"
-          value={
-            figures ? (
-              <span className={`text-lg ${TONE_TEXT[figures.pulse.tone]}`} data-room-status>
-                {figures.pulse.status}
-              </span>
-            ) : (
-              pending("Room for more clients")
-            )
-          }
-          sub={
-            figures ? (
-              <>
-                {figures.pulse.words && <span className="block">{figures.pulse.words}</span>}
-                <span className="block">Limited by {limitedBy(figures.ceiling.limit)}</span>
-                <span className="mt-0.5 block italic">A rough guide from the simulation, not a promise</span>
-              </>
-            ) : undefined
-          }
-        />
-      </div>
-      {figures ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          <div data-busiest>
-            <h3 className="mb-1.5 text-sm font-semibold">Busiest people</h3>
-            {figures.busiest.length ? (
-              <table className="w-full text-sm">
-                <tbody>
-                  {figures.busiest.map((p) => (
-                    <tr key={p.id} className="border-b border-line/60 last:border-0">
-                      <td className="py-1.5 pr-3">
-                        {p.name}
-                        <div className="text-xs text-muted-foreground">{p.roleName}</div>
-                      </td>
-                      <td className="w-1/2 py-1.5">
-                        <BusyBar busy={p.busy} line={p.line} label={p.name} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className="text-sm text-muted-foreground">Nobody works in this department yet.</p>
-            )}
-          </div>
-          <div data-time>
-            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-              <h3 className="text-sm font-semibold">
-                Where the time goes <span className="text-xs font-normal text-muted-foreground tabular-nums">{f0(figures.time.total)} h a month</span>
-              </h3>
-              <div role="group" aria-label="Group the time" className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-xs" data-time-by>
-                {(["process", "purpose"] as const).map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    aria-pressed={timeBy === k}
-                    onClick={() => setTimeBy(k)}
-                    className={`rounded-md px-2.5 py-1 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring ${timeBy === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                  >
-                    {k === "process" ? "By process" : "By purpose"}
-                  </button>
-                ))}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(17rem,100%),1fr))] gap-x-5 gap-y-4" data-tier="departments">
+        {figures.rows.map((d) => {
+          const status = dlerStatus(d.dler);
+          const run = d.run;
+          return (
+            <div key={d.id} className="flex min-w-0 flex-col gap-2" data-department={d.name}>
+              <h4 className="text-sm font-semibold">{d.name}</h4>
+              <div className="grid grid-cols-2 gap-2">
+                <Tile label="Clients" value={f0(d.per.clients)} sub={`${f0(d.alsoTake.count)} also take ${d.alsoTake.other}`} />
+                <Tile label={`MRR ÷ ${d.per.employees} people`} value={d.per.revenuePerEmployee === null ? "—" : money(d.per.revenuePerEmployee)} sub="a month" />
+                <Tile
+                  label="DLER"
+                  tone={status ? (status.tone === "good" ? "good" : "warn") : null}
+                  value={d.dler.hidden ? "Hidden" : d.dler.ratio === null ? "—" : f1(d.dler.ratio)}
+                  sub={d.dler.hidden ? "Pay is hidden for your role" : d.dler.ratio === null ? <SalariesMissing base={base} /> : status!.words}
+                />
+                <Tile
+                  label="Over their utilisation threshold"
+                  tone={run ? (run.over > 0 ? "bad" : "good") : null}
+                  value={run ? `${f0(run.over)} of ${f0(run.people.length)}` : pending("Over their utilisation threshold")}
+                  sub={run?.lineNote}
+                />
+                <Tile
+                  className="col-span-2"
+                  label="Room for more clients"
+                  tone={run ? (run.pulse.tone === "ok" ? "good" : run.pulse.tone) : null}
+                  value={
+                    run ? (
+                      <span className="text-lg" data-room-status>
+                        {run.pulse.status}
+                      </span>
+                    ) : (
+                      pending("Room for more clients")
+                    )
+                  }
+                  sub={run ? [run.pulse.words, `fills first: ${limitedBy(run.ceiling.limit)}`].filter(Boolean).join(" · ") : undefined}
+                />
               </div>
             </div>
-            {figures.time.parts.length ? (
-              <table className="w-full text-sm">
-                <tbody>
-                  {figures.time.parts.map((t) => (
-                    <tr key={t.name} className="border-b border-line/60 last:border-0" data-purpose={t.name}>
-                      <td className="py-1.5 pr-3">{t.name}</td>
-                      <td className="w-[30%] py-1.5 pr-3">
-                        <div className="h-2 rounded-full bg-panel-2" role="presentation">
-                          <i
-                            className="block h-full rounded-full bg-accent"
-                            style={{
-                              width: `${(t.hours * 100) / figures.time.parts[0]!.hours}%`,
-                            }}
-                          />
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap py-1.5 pr-3 text-right tabular-nums">{f0(t.hours)} h</td>
-                      <td className="whitespace-nowrap py-1.5 text-right tabular-nums text-muted-foreground">{formatPercent(t.share)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p className="text-sm text-muted-foreground">No hours in the run.</p>
-            )}
-          </div>
-        </div>
-      ) : failed ? null : (
-        <div role="status" aria-busy="true" data-running className="flex flex-col gap-2">
-          <p className="text-sm text-muted-foreground">Working out who is busiest and where the time goes, from a simulation of today&apos;s clients…</p>
-          <Skeleton className="h-24 w-full" />
-        </div>
-      )}
-    </Section>
-  );
-}
-
-function WholeBusinessRow({ setup, base }: { setup: CapacitySetup; base: string }) {
-  const w = useMemo(() => wholeBusiness(setup), [setup]);
-  const money = (v: number) => formatWholeCurrency(v, setup.currency);
-  return (
-    <Section title="Whole business" data-whole-business description="The capacity headline for each department. Each card opens the Capacity page with the detail.">
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-2.5">
-        <Kpi label="Clients" value={f0(w.unique)} sub={`${w.byDepartment.map((d) => `${f0(d.clients)} ${d.name}`).join(" + ")} − ${f0(w.both)} taking both`} />
-        <Kpi label="Revenue per employee" value={w.revenuePerEmployee === null ? "—" : money(w.revenuePerEmployee)} sub={`a month, ${w.employees} people`} />
-        <DlerKpi label="DLER" row={w.dler} base={base} />
+          );
+        })}
       </div>
-    </Section>
+      <How
+        works={
+          <>
+            Clients and MRR come from Set up; MRR ÷ people divides each department&apos;s MRR by everyone in it (contractors and leadership out). DLER is MRR ÷
+            salaries, the average of each client-facing person&apos;s, against a goal of {f1(DLER_GOAL)}. Who is over their utilisation threshold and the room
+            for more clients come from a simulation of today&apos;s clients; the room is a rough guide from the simulation, not a promise, and names what fills
+            first.
+          </>
+        }
+        tells="Which department needs you first: a DLER below the goal, people over their utilisation threshold, or little room for more clients."
+      />
+    </SectionCard>
   );
 }

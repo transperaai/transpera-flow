@@ -24,7 +24,7 @@ import {
 import { mapFeed, registerEntries } from "@/lib/issues/register";
 import { MemoryIssueStore } from "@/lib/issues/store";
 import { parseResolveInput } from "@/lib/issues/validate";
-import { NO_SOLUTIONS_DATA, solutionSummaries, solutionTests } from "@/lib/solutions/cards";
+import { NO_SOLUTIONS_DATA, solutionSummaries } from "@/lib/solutions/cards";
 
 // The Issues pages (issue #113, A48): the list's filters and URL, the sort, resolving and reopening (with the map badges
 // and the history), the resolved bar, and the (i) on every control.
@@ -164,7 +164,6 @@ describe("the issue's address", () => {
 
 describe("solutions tested", () => {
   it("are empty with no solutions, so the list says none and the page its empty state", () => {
-    expect(solutionTests(northbeamIssues()[0]!.id, NO_SOLUTIONS_DATA, "/demo")).toEqual([]);
     expect(solutionSummaries(NO_SOLUTIONS_DATA)).toEqual({});
   });
 });
@@ -324,7 +323,9 @@ describe("(i) help on every control", () => {
 
   it("the pages use the prototype's words", () => {
     const page = read("components/issues/issue-page.tsx");
-    for (const t of ["Where this issue sits", "What&apos;s wrong", "Solutions tried", "History", "Resolve", "+ Try a new solution", "Link an existing solution", "Reopen", "+ Link", "Linked to", "Owners", "Target"]) expect(page).toContain(t);
+    for (const t of ["Where this issue sits", "What&apos;s wrong and sources", "Solutions tried", "Resolve", "+ Try a new solution", "Link an existing solution", "Reopen", "+ Link", "Owners", "WRONG_PROMPTS"]) expect(page).toContain(t);
+    // No history timeline, no Linked to card and no step pill: an issue belongs to a process (QA round 2).
+    for (const t of ["<Timeline", "Linked to", "stepPill"]) expect(page).not.toContain(t);
     const list = read("components/issues-page.tsx");
     for (const t of ["+ New issue", "Search issues", "Status", "Owner", "Rating", "Clear filters"]) expect(list).toContain(t);
   });

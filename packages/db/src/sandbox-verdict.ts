@@ -19,6 +19,8 @@ export interface PlayPersonSeries {
   id: string;
   name: string;
   line: number;
+  /** Their (first) role, so the Sandbox can say which teams are over in a month; absent when unknown. */
+  roleId?: string | null;
   /** Mean busy share per month; null when they aren't there that month. */
   busy: (number | null)[];
 }
@@ -86,7 +88,7 @@ export function verdict(base: PlaySeries, run: PlaySeries, ctx: VerdictContext):
   const dMoney = run.retainers[last]! - base.retainers[last]!;
   const dlerNow = run.dler[last];
   const dlerThen = base.dler[last];
-  const first: VerdictLine = [t("By "), b(month(last)), t(": "), b(`${count(Math.round(run.clients[last]!))} clients`), t(` (${signed(dClients)} against today's path), retainers `), b(ctx.money(run.retainers[last]!)), t(` a month (${dMoney >= 0 ? "+" : "−"}${ctx.money(Math.abs(dMoney))})`)];
+  const first: VerdictLine = [t("By "), b(month(last)), t(": "), b(`${count(Math.round(run.clients[last]!))} clients`), t(` (${signed(dClients)} against today's path), MRR `), b(ctx.money(run.retainers[last]!)), t(` a month (${dMoney >= 0 ? "+" : "−"}${ctx.money(Math.abs(dMoney))})`)];
   if (dlerNow != null) {
     first.push(t(", DLER "), b(one(dlerNow)));
     if (dlerThen != null) first.push(t(` (${one(dlerThen)} on today's path)`));
@@ -103,14 +105,14 @@ export function verdict(base: PlaySeries, run: PlaySeries, ctx: VerdictContext):
   });
   for (const a of sooner.slice(0, 3)) {
     const w = was.get(a.roleId);
-    const line: VerdictLine = [flag(`${a.name}: over the line ${a.overFrom === 0 ? "straight away" : "from " + month(a.overFrom!)}`)];
+    const line: VerdictLine = [flag(`${a.name}: over the utilisation threshold ${a.overFrom === 0 ? "straight away" : "from " + month(a.overFrom!)}`)];
     if (w && w.overFrom !== null) line.push(t(` (${month(w.overFrom)} on today's path)`));
     line.push(t(". " + (a.hireBy! <= 0 ? "Start hiring now." : `Start hiring by ${month(a.hireBy!)}.`)));
     lines.push(line);
   }
   const runOver = new Map(run.advice.map((a) => [a.roleId, a.overFrom]));
   const fixed = base.advice.filter((a) => a.overFrom !== null && (runOver.get(a.roleId) ?? null) === null);
-  if (fixed.length) lines.push([ok(`${fixed.map((a) => a.name).join(", ")}: no longer over the line`), t(` (over from ${fixed.map((a) => month(a.overFrom!)).join(", ")} on today's path).`)]);
+  if (fixed.length) lines.push([ok(`${fixed.map((a) => a.name).join(", ")}: no longer over the utilisation threshold`), t(` (over from ${fixed.map((a) => month(a.overFrom!)).join(", ")} on today's path).`)]);
 
   // 4. and 5. People.
   const baseOver = new Map(base.people.map((p) => [p.id, firstOver(p)]));
@@ -121,16 +123,16 @@ export function verdict(base: PlaySeries, run: PlaySeries, ctx: VerdictContext):
   });
   if (newOver.length) {
     const named = newOver.slice(0, 5).map((x) => `${x.p.name} (${month(x.at!)})`).join(", ");
-    lines.push([flag(named + (newOver.length > 5 ? ` and ${newOver.length - 5} more` : "")), t(" go over their line sooner than on today's path.")]);
+    lines.push([flag(named + (newOver.length > 5 ? ` and ${newOver.length - 5} more` : "")), t(" go over their utilisation threshold sooner than on today's path.")]);
   }
   const stillOver = new Set(runPeople.filter((x) => x.at !== null).map((x) => x.p.id));
   const relieved = base.people.filter((p) => firstOver(p) !== null && !stillOver.has(p.id));
-  if (relieved.length) lines.push([ok(relieved.slice(0, 5).map((p) => p.name).join(", ")), t(" no longer go over their line.")]);
+  if (relieved.length) lines.push([ok(relieved.slice(0, 5).map((p) => p.name).join(", ")), t(" no longer go over their utilisation threshold.")]);
 
   // 6. The worst month.
   const peakRun = peakOver(run.people);
   const peakBase = peakOver(base.people);
-  lines.push([t("At the worst month, "), b(count(peakRun)), t(` ${peakRun === 1 ? "person is" : "people are"} over their line (${peakBase} on today's path).`)]);
+  lines.push([t("At the worst month, "), b(count(peakRun)), t(` ${peakRun === 1 ? "person is" : "people are"} over their utilisation threshold (${peakBase} on today's path).`)]);
   return lines;
 }
 

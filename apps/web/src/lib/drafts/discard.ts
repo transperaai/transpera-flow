@@ -7,7 +7,7 @@ import { deleteEdges, deleteSteps, updateEdge, updateStep } from "@/lib/editor/c
 import { pick, readField, type Edit, type Table } from "@/lib/editor/ops";
 import { provenanceFieldFor } from "@/lib/editor/provenance";
 import { FIELD_LABELS } from "@/lib/editor/labels";
-import { changeOf, diffBundles, type Change } from "./diff";
+import { EDGE_BEND_FIELDS, changeOf, diffBundles, type Change } from "./diff";
 
 /** A pseudo-field for a step's position (x and y together). */
 export const POSITION = "position";
@@ -105,7 +105,7 @@ export function discardChange(live: ProcessBundle, draft: ProcessBundle, table: 
   if (change.kind === "removed") {
     return { label: edgeLabel("Restored"), ops: [{ kind: "insert", steps: [], edges: [intoDraft(change.live!, draft)] }] };
   }
-  const edit = updateEdge(draft, id, pick(change.live!, change.fields.map((f) => f.field)));
+  const edit = updateEdge(draft, id, pick(change.live!, [...change.fields.map((f) => f.field), ...(change.moved ? EDGE_BEND_FIELDS : [])]));
   return edit && { ...edit, label: edgeLabel("Reverted") };
 }
 

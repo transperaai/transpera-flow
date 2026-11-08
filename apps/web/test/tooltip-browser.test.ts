@@ -53,14 +53,13 @@ async function expectFreeOfCard(page: Page, popup: string) {
 }
 
 describe("hover pop-ups inside an overflow-hidden card", () => {
-  it("the donut tooltip, with the pointer at the card's bottom-right corner, is whole and outside the card", async () => {
+  it("the time split tooltip, with the pointer at the right of the card, is whole and outside the card", async () => {
     const { page, errors } = await mount();
     const card = (await page.locator("[data-card]").first().boundingBox())!;
-    const donut = (await page.locator("[data-donut]").boundingBox())!;
-    // The ring at three o'clock is the first arc (the biggest share starts at the top and runs clockwise).
-    await page.mouse.move(donut.x + donut.width - 5, donut.y + donut.height / 2);
+    const row = (await page.locator("[data-time-split] li").first().boundingBox())!;
+    await page.mouse.move(row.x + row.width - 5, row.y + row.height / 2);
     await page.waitForSelector("[data-chart-tip]");
-    expect(await page.locator("[data-chart-tip]").innerText()).toMatch(/Operational risk: 3 \(75%\)/);
+    expect(await page.locator("[data-chart-tip]").innerText()).toMatch(/30% hands-on/);
     await expectFreeOfCard(page, "[data-chart-tip]");
     expect(card.x + card.width).toBe(900);
     expect(errors).toEqual([]);

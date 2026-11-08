@@ -1,14 +1,14 @@
 "use client";
 
-// The Overview (issue #173, B15; before it #100, A35; the department cards are capacity build P6): the landing page of a workspace, in
-// tiers. Top to bottom:
+// The Overview (issue #173, B15; before it #100, A35; the department figures are capacity build P6): the landing page of a workspace, in
+// three sections, each headed by the question it answers (the Overview options' layout L3), with a row of links to them at the top:
 //
-// 1. Capacity by department: the whole business first, then a card each for Organic and Performance (department-cards.tsx). It reads the
-//    Capacity page's "Today" run, from the same cache.
-// 2. The company map, with Play and the horizon (1, 3 or 6 months; the Sandbox goes further). The charts follow the horizon.
-// 3. Trends: open issues, time split by process, what the time achieves, team load by role.
+// 1. Money: the whole business as three hero numbers (WB1), then the departments side by side as status tiles (DS1).
+// 2. People: busiest people (BP1) and team load by role (TL1), then where the time goes (WT1) and what the time achieves (TA1).
+// 3. Processes: the company map, with Play and the horizon (1, 3 or 6 months; the Sandbox goes further), then open issues (OI1) and the
+//    time split by process (TS2). Team load, what the time achieves and the time split follow the horizon picked on the map.
 //
-// (The issues-based health strip that used to sit between the map and By process went with P6.)
+// Money's figures and People's busiest people and time read the Capacity page's "Today" run, from the same cache (department-cards.tsx).
 //
 // Two simulations of the company model feed it, in workers, each once:
 // - one at the workspace's own length, with today's team, which the facts are rated from (so they don't move with the
@@ -60,13 +60,15 @@ import { recordHeadline } from "@/app/w/[slug]/headline-actions";
 import { headlineNumbers } from "@/lib/overview/headline";
 import { useIssues } from "@/lib/issues/use-issues";
 import { capacityBaseModel } from "@/lib/capacity/model";
-import { DepartmentCards } from "./department-cards";
+import { BusiestPeople } from "./busiest-people";
+import { DepartmentAlerts, DepartmentTiles, StartChecklist, useDepartmentFigures, WholeBusinessHero } from "./department-cards";
 import { TeamLoad } from "./team-load";
+import { WhereTimeGoes } from "./where-time-goes";
 import { EDIT_ONLY } from "@/lib/phone";
 
 // The trend charts and the team load timeline load after the map and the cards.
 const chartLoading = () => <Skeleton className="h-[180px] w-full" aria-busy="true" />;
-const IssuesDonut = dynamic(() => import("./trend-charts").then((m) => m.IssuesDonut), { ssr: false, loading: chartLoading });
+const OpenIssuesSummary = dynamic(() => import("./trend-charts").then((m) => m.OpenIssuesSummary), { ssr: false, loading: chartLoading });
 const TimeSplitChart = dynamic(() => import("./trend-charts").then((m) => m.TimeSplitChart), { ssr: false, loading: chartLoading });
 const TimeAchieves = dynamic(() => import("./time-achieves").then((m) => m.TimeAchieves), { ssr: false, loading: chartLoading });
 
@@ -100,8 +102,11 @@ export interface OverviewProps {
   viewingMapVersion?: number | null;
   /** The Forecast page, linked from the team load chart. */
   forecastHref?: string;
-  /** Set up's data for the department cards (P6), with `/w/<slug>`. Absent (the demo): no cards. */
-  capacity?: { setup: CapacitySetup; base: string } | null;
+  /**
+   * Set up's data for the Money section and the people figures (P6), with `/w/<slug>`. Absent (the demo): no Money section. `model` is the
+   * capacity model when the caller has built it already (a test harness); otherwise it is built from `live` as the Capacity page does.
+   */
+  capacity?: { setup: CapacitySetup; base: string; model?: EngineModel } | null;
 }
 
 /** The company's engine model, the same object while it is unchanged. */
@@ -124,6 +129,21 @@ function useCompanyModel(bundle: ProcessBundle): {
 
 /** A run is only shown for the model it was made from: the worker's last answer outlives a change of horizon by a moment. */
 const current = (result: SimulationResult | null, model: EngineModel | null): SimulationResult | null => (result && model && Math.abs(result.H - model.horizonWeeks * model.hoursPerWeek) < 1e-6 ? result : null);
+
+/** A section of the Overview, headed by its name and the question it answers; the id is the target of the links at the top. */
+function OverviewSection({ id, title, question, children }: { id: string; title: string; question: string; children: React.ReactNode }) {
+  return (
+    <section id={id} aria-labelledby={`${id}-title`} className="flex min-w-0 scroll-mt-16 flex-col gap-4" data-overview-section={id}>
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b-2 border-fg pb-1.5">
+        <h2 id={`${id}-title`} className="font-display text-lg font-bold">
+          {title}
+        </h2>
+        <p className="text-sm text-muted-foreground">{question}</p>
+      </header>
+      {children}
+    </section>
+  );
+}
 
 /** Shown where a chart has nothing to draw until the company can be simulated. */
 const Unavailable = () => <EmptyState data-chart-unavailable>Nothing to show until the company can be simulated.</EmptyState>;
@@ -154,10 +174,12 @@ export function Overview({
   const hoursPerWeek = live.workspace.settings.hours_per_week;
   const purposeCategories = useMemo(() => workspacePurposes(live.workspace.settings), [live.workspace.settings]);
   // The department cards' model: the Capacity page's own (a year long), so its "Today" run is shared through the cache.
-  const capacityModel = useMemo(() => (capacity ? capacityBaseModel(live) : { model: null, error: null }), [capacity, live]);
+  const capacityModel = useMemo(() => (capacity?.model ? { model: capacity.model, error: null } : capacity ? capacityBaseModel(live) : { model: null, error: null }), [capacity, live]);
   // Step id → its process's name, for the cards' "Where the time goes" by process.
   const processOfStep = useMemo(() => new Map(parts.flatMap((p) => p.steps.map((st) => [st.id, p.process.name] as const))), [parts]);
   const purposeNames = useMemo(() => Object.fromEntries(purposeCategories.map((c) => [c.key, c.name])), [purposeCategories]);
+  // A model handed in (a harness) is not `parts`' company, so its steps' processes come from the model itself.
+  const departmentFigures = useDepartmentFigures({ setup: capacity?.setup ?? null, model: capacityModel.model, modelError: capacityModel.error, purposeNames, processOfStep: capacity?.model ? undefined : processOfStep });
 
   // The horizon: 1, 3 or 6 months (the Sandbox goes further). Until one is picked (or ?horizon= says) it is the nearest of those to the
   // workspace's own length: 3 months for the usual 13 weeks.
@@ -225,7 +247,6 @@ export function Overview({
   const state = useIssues(live.workspace.id, issues, mode, liveRevisions);
   const entries = useMemo(() => registerEntries(state.issues, [], state.revisionOf), [state.issues, state.revisionOf]);
   const feed = useMemo(() => mapFeed(entries), [entries]);
-  const openIssueBadges = useMemo(() => Object.fromEntries(Object.entries(feed.badges).map(([id, b]) => [id, b.count])), [feed]);
   const rating = useMemo(() => stepRatingOf(feed.ratings), [feed]);
 
   // Solutions: the workspace's, or on the demo the ones built in this tab.
@@ -300,7 +321,10 @@ export function Overview({
 
   // The trends.
   const timeSplit = useMemo(() => (horizonModel && horizonResult ? timeSplitByProcess(horizonModel, horizonResult, parts) : null), [horizonModel, horizonResult, parts]);
-  const issuesByProcess = useMemo(() => (groups ? groups.filter((g) => g.id !== COMPANY_GROUP || g.openIssues > 0).map((g) => ({ id: g.id, name: g.name, count: g.openIssues })) : null), [groups]);
+  const issuesByProcess = useMemo(
+    () => (groups ? groups.filter((g) => g.id !== COMPANY_GROUP || g.openIssues > 0).map((g) => ({ id: g.id, name: g.name, count: g.openIssues, href: hrefs[g.id] })) : null),
+    [groups, hrefs],
+  );
   const cutoffs = useMemo(() => toRatingConfig(rules, hoursPerWeek).rules.busy.cutoffs, [rules, hoursPerWeek]);
   // The Capacity page's "What to do" for this run, and each role's own line (Set up); without Set up the sentence is worked out from the rows.
   const advice = useMemo(
@@ -361,7 +385,6 @@ export function Overview({
                     const r = rating(id);
                     return r ? ratingOfRank(r.rank) : null;
                   },
-                  issues: openIssueBadges,
                   handoffs: true,
                 })}
               />
@@ -382,6 +405,21 @@ export function Overview({
           }
         />
 
+        <nav aria-label="Sections of the Overview" className="-mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm" data-jump-links>
+          {[...(capacity ? [{ id: "money", label: "Money" }] : []), { id: "people", label: "People" }, { id: "processes", label: "Processes" }].map((l, i) => (
+            <span key={l.id} className="inline-flex items-center gap-1.5">
+              {i > 0 && (
+                <span aria-hidden className="text-fg-3">
+                  ·
+                </span>
+              )}
+              <a href={`#${l.id}`} className="rounded-sm font-medium text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring">
+                {l.label}
+              </a>
+            </span>
+          ))}
+        </nav>
+
         {error ? (
           <Card className="px-4 py-3 text-sm" role="alert">
             The company can&apos;t be simulated yet: {error}. The map below still works; fix this under{" "}
@@ -392,114 +430,144 @@ export function Overview({
           </Card>
         ) : null}
 
-        {capacity && <DepartmentCards setup={capacity.setup} model={capacityModel.model} modelError={capacityModel.error} purposeNames={purposeNames} processOfStep={processOfStep} base={capacity.base} />}
-
-        <SectionCard id="company-map" section="company-map" title="Company map" description="Every process in the business. Press play to watch the work move; expand a process in place, or click it to open its page.">
-          {viewingMapVersion !== null && (
-            <div data-viewing-map-version className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-warn bg-warn-soft px-2.5 py-0.5 text-xs font-medium">Viewing version {viewingMapVersion} of the company map · read only</span>
-              <Link href={backToLive} className={buttonVariants({ variant: "outline", size: "sm" })}>
-                Back to live
-              </Link>
-            </div>
-          )}
-          <div className="overflow-hidden rounded-lg border" data-company-map>
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-3 py-2" data-map-controls>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} options={OVERVIEW_HORIZONS} />
-                {forecastHref && (
-                  <Link href={forecastHref} data-sandbox-link className={buttonVariants({ variant: "link", size: "sm" })}>
-                    Simulate further in the Sandbox
-                  </Link>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground" data-horizon-note>
-                {horizonResult ? `Playing ${span} of work, with planned hires and leave.` : error ? "Nothing to play until the company can be simulated." : `Simulating ${span}…`}
-              </p>
-            </div>
-            {map.bundle.steps.length ? (
-              <ProcessCanvas
-                refitOn={[...expanded].sort().join("|")}
-                bundle={map.bundle}
-                result={horizonResult}
-                selection={NO_SELECTION}
-                openIssues={openIssueBadges}
-                rating={rating}
-                expanded={expanded}
-                onExpandedChange={setExpanded}
-                playbackRollUp
-                playbackAbove
-                showLanes={false}
-                departmentLanes={departmentLanes}
-                cardTags={cardTags}
-                handoffs
-                height="auto"
-                stepDetail={false}
-                onStepClick={openProcess}
-                computing={horizonModel !== null && horizonSim.status === "running" && horizonSim.run === null}
-              />
+        {capacity && (
+          <OverviewSection id="money" title="Money" question="Are we making enough from our people?">
+            {departmentFigures.rows.length ? (
+              <>
+                <DepartmentAlerts failure={departmentFigures.failure} />
+                <WholeBusinessHero setup={capacity.setup} base={capacity.base} />
+                <DepartmentTiles figures={departmentFigures} base={capacity.base} currency={capacity.setup.currency} />
+              </>
             ) : (
-              <EmptyState>No process has been published yet.</EmptyState>
+              <StartChecklist setup={capacity.setup} base={capacity.base} />
             )}
-          </div>
-        </SectionCard>
+          </OverviewSection>
+        )}
 
-        <div className="grid gap-6 lg:grid-cols-2" data-tier="trends">
-          <div data-chart="issues" className="min-w-0">
-            <SectionCard id="open-issues" section="issues" title="Open issues" description="By rating, and by the process they are in." className="min-w-0">
-              <IssuesDonut byRating={open.byRating} byProcess={issuesByProcess ?? []} />
-            </SectionCard>
-          </div>
-          <div data-chart="time-split" className="min-w-0">
-            <SectionCard
-              id="time-split"
-              section="time-split"
-              title="Time split by process"
-              description={`Of the time work spends in each process over the next ${span}, the share someone is working on it.`}
-              className="min-w-0"
-            >
-              {timeSplit ? <TimeSplitChart rows={timeSplit} months={months} /> : error ? <Unavailable /> : chartLoading()}
-            </SectionCard>
-          </div>
-          <div data-chart="time-achieves" className="min-w-0 lg:col-span-2">
-            <SectionCard
-              id="time-achieves"
-              section="time-achieves"
-              title="What the time achieves"
-              description={`The team's working time over the next ${span}, by what the steps achieve, as a share of the hours available. Hands-on against waiting is above.`}
-              className="min-w-0"
-            >
-              {horizonResult?.monthly ? (
-                <TimeAchieves monthly={horizonResult.monthly} hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek} start={start} categories={purposeCategories} sandboxHref={forecastHref} span={span} />
-              ) : error ? (
-                <Unavailable />
-              ) : (
-                chartLoading()
-              )}
-            </SectionCard>
-          </div>
-          <div data-chart="team-load" className="min-w-0 lg:col-span-2">
-            <SectionCard
-              id="team-load"
-              section="team-load"
-              title="Team load by role"
-              description={`What to do, then how busy each role is month by month over the next ${span}, with planned hires and leave.`}
-              className="min-w-0"
-            >
-              {teamLoad ? (
-                teamLoad.roles.length ? (
-                  <TeamLoad rows={teamLoad.roles} months={teamLoad.months} lines={roleLines} fallbackLine={cutoffs[1]} advice={advice} span={span} sandboxHref={forecastHref} />
+        <OverviewSection id="people" title="People" question="Is anyone stretched, and when do we hire?">
+          <div className="grid gap-6 lg:grid-cols-2" data-tier="people">
+            {capacity && departmentFigures.rows.length > 0 && (
+              <div data-chart="busiest" className="min-w-0">
+                <BusiestPeople people={departmentFigures.people} failed={!!departmentFigures.failure} capacityHref={`${capacity.base}/capacity`} />
+              </div>
+            )}
+  <div data-chart="team-load" className="min-w-0">
+              <SectionCard
+                id="team-load"
+                section="team-load"
+                level={3}
+                title="Team load by role"
+                description={`When to hire, then how busy each role is month by month over the next ${span}, with planned hires and leave.`}
+                className="min-w-0"
+              >
+                {teamLoad ? (
+                  teamLoad.roles.length ? (
+                    <TeamLoad rows={teamLoad.roles} months={teamLoad.months} lines={roleLines} fallbackLine={cutoffs[1]} advice={advice} span={span} sandboxHref={forecastHref} />
+                  ) : (
+                    <EmptyState>No role has any work in this run.</EmptyState>
+                  )
+                ) : error ? (
+                  <Unavailable />
                 ) : (
-                  <EmptyState>No role has any work in this run.</EmptyState>
-                )
-              ) : error ? (
-                <Unavailable />
-              ) : (
-                <Skeleton className="h-[160px] w-full" aria-busy="true" />
-              )}
-            </SectionCard>
+                  <Skeleton className="h-[160px] w-full" aria-busy="true" />
+                )}
+              </SectionCard>
+            </div>
+            {capacity && departmentFigures.rows.length > 0 && (
+              <div data-chart="where-time-goes" className="min-w-0">
+                <WhereTimeGoes rows={departmentFigures.rows} failed={!!departmentFigures.failure} />
+              </div>
+            )}
+  <div data-chart="time-achieves" className="min-w-0">
+              <SectionCard
+                id="time-achieves"
+                section="time-achieves"
+                level={3}
+                title="What the time achieves"
+                description={`Is the team's time going on work clients pay for? Over the next ${span}; change the horizon on the company map.`}
+                className="min-w-0"
+              >
+                {horizonResult?.monthly ? (
+                  <TimeAchieves monthly={horizonResult.monthly} hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek} start={start} categories={purposeCategories} sandboxHref={forecastHref} span={span} />
+                ) : error ? (
+                  <Unavailable />
+                ) : (
+                  chartLoading()
+                )}
+              </SectionCard>
+            </div>
           </div>
-        </div>
+        </OverviewSection>
+
+        <OverviewSection id="processes" title="Processes" question="How does work move, and where does it get stuck?">
+          <SectionCard id="company-map" section="company-map" level={3} title="Company map" description="Every process in the business. Press play to watch the work move; expand a process in place, or click it to open its page.">
+            {viewingMapVersion !== null && (
+              <div data-viewing-map-version className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-warn bg-warn-soft px-2.5 py-0.5 text-xs font-medium">Viewing version {viewingMapVersion} of the company map · read only</span>
+                <Link href={backToLive} className={buttonVariants({ variant: "outline", size: "sm" })}>
+                  Back to live
+                </Link>
+              </div>
+            )}
+            <div className="overflow-hidden rounded-lg border" data-company-map>
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-3 py-2" data-map-controls>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} options={OVERVIEW_HORIZONS} />
+                  {forecastHref && (
+                    <Link href={forecastHref} data-sandbox-link className={buttonVariants({ variant: "link", size: "sm" })}>
+                      Simulate further in the Sandbox
+                    </Link>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground" data-horizon-note>
+                  {horizonResult ? `Playing ${span} of work, with planned hires and leave.` : error ? "Nothing to play until the company can be simulated." : `Simulating ${span}…`}
+                </p>
+              </div>
+              {map.bundle.steps.length ? (
+                <ProcessCanvas
+                  refitOn={[...expanded].sort().join("|")}
+                  bundle={map.bundle}
+                  result={horizonResult}
+                  selection={NO_SELECTION}
+                  rating={rating}
+                  expanded={expanded}
+                  onExpandedChange={setExpanded}
+                  playbackRollUp
+                  playbackAbove
+                  showLanes={false}
+                  departmentLanes={departmentLanes}
+                  cardTags={cardTags}
+                  handoffs
+                  height="auto"
+                  stepDetail={false}
+                  onStepClick={openProcess}
+                  computing={horizonModel !== null && horizonSim.status === "running" && horizonSim.run === null}
+                />
+              ) : (
+                <EmptyState>No process has been published yet.</EmptyState>
+              )}
+            </div>
+          </SectionCard>
+          <div className="grid gap-6 lg:grid-cols-2" data-tier="trends">
+  <div data-chart="issues" className="min-w-0">
+              <SectionCard id="open-issues" section="issues" title="Open issues" level={3} description="How many are open, how bad, and where." className="min-w-0">
+                <OpenIssuesSummary byRating={open.byRating} byProcess={issuesByProcess ?? []} />
+              </SectionCard>
+            </div>
+  <div data-chart="time-split" className="min-w-0">
+              <SectionCard
+                id="time-split"
+                section="time-split"
+                level={3}
+                title="Time split by process"
+                description={`Of the time work spends in each process over the next ${span}, the share someone is working on it.`}
+                className="min-w-0"
+              >
+                {timeSplit ? <TimeSplitChart rows={timeSplit} months={months} /> : error ? <Unavailable /> : chartLoading()}
+              </SectionCard>
+            </div>
+          </div>
+        </OverviewSection>
       </div>
     </div>
   );

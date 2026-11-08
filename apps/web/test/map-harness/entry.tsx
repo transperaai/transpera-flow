@@ -14,7 +14,7 @@ import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { addStep, deleteSelection } from "@/lib/editor/commands";
 import type { ViewHint } from "@/lib/editor/groups";
 import { kindForCategory } from "@transpera-flow/db";
-import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
+import type { LibraryProcess } from "@/lib/editor/library";
 import type { LibraryCreate, LibraryCreateInput } from "@/lib/editor/library-create";
 import { ProcessEditor } from "@/lib/editor/editor";
 import { StepBaseValues } from "@/components/step-base-values";
@@ -35,7 +35,7 @@ export interface HarnessOptions {
   palette?: boolean;
   /** A read-only map in a flex column as wide as the page, as the Overview's card holds it (the default is a plain 1300px block). */
   card?: boolean;
-  /** An ordinary process's editor with the process library (B12 part 2): Northbeam's other processes, one on the company map, templates, and a stand-in "New process". */
+  /** An ordinary process's editor with the process library (B12 part 2): Northbeam's other processes, one on the company map, and a stand-in "New process". */
   library?: boolean;
   /** The first run is still computing (issue #44): the map carries the "Running the first simulation" chip. */
   computing?: boolean;
@@ -51,6 +51,8 @@ export interface HarnessOptions {
   lanes?: boolean;
   /** The step's base values, read only, in its detail, as the process page shows them to a Viewer. */
   baseValues?: boolean;
+  /** Every connection's middle moved by this much, as if dragged and saved (`center_dx`, `center_dy`). */
+  bend?: { dx: number; dy: number };
 }
 
 declare global {
@@ -63,8 +65,11 @@ declare global {
       addStep: () => void;
       /** Delete cards by name (all of them with no names), as the Editor's Delete key does. */
       removeCards: (names?: string[]) => void;
-      /** The editor's connections, by the names of the cards they join, with their labels and shares. */
-      getEdges: () => { from: string; to: string; label: string | null; probability: number }[];
+      /** The editor's connections, by the names of the cards they join, with their labels, shares and moved middles. */
+      getEdges: () => { id: string; from: string; to: string; label: string | null; probability: number; center: [number | null, number | null] }[];
+      /** The editor's Undo, and what it would undo. */
+      undo: () => boolean;
+      undoLabel: () => string | null;
       getSteps: () => string[];
       /** What the stand-in "New process" was asked to make. */
       created: () => unknown[];
@@ -100,7 +105,7 @@ function companyBundle(): ProcessBundle {
 const created: unknown[] = [];
 
 /** The library an ordinary editor is handed (B12 part 2): the other processes sit nowhere, one more sits on the company map. */
-function libraryOf(bundle: ProcessBundle): { processes: LibraryProcess[]; templates: LibraryTemplate[]; onCreate: LibraryCreate } {
+function libraryOf(bundle: ProcessBundle): { processes: LibraryProcess[]; onCreate: LibraryCreate } {
   const others = (bundle.otherProcesses ?? []).map<LibraryProcess>((p) => ({ id: p.process.id, name: p.process.name, kind: p.process.kind, category: p.process.category, live: true, holder: null }));
   return {
     processes: [
@@ -108,10 +113,6 @@ function libraryOf(bundle: ProcessBundle): { processes: LibraryProcess[]; templa
       ...others,
       { id: "f0000000-0000-4000-8000-000000000001", name: "Renewals", kind: "servicing", category: "routine_client_work", live: true, holder: null },
       { id: "f0000000-0000-4000-8000-000000000002", name: "Referrals", kind: "pipeline", category: "sales", live: true, holder: { id: "cccc0000-0000-4000-8000-00000000c0c0", name: "Company map", company: true } },
-    ],
-    templates: [
-      { id: "agency-delivery", name: "Agency delivery", kind: "servicing", category: "routine_client_work", description: "A template." },
-      { id: "client-onboarding", name: "Client onboarding", kind: "servicing", category: "onboarding", description: "A template." },
     ],
     onCreate: async (input: LibraryCreateInput) => {
       created.push(input);
@@ -133,11 +134,12 @@ function Harness({ options }: { options: HarnessOptions }) {
       const person = bundle.people[0]!;
       bundle = { ...bundle, viewer: { seesEveryone: false, ownPersonId: null }, steps: bundle.steps.map((st) => (st.id === northbeamStepIds.audit ? { ...st, person_id: person.id } : st)) };
     }
+    if (options.bend) bundle = { ...bundle, edges: bundle.edges.map((e) => ({ ...e, center_dx: options.bend!.dx, center_dy: options.bend!.dy })) };
     if (!options.empty) return bundle;
     const ends = bundle.steps.filter((s) => s.kind === "start" || s.kind === "end");
     const kept = new Set(ends.map((s) => s.id));
     return { ...bundle, steps: ends, edges: bundle.edges.filter((e) => kept.has(e.from_step_id) && kept.has(e.to_step_id)) };
-  }, [options.nested, options.company, options.empty, options.member]);
+  }, [options.nested, options.company, options.empty, options.member, options.bend]);
   // The run's own bottleneck is a step of another process (the model holds all of Northbeam's), so none of this map's tiles
   // would carry the flag; name the Audit step as the bottleneck to see the flag on a tile.
   const result = useMemo(() => (options.run ? { ...simulate(toEngineModel(base), 30, 1), bnStep: northbeamStepIds.audit } : undefined), [base, options.run]);
@@ -173,8 +175,17 @@ function Harness({ options }: { options: HarnessOptions }) {
       getEdges: () => {
         const b = editor?.getState().bundle ?? base;
         const name = (id: string) => b.steps.find((s) => s.id === id)?.name ?? id;
-        return b.edges.map((e) => ({ from: name(e.from_step_id), to: name(e.to_step_id), label: e.label, probability: Number(e.probability) }));
+        return b.edges.map((e) => ({
+          id: e.id,
+          from: name(e.from_step_id),
+          to: name(e.to_step_id),
+          label: e.label,
+          probability: Number(e.probability),
+          center: [e.center_dx ?? null, e.center_dy ?? null] as [number | null, number | null],
+        }));
       },
+      undo: () => editor?.undo() ?? false,
+      undoLabel: () => editor?.getState().undoLabel ?? null,
       getSteps: () => (editor?.getState().bundle ?? base).steps.map((s) => s.name),
       created: () => [...created],
     };

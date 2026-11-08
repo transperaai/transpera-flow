@@ -9,14 +9,13 @@
 // mode (issue #114: a copy of live, edited in memory and saved as a solution of its own; the process's live version and its
 // single draft are never touched, D18).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { retiredSteps, isUnpublished, workspacePurposes, applyStepChangeEdit, type BlockBundle, type BlockRow, type ProcessBundle, type PurposeCategory, type ScenarioRow, type StoredStepChange } from "@transpera-flow/db";
-import { changesOnStepsOf } from "@/lib/solutions/step-changes";
+import { retiredSteps, isUnpublished, workspacePurposes, type BlockBundle, type BlockRow, type ProcessBundle, type PurposeCategory, type ScenarioRow, type StoredStepChange } from "@transpera-flow/db";
 import { createSolution } from "@/app/w/[slug]/solution-actions";
 import { addPurpose } from "@/app/w/[slug]/settings/actions";
 import { createLibraryProcess } from "@/app/w/[slug]/library-actions";
-import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
+import type { LibraryProcess } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
 import { blockFromSteps, bundleFromBlock, turnIntoSteps, turnIntoStepsProblem } from "@/lib/blocks/blocks";
 import { firstProblem, nodeProblems, problemsLine, publishBlocker } from "@/lib/editor/problems";
@@ -32,14 +31,10 @@ import type { Table } from "@/lib/editor/ops";
 import { MODE_INFO, NO_ISSUE_REFUSAL, editorHorizonWeeks, type EditorMode } from "@/lib/editor/modes";
 import { connect, connectScratch } from "@/lib/drafts/connect";
 import { newlyBroken } from "@/lib/scenarios/broken";
-import { useSimulation } from "@/lib/sim/use-simulation";
-import type { EngineModel } from "@transpera-flow/engine";
-import { currentArea, verdictArea, type SolutionIssue } from "@/lib/solutions/area";
+import { currentArea, type SolutionIssue } from "@/lib/solutions/area";
 import { changedStepIds, solutionCopy } from "@/lib/solutions/bundle";
 import { addDemoSolution } from "@/lib/solutions/demo";
 import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/save";
-import type { TargetVerdict } from "@/lib/solutions/verdict";
-import { verdictInWorker } from "@/lib/solutions/verdict-client";
 import { Button } from "@/components/ui/button";
 import { PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
@@ -52,8 +47,6 @@ import { Inspector } from "./inspector";
 import { Palette } from "./palette";
 import { useEditorTour } from "./editor-tour";
 import type { TierSetup } from "@/lib/tier-setup";
-import type { ChangesOnSteps } from "@/components/step-base-values";
-import { SimulateFooter, type SimulatedPair } from "./simulate-footer";
 import { useBlockTools } from "./use-blocks";
 import { useEditCommands } from "./use-edit-commands";
 
@@ -84,15 +77,15 @@ export function EditorView({
   historyHref,
   library,
   tierSetup,
-  changesOnSteps: changesFromServer,
+  stepChanges: storedStepChanges,
   laneInput,
 }: {
   /** The departments, tier services and servicing links the company map's lanes come from (Q4). Absent: no lanes. */
   laneInput?: DepartmentLaneInput;
   /** The workspace's tiers and their deliverables, for the step base values (capacity P4). */
   tierSetup?: TierSetup;
-  /** The workspace's stored changes, for the list on a step (capacity P7). */
-  changesOnSteps?: ChangesOnSteps;
+  /** The automations and augmentations already stored on the solution being edited (D53). The Editor no longer edits them (editor brainstorm, item 11); they are kept and saved with the solution as they are. */
+  stepChanges?: readonly StoredStepChange[];
   live: ProcessBundle;
   draft: ProcessBundle | null;
   /** How edits are saved: to the database as the signed-in user, or in memory on the demo. Viewers can't open the Editor. */
@@ -128,8 +121,8 @@ export function EditorView({
   editBlock?: { id: string; name: string; description: string; bundle: BlockBundle };
   /** Solution mode opened from a solution's page ("Open in editor", `?solution=<id>`): the map starts as that solution's copy, not as live. */
   solutionSeed?: { bundle: ProcessBundle; name: string };
-  /** The process library (B12): the workspace's processes, where each sits (live links), and the templates. */
-  library?: { processes: LibraryProcess[]; templates: LibraryTemplate[]; /** Makes a process for the library; default in a workspace is the server action (a harness stands in). */ onCreate?: LibraryCreate };
+  /** The process library (B12): the workspace's processes, and where each sits (live links). */
+  library?: { processes: LibraryProcess[]; /** Makes a process for the library; default in a workspace is the server action (a harness stands in). */ onCreate?: LibraryCreate };
 }) {
   const router = useRouter();
   // The company map (B11): the processes of the business as cards, moved and joined by handoff lines. It is not run from here (the Sandbox runs the company from it), so no Simulate or problems.
@@ -140,9 +133,8 @@ export function EditorView({
   const workspaceId = initialLive.workspace.id;
   const onCreate = useCallback<LibraryCreate>((input) => createLibraryProcess(workspaceId, input), [workspaceId]);
   const libraryProps = useMemo(() => (library ? { ...library, ...(library.onCreate ? {} : mode === "live" ? { onCreate } : {}) } : undefined), [library, mode, onCreate]);
-  // The solution's automations and augmentations (D53), kept here like every other edit on this screen and saved with the solution by Save solution.
-  // Seeded from the solution this editor was opened on; empty for a new one. (The Editor's undo carries map edits only, so these have none.)
-  const [stepChanges, setStepChanges] = useState<StoredStepChange[]>(() => (changesFromServer?.changes ?? []).map((c) => c.value));
+  // The solution's stored automations and augmentations (D53), carried unchanged into Save solution so a copy keeps them.
+  const stepChanges = storedStepChanges ?? [];
   const solutionMode = editorMode === "solution";
   // Block and solution modes edit a map of their own, in memory: never the process's live version or its draft. A block
   // starts empty; a solution starts as a copy of live.
@@ -159,22 +151,6 @@ export function EditorView({
   const marksChanges = hasDraft || solutionMode;
   const live = fromSolution ? initialLive : drafts.live;
   const working = state.bundle;
-  const changesOnSteps = useMemo<ChangesOnSteps | undefined>(() => {
-    if (!solutionMode) return changesFromServer;
-    const ids = new Set(working.steps.map((s) => s.id));
-    return {
-      changes: changesOnStepsOf("local", stepChanges),
-      edit: {
-        stepIds: [...ids],
-        apply: (e) => {
-          const r = applyStepChangeEdit("local", stepChanges, e, ids, () => crypto.randomUUID());
-          if (!r.ok) return r.message;
-          setStepChanges(r.list);
-          return null;
-        },
-      },
-    };
-  }, [solutionMode, changesFromServer, stepChanges, working.steps]);
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   // The written tour: opens the first time this user opens the Editor, and again from "Take the tour".
   const tour = useEditorTour({ userId, company, dismissed: tourDismissed });
@@ -208,10 +184,11 @@ export function EditorView({
   // A branch of a decision, picked on its line or its row or its "Go back to" node, is the decision in the panel with that branch's fields in
   // focus (the keys and the map keep the line selected, so Delete takes the line, not the decision).
   const { inspected, branchFocus } = useMemo(() => {
-    const only = !company && selected.steps.length === 0 && selected.edges.length === 1 ? working.edges.find((e) => e.id === selected.edges[0]) : undefined;
+    // On the company map too: a decision there has branches (QA round 2, item 7).
+    const only = selected.steps.length === 0 && selected.edges.length === 1 ? working.edges.find((e) => e.id === selected.edges[0]) : undefined;
     const from = only && working.steps.find((s) => s.id === only.from_step_id);
     return from?.kind === "decision" ? { inspected: { steps: [from.id], edges: [] as string[] }, branchFocus: only!.id } : { inspected: selected, branchFocus: null };
-  }, [company, selected, working.edges, working.steps]);
+  }, [selected, working.edges, working.steps]);
   // A branch just added is put in focus even though the line isn't selected.
   const pickKey = `${selection.steps.join(",")}|${selection.edges.join(",")}`;
   const [freshBranch, setFreshBranch] = useState<{ key: string; id: string } | null>(null);
@@ -283,7 +260,10 @@ export function EditorView({
     [working, partOf, turnNote, editor],
   );
 
-  const { commands, inspectFocus, clearInspectFocus } = useEditCommands({ editor, bundle: working, selected, setSelection });
+  // "Open process page" on a node that links to a process (QA round 2, item 7). The demo has no process pages to open.
+  const slug = initialLive.workspace.slug;
+  const openProcess = useCallback((processId: string) => router.push(`/w/${slug}/p/${processId}`), [router, slug]);
+  const { commands, inspectFocus, clearInspectFocus } = useEditCommands({ editor, bundle: working, selected, setSelection, ...(mode === "live" ? { openProcess } : {}) });
   // Where the map is looking, for the palette (new steps appear there).
   const viewRef = useRef<(() => ViewHint | null) | null>(null);
   const blockTools = useBlockTools({
@@ -328,7 +308,6 @@ export function EditorView({
   const [refusedWithout, setRefusedWithout] = useState(false);
   const added = useMemo(() => [...diff.steps.values()].filter((c) => c.kind === "added").map((c) => c.id), [diff]);
   const outlined = useMemo(() => (solutionMode && issue ? currentArea(issue, working.steps, added) : null), [solutionMode, issue, working.steps, added]);
-  const area = useMemo(() => (issue ? verdictArea(working.steps, issue, added) : []), [issue, working.steps, added]);
   const saveSolution = async () => {
     setSolutionError(null);
     setRefusedWithout(false);
@@ -342,19 +321,8 @@ export function EditorView({
     await editor.settled();
     const now = session.editor.getState().bundle;
     const changes = diffBundles(live, now);
-    if (!changes.list.length && !stepChanges.length) return setSolutionError("Change at least one step or add an automation first. A solution with no changes has nothing to test.");
+    if (!changes.list.length && !stepChanges.length) return setSolutionError("Change at least one step first. A solution with no changes has nothing to test.");
     setSolutionSaving(true);
-    // The automatic verdict. In a workspace the server works it out again from the stored copy and ignores what is sent; the demo has no
-    // server, so it keeps the one worked out here, in a worker.
-    let auto: TargetVerdict | null = null;
-    if (issue && mode === "demo" && workingModel.model) {
-      const addedIds = changedStepIds(changes).filter((id) => changes.steps.get(id)?.kind === "added");
-      try {
-        auto = await verdictInWorker({ target: issue.target, model: workingModel.model, area: verdictArea(now.steps, issue, addedIds) }).promise;
-      } catch {
-        auto = null;
-      }
-    }
     const input = {
       name: solutionName,
       processId: live.process.id,
@@ -363,8 +331,9 @@ export function EditorView({
       changedStepIds: changedStepIds(changes),
       levers: [],
       // Only the effects on the saved copy's steps are kept, and the server checks them again.
-      stepChanges,
-      links: issue ? [{ issueId: issue.id, autoVerdict: auto && auto.status !== "unchecked" ? auto.status : null, holdsPct: auto?.holdsPct ?? null, autoNote: auto?.note ?? "" }] : [],
+      stepChanges: [...stepChanges],
+      // No automatic verdict (QA round 2): the person gives their own on the issue.
+      links: issue ? [{ issueId: issue.id, autoVerdict: null, holdsPct: null, autoNote: "" }] : [],
     };
     const checked = parseSolutionInput(input);
     let result: SaveSolutionResult;
@@ -387,47 +356,6 @@ export function EditorView({
     [editor, session],
   );
 
-  // ▶ Simulate: both versions run 30 times, on the models as they were when it was pressed.
-  const [pressed, setAsked] = useState<{
-    draft: EngineModel;
-    live: EngineModel | null;
-    draftKey: string;
-    liveKey: string | null;
-    liveId: string;
-    draftId: string | null;
-  } | null>(null);
-  const workingKey = useMemo(() => (workingModel.model ? JSON.stringify(workingModel.model) : null), [workingModel.model]);
-  const liveKey = useMemo(() => (liveModel.model ? JSON.stringify(liveModel.model) : null), [liveModel.model]);
-  // The comparison is dropped when a publish made a new live version, or the draft it described was discarded.
-  const asked = pressed && pressed.liveId === live.revision.id && !(pressed.draftId !== null && drafts.draft === null) ? pressed : null;
-  const draftSim = useSimulation(asked?.draft ?? null);
-  const liveSim = useSimulation(asked?.live ?? null);
-  const simulating = !!asked && (draftSim.status === "running" || (!!asked.live && liveSim.status === "running"));
-  const failed = draftSim.status === "error" ? draftSim.error : liveSim.status === "error" && asked?.live ? liveSim.error : null;
-  const pair: SimulatedPair | null = asked
-    ? {
-        draft: { model: asked.draft, result: draftSim.status === "done" ? draftSim.run.result : null },
-        live: asked.live ? { model: asked.live, result: liveSim.status === "done" ? liveSim.run.result : null } : null,
-      }
-    : null;
-  // Stale: the draft, or the live model, is no longer what was simulated.
-  const stale = !!asked && (asked.draftKey !== workingKey || asked.liveKey !== liveKey);
-
-  // Solution mode: the automatic verdict for the run on screen, against the issue's target.
-  const draftResult = draftSim.status === "done" ? draftSim.run.result : null;
-  const liveResult = liveSim.status === "done" ? liveSim.run.result : null;
-  const [verdictState, setVerdictState] = useState<{ key: string; result: TargetVerdict } | null>(null);
-  const verdictKey = solutionMode && issue && !stale && asked && draftResult && asked.live && liveResult ? `${asked.draftKey}|${area.join(",")}` : null;
-  useEffect(() => {
-    if (!verdictKey || !issue || !asked) return;
-    const job = verdictInWorker({ target: issue.target, model: asked.draft, area });
-    job.promise.then((result) => setVerdictState({ key: verdictKey, result })).catch(() => undefined);
-    return () => job.cancel();
-    // `asked` and `area` are what verdictKey is made of.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [verdictKey]);
-  const verdict = issue && verdictKey && verdictState?.key === verdictKey ? { issue, result: verdictState.result } : null;
-
   const breaks = useMemo(
     () =>
       hasDraft && liveModel.model && workingModel.model
@@ -443,11 +371,6 @@ export function EditorView({
         ? `The draft can't be simulated: ${workingModel.error}.`
         : null;
 
-  const simulate = () => {
-    if (workingModel.model && workingKey) {
-      setAsked({ draft: workingModel.model, live: liveModel.model, draftKey: workingKey, liveKey, liveId: live.revision.id, draftId: drafts.draft?.id ?? null });
-    }
-  };
   const select = (id: string) => setSelection({ steps: [id], edges: [] });
 
   // A mode that isn't built: nothing on this screen may touch the draft.
@@ -492,8 +415,6 @@ export function EditorView({
         onTour={tour.start}
         historyHref={historyHref}
         history={{ undoLabel: state.undoLabel, redoLabel: state.redoLabel, onUndo: () => editor.undo(), onRedo: () => editor.redo() }}
-        simulating={simulating}
-        onSimulate={simulate}
         onReview={select}
         exitHref={exitHref}
         // The demo lives in this tab, so it stays here to be looked at; a workspace goes back to the map, now live.
@@ -522,13 +443,13 @@ export function EditorView({
           <div className="flex min-h-0 flex-1" data-tour="canvas" data-highlight-tone={solutionMode ? "issue" : undefined}>
             <ProcessCanvas
               bundle={working}
-              result={!stale && pair?.draft.result ? pair.draft.result : null}
+              result={null}
               editor={editor}
               editorState={state}
               selection={selected}
               onSelectionChange={setSelection}
-              // The company map's cards can't be copied or split (removing one is Delete or the inspector's Remove from this map), so the card menu has nothing to offer.
-              commands={company ? null : commands}
+              // The same right-click menu on both maps (QA round 2, item 7); a linked card can't be copied, and offers its process's page.
+              commands={commands}
               handoffs={company}
               departmentLanes={departmentLanes}
               cardTags={cardTags}
@@ -538,11 +459,11 @@ export function EditorView({
               savedLabel={scratch ? "Edited" : hasDraft ? "Saved to draft" : "Saved"}
               hideAdd
               problems={problems}
-              branchNodes={!company}
+              branchNodes
               onTurnIntoSteps={turnInto.run}
               viewRef={viewRef}
-              // Nothing to play until Simulate has run.
-              showPlayback={!company && !stale && !!pair?.draft.result}
+              // The Editor edits; it doesn't run the process (brainstorm round 2, item 7), so there is nothing to play.
+              showPlayback={false}
             />
           </div>
         </main>
@@ -562,7 +483,6 @@ export function EditorView({
             blocks={blockTools}
             company={company}
             tierSetup={tierSetup}
-            changesOnSteps={changesOnSteps}
             settingsHref={settingsHref}
             draft={
               marksChanges
@@ -578,18 +498,6 @@ export function EditorView({
         </aside>
       </div>
       {tour.node}
-      {!blockMode && !company && (
-      <SimulateFooter
-        asked={!!asked}
-        pair={pair}
-        failed={failed}
-        stale={stale}
-        currency={working.workspace.settings.currency}
-        liveNumber={live.revision.number}
-        solution={solutionMode}
-        verdict={verdict}
-      />
-      )}
     </div>
   );
 }

@@ -154,26 +154,10 @@ export { RATINGS_WORST_FIRST };
 // Solutions tested (the rows are built in lib/solutions/cards.ts)
 // ---------------------------------------------------------------------------
 
-/**
- * What the list says about the solutions tested for each issue, and the page lists. The rows come from
- * `solutionTests` and `solutionSummaries` in lib/solutions/cards.ts (A50).
- */
-export interface SolutionTest {
-  id: string;
-  name: string;
-  built: string;
-  /** The automatic verdict against this issue's target. */
-  auto: "pass" | "fail" | "unchecked" | null;
-  /** How often it holds across the simulated runs, as a share (0 to 1), or null. */
-  holds: number | null;
-  /** The person's own verdict. */
-  yours: "pass" | "fail" | null;
-  href: string;
-}
-
+/** What the Issues list says about the solutions tested for each issue (`solutionSummaries` in lib/solutions/cards.ts, A50). */
 export interface SolutionSummary {
   tested: number;
-  /** A solution passed (the person's verdict, else the automatic one). */
+  /** A solution passed, by the person's own verdict (QA round 2: no automatic one). */
   passed: boolean;
 }
 

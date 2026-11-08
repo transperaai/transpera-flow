@@ -475,8 +475,9 @@ export function outgoingTotal(bundle: ProcessBundle, stepId: string): number {
 export function addEdge(bundle: ProcessBundle, from: string, to: string): { edit: Edit; id: string } | null {
   if (connectionProblem(bundle, from, to)) return null;
   const { revision } = bundle;
-  // A handoff line on the company map is not a branch: it has no share to divide (a hand-off takes every won client).
-  const handoff = bundle.process.is_company === true;
+  // A handoff line on the company map is not a branch: it has no share to divide (a hand-off takes every won client). A line out of a decision on the
+  // company map is one of its branches, with a share (QA round 2, item 7).
+  const handoff = bundle.process.is_company === true && bundle.steps.find((s) => s.id === from)?.kind !== "decision";
   const edge: EdgeRow = {
     id: newId(),
     revision_id: revision.id,
@@ -503,6 +504,23 @@ export function reconnectEdge(bundle: ProcessBundle, id: string, from: string, t
   if (connectionProblem(bundle, from, to, id)) return null;
   const edit = updateEdge(bundle, id, { from_step_id: from, to_step_id: to });
   return edit && { ...edit, label: `Rerouted to ${stepName(bundle, to)}` };
+}
+
+/**
+ * Move a line's middle segment: `offset` is how far its smooth-step path's centre sits from where it would sit automatically
+ * (halfway between the steps); null, or a move back to no offset, makes it automatic again. Layout only, like moving a step:
+ * rounded to whole units, one edit with one undo, and null when nothing changes.
+ */
+export function bendEdge(bundle: ProcessBundle, id: string, offset: { x: number; y: number } | null): Edit | null {
+  const edge = bundle.edges.find((e) => e.id === id);
+  if (!edge) return null;
+  const dx = offset ? Math.round(offset.x) : 0;
+  const dy = offset ? Math.round(offset.y) : 0;
+  const at = dx || dy ? { center_dx: dx, center_dy: dy } : null;
+  const edit = updateEdge(bundle, id, at ?? { center_dx: null, center_dy: null });
+  if (!edit) return null;
+  const line = `${stepName(bundle, edge.from_step_id)} → ${stepName(bundle, edge.to_step_id)}`;
+  return { ...edit, label: at ? `Moved the line ${line}` : `Reset the line ${line}` };
 }
 
 export function deleteEdges(bundle: ProcessBundle, ids: readonly string[]): Edit | null {

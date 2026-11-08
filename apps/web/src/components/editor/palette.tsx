@@ -3,7 +3,8 @@
 // The Editor's left column (issue #104): the palette ("+ Step", "+ Wait", "+ Decision": adds after the selected step, inside its group
 // if it is in one), grouping, and the block library (issue #116): each saved block with its step count, to insert after the selection
 // or to put in place of the selected step or group. End and Go back are not added from here: they come from a decision's branch menu.
-// There is no "+ Process": processes join only on the company map, whose palette is the process library (editor brainstorm, item 3).
+// Both maps have the same Add section (brainstorm round 2, item 7): + Step, + Wait and + Decision, and on the company map only, + Process, which opens
+// the process library (processes join only on the company map, item 3). Blocks are a process's only.
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { isGroup, type ProcessBundle } from "@transpera-flow/db";
@@ -13,7 +14,7 @@ import type { Selection } from "@/components/process-canvas";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { blockStepCount, readBlock } from "@/lib/blocks/blocks";
 import { ProcessLibrary } from "./process-library";
-import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
+import type { LibraryProcess } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
 import { addAfter, groupProblem, groupSteps, ungroup, type PaletteKind, type ViewRef } from "@/lib/editor/groups";
 import type { BlockTools } from "./use-blocks";
@@ -40,16 +41,18 @@ export function Palette({
   setSelection: Dispatch<SetStateAction<Selection>>;
   /** The block library as the Editor uses it. */
   blocks: BlockTools;
-  /** The company map (B11): cards are processes placed by link from the process library (B12), so there are no steps or blocks to add. */
+  /** The company map (B11): it also places processes, by link from the process library (B12), and has no blocks. */
   company?: boolean;
   /** Where the map is looking (see ProcessCanvas): new steps appear there, so they are not off screen. */
   viewRef?: ViewRef;
-  /** The process library (B12): the workspace's processes and where each sits, templates, and how to make a new process. */
-  library?: { processes?: readonly LibraryProcess[]; templates?: readonly LibraryTemplate[]; onCreate?: LibraryCreate };
+  /** The process library (B12): the workspace's processes and where each sits, and how to make a new process. */
+  library?: { processes?: readonly LibraryProcess[]; onCreate?: LibraryCreate };
 }) {
   const only = selected.steps.length === 1 ? bundle.steps.find((s) => s.id === selected.steps[0]) : undefined;
   // What the last add left for the person to do ("connect the new step yourself").
   const [note, setNote] = useState<string | null>(null);
+  // "+ Process" opens the process library; on the company map it starts open, since placing processes is most of what is done there.
+  const [libraryOpen, setLibraryOpen] = useState(company);
   const add = (kind: PaletteKind) => {
     let id: string | null = null;
     let said: string | null = null;
@@ -82,29 +85,22 @@ export function Palette({
 
   return (
     <>
-      {company && (
-        <section aria-label="The company map" className="flex flex-col gap-2">
-          <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
-            The company map
-            <Help
-              label="The company map"
-              description="Each card is a process, placed here as a link: the process itself is never edited here. Which processes are on the map is what the Sandbox simulates, and joining one pipeline to another sends each won client on into it. Draw a line from one card's right edge to another's left edge, then click the line to give it a label."
-              example="Draw a line from “Sales” to “Onboarding” and label it “Signed contract”."
-            />
-          </h2>
-          <p className="text-xs text-muted-foreground">Drag cards to move them. Draw a handoff line from a card&apos;s right edge to another card, then click the line to label it.</p>
-        </section>
-      )}
-      {company && <ProcessLibrary bundle={bundle} editor={editor} setSelection={setSelection} viewRef={viewRef} {...library} />}
-      {!company && (
-      <section aria-label="Add to the process" className="flex flex-col gap-2">
+      <section aria-label={company ? "Add to the company map" : "Add to the process"} className="flex flex-col gap-2">
         <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
           Add
-          <Help
-            label="Add"
-            description="Adds a new step, wait or decision in the middle of what you are looking at, joined in after the step you have selected. A decision comes with two branches, Yes and No. Nothing selected adds it unconnected. To end the process or loop back, use a decision's branch menu."
-            example="Select “Discovery call”, press + Wait, and a waiting step appears in view, joined in after it."
-          />
+          {company ? (
+            <Help
+              label="Add"
+              description="Adds a step, wait or decision in the middle of what you are looking at, joined in after the card you have selected, or a process from the process library. A decision comes with two branches, Yes and No. Draw a line from one card's right edge to another's left edge to join them."
+              example="Select “Sales”, press + Decision, and send 60% of won clients to “Onboarding” and 40% to “Light touch”."
+            />
+          ) : (
+            <Help
+              label="Add"
+              description="Adds a new step, wait or decision in the middle of what you are looking at, joined in after the step you have selected. A decision comes with two branches, Yes and No. Nothing selected adds it unconnected. To end the process or loop back, use a decision's branch menu."
+              example="Select “Discovery call”, press + Wait, and a waiting step appears in view, joined in after it."
+            />
+          )}
         </h2>
         <div className="grid grid-cols-3 gap-1.5">
           {PALETTE.map(({ kind, label }) => (
@@ -112,6 +108,11 @@ export function Palette({
               {label}
             </Button>
           ))}
+          {company && (
+            <Button type="button" variant="outline" size="sm" onClick={() => setLibraryOpen((o) => !o)} aria-expanded={libraryOpen} data-palette-process className="col-span-3 border-dashed hover:border-edit">
+              + Process
+            </Button>
+          )}
         </div>
         <p className="text-xs text-muted-foreground">
           {only
@@ -126,7 +127,7 @@ export function Palette({
           </p>
         )}
       </section>
-      )}
+      {company && libraryOpen && <ProcessLibrary bundle={bundle} editor={editor} setSelection={setSelection} viewRef={viewRef} {...library} />}
 
       <section aria-label="Groups" className="flex flex-col gap-2">
         <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">

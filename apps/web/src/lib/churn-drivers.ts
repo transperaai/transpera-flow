@@ -33,7 +33,7 @@ export const DRIVER_HELP: Record<BuiltinChurnDriverId, HelpCopy> = {
   resp: { description: "How long clients wait for a reply when they ask for something.", example: "Clients wait 20 hours for an answer." },
   onb: { description: "How long a new client waits for their first piece of work.", example: "19 days from signing to the first delivery." },
   rework: { description: "Work you had to fix after the client saw it.", example: "1 in 10 reports needs fixing after it's sent." },
-  load: { description: "The team looking after the client is too busy to give them proper attention.", example: "The strategist is busy 92% of the time, above the 85% line." },
+  load: { description: "The team looking after the client is too busy to give them proper attention.", example: "The strategist is busy 92% of the time, above the 85% utilisation threshold." },
   handoff: { description: "A client gets a new account manager.", example: "About 1 in 3 clients changes account manager each year." },
   results: { description: "Whether clients are happy with their results. You enter this.", example: "Clients rate their results 7 out of 10." },
   tenure: { description: "New clients leave more easily than long-standing ones.", example: "In their first 6 months, clients are 1.6 times as likely to leave." },

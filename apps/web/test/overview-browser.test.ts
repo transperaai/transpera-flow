@@ -149,8 +149,9 @@ describe("the Overview's company map", () => {
     await page.waitForFunction(() => [...document.querySelectorAll<HTMLElement>(".playback-badge")].some((b) => b.style.display !== "none" && b.textContent), null, { timeout: 30_000 });
     await stop.click();
     await expect.poll(() => page.getByRole("button", { name: "Play", exact: true }).count()).toBe(1);
-    expect(Number(await page.locator('input[type="range"]').inputValue())).toBe(0);
-    expect(await page.locator(".playback-badge:visible").count()).toBe(0);
+    // The map resets on the next frames after Stop; on a slow machine the badges take a moment to clear.
+    await expect.poll(async () => Number(await page.locator('input[type="range"]').inputValue())).toBe(0);
+    await expect.poll(() => page.locator(".playback-badge:visible").count()).toBe(0);
     expect(await stop.isDisabled()).toBe(true);
     expect(errors).toEqual([]);
     await page.close();

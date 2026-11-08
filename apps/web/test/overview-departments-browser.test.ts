@@ -4,14 +4,15 @@ import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { capacitySetupFromModel, dler, perEmployee, serviceLines } from "@transpera-flow/db";
+import { capacitySetupFromModel, dler, DLER_GOAL, perEmployee, serviceLines } from "@transpera-flow/db";
 import { capacityModel } from "@transpera-flow/engine";
 import { bundleHarness } from "./build-harness";
 
-// The Overview's department cards in a real browser, with the Today simulation in a real Web Worker (./overview-departments-harness/entry.tsx),
+// The Overview's department figures in a real browser, with the Today simulation in a real Web Worker (./overview-departments-harness/entry.tsx),
 // on the engine fixture `capacityModel()` and the Set up data that agrees with it (made-up data; the example workspace is the same agency):
-// a card per department with its figures, busiest people and time by purpose, the whole business row, the empty state (no tiers), missing
-// salaries, the pay-hidden view, a phone, and that opening the cards again does not run the simulation again.
+// the whole business as hero numbers (WB1), the departments side by side as status tiles (DS1), the busiest people (BP1) and where the
+// time goes (WT1), the empty state (no tiers), missing salaries, the pay-hidden view, a phone, and that opening them again does not run the
+// simulation again.
 //
 // With OVERVIEW_SHOTS=<dir> it also saves the screenshots (light and dark, 1440 and 400 px) there.
 
@@ -72,7 +73,7 @@ const PERFORMANCE = "Performance";
 
 describe("Overview department cards", { timeout: 180_000 }, () => {
   for (const width of [1440, 400]) {
-    it(`shows a card per department and the whole business (${width}px)`, async () => {
+    it(`shows the whole business, the departments side by side, the busiest people and where the time goes (${width}px)`, async () => {
       const { page, errors } = await mount({}, width);
       await done(page);
       expect(await page.locator("[data-department]").count()).toBe(2);
@@ -83,53 +84,81 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
         const c = card(page, name);
         const labels = await c.locator("[data-kpi] > div:first-child").allInnerTexts();
         // D39: no "Clients per employee" (clients aren't spread evenly across employees).
-        expect(labels).toEqual(["Clients", "Revenue per employee", "DLER", "Past their busy line", "Room for more clients"]);
-        expect(await kpi(page, name, "Revenue per employee")).toContain(`retainers ÷ ${per.employees} people`);
+        expect(labels).toEqual(["Clients", `MRR ÷ ${per.employees} people`, "DLER", "Over their utilisation threshold", "Room for more clients"]);
+        // DLER against its goal, coloured by the Capacity page's rule.
         const d = await kpi(page, name, "DLER");
         expect(d).toContain(row.ratio!.toFixed(1));
-        expect(d).toContain(`Average of ${row.people} people's DLER`);
-        expect(d).not.toMatch(/[£÷]/);
-        expect(d).not.toMatch(/goal/);
+        expect(d).toContain(row.ratio! >= DLER_GOAL ? "At or above the 4.5 goal" : "Below the 4.5 goal");
         expect(d).not.toContain(":1");
+        expect(await c.locator("[data-kpi]").filter({ hasText: "DLER" }).first().getAttribute("data-tone")).toBe(row.ratio! >= DLER_GOAL ? "good" : "warn");
         const room = await kpi(page, name, "Room for more clients");
         expect(room).toMatch(/Plenty of room|Some room|Tight|Full/);
-        expect(room).toMatch(/Limited by .+/);
-        expect(room).toContain("A rough guide from the simulation, not a promise");
-        // The count, and what the line is; no names (the busy list names them).
-        const past = await kpi(page, name, "Past their busy line");
-        expect(past).toMatch(/\d/);
-        expect(past).toMatch(/Busy above \d+(–\d+% \(each role's line\)|%)/);
-        expect(await c.locator("[data-capacity-link]").getAttribute("href")).toBe("/w/example/capacity");
-        // Busiest people: everyone in the department, busiest first, each with a busy bar against the line; where the time goes: purposes with hours and share.
-        const people = await c.locator("[data-busiest] tr").count();
-        expect(people).toBeGreaterThan(0);
-        expect(await c.locator("[data-busiest] [data-busy]").count()).toBe(people);
-        const busy = (await c.locator("[data-busiest] [data-busy]").evaluateAll((els) => els.map((e) => Number(e.getAttribute("data-busy")))));
-        expect(busy).toEqual([...busy].sort((a, b) => b - a));
-        expect(await c.locator("[data-busiest]").evaluate((e) => getComputedStyle(e).overflowY)).toBe("visible");
-        // By process is the default (Q1 item 16): the process names; By purpose groups the same hours by what the steps achieve.
-        expect(await c.locator("[data-time-by] [aria-pressed=true]").innerText()).toBe("By process");
-        const byProcess = await c.locator("[data-time] [data-purpose]").evaluateAll((rows) => rows.map((r) => [r.getAttribute("data-purpose"), r.textContent]));
-        expect(byProcess.length).toBeGreaterThan(0);
-        const total = await c.locator("[data-time] h3").innerText();
-        await c.getByRole("button", { name: "By purpose" }).click();
-        expect(await c.locator("[data-time-by] [aria-pressed=true]").innerText()).toBe("By purpose");
-        const byPurpose = await c.locator("[data-time] [data-purpose]").evaluateAll((rows) => rows.map((r) => r.getAttribute("data-purpose")));
-        expect(byPurpose.length).toBeGreaterThan(0);
-        expect(byPurpose).not.toEqual(byProcess.map((r) => r[0]));
-        // The same hours either way.
-        expect(await c.locator("[data-time] h3").innerText()).toBe(total);
-        await c.getByRole("button", { name: "By process" }).click();
-        expect(await c.locator("[data-time]").innerText()).toMatch(/h a month/);
+        expect(room).toMatch(/fills first: .+/);
+        // "1 of 7", and what the threshold is.
+        const past = await kpi(page, name, "Over their utilisation threshold");
+        expect(past).toMatch(/\d+ of \d+/);
+        expect(past).toMatch(/Busy above \d+(–\d+% \(each role's utilisation threshold\)|%)/);
       }
-      // The whole business comes first, above the department cards: unique clients, revenue per employee, DLER.
+      const tiles = page.locator("[data-section=departments]");
+      expect(await tiles.locator("[data-capacity-link]").getAttribute("href")).toBe("/w/example/capacity");
+      await tiles.locator("[data-how] summary").click();
+      expect(await tiles.locator("[data-how]").innerText()).toContain("a rough guide from the simulation, not a promise");
+
+      // Busiest people: only those over or within 10 points of their own threshold, busiest first; everyone else folded away.
+      const close = await page.locator("[data-busiest-close] [role=img]").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? ""));
+      for (const label of close) {
+        const [, busy, line] = /(\d+)% busy against a utilisation threshold of (\d+)%/.exec(label)!;
+        expect(Number(busy)).toBeGreaterThanOrEqual(Number(line) - 10);
+      }
+      const order = await page.locator("[data-busiest-close] [data-busy]").evaluateAll((els) => els.map((e) => Number(e.getAttribute("data-busy"))));
+      expect(order).toEqual([...order].sort((a, b) => b - a));
+      const rest = page.locator("[data-busiest-rest]");
+      const restCount = await rest.count();
+      if (restCount) {
+        expect(await rest.locator("summary").innerText()).toMatch(/^\d+ (others|people|person) more than 10 points under their utilisation threshold$/);
+        expect(await rest.locator("[data-person]").first().isVisible()).toBe(false);
+        await rest.locator("summary").click();
+        expect(await rest.locator("[data-person]").first().isVisible()).toBe(true);
+      }
+      expect(close.length + (restCount ? await rest.locator("[data-person]").count() : 0)).toBeGreaterThan(0);
+      expect(await page.locator("#busiest-people").innerText()).toMatch(/of their utilisation threshold\.|Nobody is over or within 10 points/);
+
+      // Where the time goes: a bar per department in the same colours, by process by default (Q1 item 16), by purpose on the toggle.
+      const time = page.locator("[data-section=where-time-goes]");
+      expect(await time.locator("[data-time-by] [aria-pressed=true]").innerText()).toBe("By process");
+      expect(await time.locator("[data-department-time]").count()).toBe(2);
+      const parts = () => time.locator("[data-part]").evaluateAll((els) => els.map((e) => [e.getAttribute("data-part"), (e as HTMLElement).style.background, e.getAttribute("title")] as const));
+      const byProcess = await parts();
+      expect(byProcess.length).toBeGreaterThan(0);
+      for (const [, , title] of byProcess) expect(title).toMatch(/: \d[\d,]* h a month \(\d+%\)$/);
+      // A name has one colour in every bar.
+      const colourOf = new Map<string, string>();
+      for (const [n, bg] of byProcess) {
+        if (colourOf.has(n!)) expect(colourOf.get(n!)).toBe(bg);
+        colourOf.set(n!, bg);
+      }
+      const totals = await time.locator("[data-time-total]").allInnerTexts();
+      await time.getByRole("button", { name: "By purpose" }).click();
+      expect(await time.locator("[data-time-by] [aria-pressed=true]").innerText()).toBe("By purpose");
+      const byPurpose = await parts();
+      expect(byPurpose.length).toBeGreaterThan(0);
+      expect(byPurpose.map((p) => p[0])).not.toEqual(byProcess.map((p) => p[0]));
+      // The same hours either way.
+      expect(await time.locator("[data-time-total]").allInnerTexts()).toEqual(totals);
+      await time.getByRole("button", { name: "By process" }).click();
+
+      // The whole business comes first, above the departments: unique clients, MRR ÷ N people, DLER against its goal.
       expect(await page.evaluate(() => { const w = document.querySelector("[data-whole-business]")!; const d = document.querySelector("[data-department]")!; return !!(w.compareDocumentPosition(d) & Node.DOCUMENT_POSITION_FOLLOWING); })).toBe(true);
       const lines = serviceLines(setup);
       const whole = await page.locator("[data-whole-business]").innerText();
       expect(whole).toContain(`${lines.unique}`);
       expect(whole).toContain(`${lines.both} taking both`);
-      expect(whole).toContain("Revenue per employee");
+      expect(whole).toMatch(/MRR ÷ \d+ people/);
+      expect(whole).toMatch(/from .+ MRR/);
       expect(whole).toContain(dler(setup).whole.ratio!.toFixed(1));
+      expect(await page.locator("[data-whole-business] [data-dler-scale]").getAttribute("aria-label")).toBe(`DLER ${dler(setup).whole.ratio!.toFixed(1)} against a goal of 4.5`);
+      // Only DLER, the figure with a goal, has a status colour.
+      expect(await page.locator("[data-whole-business] [data-kpi-status]").count()).toBe(1);
       // The page never scrolls sideways.
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
       expect(errors).toEqual([]);
@@ -169,10 +198,11 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
       const d = await kpi(page, name, "DLER");
       expect(d).toContain("Salaries not entered");
       expect(d).not.toMatch(/goal/);
+      expect(await card(page, name).locator("[data-kpi]").filter({ hasText: "DLER" }).first().getAttribute("data-tone")).toBe("none");
     }
     expect(await page.locator("[data-whole-business] [data-salaries-missing]").count()).toBe(1);
     expect(await page.locator("[data-salaries-missing] a").first().getAttribute("href")).toBe("/w/example/settings/people");
-    expect(await kpi(page, ORGANIC, "Revenue per employee")).toMatch(/\d/);
+    expect(await kpi(page, ORGANIC, "MRR ÷")).toMatch(/\d/);
     expect(errors).toEqual([]);
     await page.close();
   });
@@ -185,12 +215,12 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
     expect(all).toContain("Pay is hidden for your role");
     expect(all).not.toContain("÷ £");
     // The per-employee ratio is still there.
-    expect(await kpi(page, ORGANIC, "Revenue per employee")).toMatch(/\d/);
+    expect(await kpi(page, ORGANIC, "MRR ÷")).toMatch(/\d/);
     expect(errors).toEqual([]);
     await page.close();
   });
 
-  it("does not run the simulation again when the cards open a second time (the Capacity page's cache)", async () => {
+  it("does not run the simulation again when the figures open a second time (the Capacity page's cache)", async () => {
     const { page, errors } = await mount();
     await done(page);
     const first = await page.evaluate(() => window.workerPosts.length);

@@ -9,7 +9,7 @@ import { Help } from "@/components/help";
 import { Badge } from "@/components/ui/badge";
 import { MapSkeleton } from "@/components/map/map-placeholder";
 import { Skeleton } from "@/components/ui/skeleton";
-import { confirmedBadges, confirmedRatings, registerEntries, stepRatingOf } from "@/lib/issues/register";
+import { confirmedRatings, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import type { ProcessCardData } from "@/lib/processes/data";
 import { shortDate, type CompanyRowData, type ProcessRowData } from "@/lib/processes/rows";
 import { EDIT_ONLY } from "@/lib/phone";
@@ -250,17 +250,11 @@ function MapCard({ row, card, href }: { row: ProcessRowData; card: Card; href: s
 }
 
 function ReadOnlyMap({ data }: { data: ProcessCardData }) {
-  // Only confirmed issues reach the map (they colour a step and count in its badge), as on the process page.
-  const { openIssues, rating } = useMemo(() => {
-    const entries = registerEntries(data.issues, []);
-    return {
-      openIssues: Object.fromEntries(Object.entries(confirmedBadges(entries)).map(([id, b]) => [id, b.count])),
-      rating: stepRatingOf(confirmedRatings(entries)),
-    };
-  }, [data.issues]);
+  // Only confirmed issues reach the map (they colour a step; no badges, QA round 2), as on the process page.
+  const rating = useMemo(() => stepRatingOf(confirmedRatings(registerEntries(data.issues, []))), [data.issues]);
   return (
     <div className="min-w-0 overflow-hidden rounded-token border bg-card">
-      <ProcessCanvas bundle={data.bundle} openIssues={openIssues} rating={rating} showPlayback={false} showLanes={false} height="auto" legend zoomControls />
+      <ProcessCanvas bundle={data.bundle} rating={rating} showPlayback={false} showLanes={false} height="auto" legend zoomControls />
     </div>
   );
 }

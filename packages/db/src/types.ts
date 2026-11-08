@@ -201,6 +201,11 @@ export interface ProcessRow {
    * on every process but the company map.
    */
   map_drives_run?: boolean;
+  /**
+   * Free-text notes on the process (migration 20270202000000), shown with its sources on the process page. On the process, not a version:
+   * not versioned. Absent on fixtures.
+   */
+  notes?: string | null;
 }
 
 export interface ProcessRevisionRow {
@@ -309,6 +314,13 @@ export interface EdgeRow {
   probability: number;
   condition_tag: string | null;
   label: string | null;
+  /**
+   * How far the line's middle segment is moved on the map: the offset, in map units, of its smooth-step path's centre from where it
+   * sits automatically (halfway). Null or absent means automatic. Layout only, like a step's x and y. Optional, so fixtures and older
+   * snapshots still type-check.
+   */
+  center_dx?: number | null;
+  center_dy?: number | null;
 }
 
 /**
@@ -677,11 +689,22 @@ export interface ServiceServicingRow {
   provenance: ProvenanceMap;
 }
 
-/** One hand-off line of the company map the run honours: work won or done in process `from` goes on in process `to` (both process ids). */
+/**
+ * Where the company map's run sends work: when it leaves `from` it goes on at `to`. Each end is a process id (a card) or the id of one of the
+ * map's own steps in `ProcessBundle.companySteps`; `to` may also be `COMPANY_DONE` (the work is done there). Only a decision has more than one
+ * hand-off out, one per branch, with its share `p` (and its condition `tag`); any other has one and no `p`: all the work goes that way.
+ */
 export interface CompanyHandoff {
   from: string;
   to: string;
+  /** A decision branch's share of the work, 0-1. Absent: all of it. */
+  p?: number;
+  /** A decision branch's condition tag (only honoured when there are services, as in a process). */
+  tag?: string;
 }
+
+/** `CompanyHandoff.to` when the work is done: an end on the company map, a step with no line out, a branch that went nowhere the run can follow. */
+export const COMPANY_DONE = "__company_done__";
 
 /** One process at one revision: what a run needs of a process other than the one on screen. */
 export interface ProcessPart {
@@ -766,10 +789,15 @@ export interface ProcessBundle {
   otherProcesses?: ProcessPart[];
   /**
    * Hand-offs between pipelines (Q17, ADR 0023), set only by `companyBundle` when the company map has a line from a pipeline to another
-   * pipeline: in order from the sales pipeline (`process`), each says that every client won in `from` carries on into `to`. Each `to` is in
-   * `otherProcesses`. Absent: nothing is handed on and `toEngineModel` takes the path it always took.
+   * pipeline, or to one of the map's own steps: in order from the sales pipeline (`process`), each says where work won in (or done in) `from`
+   * carries on. Each process `to` is in `otherProcesses`; each step is in `companySteps`. Absent: nothing is handed on and `toEngineModel` takes the path it always took.
    */
   handoffs?: CompanyHandoff[];
+  /**
+   * Set by `companyBundle` with `handoffs`: the company map's own steps (tasks, waits and decisions) the hand-offs pass through, which the run
+   * simulates as steps of their own. Absent: none (a map whose lines join cards only).
+   */
+  companySteps?: StepRow[];
   /** Set by `companyBundle`: the name of every process on the company map, for notes about one that isn't in the run. */
   companyNames?: Record<string, string>;
   /**
@@ -1085,12 +1113,14 @@ export type _SchemaDriftChecks = [
   Assert<Matches<PersonSkillRow, "person_skills">>,
   Assert<Matches<PersonLeaveRow, "person_leave">>,
   // is_company and archived_at are optional here (absent on fixtures).
-  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "category" | "department_id" | "whole_business" | "map_drives_run">, "processes">>,
-  Assert<Matches<Required<Pick<ProcessRow, "archived_at" | "department_id" | "whole_business" | "map_drives_run">>, "processes">>,
+  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "category" | "department_id" | "whole_business" | "map_drives_run" | "notes">, "processes">>,
+  Assert<Matches<Required<Pick<ProcessRow, "archived_at" | "department_id" | "whole_business" | "map_drives_run" | "notes">>, "processes">>,
   Assert<Matches<ProcessRevisionRow, "process_revisions">>,
   // replaced_by defaults to '{}' in the table; the app leaves it out of new steps.
   Assert<Matches<Omit<StepRow, "replaced_by">, "steps">>,
-  Assert<Matches<EdgeRow, "edges">>,
+  // center_dx and center_dy are optional here (absent on fixtures).
+  Assert<Matches<Omit<EdgeRow, "center_dx" | "center_dy">, "edges">>,
+  Assert<Matches<Required<Pick<EdgeRow, "center_dx" | "center_dy">>, "edges">>,
   // fallback_ongoing_load is jsonb; FallbackLoad is its app-side shape.
   Assert<Matches<Omit<ServiceRow, "provenance">, "services">>,
   // provenance is jsonb; ProvenanceMap is its app-side shape.

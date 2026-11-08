@@ -15,6 +15,10 @@ import {
   hiringAdvice,
   hiringDelayAt,
   leaver,
+  leavers,
+  atRisk,
+  riskOf,
+  AT_RISK_MARGIN,
   perEmployee,
   personMax,
   plannedServiceHours,
@@ -256,6 +260,104 @@ describe("leaver", () => {
     expect(res.kind).toBe("shared");
     expect(res.rows).toHaveLength(1);
     expect(res.rows[0]!.after).toBeCloseTo(0.5 + 52 / ((40 * 52) / 12), 10);
+  });
+});
+
+describe("leavers (several people leave at once)", () => {
+  const MONTH = (40 * 52) / 12;
+  test("every leaver is out of the pool before any client is handed out, so no leaver takes another's clients", () => {
+    const model = tinyModel();
+    model.people!.a!.portfolio = { "org-T1": 2 };
+    model.people!.b!.portfolio = { "org-T1": 1 };
+    const setup = capacitySetupFromModel(model);
+    // Ann and Bo are the least busy (0.02, 0.01): either would win every pick if still in the pool. Cy (0.3) takes all three; Dee is at 0.9.
+    const r = fakeResult({ d: 0.9, a: 0.02, b: 0.01, c: 0.3, free: 0.3 }, {}, { a: 10, b: 5 }, { a: 2, b: 1 }, model);
+    const res = leavers(setup, model, r, ["a", "b"])!;
+    expect(res.leaverIds).toEqual(["a", "b"]);
+    expect(res.clients).toBe(3);
+    expect(res.received).toEqual({ c: 3 });
+    expect(res.unplaced).toBe(0);
+    expect(res.rows.map((x) => x.id)).toEqual(["c"]);
+    expect(res.rows[0]!.after).toBeCloseTo(0.3 + (3 * 2) / MONTH, 10);
+  });
+
+  test("clients go one at a time to whoever is least busy at that moment, across the leavers' clients together", () => {
+    const model = tinyModel();
+    model.people!.a!.portfolio = { "org-T1": 2 };
+    model.people!.b!.portfolio = { "org-T1": 2 };
+    const setup = capacitySetupFromModel(model);
+    // Cy 0.40 and Dee 0.41; each client adds 2 ÷ 173.33 = 0.0115. Ann's: Cy (0.4115), Dee (0.4215). Bo's: Cy (0.4231), Dee (0.4331).
+    const r = fakeResult({ d: 0.41, a: 0.5, b: 0.5, c: 0.4, free: 0.3 }, {}, { a: 10, b: 10 }, { a: 2, b: 2 }, model);
+    const res = leavers(setup, model, r, ["a", "b"])!;
+    expect(res.received).toEqual({ c: 2, d: 2 });
+    expect(res.rows.find((x) => x.id === "c")!.after).toBeCloseTo(0.4 + (2 * 2) / MONTH, 10);
+    expect(res.rows.find((x) => x.id === "d")!.after).toBeCloseTo(0.41 + (2 * 2) / MONTH, 10);
+  });
+
+  test("a shared-team leaver with a client-facing one: the team shares the hours, the clients are handed out", () => {
+    const model = tinyModel();
+    model.people!.a!.portfolio = { "org-T1": 1 };
+    model.people!.free2 = { name: "Second", roles: ["content"], capacity: 40 };
+    const setup = capacitySetupFromModel(model);
+    const r = fakeResult({ d: 0.9, a: 0.5, b: 0.6, c: 0.5, free: 0.5, free2: 0.5 }, {}, { free: 52 }, { a: 1 }, model);
+    const res = leavers(setup, model, r, ["free", "a"])!;
+    expect(res.sharedTeams).toEqual(["content"]);
+    expect(res.emptyTeams).toEqual([]);
+    expect(res.received).toEqual({ c: 1 });
+    expect(res.rows.find((x) => x.id === "free2")!.after).toBeCloseTo(0.5 + 52 / MONTH, 10);
+    expect(res.rows.find((x) => x.id === "c")!.after).toBeCloseTo(0.5 + 2 / MONTH, 10);
+  });
+
+  test("when the whole shared team leaves, nobody is left to share the hours", () => {
+    const model = tinyModel();
+    model.people!.free2 = { name: "Second", roles: ["content"], capacity: 40 };
+    const setup = capacitySetupFromModel(model);
+    const r = fakeResult({ d: 0.9, a: 0.5, b: 0.5, c: 0.5, free: 0.5, free2: 0.5 }, {}, { free: 52, free2: 20 }, {}, model);
+    const res = leavers(setup, model, r, ["free", "free2"])!;
+    expect(res.emptyTeams).toEqual(["content"]);
+    expect(res.sharedTeams).toEqual([]);
+    expect(res.rows).toEqual([]);
+  });
+
+  test("repeated and unknown ids are dropped; nobody known gives null; one id matches leaver()", () => {
+    const model = tinyModel();
+    model.people!.a!.portfolio = { "org-T1": 3 };
+    const setup = capacitySetupFromModel(model);
+    const r = fakeResult({ d: 0.7, a: 0.05, b: 0.4, c: 0.41, free: 0.3 }, {}, { a: 10 }, { a: 3 }, model);
+    expect(leavers(setup, model, r, [])).toBeNull();
+    expect(leavers(setup, model, r, ["nobody"])).toBeNull();
+    const many = leavers(setup, model, r, ["a", "a", "nobody"])!;
+    expect(many.leaverIds).toEqual(["a"]);
+    const one = leaver(setup, model, r, "a")!;
+    expect(one).toMatchObject({ leaverId: "a", kind: "client_facing" });
+    expect(many.received).toEqual(one.received);
+    expect(many.rows).toEqual(one.rows);
+  });
+});
+
+describe("atRisk", () => {
+  test(`over (at or past the threshold) first, then near (within ${AT_RISK_MARGIN * 100} points under it), busiest first; with hours by purpose`, () => {
+    const model = tinyModel();
+    const setup = capacitySetupFromModel(model);
+    const { people } = busyShares(setup, model, fakeResult({ d: 0, a: 0, b: 0, c: 0, free: 0 }, {}, {}, {}, model));
+    const line = people.find((p) => p.id === "a")!.line;
+    const freeLine = people.find((p) => p.id === "free")!.line;
+    // Dee over; Ann exactly 10 points under (near); Bo just past near; Cy at the line (over); the freelancer near.
+    const r = fakeResult({ d: line + 0.05, a: line - 0.1, b: line - 0.11, c: line, free: freeLine - 0.05 }, {}, { free: 40, d: 12 }, {}, model);
+    const res = atRisk(setup, model, r);
+    expect(res.people.map((x) => [x.person.id, x.status])).toEqual([
+      ["d", "over"],
+      ["c", "over"],
+      ["free", "near"],
+      ["a", "near"],
+    ]);
+    expect(res.over).toBe(2);
+    expect(res.near).toBe(2);
+    expect(res.people.find((x) => x.person.id === "free")!.byPurpose).toEqual([{ name: "Content", hours: 40 }]);
+    expect(res.people.find((x) => x.person.id === "free")!.steps).toEqual([{ stepId: "r2", name: "Report upload", hours: 40 }]);
+    expect(riskOf(0.5, 0.85)).toBeNull();
+    expect(riskOf(0.75, 0.85)).toBe("near");
+    expect(riskOf(0.85, 0.85)).toBe("over");
   });
 });
 

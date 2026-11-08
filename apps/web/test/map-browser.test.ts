@@ -580,7 +580,7 @@ describe("the process library on the company map (B12)", () => {
 });
 
 describe("the company map's New process is made by category (D52)", () => {
-  it("offers the five categories with their help, makes the process with the category chosen, and labels templates by category", async () => {
+  it("offers the five categories with their help, makes the process with the category chosen, and has no templates (QA round 2)", async () => {
     const page = await mount({ editable: true, company: true, palette: true, library: true });
     const select = page.locator("[data-library-new-category]");
     expect(await select.locator("option").allInnerTexts()).toEqual(["Sales", "Onboarding", "Routine client work", "Ad hoc", "Internal"]);
@@ -592,8 +592,8 @@ describe("the company map's New process is made by category (D52)", () => {
     expect(rows).toMatch(/Sales|Routine client work|Ad hoc|Internal|Onboarding/);
     await select.selectOption("onboarding");
     expect(await page.locator("[data-library-category-help]").innerText()).toBe("Getting a new client set up, once per client.");
-    expect((await page.locator("[data-library-template='client-onboarding']").innerText()).replace(/\s+/g, " ")).toContain("Client onboarding Onboarding");
-    expect((await page.locator("[data-library-template='agency-delivery']").innerText()).replace(/\s+/g, " ")).toContain("Routine client work");
+    expect(await page.locator("[data-library-template]").count()).toBe(0);
+    expect(await page.locator("[data-process-library]").innerText()).not.toMatch(/From a template/);
     await page.locator("[data-library-new-name]").fill("Client offboarding");
     await page.locator("[data-library-new-make]").click();
     await page.locator("[data-library-note]").waitFor();

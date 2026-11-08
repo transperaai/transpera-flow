@@ -10,8 +10,6 @@ import { loadDepartmentLaneInput } from "@/lib/overview/lanes-data";
 import { loadLibrary } from "@/lib/editor/library-data";
 import { readBlock } from "@/lib/blocks/blocks";
 import { exitHref, parseEditorMode, parseHorizon, parseIssueParam } from "@/lib/editor/modes";
-import { changesOnStepsOf } from "@/lib/solutions/step-changes";
-import { newSolutionHref } from "@/lib/solutions/links";
 import { issueAboutProcess, solutionIssueOf } from "@/lib/solutions/area";
 
 /**
@@ -99,17 +97,8 @@ export async function WorkspaceEditorPage({
       library={company ? library : undefined}
       tierSetup={tierSetup}
       laneInput={laneInput}
-      // The changes in the solution this editor was opened on (D53) seed the Editor's own list, saved with the solution (Save solution). On the live
-      // process (the draft) the panel points at making a solution.
-      changesOnSteps={
-        company || editorMode === "block"
-          ? undefined
-          : fromSolution
-            ? { changes: changesOnStepsOf(fromSolution.id, fromSolution.step_changes) }
-            : editorMode === "solution"
-              ? undefined
-              : { changes: [], makeSolutionHref: newSolutionHref(`/w/${slug}`, live.process.id, exit) }
-      }
+      // The changes already stored on the solution this editor was opened on (D53), kept and saved with it as they are.
+      stepChanges={fromSolution?.step_changes}
     />
     </SourceLinkingScope>
     </EditorPhoneGate>

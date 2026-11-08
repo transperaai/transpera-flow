@@ -15,6 +15,9 @@ describe("an archived process's screens", () => {
     expect(page).toContain("editHref={canEdit && !archivedAt ?");
     expect(page).toContain("notice={archivedAt ? <ArchivedBanner");
     expect(page).toContain("restore={canEdit ? restoreProcess.bind(null, live.process.id) : undefined}");
+    // The process's notes show to everyone; only an editor, on the live page of a process in use, can save them.
+    expect(page).toContain("const editable = canEdit && !earlier && !archivedAt;");
+    expect(page).toContain("notes={{ value: live.process.notes ?? null, save: editable ? saveProcessNotesFromPage.bind(null, live.process.id, live.process.notes ?? null) : undefined }}");
   });
 
   it("the Editor goes back to the page, and History offers no Restore or Duplicate", () => {

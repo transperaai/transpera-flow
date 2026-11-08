@@ -1,29 +1,27 @@
 "use client";
 
-// The Solution page (issue #115, A50; descoped in Q12, decision D44): the header (name, status, the issues it fixes, the process, and the
-// actions Open in editor, Try it in the Sandbox), what it changes in plain lines, the live map and this solution's map side by
-// side, and notes edited in place. The measures table, the revenue chart, the market stress test and the per-issue verdict cards are gone:
+// The Solution page (issue #115, A50; descoped in Q12, decision D44; QA round 2): the header (name, status, the issues it fixes, the process,
+// when it was last edited, and Open in editor), the notes (what the solution changes, in the team's own words) with its sources, and the
+// live map above this solution's map. The measures table, the revenue chart, the market stress test and the per-issue verdict cards are gone:
 // the numbers live in the Sandbox, and the per-issue verdicts stay in the database.
 
 import Link from "next/link";
-import { GitCompare } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import type { IssueRow, ProcessBundle, SolutionRow, SolutionStatus } from "@transpera-flow/db";
-import { EditableText, EmptyState, HEADER_PILL, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
+import { EditableText, HEADER_PILL, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
 import { DeleteSolution } from "@/components/solutions/delete-solution";
 import { LinkIssueButton } from "@/components/solutions/new-solution";
 import { SolutionMaps } from "@/components/solutions/solution-maps";
 import { SolutionStatusMenu } from "@/components/solutions/status-menu";
-import { LINKED_SOURCES_HELP, LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
+import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { TagPill } from "@/components/tag-pill";
 import { Help } from "@/components/help";
 import { buttonVariants } from "@/components/ui/button";
 import { deleteSolution, saveSolutionNotes } from "@/app/w/[slug]/solution-page-actions";
 import { issueHref } from "@/lib/issues/pages";
 import type { ScreenMode } from "@/lib/mode";
-import { changeLines } from "@/lib/solutions/changes";
-import { builtBy, builtDate, linksOf, solutionHref, solutionsListHref, type SolutionsData } from "@/lib/solutions/cards";
+import { editedDate, linksOf, solutionHref, solutionsListHref, type SolutionsData } from "@/lib/solutions/cards";
 import { compareMaps } from "@/lib/solutions/compare";
 import { SOLUTION_PAGE_HELP } from "@/lib/solutions/help";
 import { solutionEditorHref } from "@/lib/solutions/links";
@@ -49,7 +47,7 @@ export interface SolutionPageProps {
 }
 
 export function SolutionPage(props: SolutionPageProps) {
-  const { workspaceId, solutionId, issues, processes, base, viewerId, compareBase, movedOn } = props;
+  const { workspaceId, solutionId, issues, processes, base, compareBase, movedOn } = props;
   const router = useRouter();
   // The page's data comes with the server render; this copy follows what was saved here, and follows the page when it is reloaded.
   const [local, setLocal] = useState(props.data);
@@ -62,7 +60,6 @@ export function SolutionPage(props: SolutionPageProps) {
   const canEdit = props.mode !== "readonly";
   const [error, setError] = useState<string | null>(null);
   const comparison = useMemo(() => (compareBase && solution ? compareMaps(compareBase, solution) : null), [compareBase, solution]);
-  const lines = useMemo(() => (comparison ? changeLines(comparison) : []), [comparison]);
 
   if (!solution) {
     return (
@@ -112,10 +109,7 @@ export function SolutionPage(props: SolutionPageProps) {
         }
         meta={
           <MetaLine>
-            <span className="flex items-center" data-built>
-              Built by {builtBy(solution.created_by, viewerId, false, props.memberNames)} · {builtDate(solution)}
-              <Help {...SOLUTION_PAGE_HELP.built} />
-            </span>
+            <span data-edited>Edited on {editedDate(solution)}</span>
             <span>Solutions never change the live map.</span>
           </MetaLine>
         }
@@ -150,9 +144,6 @@ export function SolutionPage(props: SolutionPageProps) {
                 </Link>
               </span>
             )}
-            <Link href={`${base}/sandbox?solution=${solution.id}`} className={buttonVariants({ variant: "outline" })} data-try-in-sandbox>
-              Try it in the Sandbox
-            </Link>
             {canEdit && (
               <span className={cn("flex flex-wrap items-center gap-2", EDIT_ONLY)} data-edit-entry>
                 <DeleteSolution
@@ -173,35 +164,14 @@ export function SolutionPage(props: SolutionPageProps) {
         </p>
       )}
 
-      <SectionCard id="changes" section="changes" title="What it changes" description={`Compared with the live map of ${processName}.`}>
-        {!comparison ? (
-          <EmptyState icon={GitCompare} data-compare-unavailable>
-            The comparison isn&apos;t available: the process this solution was copied from can&apos;t be loaded.
-          </EmptyState>
-        ) : lines.length === 0 ? (
-          <p className="text-sm text-fg-2" data-no-changes>
-            Nothing differs from the live map.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-1.5 text-sm" data-change-lines>
-            {lines.map((l, i) => (
-              <li key={i} data-change={l.kind} className="flex gap-2">
-                <span aria-hidden className="mt-2 size-1.5 shrink-0 rounded-full bg-edit" />
-                <span className="min-w-0 break-words">{l.text}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </SectionCard>
 
-      {comparison && <SolutionMaps key={solution.id} comparison={comparison} notes={notes} />}
 
       <SectionCard
         id="notes"
         section="notes"
         title={
           <span className="flex items-center">
-            Notes
+            Notes and sources
             <Help {...SOLUTION_PAGE_HELP.notes} />
           </span>
         }
@@ -211,7 +181,7 @@ export function SolutionPage(props: SolutionPageProps) {
           value={solution.notes}
           canEdit={canEdit}
           label="Notes"
-          emptyMessage="No notes yet. Anything worth knowing about this solution goes here."
+          emptyMessage="No notes yet. Say what this solution changes and why: which steps, what is new, what goes."
           emptyReader="No notes."
           addLabel="Add notes"
           maxLength={4000}
@@ -224,29 +194,28 @@ export function SolutionPage(props: SolutionPageProps) {
             return null;
           }}
         />
+        <SolutionSources solutionId={solution.id} name={solution.name} />
       </SectionCard>
 
-      <SolutionSources solutionId={solution.id} name={solution.name} />
+      {comparison ? (
+        <SolutionMaps key={solution.id} comparison={comparison} notes={notes} />
+      ) : (
+        <p className="text-sm text-fg-2" data-compare-unavailable>
+          The maps aren&apos;t available: the process this solution was copied from can&apos;t be loaded.
+        </p>
+      )}
     </div>
   );
 }
 
-/** Where the page loads source links (a workspace), the sources that back this solution up, with "+ Link". */
+/** Where the page loads source links (a workspace), the sources that back this solution up, with "+ Link", inside the notes' card. */
 function SolutionSources({ solutionId, name }: { solutionId: string; name: string }) {
   const sourceLinking = useSourceLinking();
   if (!sourceLinking) return null;
   return (
-    <SectionCard
-      id="sources"
-      section="sources"
-      title={
-        <span className="flex items-center">
-          Sources
-          <Help {...LINKED_SOURCES_HELP.sources} />
-        </span>
-      }
-    >
+    <div className="flex flex-col gap-2 border-t border-line pt-3" data-solution-sources>
+      <h3 className="text-sm font-semibold">Sources</h3>
       <LinkedSources target={{ kind: "solution", solutionId }} label={`Solution: ${name}`} empty="None linked yet." hideTitle className="flex flex-col gap-2" />
-    </SectionCard>
+    </div>
   );
 }

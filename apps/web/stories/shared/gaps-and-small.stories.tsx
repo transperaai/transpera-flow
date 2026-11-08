@@ -4,7 +4,6 @@ import { PayHidden } from "@/components/pay-hidden";
 import { GapList, IncompleteDataNote, MissingForSimulation } from "@/components/simulation-gaps";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { ProvenanceBadge } from "@/components/provenance-badge";
-import { StepIssueBadges } from "@/components/step-issue-badges";
 import { northbeamRun } from "../fixtures";
 
 const meta: Meta = { title: "Shared/Small components" };
@@ -73,22 +72,3 @@ export const Provenance: StoryObj = {
   },
 };
 
-/** The badges portal into a map's step cards; two stand-in cards give them somewhere to land. */
-export const StepBadges: StoryObj = {
-  name: "StepIssueBadges",
-  render: () => (
-    <div data-process-map className="flex gap-6 p-4">
-      {["a", "b", "c"].map((id) => (
-        // Inline position: React Flow's own `.react-flow__node { position: absolute }` beats the `relative` utility, which
-        // stacked the three cards on one spot (and their badges on each other).
-        <div key={id} data-id={id} className="react-flow__node w-40 rounded-lg border bg-card p-3" style={{ position: "relative" }}>
-          Step {id.toUpperCase()}
-        </div>
-      ))}
-      <StepIssueBadges
-        badges={{ a: { count: 2, rating: "bad", titles: ["Slow review", "Rework"] }, c: { count: 1, rating: "risk", titles: ["Single point of failure"] } }}
-        onOpen={() => undefined}
-      />
-    </div>
-  ),
-};

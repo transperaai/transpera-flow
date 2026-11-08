@@ -658,7 +658,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
             Who gets too busy, and when
             <Help
               label="Too busy alerts"
-              description="For each role and person, the first month their work passes the “Too busy” line, on average or in a bad month (the worst 10% of the 30 simulated runs). Each is an insight: acknowledge it to track it as an issue."
+              description="For each role and person, the first month their work passes the utilisation threshold (how busy a role can be before it counts as full), on average or in a bad month (the worst 10% of the 30 simulated runs). Each is an insight: acknowledge it to track it as an issue."
               example="“PPC specialist gets too busy in February (92% in a bad month)” means hiring or moving work before February avoids it."
             />
           </h2>
@@ -680,7 +680,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
         </div>
         {alerts !== null && alerts.length === 0 && state.issues.length === 0 ? (
           <Card className="px-4 py-3 text-sm text-muted-foreground" data-forecast-empty>
-            Nobody crosses the {Math.round(busyLine * 100)}% line in the next {span}, on average or in a bad month.
+            Nobody crosses the {Math.round(busyLine * 100)}% utilisation threshold in the next {span}, on average or in a bad month.
           </Card>
         ) : (
           <InsightsSection
@@ -840,8 +840,8 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
                 hasPlan={laneProps !== undefined}
               />
               <Help
-                label="The “Too busy” line"
-                description="Where a role or person counts as too busy (the “Too busy” cut-off for Bad). Above it there is little room for a bad month or a new client."
+                label="The utilisation threshold"
+                description="The utilisation threshold is how busy a role or person can be before they count as full (the “Too busy” cut-off for Bad). Above it there is little room for a bad month or a new client."
                 example="At 85%, someone with 40 hours spends more than 34 of them on work."
               />
             </div>
@@ -856,7 +856,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
                 rows={rows}
                 cutoffs={cutoffs}
                 plan={laneProps}
-                label={`How busy each ${rows === "roles" ? "role" : "person"} is per month over the next ${span}, against the ${Math.round(busyLine * 100)}% too busy line.`}
+                label={`How busy each ${rows === "roles" ? "role" : "person"} is per month over the next ${span}, against the ${Math.round(busyLine * 100)}% utilisation threshold.`}
               />
             ) : sim.status === "error" ? (
               <p className="text-sm text-muted-foreground">The forecast couldn&apos;t be worked out: {sim.error}</p>

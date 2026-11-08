@@ -18,6 +18,11 @@ export function linkProblem(issue: IssueRow | null, processId: string): string |
   return null;
 }
 
+/** Why the issue can't be linked to a solution of `processId`, read from the database, or null (QA round 2: no automatic verdict is worked out). */
+export async function linkCheck(db: Db, workspaceId: string, processId: string, issueId: string): Promise<string | null> {
+  return linkProblem(await loadIssue(db, workspaceId, issueId), processId);
+}
+
 /** The process as it was at `revisionId`, for simulating a solution against it. */
 async function baseBundle(db: Db, workspaceId: string, processId: string, revisionId: string): Promise<ProcessBundle | null> {
   const workspace = await db.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).where("id", "=", workspaceId).executeTakeFirst();

@@ -98,19 +98,18 @@ describe("the Acknowledge dialog", () => {
       source: "promoted",
       detected_key: d.key,
       process_id: P1,
-      step_id: uuid("a"),
+      // An issue belongs to its process (QA round 2), and its target moves into what's wrong.
+      step_id: null,
       owner_person_id: uuid("x"),
       owner_ids: [uuid("x"), uuid("y")],
       source_ids: [uuid("s")],
-      target_measure: "Wait at Check fit",
-      target_now: "1.4 days",
-      target_goal: "under 4 hours",
+      target_measure: null,
+      target_now: null,
+      target_goal: null,
       number: 1,
     });
-    expect(row!.links).toEqual([
-      { process_id: P1, step_id: uuid("a") },
-      { process_id: P1, step_id: uuid("b") },
-    ]);
+    expect(row!.evidence).toMatch(/What good looks like: Wait at Check fit, now 1\.4 days, goal under 4 hours$/);
+    expect(row!.links).toEqual([{ process_id: P1, step_id: null }]);
     // The insight now shows as that issue, with its number.
     const [after] = buildInsights(registerEntries([row!], [d]));
     expect(after!.issue?.id).toBe(row!.id);
@@ -121,7 +120,7 @@ describe("the Acknowledge dialog", () => {
     const store = new MemoryIssueStore("w1");
     const [i] = buildInsights(registerEntries([], [det("a", "bad")]));
     const row = await acknowledgeInsight(state(store), i!, ctx);
-    expect(row).toMatchObject({ title: "Title a", severity: storedOfRating("bad"), process_id: P1, step_id: uuid("a"), source_ids: [uuid("s")], number: 1 });
+    expect(row).toMatchObject({ title: "Title a", severity: storedOfRating("bad"), process_id: P1, step_id: null, source_ids: [uuid("s")], number: 1 });
   });
 
   it("a second acknowledge of the same insight is refused, not duplicated", async () => {
@@ -132,15 +131,13 @@ describe("the Acknowledge dialog", () => {
     expect(rowsOf(store)).toHaveLength(1);
   });
 
-  it("New issue starts empty and a title and a step are required", () => {
+  it("New issue starts empty and a title and its process are required (no steps, QA round 2)", () => {
     const draft = emptyDraft(P1);
-    expect(validateDraft(draft)).toEqual({ title: "Give the issue a title.", steps: "Pick at least one step, or choose the whole process." });
-    expect(validateDraft({ ...draft, title: "Slow check", scope: "process" })).toEqual({});
-    expect(validateDraft({ ...draft, title: "   ", scope: "process" }).title).toBeDefined();
-    expect(validateDraft({ ...draft, title: "Slow check", stepIds: [uuid("a")] })).toEqual({});
-    expect(hasErrors(validateDraft({ ...draft, title: "x", scope: "steps", stepIds: [] }))).toBe(true);
-    // The whole process needs a process to be the whole of.
-    expect(validateDraft({ ...draft, title: "x", scope: "process", processId: null }).process).toBeDefined();
+    expect(validateDraft(draft)).toEqual({ title: "Give the issue a title." });
+    expect(validateDraft({ ...draft, title: "Slow check" })).toEqual({});
+    expect(validateDraft({ ...draft, title: "   " }).title).toBeDefined();
+    expect(hasErrors(validateDraft({ ...draft, title: "x", processId: null }))).toBe(true);
+    expect(validateDraft({ ...draft, title: "x", processId: null }).process).toBeDefined();
   });
 
   it("the server refuses what the dialog does: no title, no steps when steps are meant", () => {
@@ -154,12 +151,19 @@ describe("the Acknowledge dialog", () => {
     expect(parseSaveInput({ ...ok, target_goal: "x".repeat(201) })).toMatchObject({ ok: false });
   });
 
-  it("New issue links the whole process, or the steps picked, each with its own process", () => {
+  it("New issue links its process only; a step it came from names the process, not the step (QA round 2)", () => {
     const whole = toSaveInput({ ...emptyDraft(P1), title: "T", scope: "process" }, options);
     expect(whole.links).toEqual([{ process_id: P1, step_id: null }]);
     const picked = toSaveInput({ ...emptyDraft(P1), title: "T", stepIds: [uuid("b")] }, options);
-    expect(picked.links).toEqual([{ process_id: P1, step_id: uuid("b") }]);
+    expect(picked.links).toEqual([{ process_id: P1, step_id: null }]);
     expect(picked.severity).toBe("serious");
+  });
+
+  it("a target in the old fields moves into what's wrong, once", () => {
+    const d = { ...emptyDraft(P1), title: "T", evidence: "Leads wait.", targetMeasure: "Wait", targetNow: "1 d", targetGoal: "4 h" };
+    const input = toSaveInput(d, options);
+    expect(input).toMatchObject({ target_measure: null, target_now: null, target_goal: null, evidence: "Leads wait.\n\nWhat good looks like: Wait, now 1 d, goal 4 h" });
+    expect(toSaveInput({ ...d, evidence: input.evidence }, options).evidence).toBe(input.evidence);
   });
 
   it("Edit reopens the dialog on the issue and saves over it, keeping its number and status", async () => {
@@ -167,10 +171,10 @@ describe("the Acknowledge dialog", () => {
     const created = await store.save(toSaveInput({ ...emptyDraft(P1), title: "Slow check", stepIds: [uuid("a")], ownerIds: [uuid("x")] }, options));
     if (created.status !== "ok") throw new Error("setup");
     const draft = draftFromIssue(created.issue);
-    expect(draft).toMatchObject({ id: created.issue.id, title: "Slow check", scope: "steps", stepIds: [uuid("a")], ownerIds: [uuid("x")], rating: "bad" });
-    const edited = await store.save(toSaveInput({ ...draft, title: "Slow check, renamed", scope: "process", stepIds: [], ownerIds: [uuid("x"), uuid("y")], targetGoal: "under 4 hours" }, options));
+    expect(draft).toMatchObject({ id: created.issue.id, title: "Slow check", scope: "process", stepIds: [], ownerIds: [uuid("x")], rating: "bad" });
+    const edited = await store.save(toSaveInput({ ...draft, title: "Slow check, renamed", ownerIds: [uuid("x"), uuid("y")], targetGoal: "under 4 hours" }, options));
     if (edited.status !== "ok") throw new Error("edit");
-    expect(edited.issue).toMatchObject({ id: created.issue.id, number: created.issue.number, status: "open", title: "Slow check, renamed", step_id: null, process_id: P1, owner_ids: [uuid("x"), uuid("y")], target_goal: "under 4 hours" });
+    expect(edited.issue).toMatchObject({ id: created.issue.id, number: created.issue.number, status: "open", title: "Slow check, renamed", step_id: null, process_id: P1, owner_ids: [uuid("x"), uuid("y")], target_goal: null, evidence: "What good looks like: goal under 4 hours" });
     expect(edited.issue.links).toEqual([{ process_id: P1, step_id: null }]);
     expect(rowsOf(store)).toHaveLength(1);
   });
@@ -249,7 +253,8 @@ describe("a dismissal lasts until the process's next published version", () => {
     expect(row).toMatchObject({ id: rowsOf(store)[0]!.id, status: "open", dismissed_revision_id: null, number: 1, detected_key: d.key });
     const entries = registerEntries([row!], [d], at(R2));
     expect(entries.map((e) => e.kind)).toEqual(["tracked"]);
-    expect(Object.keys(mapFeed(entries).badges)).toEqual([uuid("a")]);
+    // An issue of the process: no badge on the step it was found at (QA round 2).
+    expect(mapFeed(entries).badges).toEqual({});
   });
 
   it("a dismissal made before the process was ever published expires on its first publish", async () => {

@@ -122,7 +122,8 @@ describe("process pages", () => {
     actAs("editor");
     const lib = await loadLibrary(ws);
     expect(lib.processes.length).toBeGreaterThan(0);
-    expect(lib.templates.length).toBeGreaterThan(0);
+    // No templates in the library (QA round 2).
+    expect(Object.keys(lib)).toEqual(["processes"]);
   });
 
   it("loads the company map and the live parts", async () => {

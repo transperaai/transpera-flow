@@ -144,3 +144,100 @@ export function headlineText(h: ProcessHeadline): string {
   const auto = h.automatable === null ? "" : `; about ${percentText(h.automatable)} of it is automatable`;
   return `${takes}${of}${auto}.`;
 }
+
+// ---------------------------------------------------------------------------
+// The pie of hours by role
+// ---------------------------------------------------------------------------
+
+/** How many roles the pie names before the rest fold into "Others". */
+export const PIE_SLICES = 6;
+
+export interface PieSlice {
+  /** The role id, null for "No role", or "others" for the folded slice. */
+  key: string;
+  label: string;
+  hours: number;
+  /** Of the process's hours, 0 to 1. */
+  share: number;
+  /** The role, for a named slice; null for "Others". */
+  role: RoleHours | null;
+  /** The roles folded into "Others", largest first; empty for a named slice. */
+  members: RoleHours[];
+}
+
+/**
+ * The roles as pie slices, largest first: the first `limit` by name, the rest folded into one "Others" slice (only when that folds two
+ * or more; a single leftover role keeps its own slice). Roles with no hours are left out.
+ */
+export function pieSlices(roles: readonly RoleHours[], limit = PIE_SLICES): PieSlice[] {
+  const rows = roles.filter((r) => r.hours > 0).sort((a, b) => b.hours - a.hours || a.label.localeCompare(b.label));
+  const total = rows.reduce((s, r) => s + r.hours, 0);
+  if (!(total > 0)) return [];
+  const named = rows.length > limit + 1 ? rows.slice(0, limit) : rows;
+  const rest = rows.slice(named.length);
+  const slices: PieSlice[] = named.map((r) => ({ key: r.id ?? "none", label: r.label, hours: r.hours, share: r.hours / total, role: r, members: [] }));
+  if (rest.length > 0) {
+    const hours = rest.reduce((s, r) => s + r.hours, 0);
+    slices.push({ key: "others", label: "Others", hours, share: hours / total, role: null, members: rest });
+  }
+  return slices;
+}
+
+// ---------------------------------------------------------------------------
+// The strip of hours by step ("Heaviest steps")
+// ---------------------------------------------------------------------------
+
+/** How many steps the strip names before the rest group into "N other steps". */
+export const STRIP_NAMED = 4;
+
+export interface StripSegment {
+  /** The step id, or "others" for the grouped segment. */
+  key: string;
+  label: string;
+  hours: number;
+  /** Of the process's hours, 0 to 1. */
+  share: number;
+  /** The steps grouped into "N other steps", heaviest first; empty for a named step. */
+  members: StepHours[];
+}
+
+export interface HoursStrip {
+  total: number;
+  /** Heaviest first; the grouped segment, if any, last. */
+  segments: StripSegment[];
+  /** The fewest heaviest steps that take at least half the hours (at most `STRIP_NAMED`), and their share: the headline's numbers. */
+  lead: { steps: StepHours[]; share: number };
+}
+
+/**
+ * The process's monthly hours as one strip, split by step: the `named` heaviest steps by name, the rest as one "N other steps" segment
+ * (only when that groups two or more; a single leftover step keeps its name). Null with no hours.
+ */
+export function hoursStrip(hours: Pick<ProcessHours, "steps"> | null, named = STRIP_NAMED): HoursStrip | null {
+  const rows = (hours?.steps ?? []).filter((s) => s.hours > 0).sort((a, b) => b.hours - a.hours || a.label.localeCompare(b.label));
+  const total = rows.reduce((s, r) => s + r.hours, 0);
+  if (!(total > 0)) return null;
+  const shown = rows.length > named + 1 ? rows.slice(0, named) : rows;
+  const rest = rows.slice(shown.length);
+  const segments: StripSegment[] = shown.map((r) => ({ key: r.id, label: r.label, hours: r.hours, share: r.hours / total, members: [] }));
+  if (rest.length > 0) {
+    const h = rest.reduce((s, r) => s + r.hours, 0);
+    segments.push({ key: "others", label: `${rest.length} other steps`, hours: h, share: h / total, members: rest });
+  }
+  // The headline: the fewest heaviest steps that reach half the hours, or the named ones when even they don't.
+  let lead = 0;
+  let sum = 0;
+  while (lead < Math.min(named, rows.length) && sum < total / 2) sum += rows[lead++]!.hours;
+  return { total, segments, lead: { steps: rows.slice(0, lead), share: sum / total } };
+}
+
+/** The strip's headline: "3 steps take 58% of the 156 h a month", "Review takes 62% of …", or "One step, Review, takes all 12 h a month". */
+export function stripHeadline(strip: HoursStrip, stepCount = strip.segments.reduce((n, s) => n + (s.members.length || 1), 0)): string {
+  const total = `${hoursText(strip.total)} h a month`;
+  const { steps, share } = strip.lead;
+  if (stepCount === 1) return `One step, ${steps[0]!.label}, takes all ${total}.`;
+  const pct = percentText(share);
+  if (steps.length === 1) return `${steps[0]!.label} takes ${pct} of the ${total}.`;
+  if (share < 0.5) return `The ${steps.length} heaviest steps take ${pct} of the ${total}.`;
+  return `${steps.length} steps take ${pct} of the ${total}.`;
+}

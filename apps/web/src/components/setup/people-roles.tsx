@@ -58,7 +58,7 @@ const HELP = {
   named: { label: "Named clients", description: "Named clients this person looks after, from the Tiers & clients page. Read only.", example: "Laura: Harbourline Group, Meridian Finance." },
   roleName: { label: "Role", description: "A kind of work. A step that needs a role can be done by anyone who has it.", example: "SEO Director." },
   kind: { label: "Kind", description: "Client-facing roles own clients in a portfolio. Shared teams own none: they work in their own unit, and client demand turns into their hours.", example: "SEO Manager is client-facing; the Content team is a shared team." },
-  line: { label: "Busy line %", description: "How busy this role can be before it counts as full. Past the line, more clients won't fit.", example: "85%: a person booked at 85% of their hours is at the line." },
+  line: { label: "Utilisation threshold %", description: "The utilisation threshold is how busy this role can be before it counts as full. Past it, more clients won't fit.", example: "85%: a person booked at 85% of their hours is at their utilisation threshold." },
   rule: { label: "Rule of thumb", description: "A rule of thumb: the most clients one person in this role holds. Shown as a line to compare the real counts against.", example: "SEO Manager: 10 clients." },
   unit: { label: "Unit of work", description: "What a shared team counts its work in. Rates for each unit come later.", example: "Content team: words. Link outreach: links." },
   headcount: { label: "People", description: "How many people have this role.", example: "SEO Manager: 3." },
@@ -104,7 +104,7 @@ export function PeopleHeaderActions({ setup, data }: { setup: CapacitySetup; dat
         <DialogContent onOpenAutoFocus={focusPanel}>
           <DialogHeader>
             <DialogTitle>Add a role</DialogTitle>
-            <DialogDescription>A kind of work. Its kind, department and line are in its panel.</DialogDescription>
+            <DialogDescription>A kind of work. Its kind, department and utilisation threshold are in its panel.</DialogDescription>
           </DialogHeader>
           <AddRole workspaceId={setup.workspaceId} className="items-end" onAdded={() => setRole(false)} />
         </DialogContent>
@@ -571,7 +571,7 @@ function RolesList({ setup, data }: { setup: CapacitySetup; data: WorkspaceSetti
             <ColHead help={HELP.department}>Department</ColHead>
             <ColHead help={HELP.kind}>Kind</ColHead>
             <ColHead help={HELP.line} className="justify-end">
-              Busy line %
+              Utilisation threshold %
             </ColHead>
             <ColHead help={HELP.headcount} className="justify-end">
               People
@@ -648,7 +648,7 @@ function RolePanel({ setup, data, role: r, missingUnit }: { setup: CapacitySetup
             ]}
           />
           <div className="flex flex-col">
-            <NumberField label="Busy line %" value={r.line} save={field("roles", key, "line")} scale={100} min={1} max={150} step={5} disabled={!canEdit} help={HELP.line} />
+            <NumberField label="Utilisation threshold %" value={r.line} save={field("roles", key, "line")} scale={100} min={1} max={150} step={5} disabled={!canEdit} help={HELP.line} />
             <Marks provenance={r.provenance} column="line" value={r.line} />
           </div>
           {r.kind === "client_facing" && (

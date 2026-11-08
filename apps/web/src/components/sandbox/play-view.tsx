@@ -13,7 +13,7 @@ import { usePlayRuns, type PlayRuns } from "@/lib/sandbox/use-play-runs";
 import { PlayLevers } from "./play-levers";
 import { PlayMapCard, type PlayMapApi } from "./play-map";
 import { PlayResults } from "./play-results";
-import type { PlayMonths, PlayProcess } from "./play-types";
+import type { PlayHorizon, PlayMonths, PlayProcess } from "./play-types";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -35,6 +35,9 @@ export interface PlayViewProps {
   purposes?: readonly PurposeCategory[];
   /** The ISO date the run starts on. */
   startDate: string;
+  /** How many months the run covers, and changing it (the filter above the charts). The page prepares every run for it. */
+  horizon?: PlayHorizon;
+  onHorizon?: (h: PlayHorizon) => void;
   /** Today's path, ready to run, and the way to prepare a run for the levers as they stand. */
   today: PreparedPlay;
   prepare: (play: PlayState) => PreparedPlay;
@@ -55,18 +58,20 @@ export interface PlayViewProps {
 }
 
 export function PlayView(props: PlayViewProps) {
-  const { setup, processes, startDate, today, prepare, modelError } = props;
+  const { setup, processes, startDate, today, prepare, modelError, horizon = 12, onHorizon } = props;
   const [play, setPlay] = useState<PlayState>(() => {
     const start = defaultPlay();
     const pick = props.initialSolution;
     // Only a solution of a process this page lists can be picked (the select would have no option for it).
     return pick && processes.some((p) => p.id === pick.processId && p.solutions.some((s) => s.id === pick.id)) ? { ...start, versions: { [pick.processId]: { solution: pick.id, month: 0 } } } : start;
   });
-  const months = useMemo(() => playMonths(startDate), [startDate]);
+  const months = useMemo(() => playMonths(startDate, horizon), [startDate, horizon]);
   const mapKey = props.mapKey ?? null;
   const runs = usePlayRuns(setup, play, today, prepare, mapKey);
+  // The levers' month pickers stay on the first year; the charts follow the horizon.
+  const leverMonths = useMemo(() => (horizon === 12 ? months : playMonths(startDate)), [horizon, months, startDate]);
   const moved = !playIsDefault(play) || mapKey !== null;
-  const expectedWins = runs.today ? runs.today.run.result.kpi.won.mean / 12 : null;
+  const expectedWins = runs.today ? runs.today.run.result.kpi.won.mean / horizon : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-6" data-sandbox-play data-moved={moved ? "true" : "false"} data-run-ms={runs.changed ? Math.round(runs.changed.ms) : undefined}>
@@ -76,7 +81,7 @@ export function PlayView(props: PlayViewProps) {
         title="Sandbox"
         meta={
           <MetaLine>
-            <span data-play-note>Load another map for a process (an automation is part of a version of it) and pull the levers, then watch the next 12 months change. Nothing here is saved and nothing touches live data: the levers reset when you leave.</span>
+            <span data-play-note>Load another map for a process (an automation is part of a version of it) and pull the levers, then watch the months ahead change. Nothing here is saved and nothing touches live data: the levers reset when you leave.</span>
           </MetaLine>
         }
         actionsLabel="Sandbox actions"
@@ -87,7 +92,7 @@ export function PlayView(props: PlayViewProps) {
           The company can&apos;t be simulated yet: {modelError}
         </div>
       )}
-      <PlayMapCard play={play} setPlay={setPlay} processes={processes} months={months} header={props.mapHeader} canvas={props.map ? (api) => props.map!(runs, api) : undefined} />
+      <PlayMapCard play={play} setPlay={setPlay} processes={processes} months={leverMonths} header={props.mapHeader} canvas={props.map ? (api) => props.map!(runs, api) : undefined} />
 
       <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
         <div className="min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto" data-play-levers-column>
@@ -95,16 +100,16 @@ export function PlayView(props: PlayViewProps) {
             play={play}
             setPlay={setPlay}
             setup={setup}
-            months={months}
+            months={leverMonths}
             expectedWinsPerMonth={expectedWins}
           />
         </div>
-        <PlayResults runs={runs} setup={setup} months={months} moved={moved} purposes={props.purposes} />
+        <PlayResults runs={runs} setup={setup} months={months} moved={moved} purposes={props.purposes} horizon={horizon} onHorizon={onHorizon} />
       </div>
 
       {props.base && (
         <p className="text-xs text-muted-foreground">
-          Baselines, tiers, salaries and lines are set in{" "}
+          Baselines, tiers, salaries and utilisation thresholds are set in{" "}
           <Link href={`${props.base}/settings/people`} className="font-medium text-accent hover:underline">
             Settings
           </Link>

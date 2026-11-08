@@ -9,7 +9,7 @@ import { bundleHarness } from "./build-harness";
 // The Capacity page in a real browser, with its two simulations in a real Web Worker (./capacity-harness/entry.tsx), on the engine
 // fixture `capacityModel()` and the Set up data that agrees with it (made-up data; the example workspace is the same agency): every
 // section of the page, the leaver select, the empty state (no tiers), the missing state (a blank tier value and an engine problem),
-// the pay-hidden view, and a phone, where the page never scrolls sideways and the tables scroll inside their card.
+// the pay-hidden view, and a phone, where the page never scrolls sideways.
 //
 // With CAPACITY_SHOTS=<dir> it also saves the screenshots of the page (light and dark, 1440 and 400 px) there.
 
@@ -71,71 +71,128 @@ describe("Capacity page", { timeout: 180_000 }, () => {
       const root = page.locator("[data-capacity]");
       console.log(`capacity run (${width}px): today ${await root.getAttribute("data-today-ms")} ms`);
 
-      // Headline: clients by service line, taking both, and DLER as the average of each person's DLER (D40, no goal).
+      // Headline: clients by service line, taking both, and DLER as the average of each person's DLER, said against its goal in words.
       const kpis = await page.locator("[data-headline] [data-kpi]").allInnerTexts();
       expect(kpis.some((k) => /Clients with Organic \(SEO\) services/.test(k))).toBe(true);
       expect(kpis.some((k) => /Clients with Performance services/.test(k))).toBe(true);
       expect(kpis.some((k) => /Clients taking both\s+\d+\s+\d+ clients in all/.test(k))).toBe(true);
-      expect(kpis.filter((k) => k.includes("DLER") && /Average of \d+ people.s DLER/.test(k) && !k.includes("goal"))).toHaveLength(3);
+      const dlerKpis = kpis.filter((k) => k.includes("DLER") && /Average of \d+ people.s DLER/.test(k));
+      expect(dlerKpis).toHaveLength(3);
+      for (const k of dlerKpis) expect(k).toMatch(/(At or above|Below) the 4\.5 goal/);
+      const statuses = await page.locator("[data-headline] [data-kpi][data-kpi-status]").evaluateAll((els) => els.map((e) => e.getAttribute("data-kpi-status")));
+      expect(statuses).toHaveLength(3);
+      for (const s of statuses) expect(["good", "warn"]).toContain(s);
       expect(kpis.some((k) => k.includes("DLER whole business"))).toBe(true);
 
-      // Room for more clients: a sentence, the gauge with its limits, and chips.
+      // Room for more clients: today's clients first, a bar against the most that fit labelled in words, who gets the next client.
       expect(await page.locator("[data-room]").count()).toBe(2);
-      for (const s of await page.locator("[data-room-sentence]").allInnerTexts()) expect(s).toMatch(/^(Plenty of room|Some room|Tight)\. .* can take about \d+ more clients?\. Limited by .+\.|^Full\. .*Limited by /);
-      expect(await page.locator("[data-gauge]").count()).toBe(2);
-      expect(await page.locator("[data-chips] span").count()).toBeGreaterThan(5);
+      for (const s of await page.locator("[data-room-clients]").allInnerTexts()) expect(s).toMatch(/^\d[\d,]*\s+clients today$/);
+      for (const s of await page.locator("[data-room-status]").allInnerTexts()) expect(s).toMatch(/^(Room for \d+ more|Full|Over by \d+)$/);
+      for (const s of await page.locator("[data-room-sentence]").allInnerTexts()) expect(s).toMatch(/^Up to \d[\d,]* before .+ reach their utilisation threshold\.$/);
+      for (const s of await page.locator("[data-room-next]").allInnerTexts()) expect(s).toMatch(/^Next client goes to: \S/);
+      expect(await page.locator("[data-room-bar]").count()).toBe(2);
+      // The per-team ceilings are folded into "How this works".
+      expect(await page.locator("[data-room] details[data-how] [data-room-limits]").count()).toBe(2);
 
-      // Client-facing people: one table per department; Performance has channels.
+      // Client-facing people: one bar per person per department, busiest first, with +N or full; the detail is in each row's title.
       expect(await page.locator("[data-people-table]").count()).toBe(2);
-      expect(await text(page, '[data-people-table="Performance"] thead')).toContain("Channels");
-      expect(await text(page, '[data-people-table="Organic (SEO)"] thead')).not.toContain("Channels");
-      expect(await text(page, '[data-people-table="Organic (SEO)"] tbody')).toContain("Laura");
+      const rowTitles = (dept: string) => page.locator(`[data-people-table="${dept}"] [data-person-row]`).evaluateAll((els) => els.map((e) => e.getAttribute("title") ?? ""));
+      const perf = await rowTitles("Performance");
+      const org = await rowTitles("Organic (SEO)");
+      expect(perf.length).toBeGreaterThan(1);
+      expect(perf.every((t) => / channels\./.test(t))).toBe(true);
+      expect(org.some((t) => / channels\./.test(t))).toBe(false);
+      for (const t of [...perf, ...org]) expect(t).toMatch(/busy against a utilisation threshold of \d+%.*hours needed \d+ h a month, \d+ h available.*rule of thumb/);
+      expect(org.some((t) => t.startsWith("Laura"))).toBe(true);
+      for (const n of await page.locator("[data-can-take]").allInnerTexts()) expect(n).toMatch(/^(\+\d+|full)$/);
+      const busiest = await page.locator('[data-people-table="Organic (SEO)"] [data-busy]').evaluateAll((els) => els.map((e) => Number(e.getAttribute("data-busy"))));
+      expect(busiest).toEqual([...busiest].sort((a, b) => b - a));
 
-      // Shared teams: no rate is entered, so hours and "Rate not entered yet".
-      expect(await page.locator("[data-team]").count()).toBeGreaterThanOrEqual(5);
-      expect(await text(page, "[data-shared-teams]")).toContain("Rate not entered yet");
+      // No "Shared teams" section (removed at QA).
+      expect(await page.locator("[data-shared-teams], [data-team]").count()).toBe(0);
 
-      // Bottleneck: the sentence and step links to the process page.
-      expect(await text(page, "[data-bottleneck-sentence]")).toMatch(/is the most stretched, at \d+% against a line of \d+%/);
-      const href = await page.locator("[data-step-link]").first().getAttribute("href");
-      expect(href).toMatch(/^\/w\/example\/p\/[\w-]+\?step=\w+$/);
+      // Bottleneck: everyone over or within 10 points of their utilisation threshold, over first, each with their month by purpose.
+      const atRisk = await page.locator("[data-at-risk]").evaluateAll((els) => els.map((e) => e.getAttribute("data-at-risk")));
+      const sentence = await text(page, "[data-bottleneck-sentence]");
+      if (atRisk.length === 0) expect(sentence).toBe("Nobody is over or within 10 points of their utilisation threshold.");
+      else {
+        expect(sentence).toMatch(/^(\d+ over( and \d+ within 10 points)?|\d+ within 10 points) of their utilisation threshold\.$/);
+        expect(atRisk).toEqual([...atRisk].sort((a, b) => (a === b ? 0 : a === "over" ? -1 : 1)));
+        expect(await page.locator("[data-bottleneck] [data-at-risk] [data-stack]").count()).toBe(atRisk.length);
+        expect(await page.locator("[data-bottleneck] [data-legend] li").count()).toBeGreaterThan(0);
+        // Their biggest steps link to the process page, in "How this works".
+        const href = await page.locator("[data-bottleneck] details[data-how] [data-step-link]").first().getAttribute("href");
+        expect(href).toMatch(/^\/w\/example\/p\/[\w-]+\?step=\w+$/);
+      }
 
       // What if someone leaves, time to serve.
       expect(await text(page, "[data-leaver-sentence]")).toMatch(/If .+ leaves/);
       expect(await page.locator("[data-dumbbell]").count()).toBeGreaterThan(0);
       expect(await page.locator("[data-tier-card]").count()).toBe(6);
+      expect(await text(page, "[data-time-to-serve]")).toContain("Avg time to serve one client, by tier, per month");
+      for (const fee of await page.locator("[data-tier-fee]").allInnerTexts()) expect(fee).toMatch(/^Avg A\$[\d,]+ a month$/);
+      // One colour per purpose across the page: a purpose's segment is the same colour in every tier's bar and every bottleneck bar, and no
+      // two purposes share one.
+      const colours = await page.locator("[data-time-to-serve] [data-part], [data-bottleneck] [data-part]").evaluateAll((els) => els.map((e) => [e.getAttribute("data-part"), getComputedStyle(e).backgroundColor] as const));
+      const byPurpose = new Map<string, Set<string>>();
+      for (const [name, c] of colours) byPurpose.set(name!, (byPurpose.get(name!) ?? new Set()).add(c));
+      expect(byPurpose.size).toBeGreaterThan(1);
+      for (const set of byPurpose.values()) expect(set.size).toBe(1);
+      expect(new Set([...byPurpose.values()].map((v) => [...v][0])).size).toBe(byPurpose.size);
       expect(await page.locator("[data-named-clients] tbody tr").count()).toBe(13);
       // Each widget folds its "How this works".
-      expect(await page.locator("details[data-how]").count()).toBeGreaterThanOrEqual(8);
+      expect(await page.locator("details[data-how]").count()).toBeGreaterThanOrEqual(7);
       expect(await page.locator("details[data-how][open]").count()).toBe(0);
 
-      // The page never scrolls sideways; wide tables scroll inside their card.
+      // The page never scrolls sideways, and the people rows fit their card.
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       expect(overflow).toBeLessThanOrEqual(0);
-      if (width === 400) {
-        const scrolls = await page.locator("[data-people-table] .overflow-x-auto").evaluateAll((els) => els.map((e) => e.scrollWidth > e.clientWidth));
-        expect(scrolls.every(Boolean)).toBe(true);
-      }
+      const rowsFit = await page.locator("[data-person-row]").evaluateAll((els) => els.every((e) => e.scrollWidth <= e.clientWidth + 1));
+      expect(rowsFit).toBe(true);
       expect(errors).toEqual([]);
       await page.close();
     });
   }
 
-  it("changing the person who leaves changes the sentence and the dumbbells", async () => {
+  it("choosing who leaves, one or several, from the dropdown changes the sentence and the dumbbells", async () => {
     const { page, errors } = await mount();
     await page.waitForSelector("[data-leaver-select]", { timeout: 120_000 });
-    const select = page.locator("[data-leaver-select]");
+    const button = page.locator("[data-leaver-select]");
     const first = await text(page, "[data-leaver-sentence]");
-    const options = await select.locator("option").allInnerTexts();
-    const other = options.find((o) => o === "Zach")!;
-    expect(other).toBeDefined();
-    await select.selectOption({ label: other });
-    const second = await text(page, "[data-leaver-sentence]");
-    expect(second).not.toBe(first);
-    expect(second).toContain("If Zach leaves");
-    expect(second).not.toMatch(/to Zach \(/); // the leaver is never handed clients
-    // A shared-team person has no clients: their team shares the work.
-    await select.selectOption({ label: "Zach" });
+    expect(first).toMatch(/^If .+ leaves, /);
+    const chosen = (await button.innerText()).trim();
+
+    // A full-width button that opens a checkbox list grouped by department; Escape closes it and returns to the button.
+    expect(await button.getAttribute("aria-expanded")).toBe("false");
+    await button.click();
+    expect(await button.getAttribute("aria-expanded")).toBe("true");
+    expect(await page.locator("[data-leaver-options] fieldset legend").count()).toBeGreaterThanOrEqual(2);
+    await page.keyboard.press("Escape");
+    expect(await page.locator("[data-leaver-options]").count()).toBe(0);
+    expect(await page.evaluate(() => document.activeElement?.hasAttribute("data-leaver-select"))).toBe(true);
+
+    // Keyboard: open with ArrowDown, the checked person has focus; Space unticks them.
+    await page.keyboard.press("ArrowDown");
+    await page.waitForSelector("[data-leaver-options]");
+    await page.keyboard.press(" ");
+    expect(await page.locator("[data-leaver-options] input:checked").count()).toBe(0);
+    expect(await text(page, "[data-leaver-sentence]")).toBe("Choose one or more people to see who takes their work.");
+
+    // Two people: Zach and Laura (both Organic) leave together; neither is handed the other's clients.
+    await page.locator('[data-leaver-option="Zach"] input').check();
+    await page.locator('[data-leaver-option="Laura"] input').check();
+    const two = await text(page, "[data-leaver-sentence]");
+    expect(two).not.toBe(first);
+    expect(two).toMatch(/^If (Laura and Zach|Zach and Laura) leave, their \d+ clients go to /);
+    expect(two).not.toMatch(/(Zach|Laura) \(\d+\)/);
+    expect(await button.innerText()).toMatch(/Laura, Zach|Zach, Laura/);
+    expect(await page.locator("[data-dumbbell]").count()).toBeGreaterThan(0);
+
+    // Clear empties the choice.
+    await page.keyboard.press("Escape");
+    await page.locator("[data-leaver-clear]").click();
+    expect((await button.innerText()).trim()).toBe("Choose who leaves");
+    expect(chosen).not.toBe("Choose who leaves");
     expect(errors).toEqual([]);
     await page.close();
   });

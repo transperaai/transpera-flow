@@ -127,6 +127,9 @@ export const EDGE_FIELDS = {
   probability: share,
   condition_tag: optionalText(100),
   label: optionalText(200),
+  // Where the line's middle segment runs (flow coordinates of its path's centre), or null for automatic.
+  center_dx: (v) => v === null || coordinate(v),
+  center_dy: (v) => v === null || coordinate(v),
 } as const satisfies Record<string, Check>;
 
 const FIELDS: Record<Table, Record<string, Check>> = { steps: STEP_FIELDS, edges: EDGE_FIELDS };
@@ -233,6 +236,9 @@ export function parseNewEdge(v: unknown): NewEdge | null {
   for (const [field, check] of Object.entries(EDGE_FIELDS)) {
     const value = v[field] === undefined ? null : v[field];
     if (!check(value)) return null;
+    // A line's bend is sent only when it has one, so an unbent new line saves the columns it always had (a database without the
+    // bend columns still takes it).
+    if (value === null && (field === "center_dx" || field === "center_dy")) continue;
     out[field] = typeof value === "string" && !field.endsWith("_id") ? value.trim() || null : value;
   }
   if (out.from_step_id === out.to_step_id) return null;

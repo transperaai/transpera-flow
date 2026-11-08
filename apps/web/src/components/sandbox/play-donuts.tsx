@@ -1,68 +1,53 @@
 "use client";
 
-// "Where the time goes" in the Sandbox (D54): two donuts, Today and This scene, of the team's hours a month by purpose (the workspace's purposes in its
-// order and colours, the same order in both), and beside them the purposes that moved most. Plain SVG from the theme's tokens, with a table for a
-// screen reader.
+// "Where the time goes" in the Sandbox (D54; QA round 2, option C1): a stacked bar each for Today and This scene, of the team's hours a month by purpose
+// (the workspace's purposes in its order and colours, the same order in both), the total hours under them, and the purposes that moved most. Plain
+// HTML from the theme's tokens, with a table for a screen reader.
 
 import { useState } from "react";
 import { FloatingTip } from "@/components/ui/floating-tip";
 import { purposeColor } from "@/components/sandbox/time-chart";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { signedHours, type PurposeMove, type PurposeSlice } from "@/lib/sandbox/play-results-data";
+import { cn } from "@/lib/utils";
 
-const R = 46;
-const STROKE = 20;
-const C = 2 * Math.PI * R;
-
-export function Donut({ title, slices, order }: { title: string; slices: PurposeSlice[]; order: readonly string[] }) {
+/** One run's hours a month by purpose as a bar of 100%: each purpose's share, labelled inside when it is wide enough. */
+export function PurposeBar({ title, slices, order, strong = false }: { title: string; slices: PurposeSlice[]; order: readonly string[]; strong?: boolean }) {
   const [tip, setTip] = useState<{ s: PurposeSlice; at: { x: number; y: number } } | null>(null);
   const sorted = order.map((id) => slices.find((s) => s.id === id)).filter((s): s is PurposeSlice => !!s && s.hours > 0);
   const total = sorted.reduce((a, s) => a + s.hours, 0);
-  const starts = sorted.map((_, i) => (sorted.slice(0, i).reduce((a, s) => a + s.hours, 0) / (total || 1)) * C);
   return (
-    <figure className="m-0 flex min-w-0 flex-col items-center gap-1" data-play-donut={title}>
-      <svg viewBox="0 0 120 120" role="img" aria-label={`${title}: ${sorted.map((s) => `${s.name} ${formatNumber(s.hours, 0)} hours a month`).join(", ")}`} className="h-auto w-full max-w-40" onPointerLeave={() => setTip(null)}>
-        <g transform="rotate(-90 60 60)">
-          {total === 0 && <circle cx={60} cy={60} r={R} fill="none" stroke="var(--panel-2)" strokeWidth={STROKE} />}
-          {sorted.map((s, i) => {
-            const len = (s.hours / total) * C;
-            const gap = sorted.length > 1 ? Math.min(2, len / 2) : 0;
-            return (
-              <circle
-                key={s.id}
-                data-donut-slice={s.id}
-                cx={60}
-                cy={60}
-                r={R}
-                fill="none"
-                stroke={purposeColor(s.id)}
-                strokeWidth={STROKE}
-                strokeDasharray={`${Math.max(0, len - gap)} ${C - Math.max(0, len - gap)}`}
-                strokeDashoffset={-starts[i]!}
-                onPointerMove={(e) => setTip({ s, at: { x: e.clientX, y: e.clientY } })}
-                onPointerDown={(e) => setTip({ s, at: { x: e.clientX, y: e.clientY } })}
-              />
-            );
-          })}
-        </g>
-        <text x={60} y={58} textAnchor="middle" className="fill-foreground text-[15px] font-semibold">
-          {formatNumber(total, 0)}
-        </text>
-        <text x={60} y={72} textAnchor="middle" className="fill-muted-foreground text-[8px]">
-          hours a month
-        </text>
-      </svg>
-      <figcaption className="text-sm font-medium">{title}</figcaption>
+    <figure className="m-0 grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-2" data-play-purpose-bar={title}>
+      <figcaption className={cn("text-xs", strong ? "font-semibold" : "text-muted-foreground")}>{title}</figcaption>
+      <div
+        role="img"
+        aria-label={`${title}: ${sorted.map((s) => `${s.name} ${formatNumber(s.hours, 0)} hours a month (${formatPercent(s.hours / (total || 1))})`).join(", ")}`}
+        className="flex h-7 min-w-0 overflow-hidden rounded-md bg-panel-2"
+        onPointerLeave={() => setTip(null)}
+      >
+        {sorted.map((s) => {
+          const share = s.hours / (total || 1);
+          return (
+            <span
+              key={s.id}
+              data-purpose-segment={s.id}
+              className="flex min-w-0 items-center justify-center overflow-hidden border-r border-panel text-2xs font-semibold text-accent-fg tabular-nums last:border-r-0"
+              style={{ width: `${share * 100}%`, background: purposeColor(s.id) }}
+              onPointerMove={(e) => setTip({ s, at: { x: e.clientX, y: e.clientY } })}
+              onPointerDown={(e) => setTip({ s, at: { x: e.clientX, y: e.clientY } })}
+            >
+              {share >= 0.09 ? `${Math.round(share * 100)}%` : ""}
+            </span>
+          );
+        })}
+      </div>
       {tip && (
         <FloatingTip at={tip.at} placement="side">
           <div data-play-tip className="flex flex-col gap-0.5">
-            <div className="font-semibold">{title}</div>
-            <div className="flex items-center gap-1.5">
-              <i aria-hidden className="inline-block size-2 rounded-sm" style={{ background: purposeColor(tip.s.id) }} />
-              {tip.s.name}
-            </div>
+            <div className="font-semibold">{tip.s.name}</div>
+            <div className="text-muted-foreground">{title}</div>
             <div>
-              <b className="font-semibold">{formatNumber(tip.s.hours, 0)} h</b> a month ({formatPercent(total > 0 ? tip.s.hours / total : 0)})
+              <b className="font-semibold">{formatNumber(tip.s.hours, 0)} h</b> a month, {formatPercent(tip.s.hours / (total || 1))}
             </div>
           </div>
         </FloatingTip>
@@ -73,7 +58,8 @@ export function Donut({ title, slices, order }: { title: string; slices: Purpose
           {sorted.map((s) => (
             <tr key={s.id}>
               <th scope="row">{s.name}</th>
-              <td>{formatNumber(s.hours, 0)} h</td>
+              <td>{formatNumber(s.hours, 0)} hours a month</td>
+              <td>{formatPercent(s.hours / (total || 1))}</td>
             </tr>
           ))}
         </tbody>

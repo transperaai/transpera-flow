@@ -136,6 +136,7 @@ export function playSeries(setup: CapacitySetup, play: Pick<PlayState, "leavers"
       id,
       name: p?.name ?? mp?.name ?? "New hire",
       line: p?.line ?? roleLine.get(mp?.roles[0] ?? "") ?? 0.85,
+      roleId: p?.roleId ?? mp?.roles[0] ?? null,
       busy: range.map((m) => series[m]?.mean ?? null),
     };
   });

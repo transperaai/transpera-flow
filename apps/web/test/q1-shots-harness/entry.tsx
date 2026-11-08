@@ -2,10 +2,12 @@
 // business and the department cards, "What the time achieves" with the example's categories, and Team load by role. Test only, nothing here ships.
 
 import { createRoot } from "react-dom/client";
-import { capacitySetupFromModel, hiringAdvice, hiringDelayAt } from "@transpera-flow/db";
+import { capacitySetupFromModel, hiringAdvice, hiringDelayAt, type CapacitySetup } from "@transpera-flow/db";
 import { calendarMonthStarts } from "@transpera-flow/db/sandbox";
-import { capacityModel, simulate } from "@transpera-flow/engine";
-import { DepartmentCards } from "@/components/overview/department-cards";
+import { capacityModel, simulate, type EngineModel } from "@transpera-flow/engine";
+import { BusiestPeople } from "@/components/overview/busiest-people";
+import { DepartmentTiles, useDepartmentFigures, WholeBusinessHero } from "@/components/overview/department-cards";
+import { WhereTimeGoes } from "@/components/overview/where-time-goes";
 import { TeamLoad } from "@/components/overview/team-load";
 import { TimeAchieves } from "@/components/overview/time-achieves";
 import { timelineMonths, type TimelineRow } from "@/lib/forecast/timeline";
@@ -30,6 +32,21 @@ window.Worker = class extends NativeWorker {
 
 const START = "2026-11-02";
 
+/** The Overview's department figures: Money's hero numbers and tiles, People's busiest people and where the time goes. */
+function Departments({ setup, model, purposeNames }: { setup: CapacitySetup; model: EngineModel; purposeNames: Record<string, string> }) {
+  const figures = useDepartmentFigures({ setup, model, purposeNames });
+  return (
+    <>
+      <WholeBusinessHero setup={setup} base="/w/example" />
+      <DepartmentTiles figures={figures} base="/w/example" currency={setup.currency} />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <BusiestPeople people={figures.people} failed={!!figures.failure} capacityHref="/w/example/capacity" />
+        <WhereTimeGoes rows={figures.rows} failed={!!figures.failure} />
+      </div>
+    </>
+  );
+}
+
 window.mountShots = () => {
   const model = capacityModel();
   const setup = capacitySetupFromModel(model);
@@ -45,7 +62,7 @@ window.mountShots = () => {
   const advice = hiringAdvice(setup, result, (m) => hiringDelayAt(horizon.market, m));
   createRoot(document.getElementById("root")!).render(
     <div className="mx-auto flex max-w-6xl flex-col gap-8 p-4">
-      <DepartmentCards setup={setup} model={model} purposeNames={Object.fromEntries(EXAMPLE_PURPOSES.map((p) => [p.key, p.name]))} base="/w/example" />
+      <Departments setup={setup} model={model} purposeNames={Object.fromEntries(EXAMPLE_PURPOSES.map((p) => [p.key, p.name]))} />
       <section className="flex flex-col gap-2 rounded-lg border p-4" data-shot="achieves">
         <h3 className="text-sm font-semibold">What the time achieves</h3>
         <TimeAchieves monthly={monthly} hoursPerWeek={horizon.hoursPerWeek} start={START} categories={EXAMPLE_PURPOSES} sandboxHref="/w/example/sandbox" span="6 months" />

@@ -447,6 +447,84 @@ describe("processes", () => {
     const pub = await publishDraft(P, true);
     expect(["published", "unresolved"]).toContain(pub.status);
   });
+
+  it("saves a line's moved middle and loads it back, keeps it through a new draft, and doesn't count it as a change in History", async () => {
+    const { openDraft, discardDraft, insertProcessRows, saveProcessFields } = await import("@/app/w/[slug]/actions");
+    const { loadProcessBySlug } = await import("@transpera-flow/db");
+    const { sessionMock } = await import("./action-harness");
+    if (!(await one("select draft_revision_id from processes where id = $1", [P])).draft_revision_id) expect((await openDraft(P)).status).toBe("ok");
+    const rev = (await one("select draft_revision_id from processes where id = $1", [P])).draft_revision_id as string;
+    const edge = (await one("select id from edges where revision_id = $1 order by id limit 1", [rev])).id as string;
+    const loaded = async () => (await loadProcessBySlug(await sessionMock.getDb(), SLUG, { processId: P }))!.draft!.edges.find((e) => e.id === edge)!;
+    expect(await loaded()).toMatchObject({ center_dx: null, center_dy: null });
+
+    // A drag, as the editor saves it (per-field compare-and-set), and undo's save back to automatic.
+    expect(await saveProcessFields(rev, "edges", edge, { center_dx: null, center_dy: null }, { center_dx: 40, center_dy: -20 })).toEqual({ status: "saved" });
+    expect(await loaded()).toMatchObject({ center_dx: 40, center_dy: -20 });
+    // Someone else moved it meanwhile: a conflict, not an overwrite.
+    expect(await saveProcessFields(rev, "edges", edge, { center_dx: null, center_dy: null }, { center_dx: 10, center_dy: 10 })).toMatchObject({ status: "conflict" });
+    expect(await saveProcessFields(rev, "edges", edge, { center_dx: 40, center_dy: -20 }, { center_dx: null, center_dy: null })).toEqual({ status: "saved" });
+    expect(await loaded()).toMatchObject({ center_dx: null, center_dy: null });
+
+    // A new line (or one undo brings back) is inserted with its middle.
+    const [from, to] = (await q("select id from steps where revision_id = $1 and kind = 'task' order by id limit 2", [rev])).rows.map((r) => r.id as string);
+    const made = "88888888-8888-4888-8888-888888888882";
+    expect(await insertProcessRows(rev, [], [{ id: made, from_step_id: from, to_step_id: to, probability: 0, condition_tag: null, label: null, center_dx: 30, center_dy: 5 }])).toEqual({ status: "ok" });
+    expect(await one("select center_dx::float8 as dx, center_dy::float8 as dy from edges where revision_id = $1 and id = $2", [rev, made])).toEqual({ dx: 30, dy: 5 });
+
+    // History's change counts leave a moved line out, as they leave out a moved step.
+    expect(await saveProcessFields(rev, "edges", edge, { center_dx: null, center_dy: null }, { center_dx: 40, center_dy: -20 })).toEqual({ status: "saved" });
+    const counts = await one("select private.revision_change_counts(live_revision_id, draft_revision_id) as c from processes where id = $1", [P]);
+    expect(counts.c.edges).toMatchObject({ changed: 0 });
+    expect(await discardDraft(P)).toEqual({ status: "ok" });
+    // A live version with a moved line opens into a draft with the line where it was.
+    const live = (await one("select live_revision_id from processes where id = $1", [P])).live_revision_id as string;
+    await q("update edges set center_dx = 25, center_dy = 0 where revision_id = $1 and id = $2", [live, edge]);
+    expect((await openDraft(P)).status).toBe("ok");
+    expect(await loaded()).toMatchObject({ center_dx: 25, center_dy: 0 });
+    await q("update edges set center_dx = null, center_dy = null where revision_id = $1 and id = $2", [live, edge]);
+    expect(await discardDraft(P)).toEqual({ status: "ok" });
+  });
+
+  it("saves a process's notes and loads them back; a stale base is a conflict, a Viewer can't, and too long is refused", async () => {
+    const { saveProcessNotes, saveProcessNotesFromPage } = await import("@/app/w/[slug]/process-notes-actions");
+    const { loadProcessBySlug } = await import("@transpera-flow/db");
+    const { sessionMock } = await import("./action-harness");
+    const loaded = async () => (await loadProcessBySlug(await sessionMock.getDb(), SLUG, { processId: P }))!.live.process.notes;
+    expect(await loaded()).toBeNull();
+
+    // Trimmed as saved, and read back by the page's loader.
+    expect(await saveProcessNotes(P, null, "  Timings from the March interview with Sam.  ")).toEqual({ status: "saved", value: "Timings from the March interview with Sam." });
+    expect(await loaded()).toBe("Timings from the March interview with Sam.");
+    // Not versioned: no draft is opened and the live version is the same.
+    const before = await one("select live_revision_id, draft_revision_id from processes where id = $1", [P]);
+    // The page still holds no notes: someone saved since, so it is a conflict with what is stored, not an overwrite.
+    expect(await saveProcessNotes(P, null, "Mine")).toEqual({ status: "conflict", theirs: "Timings from the March interview with Sam." });
+    expect(await saveProcessNotesFromPage(P, null, "Mine")).toMatch(/Someone else changed these notes/);
+    expect(await loaded()).toBe("Timings from the March interview with Sam.");
+    // Too long is refused before the database; exactly 4,000 is fine.
+    expect(await saveProcessNotes(P, "Timings from the March interview with Sam.", "x".repeat(4001))).toEqual({ status: "error", message: "Keep the notes to 4,000 characters." });
+    expect(await saveProcessNotesFromPage(P, "Timings from the March interview with Sam.", "x".repeat(4001))).toBe("Keep the notes to 4,000 characters.");
+    expect(await saveProcessNotes(P, "Timings from the March interview with Sam.", "x".repeat(4000))).toEqual({ status: "saved", value: "x".repeat(4000) });
+    // The database's own limit holds too.
+    await expect(q("update processes set notes = $2 where id = $1", [P, "y".repeat(4001)])).rejects.toThrow(/processes_notes_length/);
+    // Cleared (empty) is stored as null, through the page's binding.
+    expect(await saveProcessNotesFromPage(P, "x".repeat(4000), "   ")).toBeNull();
+    expect(await loaded()).toBeNull();
+    expect(await one("select live_revision_id, draft_revision_id from processes where id = $1", [P])).toEqual(before);
+    expect(await saveProcessNotes("not-an-id", null, "x")).toEqual({ status: "error", message: "That value isn't valid." });
+
+    // A Viewer can't save: row-level security finds no row to change.
+    await q("update processes set notes = 'Kept' where id = $1", [P]);
+    signInAs({ tdb }, viewer);
+    expect(await saveProcessNotes(P, "Kept", "Viewer's")).toEqual({ status: "not_found" });
+    expect(await saveProcessNotesFromPage(P, "Kept", "Viewer's")).toMatch(/can't change this process's notes/);
+    expect((await one("select notes from processes where id = $1", [P])).notes).toBe("Kept");
+    // The Owner can.
+    signInAs({ tdb }, owner);
+    expect(await saveProcessNotes(P, "Kept", null)).toEqual({ status: "saved", value: null });
+    expect((await one("select notes from processes where id = $1", [P])).notes).toBeNull();
+  });
 });
 
 describe("settings", () => {

@@ -32,7 +32,7 @@ export const MODE_INFO: Record<EditorMode, ModeInfo> = {
   },
   solution: {
     title: (subject) => `New solution · ${subject}`,
-    hint: "Change the steps, simulate, then save. Every solution fixes an issue, so pick the issue first. Solutions never change the live map.",
+    hint: "Change the steps, then save. Every solution fixes an issue, so pick the issue first. Solutions never change the live map.",
     save: [{ id: "save-solution", label: "Save solution", primary: true }],
     available: true,
   },

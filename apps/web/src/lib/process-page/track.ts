@@ -10,14 +10,9 @@ export type TrackStage = 0 | 1 | 2 | 3 | 4;
 
 export interface LinkedSolution {
   solution: Pick<SolutionRow, "id" | "name" | "process_id" | "changed_step_ids">;
-  /** The verdict that counts: the person's own, else the simulation's. */
+  /** The person's verdict (there are no automatic verdicts), or null while nobody has given one. */
   verdict: SolutionVerdict | null;
-  /** The simulation's own verdict, and the person's; when they differ the page says so. */
-  autoVerdict: SolutionVerdict | null;
-  userVerdict: SolutionVerdict | null;
-  /** Share of simulated runs that meet the target, 0 to 100 (the simulation's). */
-  holdsPct: number | null;
-  /** True when the verdict is the person's own rather than the simulation's. */
+  /** True when someone has given a verdict. */
   yours: boolean;
 }
 
@@ -40,9 +35,6 @@ export function linkedSolutions(data: Pick<SolutionsData, "solutions" | "links">
     .map((l) => ({
       solution: byId.get(l.solution_id)!,
       verdict: effectiveVerdict(l),
-      autoVerdict: l.auto_verdict,
-      userVerdict: l.user_verdict,
-      holdsPct: l.holds_pct,
       yours: l.user_verdict !== null,
     }))
     .sort((a, b) => byId.get(b.solution.id)!.created_at.localeCompare(byId.get(a.solution.id)!.created_at) || a.solution.id.localeCompare(b.solution.id));
@@ -55,7 +47,7 @@ export function linkedSolutions(data: Pick<SolutionsData, "solutions" | "links">
  * - Being built: a solution has been tested against it (a verdict, or the issue is in Testing solutions).
  * - Implemented: the issue is resolved by a solution or a change to the process.
  * - Verified: resolved by a solution, and that solution (the one picked when it was resolved, not another linked one)
- *   passed its check (a person's Pass counts; where it overrides a simulation Fail the page shows both).
+ *   passed its check (only a person's Pass counts).
  * Won't fix, and resolved as not a problem, leave the track.
  */
 export function trackOf(issue: Pick<IssueRow, "status" | "resolved_how" | "resolved_solution_id">, solutions: readonly LinkedSolution[]): IssueTrack {
@@ -76,4 +68,31 @@ export function trackOf(issue: Pick<IssueRow, "status" | "resolved_how" | "resol
 export function otherImprovements(data: SolutionsData, processId: string): SolutionsData {
   const linked = new Set(data.links.map((l) => l.solution_id));
   return { ...data, solutions: data.solutions.filter((s) => s.process_id === processId && !linked.has(s.id)), links: [] };
+}
+
+/** The solution an issue was resolved by, when it was resolved by one that was picked and is still linked; else null. */
+export function solvedBy(issue: Pick<IssueRow, "status" | "resolved_how" | "resolved_solution_id">, solutions: readonly LinkedSolution[]): LinkedSolution | null {
+  if (issue.status !== "resolved" || issue.resolved_how !== "solution" || !issue.resolved_solution_id) return null;
+  return solutions.find((s) => s.solution.id === issue.resolved_solution_id) ?? null;
+}
+
+export interface IssueGroups<T> {
+  /** Not solved yet: Open and Testing solutions, in the order given. */
+  current: T[];
+  /** Resolved, shown as the solution that resolved each (or, with none, by the issue and how it was resolved). */
+  solved: T[];
+  /** Closed without a fix. */
+  wontFix: T[];
+}
+
+/** The process page's Issues and solutions, split into current issues, solved ones and won't fix. */
+export function issueGroups<T>(items: readonly T[], status: (item: T) => IssueRow["status"]): IssueGroups<T> {
+  const out: IssueGroups<T> = { current: [], solved: [], wontFix: [] };
+  for (const item of items) {
+    const s = status(item);
+    if (s === "resolved") out.solved.push(item);
+    else if (s === "wont_fix") out.wontFix.push(item);
+    else out.current.push(item);
+  }
+  return out;
 }

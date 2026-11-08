@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
 import { HeaviestSteps, HoursByRole, SupportingHeadline } from "@/components/process-supporting-data";
-import { headlineText, processHeadline, processHours, type DepartmentMap } from "@/lib/process-page/hours";
+import { headlineText, hoursStrip, pieSlices, processHeadline, processHours, stripHeadline, type DepartmentMap } from "@/lib/process-page/hours";
 
 // The Supporting data's hours (Q3 item 5), worked out by hand from a run's `personTime.stepHours`.
 //
@@ -103,7 +103,7 @@ describe("the panels", () => {
   const hours = processHours(model, result, mine);
   const headline = processHeadline(model, result, mine, null);
 
-  it("render the headline, the total, a bar per role opening to people, and the steps with their split", () => {
+  it("render the headline, the total, a donut per role opening to people, and the strip of hours by step", () => {
     const html = renderToStaticMarkup(
       createElement("div", null, [
         createElement(SupportingHeadline, { key: 1, headline, result }),
@@ -116,17 +116,58 @@ describe("the panels", () => {
     expect(html).toContain("Executor");
     expect(html).toContain("Bob");
     expect(html).toContain("<details");
+    // A donut with a summary for a screen reader, a slice per role with its numbers on hover, and the legend as text.
+    expect(html).toMatch(/<svg[^>]*role="img"[^>]*aria-label="Hours a month by role, 350 h in all: /);
+    expect(html).toContain("data-pie-slice");
+    expect(html).toMatch(/<title>Executor: \d+ h a month, \d+%<\/title>/);
     expect(html).toContain("Review");
-    expect(html).toContain("data-split-bar");
-    expect(html).toContain("No work split yet");
+    // Heaviest steps: one strip of the 350 h, Review 250 (71%) and Draft 100 (29%), each segment with its numbers on hover.
+    expect(html).toContain("Review takes 71% of the 350 h a month.");
+    expect(html).toMatch(/<div role="img" aria-label="The process&#x27;s 350 h a month by step: Review: 250 h a month, 71% of the process; Draft: 100 h a month, 29% of the process\."/);
+    expect(html).toContain('title="Review: 250 h a month, 71% of the process"');
+    expect(html.match(/data-strip-segment=/g)).toHaveLength(2);
+    // The per-step work split is gone from this panel (it is on the step).
+    expect(html).not.toContain("data-split-bar");
     expect(html).not.toContain("Show all");
   });
 
-  it("show at most ten steps, with Show all for the rest", () => {
-    const many = { total: 11, roles: [], cells: [], steps: Array.from({ length: 12 }, (_, i) => ({ id: `s${i}`, label: `Step ${i}`, hours: 12 - i, split: null })) };
+  it("fold the roles past the sixth into Others, largest first, naming them on hover", () => {
+    const roles = [120, 80, 60, 40, 25, 15, 6, 4].map((h, i) => ({ id: `r${i}`, label: `Role ${i + 1}`, hours: h, people: [] }));
+    const slices = pieSlices(roles);
+    expect(slices.map((s) => s.label)).toEqual(["Role 1", "Role 2", "Role 3", "Role 4", "Role 5", "Role 6", "Others"]);
+    expect(slices.at(-1)!.hours).toBe(10);
+    expect(slices.at(-1)!.members.map((m) => m.label)).toEqual(["Role 7", "Role 8"]);
+    expect(slices.reduce((s, x) => s + x.share, 0)).toBeCloseTo(1, 9);
+    // One leftover role keeps its own slice; no hours, no slices.
+    expect(pieSlices(roles.slice(0, 7)).map((s) => s.label)).not.toContain("Others");
+    expect(pieSlices([])).toEqual([]);
+    const html = renderToStaticMarkup(createElement(HoursByRole, { hours: { total: 350, roles, steps: [], cells: [] }, result }));
+    expect(html).toContain("<title>Others: 10 h a month, 3% (Role 7 6 h, Role 8 4 h)</title>");
+    expect(html).toContain("and 4 more");
+  });
+
+  it("name the four heaviest steps on the strip and group the rest as N other steps, listed on hover and when opened", () => {
+    const many = { total: 100, roles: [], cells: [], steps: [38, 29, 24, 19, 16, 12, 10, 8].map((h, i) => ({ id: `s${i}`, label: `Step ${i}`, hours: h, split: null })) };
+    const strip = hoursStrip(many)!;
+    expect(strip.total).toBe(156);
+    expect(strip.segments.map((x) => [x.label, x.hours])).toEqual([["Step 0", 38], ["Step 1", 29], ["Step 2", 24], ["Step 3", 19], ["4 other steps", 46]]);
+    // 38 + 29 = 67 < 78 (half), + 24 = 91: three steps take 58%.
+    expect(strip.lead.steps).toHaveLength(3);
+    expect(stripHeadline(strip)).toBe("3 steps take 58% of the 156 h a month.");
     const html = renderToStaticMarkup(createElement(HeaviestSteps, { hours: many, result }));
-    expect(html.match(/data-heavy-step/g)).toHaveLength(10);
-    expect(html).toContain("Show all 12");
+    expect(html).toContain("3 steps take 58% of the 156 h a month.");
+    expect(html).toContain('title="4 other steps: 46 h a month, 29% of the process (Step 4 16 h, Step 5 12 h, Step 6 10 h, Step 7 8 h)"');
+    expect(html.match(/data-other-step=/g)).toHaveLength(4);
+    expect(html).toContain("How this works");
+  });
+
+  it("keep a single leftover step by name, and word one step and a spread-out process plainly", () => {
+    const steps = (hs: number[]) => ({ steps: hs.map((h, i) => ({ id: `s${i}`, label: `Step ${i}`, hours: h, split: null })) });
+    expect(hoursStrip(steps([5, 4, 3, 2, 1]))!.segments.map((x) => x.label)).toEqual(["Step 0", "Step 1", "Step 2", "Step 3", "Step 4"]);
+    expect(stripHeadline(hoursStrip(steps([12]))!)).toBe("One step, Step 0, takes all 12 h a month.");
+    expect(stripHeadline(hoursStrip(steps([10, 10, 10, 10, 10, 10, 10, 10, 10, 10]))!)).toBe("The 4 heaviest steps take 40% of the 100 h a month.");
+    expect(hoursStrip(steps([]))).toBeNull();
+    expect(hoursStrip(null)).toBeNull();
   });
 
   it("say what is missing instead of an empty chart", () => {

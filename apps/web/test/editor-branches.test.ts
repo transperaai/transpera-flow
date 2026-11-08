@@ -111,8 +111,19 @@ describe("addDecision", () => {
 
 const from = (b: ProcessBundle, id: string) => b.edges.filter((e) => e.from_step_id === id);
 
+/** A decision with Yes 50 / No 30 / Maybe 20. */
+function threeWay() {
+  const start = withDecision();
+  const d = start.d;
+  let b = applyEdit(start.b, edit(addBranch(start.b, d, ids.lost)));
+  const changes = branchesOf(b, d).map((e, i) => ({ table: "edges" as const, id: e.id, before: { probability: e.probability }, after: { probability: [0.5, 0.3, 0.2][i]! } }));
+  b = applyEdit(b, { label: "", ops: [{ kind: "update", changes }] });
+  expect(percents(b, d)).toEqual([50, 30, 20]);
+  return { b, d };
+}
+
 describe("setBranchShare", () => {
-  it("sets a branch and gives the last one the rest", () => {
+  it("sets a branch and gives the other the rest", () => {
     const { b, d } = withDecision();
     const [yes] = branchesOf(b, d);
     const e = setBranchShare(b, d, yes!.id, 70)!;
@@ -121,27 +132,42 @@ describe("setBranchShare", () => {
     roundTrips(b, e);
   });
 
-  it("lets the last branch be set too: the others share what it leaves", () => {
+  it("treats the last branch like any other", () => {
     const { b, d } = withDecision();
     const last = branchesOf(b, d)[1]!;
     expect(percents(applyEdit(b, setBranchShare(b, d, last.id, 20)!), d)).toEqual([80, 20]);
   });
 
-  it("keeps the middle branches, and shrinks them in proportion when the total would pass 100%", () => {
-    const start = withDecision();
-    const d = start.d;
-    let b = start.b;
-    b = applyEdit(b, edit(addBranch(b, d, ids.lost))); // 50 / 25 / 25
-    b = applyEdit(b, edit(addBranch(b, d, ids.won))); // 50 / 25 / 13 / 12
-    expect(percents(b, d)).toEqual([50, 25, 13, 12]);
-    const [yes, ...rest] = branchesOf(b, d);
-    // 10% on the first: the middle two (25 and 13) keep theirs and the last takes the rest.
-    expect(percents(applyEdit(b, setBranchShare(b, d, yes!.id, 10)!), d)).toEqual([10, 25, 13, 52]);
-    // 80% on the first: 25 + 13 no longer fit in 20, so they shrink in proportion and the last gets 0.
-    const big = applyEdit(b, setBranchShare(b, d, yes!.id, 80)!);
-    expect(percents(big, d)).toEqual([80, 13, 7, 0]);
-    // Setting a middle branch: the first (50) and third (13) would pass 100% with it, so they shrink to 60 between them.
-    expect(percents(applyEdit(b, setBranchShare(b, d, rest[0]!.id, 40)!), d)).toEqual([48, 40, 12, 0]);
+  it("shares the difference across the others in proportion to what they had (round 2, item 12)", () => {
+    const { b, d } = threeWay();
+    const [yes, no, maybe] = branchesOf(b, d);
+    // 60 on Yes: No and Maybe share 40 as 30 : 20.
+    expect(percents(applyEdit(b, setBranchShare(b, d, yes!.id, 60)!), d)).toEqual([60, 24, 16]);
+    // 61 on Yes: 39 as 30 : 20 is 23.4 and 15.6; rounded down that is 38, and the 1 left goes to the larger (No).
+    expect(percents(applyEdit(b, setBranchShare(b, d, yes!.id, 61)!), d)).toEqual([61, 24, 15]);
+    // Down works the same way: 10 on Yes leaves 90 as 30 : 20.
+    expect(percents(applyEdit(b, setBranchShare(b, d, yes!.id, 10)!), d)).toEqual([10, 54, 36]);
+    // A middle or last branch too: 50 on Maybe leaves 50 as 50 : 30, which is 31.25 and 18.75; the 1 left goes to Yes.
+    expect(percents(applyEdit(b, setBranchShare(b, d, maybe!.id, 50)!), d)).toEqual([32, 18, 50]);
+    expect(percents(applyEdit(b, setBranchShare(b, d, no!.id, 0)!), d)).toEqual([72, 0, 28]);
+  });
+
+  it("splits evenly when the others are all at 0%", () => {
+    const { b, d } = threeWay();
+    const [yes] = branchesOf(b, d);
+    const all = applyEdit(b, setBranchShare(b, d, yes!.id, 100)!);
+    expect(percents(all, d)).toEqual([100, 0, 0]);
+    expect(percents(applyEdit(all, setBranchShare(all, d, yes!.id, 40)!), d)).toEqual([40, 30, 30]);
+    // An odd remainder goes to the first of equals.
+    expect(percents(applyEdit(all, setBranchShare(all, d, yes!.id, 99)!), d)).toEqual([99, 1, 0]);
+  });
+
+  it("counts a go back as a branch like any other", () => {
+    const { b: start, d } = threeWay();
+    const maybe = branchesOf(start, d)[2]!;
+    const b = applyEdit(start, edit(setBranchTarget(start, maybe.id, { goBackTo: ids.qualify })));
+    expect(isGoBack(b, maybe.id)).toBe(true);
+    expect(percents(applyEdit(b, setBranchShare(b, d, branchesOf(b, d)[0]!.id, 60)!), d)).toEqual([60, 24, 16]);
   });
 
   it("handles 0% and 100%", () => {
@@ -161,7 +187,7 @@ describe("setBranchShare", () => {
     let b = start.b;
     b = applyEdit(b, edit(addBranch(b, d, ids.lost)));
     b = applyEdit(b, edit(addBranch(b, d, ids.won)));
-    for (const [i, value] of [[0, 33], [1, 77], [3, 5], [2, 99.6], [0, 0], [3, 100], [1, 1]] as const) {
+    for (const [i, value] of [[0, 33], [1, 77], [3, 5], [2, 99.6], [0, 0], [3, 100], [1, 1], [2, 37], [0, 50]] as const) {
       const e = setBranchShare(b, d, branchesOf(b, d)[i]!.id, value);
       if (e) b = applyEdit(b, e);
       const p = percents(b, d);
@@ -190,11 +216,12 @@ describe("setBranchShare", () => {
 });
 
 describe("addBranch and setBranchTarget", () => {
-  it("adds a branch to a step, taking half the last branch's share", () => {
+  it("adds a branch to a step with an even share, the others making room in proportion", () => {
     const { b, d } = withDecision();
     const r = addBranch(b, d, ids.lost);
     const after = applyEdit(b, edit(r));
-    expect(percents(after, d)).toEqual([50, 25, 25]);
+    // 100 / 3 is 33; Yes and No share 67 evenly, and the 1 left over goes to the first of equals.
+    expect(percents(after, d)).toEqual([34, 33, 33]);
     expect(branchesOf(after, d)[2]!.to_step_id).toBe(ids.lost);
     expect(branchesOf(after, d)[2]!.label).toBe("Branch 3");
     expect(stepWarnings(after).get(d)).toBeUndefined();
@@ -332,24 +359,32 @@ describe("branch names and conditions", () => {
 });
 
 describe("removeBranch", () => {
-  it("takes a branch off and gives its share to the branch that is last, so the shares still add to 100%", () => {
-    const { b, d } = withDecision();
-    const three = applyEdit(b, edit(addBranch(b, d, ids.lost)));
-    expect(percents(three, d)).toEqual([50, 25, 25]);
-    const [yes, , third] = branchesOf(three, d);
+  it("takes a branch off and the others grow in proportion, so the shares still add to 100%", () => {
+    const { b: three, d } = threeWay();
+    const [yes, no, maybe] = branchesOf(three, d);
     const e = removeBranch(three, yes!.id)!;
     const after = applyEdit(three, e);
-    expect(percents(after, d)).toEqual([25, 75]);
-    expect(branchesOf(after, d).map((x) => x.id)).not.toContain(yes!.id);
-    expect(branchesOf(after, d)[1]!.id).toBe(third!.id);
+    // No and Maybe share 100 as 30 : 20.
+    expect(percents(after, d)).toEqual([60, 40]);
+    expect(branchesOf(after, d).map((x) => x.id)).toEqual([no!.id, maybe!.id]);
     expect(total(after, d)).toBeCloseTo(1, 10);
+    // 50 : 20 is 71.4 and 28.6; rounded down that is 99, and the 1 left goes to the larger.
+    expect(percents(applyEdit(three, removeBranch(three, no!.id)!), d)).toEqual([72, 28]);
     // Undo puts the line and its share back (the line comes back at the end of the list).
     const undone = applyEdit(after, invertEdit(e));
     const byId = (x: ProcessBundle) => [...x.edges].sort((p, q) => p.id.localeCompare(q.id));
     expect(byId(undone)).toEqual(byId(three));
   });
 
-  it("removing the last branch gives its share to the new last; the last two become one at 100%", () => {
+  it("splits evenly among the branches left when they were all at 0%", () => {
+    const { b: three, d } = threeWay();
+    const [yes, no] = branchesOf(three, d);
+    const all = applyEdit(three, setBranchShare(three, d, yes!.id, 100)!);
+    expect(percents(applyEdit(all, removeBranch(all, yes!.id)!), d)).toEqual([50, 50]);
+    expect(percents(applyEdit(all, removeBranch(all, no!.id)!), d)).toEqual([100, 0]);
+  });
+
+  it("removing one of two leaves the other at 100%", () => {
     const { b, d } = withDecision();
     const [yes, no] = branchesOf(b, d);
     const after = applyEdit(b, removeBranch(b, no!.id)!);

@@ -25,22 +25,17 @@ export const SOLUTIONS_LIST_HELP = {
   },
 } as const;
 
-/** The Solution page's sections and controls (descoped in Q12: the header's built-by and fixes, and the notes). */
+/** The Solution page's sections and controls (descoped in Q12 and QA round 2: the header's fixes, and the notes and sources). */
 export const SOLUTION_PAGE_HELP = {
-  built: {
-    label: "Built by",
-    description: "Who saved the solution, when, and which process it changes. It is a separate copy: the live version of that process is not touched.",
-    example: "Built by You · 5 Oct · changes Sales.",
-  },
   solves: {
     label: "Solves",
     description: "The issues this solution was built to fix. A solution can fix more than one. Open an issue to see how it is getting on.",
     example: "“AI lead qualifier” fixes #15 (wait to first contact) and #17 (leads lost at Check fit).",
   },
   notes: {
-    label: "Notes",
-    description: "Anything worth knowing about the solution as a whole: what you tried, what to watch, who agreed. Click the notes to edit them, then press Save.",
-    example: "Needs the enrichment tool trial extended to 30 days.",
+    label: "Notes and sources",
+    description: "What this solution changes and why, in your own words, and the sources that back it up. Click the notes to edit them, then press Save.",
+    example: "Drops the manual enrichment step: the new tool fills in company size and industry before Check fit.",
   },
 } as const;
 

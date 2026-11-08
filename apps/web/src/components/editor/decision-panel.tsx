@@ -1,7 +1,8 @@
 "use client";
 
 // A decision's side panel (editor brainstorm, item 5): each branch's name, share, where it goes and its optional "Only when…", and
-// "+ Add branch". The last branch takes what the others leave, so the shares always add up to 100%. Every change is one undo.
+// "+ Add branch". Changing one share re-balances the others in proportion (round 2, item 12), so the shares always add up to 100%.
+// The same edits are on the decision's card on the map (a branch's % and its "+" dot). Every change is one undo.
 
 import { useEffect, useRef, useState } from "react";
 import type { EdgeRow, ProcessBundle, StepRow } from "@transpera-flow/db";
@@ -58,7 +59,7 @@ export function DecisionPanel({
         Branches
         <Help
           label="Branches"
-          description="Each branch is a way the work can go after this question, with the share of items that take it. The shares always add up to 100%: the last branch takes what the others leave."
+          description="Each branch is a way the work can go after this question, with the share of items that take it. The shares always add up to 100%: change one and the others make room in proportion to what they had."
           example="“Signs” 60% goes on to Kickoff; “Walks away” 40% ends as Lost."
         />
       </h3>
@@ -70,7 +71,6 @@ export function DecisionPanel({
               edge={edge}
               index={i}
               count={branches.length}
-              last={i === branches.length - 1}
               focused={focus === edge.id}
               onName={(v) => run((b) => setBranchName(b, edge.id, v))}
               onShare={(v) => run((b) => setBranchShare(b, decision.id, edge.id, v))}
@@ -98,7 +98,7 @@ export function DecisionPanel({
       >
         + Add branch
       </Button>
-      <p className="text-xs text-muted-foreground">The last branch takes what is left, so the shares always add up to 100%.</p>
+      <p className="text-xs text-muted-foreground">Change one share and the others make room in proportion, so the shares always add up to 100%.</p>
       {note && (
         <p role="alert" className="rounded-token border border-warn bg-warn-soft px-2 py-1 text-xs">
           {note}
@@ -113,7 +113,6 @@ function BranchFields({
   edge,
   index,
   count,
-  last,
   focused,
   onName,
   onShare,
@@ -125,7 +124,6 @@ function BranchFields({
   edge: EdgeRow;
   index: number;
   count: number;
-  last: boolean;
   focused: boolean;
   onName: (v: string) => void;
   onShare: (v: number) => void;
@@ -172,9 +170,9 @@ function BranchFields({
           max={100}
           step={1}
           disabled={count < 2}
-          hint={count < 2 ? "Always 100%" : last ? "Takes what is left" : undefined}
+          hint={count < 2 ? "Always 100%" : undefined}
           save={saver<number | null>((v) => v !== null && onShare(v))}
-          help={{ description: "The share of items that take this branch. The shares add up to 100%; the last branch takes whatever the others leave.", example: "60% sign and go on to Kickoff; the other 40% walk away." }}
+          help={{ description: "The share of items that take this branch. The shares add up to 100%: the other branches grow or shrink in proportion to make room.", example: "60% sign and go on to Kickoff; the other 40% walk away." }}
         />
       </div>
       <label className="flex flex-col gap-1 text-xs font-medium text-fg-2">

@@ -375,18 +375,13 @@ function IssueItem({
     );
   }
   const owners = issue ? (issue.owner_ids.length ? issue.owner_ids : issue.owner_person_id ? [issue.owner_person_id] : []) : [];
-  const touches = v.stepIds.length
-    ? v.stepIds.map((id) => names.step.get(id) ?? "a removed step").join(", ")
-    : issue && v.processIds.length
-      ? "The whole process"
-      : null;
-  const target = issue?.target_measure ? `Target: ${issue.target_measure}${issue.target_now ? `, now ${issue.target_now}` : ""}${issue.target_goal ? `, goal ${issue.target_goal}` : ""}` : null;
+  // An issue belongs to its process (QA round 2): only a finding of the run, not yet an issue, names the steps it was found at.
+  const touches = !issue && v.stepIds.length ? v.stepIds.map((id) => names.step.get(id) ?? "a removed step").join(", ") : null;
   const where = [
     showProcess && v.processId ? names.process.get(v.processId) : null,
     touches,
     v.personId ? names.person.get(v.personId) : null,
     owners.length ? `${owners.length > 1 ? "owners" : "owner"} ${owners.map((id) => names.person.get(id) ?? "someone who left").join(", ")}` : null,
-    target,
   ].filter(Boolean);
 
   return (

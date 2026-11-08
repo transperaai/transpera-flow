@@ -1,4 +1,8 @@
 import { chromium, type Browser, type Page } from "playwright-core";
+import { mkdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundleHarness } from "./build-harness";
 
@@ -9,14 +13,27 @@ import { bundleHarness } from "./build-harness";
 let browser: Browser;
 let script: string;
 let workers: Record<string, string>;
+let css = "";
+
+/** The app's real stylesheet (Tailwind compiled from globals.css), for the layout checks and screenshots. Test only. */
+async function appCss(): Promise<string> {
+  const require = createRequire(import.meta.url);
+  const here = dirname(require.resolve("@tailwindcss/postcss"));
+  type Process = { process(css: string, o: { from: string }): Promise<{ css: string }> };
+  const postcss = require(require.resolve("postcss", { paths: [here] })) as (plugins: unknown[]) => Process;
+  const tailwind = require("@tailwindcss/postcss") as (o: { base: string }) => unknown;
+  const file = fileURLToPath(new URL("../src/app/globals.css", import.meta.url));
+  return (await postcss([tailwind({ base: fileURLToPath(new URL("..", import.meta.url)) })]).process(readFileSync(file, "utf8"), { from: file })).css;
+}
 
 // The bundle has no `import.meta.url`: give it one under which `../../workers/<name>.ts` names the worker file.
 const META = { "import.meta.url": JSON.stringify("http://harness.test/src/lib/x/") };
 
 beforeAll(async () => {
-  [script, workers] = await Promise.all([
+  [script, workers, css] = await Promise.all([
     bundleHarness(new URL("./overview-page-harness/entry.tsx", import.meta.url), META),
     Promise.all(["simulate.worker.ts", "absence.worker.ts"].map(async (f) => [f, await bundleHarness(new URL(`../src/workers/${f}`, import.meta.url))] as const)).then(Object.fromEntries),
+    appCss(),
   ]);
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 }, 120_000);
@@ -25,14 +42,14 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function mount(): Promise<{ page: Page; errors: string[] }> {
-  const page = await browser.newPage({ viewport: { width: 1300, height: 1400 } });
+async function mount({ width = 1300, capacity = false, styled = false }: { width?: number; capacity?: boolean; styled?: boolean } = {}): Promise<{ page: Page; errors: string[] }> {
+  const page = await browser.newPage({ viewport: { width, height: 1400 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.setContent(`<div id="root"></div>`);
+  await page.setContent(`${styled ? `<style>${css}</style>` : ""}<div id="root"></div>`);
   await page.evaluate((w) => (window.workerScripts = w), workers);
   await page.addScriptTag({ content: script });
-  await page.evaluate(() => window.mountOverview());
+  await page.evaluate((c) => window.mountOverviewPage({ capacity: c }), capacity);
   return { page, errors };
 }
 
@@ -67,4 +84,44 @@ describe("the Overview page's runs", () => {
     expect(errors).toEqual([]);
     await page.close();
   }, 240_000);
+});
+
+describe("the Overview's layout: sections by question (L3)", () => {
+  const ready = async (page: Page) => {
+    await page.waitForSelector("[data-busiest]", { timeout: 120_000 });
+    await page.waitForSelector("[data-team-load]", { timeout: 120_000 });
+    await page.waitForSelector("[data-time-achieves]", { timeout: 120_000 });
+    await page.waitForSelector("[data-time-split]", { timeout: 120_000 });
+  };
+
+  for (const width of [1300, 400]) {
+    it(`Money, People, then Processes, each with its question and its widgets, the company map at the top of Processes (${width}px)`, async () => {
+      const { page, errors } = await mount({ width, capacity: true, styled: true });
+      await ready(page);
+      const sections = await page.locator("[data-overview-section]").evaluateAll((els) => els.map((e) => e.getAttribute("data-overview-section")));
+      expect(sections).toEqual(["money", "people", "processes"]);
+      expect(await page.locator("[data-jump-links] a").evaluateAll((as) => as.map((a) => [a.textContent, a.getAttribute("href")]))).toEqual([
+        ["Money", "#money"],
+        ["People", "#people"],
+        ["Processes", "#processes"],
+      ]);
+      const inSection = (id: string) => page.locator(`[data-overview-section=${id}] [data-section]`).evaluateAll((els) => els.map((e) => e.getAttribute("data-section")));
+      expect(await page.locator("[data-overview-section=money] [data-whole-business]").count()).toBe(1);
+      expect(await inSection("money")).toEqual(["departments"]);
+      expect(await inSection("people")).toEqual(["busiest", "team-load", "where-time-goes", "time-achieves"]);
+      expect(await inSection("processes")).toEqual(["company-map", "issues", "time-split"]);
+      // The company map is the same component as before, with its controls.
+      expect(await page.locator("[data-overview-section=processes] [data-company-map] [data-map-controls]").count()).toBe(1);
+      // No sideways scroll on a phone or a laptop.
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
+      const shots = process.env.OVERVIEW_SHOTS;
+      if (shots) {
+        mkdirSync(shots, { recursive: true });
+        await page.evaluate(() => document.fonts.ready);
+        await page.screenshot({ path: `${shots}/overview-${width}.png`, fullPage: true });
+      }
+      expect(errors).toEqual([]);
+      await page.close();
+    }, 300_000);
+  }
 });

@@ -18,7 +18,7 @@ describe("Acknowledge dialog help", () => {
   const dialog = read("components/acknowledge-dialog.tsx");
 
   it("has a description and an example for every control", () => {
-    expect(Object.keys(ACK_HELP).sort()).toEqual(["goal", "measure", "now", "owners", "process", "rating", "scope", "sources", "steps", "title"]);
+    expect(Object.keys(ACK_HELP).sort()).toEqual(["owners", "process", "rating", "sources", "title"]);
     for (const [key, help] of Object.entries(ACK_HELP)) {
       expect(help.label.length, key).toBeGreaterThan(2);
       expect(help.description.length, `${key} description`).toBeGreaterThan(20);
@@ -34,12 +34,13 @@ describe("Acknowledge dialog help", () => {
     }
   });
 
-  it("asks the questions the prototype does, in its words", () => {
-    for (const text of ["How bad is it?", "What does it touch?", "The whole process", "Specific steps (pick one or more)", "Add to issues"]) expect(dialog).toContain(text);
+  it("asks the questions the prototype does, in its words, but no steps and no target (QA round 2)", () => {
+    for (const text of ["How bad is it?", "Add to issues"]) expect(dialog).toContain(text);
     expect(ACK_HELP.rating.label).toBe("How bad is it?");
-    expect(ACK_HELP.scope.label).toBe("What does it touch?");
-    expect(ACK_HELP.measure.label).toBe("Target measure");
-    expect(ACK_HELP.goal.label).toBe("Goal");
+    // An issue belongs to a process, and its target is written in What's wrong.
+    for (const text of ["What does it touch?", "Specific steps (pick one or more)", "ack-measure", "ack-goal"]) expect(dialog).not.toContain(text);
+    expect(Object.keys(ACK_HELP)).not.toContain("scope");
+    expect(Object.keys(ACK_HELP)).not.toContain("measure");
   });
 
   it("lists the four ratings with a one-line meaning each", () => {

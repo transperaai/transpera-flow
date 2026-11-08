@@ -60,7 +60,7 @@ export function usePlayRuns(
   const asDefault = playIsDefault(play) && mapKey === null;
   const prepared = useMemo(() => (asDefault ? today : prepare(play)), [asDefault, today, prepare, play]);
   const todayKey = useMemo(() => today.segments.map((s) => `${s.from}:${runKey(s.model, today.monthStarts, today.start, YEAR_REPS)}`).join("|"), [today]);
-  const preparedKey = useMemo(() => (asDefault ? todayKey : JSON.stringify(play) + "|" + (mapKey ?? "") + "|" + prepared.segments.map((s) => s.from).join(",")), [asDefault, todayKey, play, mapKey, prepared]);
+  const preparedKey = useMemo(() => (asDefault ? todayKey : JSON.stringify(play) + "|" + (mapKey ?? "") + "|" + prepared.segments.map((s) => s.from).join(",") + "|" + prepared.monthStarts.length), [asDefault, todayKey, play, mapKey, prepared]);
 
   const [todaySlot, setTodaySlot] = useState<Slot | null>(null);
   const [changedSlot, setChangedSlot] = useState<Slot | null>(null);

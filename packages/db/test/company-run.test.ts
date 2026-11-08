@@ -297,3 +297,208 @@ describe("how the live map differs while it doesn't drive the run", () => {
     expect(diff(mapOf(parts))).toEqual([]);
   });
 });
+
+describe("the map's own steps, waits and decisions are simulated", () => {
+  const parts = [pipeline, onboarding, delivery, ...servicingParts];
+  const template = base.steps.find((s) => s.kind === "task")!;
+
+  /** One of the company map's own steps (+ Step, + Wait, + Decision). */
+  function node(company: ProcessPart, id: string, kind: "task" | "wait" | "decision", over: Partial<StepRow> = {}): StepRow {
+    return {
+      ...template,
+      id,
+      revision_id: company.revision.id,
+      workspace_id: ws,
+      process_id: company.process.id,
+      name: id,
+      kind,
+      outcome: null,
+      role_id: kind === "task" ? roleId : null,
+      person_id: null,
+      work_hours: kind === "task" ? 3 : 0,
+      wait_hours: kind === "wait" ? 40 : 0,
+      rework_rate: 0,
+      current_wip: null,
+      sla_hours: null,
+      parent_step_id: null,
+      child_process_id: null,
+      provenance: {},
+      ...over,
+    };
+  }
+  /** A line on the company map between two of its steps (a card is its holder step). */
+  const line = (company: ProcessPart, from: string, to: string, probability = 1): EdgeRow => ({
+    id: `l-${from}-${to}`,
+    revision_id: company.revision.id,
+    workspace_id: ws,
+    process_id: company.process.id,
+    from_step_id: from,
+    to_step_id: to,
+    probability,
+    condition_tag: null,
+    label: null,
+  });
+  const card = (p: ProcessPart) => holderStepId(pid(p));
+  /** The system-made map for `parts` with `nodes` added and `lines` drawn: [from, to, share?] by step id (a card by `card(...)`). */
+  function mapWith(nodes: ((c: ProcessPart) => StepRow)[], lines: [string, string, number?][]): ProcessPart {
+    const company = mapOf(parts);
+    return { ...company, steps: [...company.steps, ...nodes.map((n) => n(company))], edges: [...company.edges, ...lines.map(([f, t, p]) => line(company, f, t, p))] };
+  }
+  const todayModel = toEngineModel(base, { startDate: START });
+
+  describe("card → Step → card", () => {
+    const company = mapWith([(c) => node(c, "c-check", "task")], [[card(pipeline), "c-check"], ["c-check", card(onboarding)]]);
+
+    it("the step joins the model between the two processes, and the work goes through both", () => {
+      const r = run(company, parts);
+      expect(r.notes).toEqual([]);
+      expect(r.bundle.handoffs).toEqual([
+        { from: pid(pipeline), to: "c-check" },
+        { from: "c-check", to: pid(onboarding) },
+      ]);
+      expect(r.model.ends![r.model.sinks.won]).toEqual({ outcome: "won", handoff: "c-check" });
+      const check = r.model.steps.find((s) => s.id === "c-check")!;
+      expect(check).toMatchObject({ role: roleId, work: 3, wait: 0, next: [{ to: "p-onboarding-task", p: 1 }] });
+      const out = simulate(r.model, 3, 1);
+      expect(out.steps["c-check"]!.arrivals).toBeGreaterThan(0);
+      expect(out.steps["c-check"]!.arrivals).toBeCloseTo(out.kpi.won.mean, 0);
+      expect(out.steps["p-onboarding-task"]!.arrivals).toBeGreaterThan(0);
+      // The step's role does its hands-on time.
+      expect(out.steps["c-check"]!.avgHandsOn).toBeGreaterThan(0);
+    });
+
+    it("its steps are after the sale for purposes", () => {
+      const r = run(company, parts, base, { startDate: START, purposes: true } as never);
+      expect(r.model.steps.find((s) => s.id === "c-check")!.purpose).toBe("client_job");
+    });
+
+    it("deleting the step (and its lines) takes it and the process after it out of the run", () => {
+      const deleted: ProcessPart = { ...company, steps: company.steps.filter((s) => s.id !== "c-check"), edges: company.edges.filter((e) => e.from_step_id !== "c-check" && e.to_step_id !== "c-check") };
+      const r = run(deleted, parts);
+      expect(r.model).toEqual(todayModel);
+      expect(r.model).not.toEqual(run(company, parts).model);
+    });
+
+    it("re-wiring the step to Delivery hands the work on there instead", () => {
+      const rewired: ProcessPart = { ...company, edges: company.edges.map((e) => (e.from_step_id === "c-check" ? { ...e, to_step_id: card(delivery) } : e)) };
+      const out = simulate(run(rewired, parts).model, 2, 1);
+      expect(out.steps["p-delivery-task"]!.arrivals).toBeGreaterThan(0);
+      expect(out.steps["p-onboarding-task"]).toBeUndefined();
+    });
+  });
+
+  it("a Decision (70/30) splits the work across the two processes after it", () => {
+    const company = mapWith(
+      [(c) => node(c, "c-fit", "decision")],
+      [
+        [card(pipeline), "c-fit"],
+        ["c-fit", card(onboarding), 0.7],
+        ["c-fit", card(delivery), 0.3],
+      ],
+    );
+    const r = run(company, parts);
+    expect(r.notes).toEqual([]);
+    // Branches come in the order of the lines' ids.
+    expect(r.model.steps.find((s) => s.id === "c-fit")!.next).toEqual(
+      expect.arrayContaining([
+        { to: "p-onboarding-task", p: 0.7 },
+        { to: "p-delivery-task", p: 0.3 },
+      ]),
+    );
+    expect(r.model.steps.find((s) => s.id === "c-fit")!.next).toHaveLength(2);
+    const out = simulate(r.model, 12, 7);
+    const a = out.steps["p-onboarding-task"]!.arrivals;
+    const b = out.steps["p-delivery-task"]!.arrivals;
+    expect(a + b).toBeCloseTo(out.kpi.won.mean, 0);
+    expect(a / (a + b)).toBeGreaterThan(0.62);
+    expect(a / (a + b)).toBeLessThan(0.78);
+    // The win is still counted once.
+    expect(out.kpi.won.mean).toBeCloseTo(simulate(todayModel, 12, 7).kpi.won.mean, -1);
+  });
+
+  it("a Decision's branch to a servicing card or an end is done there, and shares that don't add up are scaled", () => {
+    const company = mapWith(
+      [(c) => node(c, "c-fit", "decision")],
+      [
+        [card(pipeline), "c-fit"],
+        ["c-fit", card(onboarding), 0.5],
+        ["c-fit", card(servicingParts[0]!), 0.5],
+      ],
+    );
+    const r = run(company, parts);
+    expect(r.bundle.handoffs).toEqual([
+      { from: pid(pipeline), to: "c-fit" },
+      { from: "c-fit", to: "__company_done__", p: 0.5 },
+      { from: "c-fit", to: pid(onboarding), p: 0.5 },
+    ]);
+    expect(messages(r)).toEqual([`The branch from 'c-fit' to '${servicingParts[0]!.process.name}' isn't simulated: work that takes it is done there.`]);
+    expect(r.model.ends!["__company_done__"]).toEqual({ outcome: "done" });
+    expect(simulate(r.model, 2, 1).steps["p-onboarding-task"]!.arrivals).toBeGreaterThan(0);
+
+    const off = mapWith(
+      [(c) => node(c, "c-fit", "decision")],
+      [
+        [card(pipeline), "c-fit"],
+        ["c-fit", card(onboarding), 0.7],
+      ],
+    );
+    const o = run(off, parts);
+    expect(messages(o)).toEqual(["The branches out of 'c-fit' add up to 70%, so the run scales them to 100%."]);
+    expect(o.model.steps.find((s) => s.id === "c-fit")!.next).toEqual([{ to: "p-onboarding-task", p: 1 }]);
+  });
+
+  it("a Wait delays the work before the next process", () => {
+    const withWait = (hours: number) =>
+      run(mapWith([(c) => node(c, "c-hold", "wait", { wait_hours: hours })], [[card(pipeline), "c-hold"], ["c-hold", card(onboarding)]]), parts).model;
+    const short = simulate(withWait(40), 4, 3);
+    expect(short.steps["c-hold"]!.avgFixedWait).toBeGreaterThan(25);
+    expect(short.steps["c-hold"]!.avgFixedWait).toBeLessThan(60);
+    expect(short.steps["c-hold"]!.avgHandsOn ?? 0).toBe(0);
+    // A long wait holds work past the end of the run: fewer clients reach onboarding within it.
+    const long = simulate(withWait(1500), 4, 3);
+    expect(long.steps["p-onboarding-task"]!.arrivals).toBeLessThan(short.steps["p-onboarding-task"]!.arrivals * 0.9);
+  });
+
+  it("a chain of map steps ends the work when the last has no line out", () => {
+    const company = mapWith([(c) => node(c, "c-a", "task"), (c) => node(c, "c-b", "wait")], [[card(pipeline), "c-a"], ["c-a", "c-b"]]);
+    const r = run(company, parts);
+    expect(r.bundle.companySteps!.map((s) => s.id)).toEqual(["c-a", "c-b"]);
+    expect(r.model.steps.find((s) => s.id === "c-b")!.next).toEqual([{ to: "__company_done__", p: 1 }]);
+    expect(simulate(r.model, 2, 1).steps["c-b"]!.arrivals).toBeGreaterThan(0);
+  });
+
+  it("a step that isn't joined to the work isn't simulated, and a note names it; the rest of the run is unchanged", () => {
+    const company = mapWith([(c) => node(c, "c-loose", "task")], []);
+    const r = run(company, parts);
+    expect(messages(r)).toEqual(["'c-loose' isn't joined to the work from the sales pipeline, so it isn't simulated."]);
+    expect(r.model).toEqual(todayModel);
+    // A card reached only through a step isn't taken for the sales pipeline, even when it comes first in the workspace's order.
+    const odd = [onboarding, pipeline, delivery, ...servicingParts];
+    const c2 = { ...mapOf(odd), steps: [...mapOf(odd).steps, node(mapOf(odd), "c-x", "task")], edges: [...mapOf(odd).edges, line(mapOf(odd), card(pipeline), "c-x"), line(mapOf(odd), "c-x", card(onboarding))] };
+    expect(run(c2, odd).bundle.process.id).toBe(pid(pipeline));
+  });
+
+  it("a decision branch back to the sales pipeline is cut and its work is done", () => {
+    const company = mapWith(
+      [(c) => node(c, "c-fit", "decision")],
+      [
+        [card(pipeline), "c-fit"],
+        ["c-fit", card(onboarding), 0.8],
+        ["c-fit", card(pipeline), 0.2],
+      ],
+    );
+    const r = run(company, parts);
+    expect(messages(r)).toEqual([`The line from 'c-fit' back to '${pipeline.process.name}' closes a loop, so it isn't used: work that takes it is done there.`]);
+    expect(r.model.steps.find((s) => s.id === "c-fit")!.next).toEqual([
+      { to: "__company_done__", p: 0.2 },
+      { to: "p-onboarding-task", p: 0.8 },
+    ]);
+  });
+
+  it("a cards-only chain is unchanged: no shares, no map steps", () => {
+    const r = run(mapOf(parts, { lines: [[pid(pipeline), pid(onboarding)]] }), parts);
+    expect(r.bundle.handoffs).toEqual([{ from: pid(pipeline), to: pid(onboarding) }]);
+    expect(r.bundle.companySteps).toBeUndefined();
+    expect(r.model.ends!["__company_done__"]).toBeUndefined();
+  });
+});

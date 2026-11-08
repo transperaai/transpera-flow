@@ -149,7 +149,8 @@ describe("Clients react to a price rise (D36)", () => {
     expect(all).toBeLessThan(2);
   });
 
-  it("run through the engine, Normally loses about twice the clients Barely does to the rise", () => {
+  // Two 6-month engine runs: about 2 s alone, but over the default 5 s on a busy CI runner beside the rest of the suite.
+  it("run through the engine, Normally loses about twice the clients Barely does to the rise", { timeout: 60_000 }, () => {
     // The workspace's own price driver is on with a planned 10% rise in month 3; the lever sets how hard clients react.
     const base: EngineModel = { ...model, churnDrivers: [{ id: "price", weight: 1, enabled: true, value: 10, month: 3 }] };
     const lost = (reaction: PlayState["priceReaction"]) => {

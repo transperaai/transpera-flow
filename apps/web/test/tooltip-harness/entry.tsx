@@ -1,10 +1,10 @@
-// Hover pop-ups inside an `overflow: hidden` card, for ../tooltip-browser.test.ts: a chart tooltip (the Open issues donut and the
+// Hover pop-ups inside an `overflow: hidden` card, for ../tooltip-browser.test.ts: a chart tooltip (the time split by process and the
 // revenue line) and a help (i) bubble, in a card that sits against the right and bottom of the window. Nothing here ships.
 
 import { createRoot } from "react-dom/client";
 import { Help } from "@/components/help";
 import { MrrChart } from "@/components/overview/charts";
-import { IssuesDonut } from "@/components/overview/trend-charts";
+import { TimeSplitChart } from "@/components/overview/trend-charts";
 
 declare global {
   interface Window {
@@ -21,8 +21,8 @@ window.mountTooltips = () => {
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <Help label="Test setting" description="What this setting does, in a sentence." example="An example of it." />
         </div>
-        <div data-donut-box>
-          <IssuesDonut byRating={[{ rating: "risk", count: 3 }, { rating: "bad", count: 1 }]} byProcess={[{ id: "p", name: "Onboarding", count: 4 }]} />
+        <div data-split-box>
+          <TimeSplitChart rows={[{ id: "p", name: "Onboarding", handsOn: 30, waitingForPerson: 50, waitingOnOthers: 20, share: 0.3 }]} months={3} />
         </div>
       </div>
       <div data-card style={{ position: "absolute", right: 0, bottom: 0, width: 360, height: 270, overflow: "hidden", border: "1px solid #888", padding: 8, boxSizing: "border-box" }}>

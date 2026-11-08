@@ -32,15 +32,18 @@ export interface PlayChartProps {
   todayLabel?: string;
   /** Three of these sit in a row: a narrower drawing, so the text stays readable when it is scaled down. */
   narrow?: boolean;
+  /** A chart on a row of its own (QA round 2, option B1): a wide, taller drawing with a month label for every month up to a year, then every quarter. */
+  full?: boolean;
   /** Extra lines under a month's values in the tooltip (clients won and lost). */
   tipExtra?: (month: number) => ReactNode;
 }
 
 const WIDE = { W: 520, H: 230, M: { l: 62, r: 14, t: 14, b: 28 } };
 const NARROW = { W: 300, H: 220, M: { l: 52, r: 10, t: 14, b: 28 } };
+const FULL = { W: 860, H: 280, M: { l: 64, r: 16, t: 14, b: 28 } };
 
-export function PlayChart({ title, months, series, format, goal, min, todayLabel = "Today's path", narrow = false, tipExtra }: PlayChartProps) {
-  const { W, H, M } = narrow ? NARROW : WIDE;
+export function PlayChart({ title, months, series, format, goal, min, todayLabel = "Today's path", narrow = false, full = false, tipExtra }: PlayChartProps) {
+  const { W, H, M } = full ? FULL : narrow ? NARROW : WIDE;
   const [tip, setTip] = useState<{ i: number; at: { x: number; y: number } } | null>(null);
   const n = months.length;
   const values = series.flatMap((s) => s.values).filter((v): v is number => v !== null);
@@ -77,7 +80,8 @@ export function PlayChart({ title, months, series, format, goal, min, todayLabel
   };
   const hasToday = series.some((s) => s.dashed);
   const legend = series.filter((s) => !s.dashed && !s.hideFromLegend);
-  const label = labelIndexes(n, narrow ? 3 : 4);
+  // A full-width chart names every month of a year; past that, about a dozen labels (every quarter, or every half year at five years).
+  const label = labelIndexes(n, full ? (n <= 12 ? n : 13) : narrow ? 3 : 4);
   const nearest = (e: React.PointerEvent<SVGSVGElement>) => {
     const box = e.currentTarget.getBoundingClientRect();
     const px = ((e.clientX - box.left) / box.width) * W;

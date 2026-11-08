@@ -29,6 +29,8 @@ export interface CanvasCommands {
   inspect: (id: string) => void;
   /** Split a step into two new ones; the old one is retired with `replaced_by` (issue #16). */
   split?: (id: string) => void;
+  /** Open the page of the process a linked node holds (QA round 2, item 7): on every company map card, and old linked nodes in a process. */
+  openProcess?: (processId: string) => void;
 }
 
 export interface MenuState {
@@ -150,24 +152,22 @@ export function NodeMenu({
     );
   } else if (view === "main") {
     const start = step.kind === "start";
+    // A node that links to a process: named after it, and it sits in one place only, so it can't be renamed, copied or turned into another kind.
+    const linked = step.child_process_id ?? null;
+    const noCopy = start ? "A process has one start step." : linked ? "A process sits in one place only." : undefined;
     body = (
       <>
-        <Item onSelect={run(() => onRename(step.id), false)} shortcut="Enter">
-          Rename and edit here
-        </Item>
+        {linked && commands.openProcess && <Item onSelect={run(() => commands.openProcess!(linked), false)}>Open process page</Item>}
+        {!linked && (
+          <Item onSelect={run(() => onRename(step.id), false)} shortcut="Enter">
+            Rename and edit here
+          </Item>
+        )}
         <Item onSelect={run(() => commands.inspect(step.id), false)}>Edit in the inspector</Item>
-        <Item
-          onSelect={run(() => commands.duplicate([step.id]))}
-          shortcut={`${mod()}D`}
-          disabled={start ? "A process has one start step." : undefined}
-        >
+        <Item onSelect={run(() => commands.duplicate([step.id]))} shortcut={`${mod()}D`} disabled={noCopy}>
           Duplicate
         </Item>
-        <Item
-          onSelect={run(() => commands.copy([step.id]))}
-          shortcut={`${mod()}C`}
-          disabled={start ? "A process has one start step." : undefined}
-        >
+        <Item onSelect={run(() => commands.copy([step.id]))} shortcut={`${mod()}C`} disabled={noCopy}>
           Copy
         </Item>
         {commands.split && (
@@ -180,10 +180,12 @@ export function NodeMenu({
           </Item>
         )}
         <Separator />
-        <Item view="kind" onSelect={() => setView("kind")} submenu>
-          Change kind
-          <span className="ml-1 text-fg-3">({KIND_LABELS[step.kind]})</span>
-        </Item>
+        {!linked && (
+          <Item view="kind" onSelect={() => setView("kind")} submenu>
+            Change kind
+            <span className="ml-1 text-fg-3">({KIND_LABELS[step.kind]})</span>
+          </Item>
+        )}
         {working && bundle.people.length > 0 && (
           <Item view="person" onSelect={() => setView("person")} submenu>
             Pin to person
@@ -191,7 +193,7 @@ export function NodeMenu({
         )}
         <Separator />
         <Item onSelect={run(() => commands.remove([step.id]))} shortcut="Del" danger>
-          Delete
+          {linked ? "Remove from this map" : "Delete"}
         </Item>
       </>
     );

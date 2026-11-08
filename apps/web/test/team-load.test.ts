@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { TeamLoad, whatToDo } from "@/components/overview/team-load";
+import { hiringCalls, TeamLoad } from "@/components/overview/team-load";
 import type { TimelineMonth, TimelineRow } from "@/lib/forecast/timeline";
 
 vi.mock("next/link", () => ({ default: ({ href, children }: { href: string; children?: unknown }) => createElement("a", { href }, children as never) }));
@@ -12,16 +12,24 @@ const months = [month(0, "Nov 26"), month(1, "Dec"), month(2, "Jan 27")];
 const stat = (mean: number) => ({ mean, p10: mean, p90: mean }) as never;
 const row = (id: string, name: string, means: (number | null)[]): TimelineRow => ({ id, name, series: means.map((m) => (m === null ? null : stat(m))), markers: [] });
 
-describe("what to do", () => {
+describe("the hiring call", () => {
   const name = (i: number) => months[i]!.short;
-  it("says when a team goes over its line and when to start hiring", () => {
-    expect(whatToDo([{ name: "Performance managers", overFrom: 2, hireBy: 0 }], name, "3 months")).toEqual(["Performance managers: over the line from Jan 27. Start hiring now."]);
-    expect(whatToDo([{ name: "SEO managers", overFrom: 2, hireBy: 1 }], name, "3 months")).toEqual(["SEO managers: over the line from Jan 27. Start hiring by Dec."]);
-    expect(whatToDo([{ name: "Tech", overFrom: 0, hireBy: -2 }], name, "3 months")).toEqual(["Tech: over the line now. Start hiring now."]);
+  it("says when to hire and why: start now, or hire by a month", () => {
+    expect(hiringCalls([{ name: "Performance managers", overFrom: 2, hireBy: 0 }], name)).toEqual([{ action: "Start hiring now", why: "Performance managers go over their utilisation threshold from Jan 27." }]);
+    expect(hiringCalls([{ name: "SEO managers", overFrom: 2, hireBy: 1 }], name)).toEqual([{ action: "Hire by Dec", why: "SEO managers go over their utilisation threshold from Jan 27." }]);
+    expect(hiringCalls([{ name: "Tech", overFrom: 0, hireBy: -2 }], name)).toEqual([{ action: "Start hiring now", why: "Tech are over their utilisation threshold now." }]);
   });
-  it("says so when no team goes over", () => {
-    expect(whatToDo([{ name: "SEO managers", overFrom: null, hireBy: null }], name, "6 months")).toEqual(["No team goes over its line in the next 6 months."]);
-    expect(whatToDo([], name, "1 month")).toEqual(["No team goes over its line in the next 1 month."]);
+  it("puts the soonest hire first, and makes no call when no team goes over", () => {
+    const calls = hiringCalls(
+      [
+        { name: "Later", overFrom: 2, hireBy: 1 },
+        { name: "Sooner", overFrom: 1, hireBy: -1 },
+        { name: "Fine", overFrom: null, hireBy: null },
+      ],
+      name,
+    );
+    expect(calls.map((c) => c.action)).toEqual(["Start hiring now", "Hire by Dec"]);
+    expect(hiringCalls([{ name: "SEO managers", overFrom: null, hireBy: null }], name)).toEqual([]);
   });
 });
 
@@ -43,12 +51,18 @@ describe("the team load rows", () => {
     expect(tones("SEO managers")).toEqual(["ok", "warn", "bad"]);
     expect(tones("Tech")).toEqual(["ok", "none", "warn"]);
   });
-  it("puts the percentage in each cell's tooltip, leads with what to do, and keeps the Sandbox link", () => {
-    expect(html).toContain('title="Dec: 78% busy, against a line of 85%"');
-    expect(html.indexOf("data-todo")).toBeLessThan(html.indexOf("<table"));
-    expect(html).toContain("SEO managers: over the line from Jan 27");
+  it("shows the percentage in each cell and its tooltip, leads with a red hiring call, and keeps the Sandbox link", () => {
+    expect(html).toContain('title="Dec: 78% busy, against a utilisation threshold of 85%"');
+    expect(html).toMatch(/data-busy="78"[^>]*><span aria-hidden="true">78%<\/span>/);
+    expect(html.indexOf("data-hire-callout")).toBeLessThan(html.indexOf("<table"));
+    expect(html).toMatch(/data-hire-callout[^>]*>.*Start hiring now:<\/b> SEO managers go over their utilisation threshold from Jan 27\./);
     expect(html).toContain('href="/w/x/sandbox"');
     // None of the Sandbox timeline's extras.
     expect(html).not.toMatch(/uncovered|market|starts|leaves/i);
+  });
+  it("says so, without a red call, when no team goes over", () => {
+    const calm = renderToStaticMarkup(createElement(TeamLoad, { rows: [row("a", "SEO managers", [0.5, 0.5, 0.5])], months, lines: { a: 0.85 }, fallbackLine: 0.85, advice: null, span: "3 months" }));
+    expect(calm).not.toContain("data-hire-callout");
+    expect(calm).toContain("No team goes over its utilisation threshold in the next 3 months.");
   });
 });

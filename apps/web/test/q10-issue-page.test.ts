@@ -108,7 +108,8 @@ describe("the Issue page as cards", () => {
     const header = page.locator("[data-testid=issue-header]");
     expect(await header.locator("h1").innerText()).toMatch(/^#6\s+Only Karl can vet link domains$/);
     expect(await header.locator("[data-status-menu]").count()).toBe(1);
-    expect(await header.locator("[data-process-tag]").count()).toBe(2);
+    // Its process only: no step pill (QA round 2).
+    expect(await header.locator("[data-process-tag]").count()).toBe(1);
     expect(await header.locator("[data-meta-line]").innerText()).toMatch(/Owner: \w+\s*·\s*Created \d+ \w+(?: \d+)?\s*·\s*Last change \d+ \w+/);
     for (const name of ["Edit", "Resolve"]) expect(await header.getByRole("button", { name, exact: true }).count()).toBe(1);
     expect(errors).toEqual([]);
@@ -174,7 +175,8 @@ describe("the Issue page as cards", () => {
     expect(await row.locator("[data-status-menu]").getAttribute("data-status")).toBe("works");
     expect(await row.locator("[data-status-menu]").innerText()).toContain("Works");
     expect(await row.locator("[data-tried-changes]").innerText()).toMatch(/Changes: /);
-    expect(await row.locator("[data-tried-result]").innerText()).toMatch(/Against today|against today|Open to compare/);
+    // The person's own verdict only, no automatic one (QA round 2).
+    expect(await row.locator("[data-tried-result]").innerText()).toMatch(/^(Your call: (Pass|Fail)|No verdict yet\.\s*Open to compare)$/);
     expect(await row.locator("a[href='/w/example/solutions/" + vettingSolutionId + "']").count()).toBeGreaterThan(0);
     expect(await section.locator("[data-try-solution]").innerText()).toBe("+ Try a new solution");
     expect(await section.locator("[data-try-solution]").getAttribute("href")).toMatch(/\/edit\?mode=solution&issue=/);
@@ -193,20 +195,11 @@ describe("the Issue page as cards", () => {
     await page.close();
   }, 300_000);
 
-  it("History is a timeline, newest first, with one plain line each and the fold", async () => {
+  it("has no History card, and its sources sit in What's wrong (QA round 2)", async () => {
     const { page } = await issuePage(8);
-    const entries = page.locator("#history [data-timeline-entry]");
-    const n = await entries.count();
-    expect(n).toBeGreaterThan(2);
-    const kinds = await entries.evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")));
-    // Oldest last: the issue was created first.
-    expect(kinds.at(-1)).toBe("created");
-    expect(kinds).toContain("resolved");
-    expect(kinds).toContain("solution");
-    const text = await page.locator("#history").innerText();
-    expect(text).toMatch(/Solution “Ad QA only on new campaigns”: Testing → Adopted/);
-    expect(await page.locator("#history details").textContent()).toContain("Written automatically when the issue is created, edited, changes status, gains or loses a link, a solution is judged, or it's resolved.");
-    expect(await entries.first().locator("svg").count()).toBe(1);
+    expect(await page.locator("#history, [data-timeline-entry]").count()).toBe(0);
+    expect(await page.locator("#wrong [data-issue-sources]").count()).toBe(1);
+    expect(await page.locator("aside #sources, aside #linked").count()).toBe(0);
     await page.close();
   }, 300_000);
 

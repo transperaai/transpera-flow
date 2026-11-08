@@ -1,8 +1,8 @@
 "use client";
 
-// "Who's overloaded, and when" (D54): a heatmap of every team by month, coloured by busy share against the team's line (the Capacity page's cut-offs:
-// green under, amber within ten points, red at or over), a This scene / Today switch for which run it shows, and under it paired bars of the people over
-// their line each month (today grey, this scene in colour). Plain HTML grid and SVG from the theme's tokens, with the numbers as a table for a screen reader.
+// "Who's overloaded, and when" (D54; QA round 2, option A1): a heatmap of every team by month, coloured by busy share against the team's utilisation
+// threshold (the Capacity page's cut-offs: green under, amber within ten points, red at or over), with the worst month's column outlined. The card above
+// it names that month. A This scene / Today switch picks which run it shows. Plain HTML grid and SVG from the theme's tokens, with the numbers as a table for a screen reader.
 
 import { useState } from "react";
 import { FloatingTip } from "@/components/ui/floating-tip";
@@ -15,11 +15,11 @@ const TINT: Record<BusyTone, string> = {
   warn: "color-mix(in srgb, var(--warn) 50%, transparent)",
   bad: "color-mix(in srgb, var(--crit) 68%, transparent)",
 };
-const WORDS: Record<BusyTone, string> = { ok: "under the line", warn: "close to the line", bad: "over the line" };
+const WORDS: Record<BusyTone, string> = { ok: "under the utilisation threshold", warn: "close to the utilisation threshold", bad: "over the utilisation threshold" };
 
 export type HeatView = "scene" | "today";
 
-export function Heatmap({ rows, months, view }: { rows: HeatRow[]; months: string[]; view: HeatView }) {
+export function Heatmap({ rows, months, view, worst = null }: { rows: HeatRow[]; months: string[]; view: HeatView; worst?: number | null }) {
   const [tip, setTip] = useState<{ row: HeatRow; m: number; at: { x: number; y: number } } | null>(null);
   const grid = { display: "grid", gridTemplateColumns: `minmax(4.5rem, 7.5rem) repeat(${months.length}, minmax(0, 1fr))` } as const;
   const at = (e: React.PointerEvent) => ({ x: e.clientX, y: e.clientY });
@@ -32,7 +32,7 @@ export function Heatmap({ rows, months, view }: { rows: HeatRow[]; months: strin
           </span>
           <span aria-hidden />
           {months.map((m, i) => (
-            <span key={i} role="columnheader" className={cn("overflow-visible text-center text-2xs whitespace-nowrap", i % 3 !== 0 && "max-sm:invisible")}>
+            <span key={i} role="columnheader" data-worst-month={i === worst ? "" : undefined} className={cn("overflow-visible text-center text-2xs whitespace-nowrap", i % 3 !== 0 && i !== worst && "max-sm:invisible", i === worst && "font-bold text-fg")}>
               {m}
             </span>
           ))}
@@ -49,7 +49,8 @@ export function Heatmap({ rows, months, view }: { rows: HeatRow[]; months: strin
                   key={m}
                   role="cell"
                   data-heat-cell={tone ?? "none"}
-                  className="flex h-8 items-center justify-center rounded-[3px] text-2xs tabular-nums"
+                  data-worst-month={m === worst ? "" : undefined}
+                  className={cn("flex h-8 items-center justify-center rounded-[3px] text-2xs tabular-nums", m === worst && "outline-2 -outline-offset-1 outline-fg")}
                   style={{ background: tone ? TINT[tone] : "var(--panel-2)" }}
                   onPointerMove={(e) => setTip({ row: r, m, at: at(e) })}
                   onPointerDown={(e) => setTip({ row: r, m, at: at(e) })}
@@ -67,7 +68,7 @@ export function Heatmap({ rows, months, view }: { rows: HeatRow[]; months: strin
         {(["ok", "warn", "bad"] as const).map((t) => (
           <li key={t} className="inline-flex items-center gap-1.5">
             <i aria-hidden className="inline-block h-2.5 w-3.5 rounded-[3px]" style={{ background: TINT[t] }} />
-            {t === "ok" ? "Under the line" : t === "warn" ? "Within 10 points of it" : "At or over the line"}
+            {t === "ok" ? "Under the utilisation threshold" : t === "warn" ? "Within 10 points of it" : "At or over the utilisation threshold"}
           </li>
         ))}
       </ul>
@@ -116,86 +117,3 @@ export function Heatmap({ rows, months, view }: { rows: HeatRow[]; months: strin
   );
 }
 
-const BAR_H = 72;
-
-/** For each month, the people over their line: today in grey, this scene in colour. Only today's bar when `scene` is null. Aligned to the heatmap's columns. */
-export function OverBars({ months, today, scene }: { months: string[]; today: number[]; scene: number[] | null }) {
-  const [tip, setTip] = useState<{ m: number; at: { x: number; y: number } } | null>(null);
-  const top = Math.max(1, ...today, ...(scene ?? []));
-  const grid = { display: "grid", gridTemplateColumns: `minmax(4.5rem, 7.5rem) repeat(${months.length}, minmax(0, 1fr))` } as const;
-  const h = (v: number) => `${(v / top) * 100}%`;
-  return (
-    <figure className="m-0 flex flex-col gap-1" data-play-over-bars>
-      <div className="gap-0.5 text-xs" style={grid} role="img" aria-label="People over their line, month by month">
-        <div className="flex flex-col justify-between pr-1 text-2xs text-muted-foreground" style={{ height: BAR_H }}>
-          <span>{top} people</span>
-          <span>0</span>
-        </div>
-        {months.map((m, i) => (
-          <div
-            key={i}
-            className="flex min-w-0 flex-col"
-            onPointerMove={(e) => setTip({ m: i, at: { x: e.clientX, y: e.clientY } })}
-            onPointerDown={(e) => setTip({ m: i, at: { x: e.clientX, y: e.clientY } })}
-            onPointerLeave={() => setTip(null)}
-          >
-            <div className="flex items-end justify-center gap-px border-b border-line" style={{ height: BAR_H }}>
-              <i data-over-bar="today" className="block w-1/3 max-w-3 min-w-[3px] rounded-t-[3px]" style={{ height: h(today[i]!), background: "var(--fg-3)", opacity: 0.55 }} />
-              {scene && <i data-over-bar="scene" className="block w-1/3 max-w-3 min-w-[3px] rounded-t-[3px]" style={{ height: h(scene[i]!), background: "var(--chart-1)" }} />}
-            </div>
-          </div>
-        ))}
-      </div>
-      {tip && (
-        <FloatingTip at={tip.at} placement="side">
-          <div data-play-tip className="flex flex-col gap-0.5">
-            <div className="font-semibold">{months[tip.m]}</div>
-            {scene && (
-              <div className="flex items-center gap-1.5">
-                <i aria-hidden className="inline-block size-2 rounded-sm" style={{ background: "var(--chart-1)" }} />
-                This scene: <b className="font-semibold">{scene[tip.m]}</b>
-              </div>
-            )}
-            <div className="flex items-center gap-1.5">
-              <i aria-hidden className="inline-block size-2 rounded-sm" style={{ background: "var(--fg-3)", opacity: 0.55 }} />
-              Today: <b className="font-semibold">{today[tip.m]}</b>
-            </div>
-            <div className="text-muted-foreground">people over their line</div>
-          </div>
-        </FloatingTip>
-      )}
-      <figcaption className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" data-legend>
-        <span>People over their line, each month</span>
-        {scene && (
-          <span className="inline-flex items-center gap-1.5">
-            <i aria-hidden className="inline-block size-2.5 rounded-sm" style={{ background: "var(--chart-1)" }} />
-            This scene
-          </span>
-        )}
-        <span className="inline-flex items-center gap-1.5">
-          <i aria-hidden className="inline-block size-2.5 rounded-sm" style={{ background: "var(--fg-3)", opacity: 0.55 }} />
-          Today
-        </span>
-      </figcaption>
-      <table className="sr-only">
-        <caption>People over their line, by month</caption>
-        <thead>
-          <tr>
-            <th scope="col">Month</th>
-            {scene && <th scope="col">This scene</th>}
-            <th scope="col">Today</th>
-          </tr>
-        </thead>
-        <tbody>
-          {months.map((m, i) => (
-            <tr key={i}>
-              <th scope="row">{m}</th>
-              {scene && <td>{scene[i]}</td>}
-              <td>{today[i]}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </figure>
-  );
-}

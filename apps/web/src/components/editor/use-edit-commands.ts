@@ -17,7 +17,10 @@ export function useEditCommands({
   bundle,
   selected,
   setSelection,
+  openProcess,
 }: {
+  /** Open a linked process's page, for "Open process page" on a node that links to one. */
+  openProcess?: (processId: string) => void;
   editor: ProcessEditor;
   bundle: ProcessBundle;
   selected: Selection;
@@ -59,8 +62,9 @@ export function useEditCommands({
         });
         if (made.length) setSelection({ steps: made, edges: [] });
       },
+      ...(openProcess ? { openProcess } : {}),
     }),
-    [editor, setSelection],
+    [editor, setSelection, openProcess],
   );
 
   useEffect(() => {

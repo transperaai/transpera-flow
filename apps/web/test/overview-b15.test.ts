@@ -1,9 +1,9 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { northbeamBundle, northbeamIssues, partOf, toEngineModel, type IssueRow, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
 import { ratingOfStored, ratingRank, simulate, type EngineModel, type Rating, type SimulationResult } from "@transpera-flow/engine";
-import { IssuesDonut, TimeSplitChart } from "@/components/overview/trend-charts";
+import { OpenIssuesSummary, slowestFirst, TimeSplitChart } from "@/components/overview/trend-charts";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { ratingOfRank } from "@/lib/map/rating";
 import { COMPANY_GROUP, groupByProcess, groupOfFact, groupOfIssue } from "@/lib/overview/by-process";
@@ -14,6 +14,8 @@ import { playbackRun, rolledUpSteps } from "@/lib/playback/graph";
 import { rerate } from "@/lib/rules/edit";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import { demoBundle } from "@/lib/sources/demo";
+
+vi.mock("next/link", () => ({ default: ({ href, children, className }: { href: string; children?: unknown; className?: string }) => createElement("a", { href, className }, children as never) }));
 
 // The Overview's B15 redesign (issue #173): the aggregations behind the health numbers, the findings by process and the
 // trends, and each chart rendered with data and empty (the health strip's cards are gone: P6 replaced the strip). The browser behaviour (play, horizon, expand) is in
@@ -231,10 +233,11 @@ const link = (solution_id: string, verdict: "pass" | "fail" | null): SolutionIss
   solution_id,
   issue_id: "i",
   workspace_id: live.workspace.id,
-  auto_verdict: verdict,
+  // The person's verdict: an automatic one no longer counts (QA round 2).
+  auto_verdict: null,
   holds_pct: null,
   auto_note: "",
-  user_verdict: null,
+  user_verdict: verdict,
   user_notes: "",
   created_at: "",
   updated_at: "",
@@ -328,21 +331,40 @@ describe("playing the company map", () => {
 const html = (el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(el);
 
 describe("the trend charts", () => {
-  it("the issues donut: an arc per rating with a legend, bars by process, and a table", () => {
-    const out = html(createElement(IssuesDonut, { byRating: countByRating(["bad", "bad", "risk"]), byProcess: [{ id: "p", name: "Lead to live", count: 3 }] }));
+  it("open issues: the count, the operational risks, one bar by rating and the top three processes linked", () => {
+    const byProcess = [
+      { id: "a", name: "Lead to live", count: 3, href: "/w/x/p/a" },
+      { id: "b", name: "Onboarding", count: 1, href: "/w/x/p/b" },
+      { id: "c", name: "Reporting", count: 2 },
+      { id: "d", name: "Billing", count: 1 },
+      { id: "e", name: "Quiet", count: 0 },
+    ];
+    const out = html(createElement(OpenIssuesSummary, { byRating: countByRating(["bad", "bad", "risk"]), byProcess }));
+    expect(out).toMatch(/data-open-total[^>]*>3</);
+    expect(out).toMatch(/>1<\/span> <span[^>]*>operational risk</);
     expect(out).toContain('data-arc="risk"');
     expect(out).toContain('data-arc="bad"');
     expect(out).not.toContain('data-arc="good"');
     expect(out).toContain("3 open issues: 1 Operational risk, 2 Bad, not urgent.");
-    expect(out).toContain("Lead to live");
+    // Most first, three named, the rest counted; a process with a page links to it.
+    const most = /data-by-process[^>]*>(.*?)<\/p>/.exec(out)![1]!;
+    expect(most.indexOf("Lead to live")).toBeLessThan(most.indexOf("Reporting"));
+    expect(most).toContain('href="/w/x/p/a"');
+    expect(most).toContain("and 1 more");
+    expect(most).not.toContain("Quiet");
     expect(out).toContain("<table");
-    expect(html(createElement(IssuesDonut, { byRating: countByRating([]), byProcess: [] }))).toContain("No open issues.");
+    expect(html(createElement(OpenIssuesSummary, { byRating: countByRating([]), byProcess: [] }))).toContain("No open issues.");
   });
   it("the time split: a stacked bar per process with its working share", () => {
     const rows = timeSplitByProcess(model, result, parts);
     const out = html(createElement(TimeSplitChart, { rows, months: 3 }));
     for (const r of rows) expect(out).toContain(r.name);
-    expect(out).toContain("Waiting on others");
+    // Slowest first (the smallest hands-on share on top), named in the first sentence; the three parts in today's words.
+    const order = [...out.matchAll(/data-process="([^"]+)"/g)].map((m) => m[1]);
+    expect(order).toEqual(slowestFirst(rows).map((r) => r.id));
+    expect(out).toContain(`Slowest: ${slowestFirst(rows)[0]!.name}`);
+    expect(out).toContain("Waiting for one of our people");
+    expect(out).toContain("Waiting on the client or others");
     expect(out).toContain("working");
     expect(html(createElement(TimeSplitChart, { rows: [], months: 3 }))).toContain("No work went through");
   });

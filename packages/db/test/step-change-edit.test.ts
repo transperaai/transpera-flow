@@ -120,13 +120,15 @@ describe("a change saved through the step panel", () => {
   it("a copy drops an effect on a deleted step, and a change left with no effects", () => {
     const [a] = solution.step_changes;
     const gone = "0b8f6f0e-6d0a-4d5e-9d57-2f1d1d2a9cff";
-    const keptStep = a!.effects[0]!.step;
+    // Every step the change acts on is kept: which stored change comes first depends on the order rows come back, and it can act
+    // on more than one step (keeping only its first effect's step made this fail now and then).
+    const kept = new Set(a!.effects.map((e) => e.step));
     const two = { ...a!, id: NEW_ID, effects: [...a!.effects, { step: gone, part: "augmentable" as const, factor: 2 }] };
     const onlyGone = { ...a!, id: "0b8f6f0e-6d0a-4d5e-9d57-2f1d1d2a9c22", effects: [{ step: gone, part: "automatable" as const, remove: 0.5 }] };
-    const out = carryStepChanges([two, onlyGone], new Set([keptStep]));
+    const out = carryStepChanges([two, onlyGone], kept);
     expect(out).toHaveLength(1);
     expect(out[0]!.id).toBe(NEW_ID);
-    expect(out[0]!.effects.every((e) => e.step === keptStep)).toBe(true);
-    expect(out[0]!.effects).toHaveLength(a!.effects.length);
+    expect(out[0]!.effects.every((e) => kept.has(e.step))).toBe(true);
+    expect(out[0]!.effects).toEqual(a!.effects);
   });
 });

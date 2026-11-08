@@ -12,7 +12,6 @@ import {
   triangularRange,
   UPKEEP_PURPOSE,
   workspacePurposes,
-  type Distribution,
   type EvidenceStamp,
   type ProcessBundle,
   type PurposeCategory,
@@ -22,10 +21,9 @@ import {
 import { DecisionPanel } from "@/components/editor/decision-panel";
 import { NewPurpose, type PurposeAdder } from "@/components/editor/new-purpose";
 import { TYPE_CHOICES, TYPE_LABELS } from "@/lib/editor/node-types";
-import { StepBaseValues, type ChangesOnSteps } from "@/components/step-base-values";
+import { StepBaseValues } from "@/components/step-base-values";
 import type { TierSetup } from "@/lib/tier-setup";
-import { NumberField, SelectField, TextField, type SelectOption } from "@/components/fields";
-import { ProvenanceBadge } from "@/components/provenance-badge";
+import { NumberField, SelectField, TextField, ToggleField, type SelectOption } from "@/components/fields";
 import {
   OUTCOME_LABELS,
   kindProblem,
@@ -44,15 +42,6 @@ import { type Edit, type Scalar } from "@/lib/editor/ops";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
 import { formatHours } from "@/lib/format";
 import { selectableRoles } from "@/lib/roles";
-
-const DIST_OPTIONS: SelectOption[] = [
-  { value: "lognormal", label: "Usually about this, sometimes much longer" },
-  { value: "triangular", label: "Somewhere between min and max, most often the middle value" },
-  { value: "constant", label: "Always the same" },
-];
-
-/** Engine defaults for a lognormal duration's spread (packages/engine simulate.ts). */
-const DEFAULT_CV: Record<Phase, number> = { work: 0.35, wait: 0.3 };
 
 /** The workspace's purposes as the Editor sees them now (it can add one), and how to add one (absent: this person can't). */
 export interface PurposeTools {
@@ -113,7 +102,6 @@ export function StepInspector({
   draft = null,
   stamp,
   tierSetup,
-  changesOnSteps,
   settingsHref,
   readOnly = false,
   purposes,
@@ -126,7 +114,6 @@ export function StepInspector({
   editor: ProcessEditor;
   /** The workspace's tiers and what each tier's service gets, for the base values (capacity P4). */
   tierSetup?: TierSetup;
-  changesOnSteps?: ChangesOnSteps;
   settingsHref?: string;
   /** Show the base values as they are without letting anyone change them. */
   readOnly?: boolean;
@@ -289,7 +276,7 @@ export function StepInspector({
         </p>
       ) : null}
 
-      {decision && !company && onFocusBranch && <DecisionPanel bundle={bundle} editor={editor} decision={step} focus={branchFocus} onFocusBranch={onFocusBranch} />}
+      {decision && onFocusBranch && <DecisionPanel bundle={bundle} editor={editor} decision={step} focus={branchFocus} onFocusBranch={onFocusBranch} />}
 
       {wait && (
         <div className={sectionClass}>
@@ -327,7 +314,6 @@ export function StepInspector({
             editor={editor}
             stamp={stamp ?? (() => ({ at: new Date().toISOString() }))}
             tierSetup={tierSetup}
-            changesOnSteps={changesOnSteps}
             readOnly={readOnly}
             settingsHref={settingsHref}
           />
@@ -346,31 +332,6 @@ export function StepInspector({
               step={1}
               save={field("rework_rate")}
             />
-            <div className="grid grid-cols-2 gap-2">
-              <NumberField
-                label="Promised time"
-                help={{ description: "The time you promise to get this step done within, such as in a client agreement. It is kept here for reference; the numbers don't use it yet.", example: "24 h to reply to a new enquiry." }}
-                value={nullableNumber(step.sla_hours)}
-                optional
-                unit="h"
-                min={0}
-                save={field("sla_hours")}
-              />
-              <NumberField
-                label="Work already in progress"
-                help={{ description: "How many items are sitting at this step right now. Fill it in on any step and the simulation starts from today's real queues instead of an empty process.", example: "7 proposals are waiting for review today, so enter 7." }}
-                value={nullableNumber(step.current_wip)}
-                optional
-                min={0}
-                step={1}
-                placeholder="Not entered"
-                save={wholeNumber(field("current_wip"))}
-                hint={step.current_wip !== null && <ProvenanceBadge step={step} column="current_wip" />}
-              />
-            </div>
-            <p className="text-xs text-fg-3">
-              Work already in progress is what sits at this step now. The promised time is saved but doesn&apos;t change the numbers yet.
-            </p>
             <TextField
               label="Tool"
               help={{ description: "The software or channel used for this step, for your own reference.", example: "Xero, Google Docs or Zoom." }}
@@ -379,59 +340,6 @@ export function StepInspector({
               save={field("tool")}
             />
             <PurposeField bundle={bundle} step={step} save={field("purpose")} purposes={purposes ?? ownPurposes} />
-          </div>
-          <div className={sectionClass}>
-            <p className="text-xs font-semibold text-fg-2">Analysis rules</p>
-            <div className="grid grid-cols-2 gap-2">
-              <NumberField
-                label="Expected wait"
-                value={nullableNumber(step.expected_wait_hours)}
-                optional
-                unit="h"
-                min={0}
-                placeholder="Default"
-                save={field("expected_wait_hours")}
-                help={{
-                  description:
-                    "How long an item can sit in the queue for a person here before it counts as waiting too long. Left blank, the workspace default applies: 1 working day for sales steps, 2 for client work.",
-                  example: "4 h at Reply to the lead: a lead that waits 12 h for a reply is waiting 3 times too long.",
-                }}
-              />
-              <NumberField
-                label="Lost per day of waiting"
-                value={nullableNumber(step.lost_per_day_waiting)}
-                optional
-                scale={100}
-                unit="%"
-                min={0}
-                max={100}
-                step={1}
-                placeholder="None"
-                save={field("lost_per_day_waiting")}
-                help={{
-                  description:
-                    "The share of items that go cold for each working day they wait here. It turns waiting time into money in the insights. Left blank, waiting shows as time only.",
-                  example: "5% a day at Reply to the lead: a lead left 3 days has lost about 15% of its chance of signing.",
-                }}
-              />
-            </div>
-            <NumberField
-              label="Work lost benchmark"
-              value={nullableNumber(step.dropoff_benchmark)}
-              optional
-              scale={100}
-              unit="%"
-              min={0}
-              max={100}
-              step={1}
-              placeholder="Not rated"
-              save={field("dropoff_benchmark")}
-              help={{
-                description:
-                  "The share of the work leaving this step that you would accept losing here, such as leads that don't go any further. If the simulation loses more than this, the step is flagged. Left blank, the step isn't checked.",
-                example: "30% at Check fit: losing 45% of leads here is 1.5 times the benchmark, so it is flagged as Bad.",
-              }}
-            />
           </div>
         </>
       )}
@@ -549,12 +457,11 @@ function DraftChanges({ info, change }: { info: DraftInfo; change: StepChange })
 
 const nullableNumber = (v: number | null) => (v === null ? null : Number(v));
 
-/** Refuse fractions before they reach the saver. */
-const wholeNumber =
-  (save: Saver<number | null>): Saver<number | null> =>
-  async (base, next) =>
-    next !== null && !Number.isInteger(next) ? { status: "error", message: "Enter a whole number." } : save(base, next);
-
+/**
+ * A time, entered one way (brainstorm round 2, item 10): "[ ] h usually", and a tick box "It varies" that opens Quickest / Usually / Longest.
+ * Unticked runs as "about this, sometimes longer" with the engine's usual spread (lognormal); ticked runs as the range (triangular). A step stored
+ * as "always the same" or with its own spread keeps running as it is until someone changes it here.
+ */
 function Duration({
   phase,
   title,
@@ -572,61 +479,45 @@ function Duration({
   const mean = Number(step[`${phase}_hours`]);
   const params = step[`${phase}_params`] ?? {};
   const range = triangularRange(params, mean);
+  const varies = dist === "triangular";
   const point = (p: "min" | "mode" | "max") =>
     via<number | null>((b, v) => (v === null ? null : setRangePoint(b, step.id, phase, p, v)));
+  // Ticking turns the time into a range around it; unticking keeps the usual time and goes back to "about this, sometimes longer".
+  const vary = via<boolean>((b, on) => (on ? setDistribution(b, step.id, phase, "triangular") : updateStep(b, step.id, { [`${phase}_dist`]: "lognormal", [`${phase}_hours`]: Math.round(range.mode * 1000) / 1000 })));
+  const usual =
+    phase === "work"
+      ? { description: "How long someone usually works on it, each time it is done.", example: "1.5 h to write a proposal." }
+      : { description: "How long the item usually sits after the work, with nobody working on it: waiting for a client, a sign-off or a supplier.", example: "24 h for the client to reply." };
   return (
-    <fieldset className={sectionClass}>
+    <fieldset className={sectionClass} data-duration={phase}>
       <legend className="sr-only">{title}</legend>
       <p className="text-xs font-semibold text-fg">{title}</p>
-      <SelectField
-        label="Time pattern"
-        help={{
-          description: "How the time behaves from one run to the next. Pick “Usually about this, sometimes much longer” for most steps, the “between min and max” one when you know the quickest, usual and slowest, and “Always the same” for a fixed time.",
-          example: "A discovery call usually takes an hour but can run to three: pick the “between min and max” pattern with 0.5, 1 and 3 hours.",
-        }}
-        value={dist}
-        options={DIST_OPTIONS}
-        save={via<string | null>((b, v) => (v ? setDistribution(b, step.id, phase, v as Distribution) : null))}
-      />
-      {dist === "triangular" ? (
-        <>
-          <div className="grid grid-cols-3 gap-2">
-            <NumberField label="Min" help={{ description: "The quickest this has ever gone.", example: "0.5 h for a very short call." }} value={range.min} unit="h" min={0} save={point("min")} />
-            <NumberField label="Most likely" help={{ description: "The time it usually takes.", example: "1 h for a typical call." }} value={range.mode} unit="h" min={0} save={point("mode")} />
-            <NumberField label="Max" help={{ description: "The longest it has taken, on a bad day.", example: "3 h when the client keeps asking questions." }} value={range.max} unit="h" min={0} save={point("max")} />
-          </div>
-          <p className="text-xs text-fg-3">
-            Average {formatHours(mean)}, from the range. The simulation samples between min and max.
-          </p>
-        </>
-      ) : (
-        <div className="grid grid-cols-2 gap-2">
-          <NumberField
-            label="Average"
-            help={{
-              description: phase === "work" ? "The average hands-on time: how long someone actually works on it each time." : "The average time the item waits after the work, with nobody working on it.",
-              example: phase === "work" ? "1.5 h to write a proposal." : "24 h waiting for the client to reply.",
-            }}
-            value={mean}
-            unit="h"
-            min={0}
-            save={field(`${phase}_hours`)}
-          />
-          {dist === "lognormal" && (
-            <NumberField
-              label="How much it varies"
-              help={{ description: "How far the time moves around the average. 0 means it is always the same; 0.35 is a typical step; higher means some runs take much longer.", example: "A steady admin task is about 0.2. A client reply that is sometimes instant and sometimes a week is about 1." }}
-              value={nullableNumber((params.cv as number | null | undefined) ?? null)}
-              optional
-              min={0}
-              max={5}
-              step={0.05}
-              placeholder={`${DEFAULT_CV[phase]} (usual)`}
-              save={field(`${phase}_params.cv`)}
-            />
-          )}
+      {varies ? (
+        <div className="grid grid-cols-3 gap-2">
+          <NumberField label="Quickest" help={{ description: "The quickest it goes, on a good day.", example: "0.5 h for a very short call." }} value={range.min} unit="h" min={0} save={point("min")} />
+          <NumberField label="Usually" help={{ description: usual.description, example: usual.example }} value={range.mode} unit="h" min={0} save={point("mode")} />
+          <NumberField label="Longest" help={{ description: "The longest it takes, on a bad day.", example: "3 h when the client keeps asking questions." }} value={range.max} unit="h" min={0} save={point("max")} />
         </div>
+      ) : (
+        <NumberField label="Usually" help={{ description: usual.description, example: usual.example }} value={mean} unit="h" min={0} save={field(`${phase}_hours`)} />
       )}
+      <ToggleField
+        label="It varies"
+        help={{
+          description: "Tick it when the time changes a lot from one time to the next, and say the quickest, the usual and the longest. Left unticked, the simulation takes the usual time and lets it run a little longer now and then, as most work does.",
+          example: "A discovery call is usually 1 h, but 0.5 h at best and 3 h at worst: tick It varies and enter 0.5, 1 and 3.",
+        }}
+        value={varies}
+        onLabel="Quickest, usually and longest"
+        offLabel="About the usual time"
+        save={vary}
+      />
+      {varies && (
+        <p className="text-xs text-fg-3">
+          Average {formatHours(mean)}. The simulation picks a time between the quickest and the longest, most often near the usual.
+        </p>
+      )}
+      {dist === "constant" && <p className="text-xs text-fg-3">This time is set to always be exactly the same. Tick It varies to give it a range.</p>}
     </fieldset>
   );
 }

@@ -46,7 +46,6 @@ const SHARED: [string, string][] = [
   ["solutions/solution-cards", "VerdictWord"],
   ["solutions/solution-cards", "SolutionCards"],
   ["provenance-badge", "ProvenanceBadge"],
-  ["step-issue-badges", "StepIssueBadges"],
   ["shell/skeletons", "PageSkeleton"],
   ["shell/skeletons", "ListSkeleton"],
   ["shell/skeletons", "CardGridSkeleton"],
@@ -67,7 +66,7 @@ const SHARED: [string, string][] = [
 
 const CHARTS: [string, string][] = [
   ["overview/charts", "MrrChart"],
-  ["overview/trend-charts", "IssuesDonut"],
+  ["overview/trend-charts", "OpenIssuesSummary"],
   ["overview/trend-charts", "TimeSplitChart"],
   ["sandbox/time-chart", "TimeChart"],
   ["sandbox/time-chart", "TimeBar"],

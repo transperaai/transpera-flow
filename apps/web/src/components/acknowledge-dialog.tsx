@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { DIALOG_RATINGS, RATING_MEANINGS, hasErrors, toggle, validateDraft, type DraftErrors, type IssueDraft, type IssueFormOptions } from "@/lib/issues/draft";
-import { MAX_TARGET, MAX_TITLE } from "@/lib/issues/validate";
+import { MAX_TITLE } from "@/lib/issues/validate";
 import { cn } from "@/lib/utils";
 
 /** The (i) texts: what each control does, in plain words, with an example. */
@@ -24,43 +24,18 @@ export const ACK_HELP = {
   },
   rating: {
     label: "How bad is it?",
-    description: "How serious the problem is, in the same four ratings the analysis uses. It sets the colour of the issue and of the steps it touches on the map.",
+    description: "How serious the problem is, in the same four ratings the analysis uses. It sets the colour of the issue.",
     example: "Operational risk for a step that only one person can do.",
-  },
-  scope: {
-    label: "What does it touch?",
-    description: "Whether the problem is about the whole process or about particular steps. Steps you pick get a badge on the map.",
-    example: "The whole process for “Clients wait too long to hear back”; the step Check fit for “Fit checks are done by hand”.",
   },
   process: {
     label: "Process",
-    description: "The process the issue is in. The steps you can pick belong to it.",
+    description: "The process the issue is in. An issue belongs to a process, as its solutions do.",
     example: "Lead to live.",
-  },
-  steps: {
-    label: "Steps",
-    description: "Pick every step the problem shows up in. Click a step again to take it off.",
-    example: "Check fit and Send proposal, when both wait on the same person.",
   },
   owners: {
     label: "Owners",
     description: "The people who will sort this out. More than one is fine; each is told it is theirs.",
     example: "Rosa Diaz and Priya Shah.",
-  },
-  measure: {
-    label: "Target measure",
-    description: "What you will measure to know it is fixed, in your own words.",
-    example: "Wait at Check fit.",
-  },
-  now: {
-    label: "Value now",
-    description: "What that measure is today. Write the unit, so nobody has to guess.",
-    example: "1.4 days.",
-  },
-  goal: {
-    label: "Goal",
-    description: "The value that means the problem is fixed. A solution is judged against it.",
-    example: "Under 4 hours.",
   },
   sources: {
     label: "Sources",
@@ -119,9 +94,6 @@ function Form({ mode, draft: initial, options, onSubmit, onClose, busy, error }:
   const [errors, setErrors] = useState<DraftErrors>({});
   const [working, setWorking] = useState(false);
   const set = (patch: Partial<IssueDraft>) => setDraft((d) => ({ ...d, ...patch }));
-  const stepsHere = options.steps.filter((s) => !draft.processId || !s.processId || s.processId === draft.processId);
-  // A step already on the draft (an insight on a step of a nested process) stays pickable even when its process differs.
-  const pickable = [...stepsHere, ...options.steps.filter((s) => draft.stepIds.includes(s.id) && !stepsHere.includes(s))];
 
   const submit = async () => {
     const found = validateDraft(draft);
@@ -169,19 +141,15 @@ function Form({ mode, draft: initial, options, onSubmit, onClose, busy, error }:
         </div>
       </fieldset>
 
-      <fieldset className="flex flex-col gap-2">
-        <legend className="flex items-center text-xs font-medium text-muted-foreground uppercase">
-          {ACK_HELP.scope.label}
-          <Help {...ACK_HELP.scope} />
-        </legend>
+      {(options.processes.length > 1 || errors.process) && (
+      <div className="flex flex-col gap-2">
         {options.processes.length > 1 && (
           <label className="flex max-w-xs flex-col gap-0.5">
             <HelpLabel {...ACK_HELP.process} />
             <NativeSelect
               aria-label="Process"
               value={draft.processId ?? ""}
-              // Steps of another process can't stay on the draft.
-              onChange={(e) => set({ processId: e.target.value || null, stepIds: draft.stepIds.filter((id) => options.steps.find((s) => s.id === id)?.processId === e.target.value) })}
+              onChange={(e) => set({ processId: e.target.value || null, stepIds: [] })}
             >
               {options.processes.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -191,39 +159,13 @@ function Form({ mode, draft: initial, options, onSubmit, onClose, busy, error }:
             </NativeSelect>
           </label>
         )}
-        <div role="radiogroup" aria-label="What does it touch?" className="flex flex-col gap-1">
-          <ScopeChoice id="ack-scope-process" on={draft.scope === "process"} onPick={() => set({ scope: "process" })}>
-            The whole process
-          </ScopeChoice>
-          <ScopeChoice id="ack-scope-steps" on={draft.scope === "steps"} onPick={() => set({ scope: "steps" })}>
-            Specific steps (pick one or more)
-          </ScopeChoice>
-        </div>
-        {draft.scope === "steps" && (
-          <div className="flex flex-col gap-1.5">
-            <span className="flex items-center text-xs font-medium text-muted-foreground">
-              {ACK_HELP.steps.label}
-              <Help {...ACK_HELP.steps} />
-            </span>
-            {pickable.length ? (
-              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Steps">
-                {pickable.map((s) => (
-                  <Chip key={s.id} on={draft.stepIds.includes(s.id)} onClick={() => set({ stepIds: toggle(draft.stepIds, s.id) })}>
-                    {s.name}
-                  </Chip>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">This process has no steps to pick yet.</p>
-            )}
-          </div>
-        )}
-        {(errors.steps || errors.process) && (
-          <p role="alert" className="text-xs text-crit" id="ack-steps-error">
-            {errors.steps ?? errors.process}
+        {errors.process && (
+          <p role="alert" className="text-xs text-crit" id="ack-process-error">
+            {errors.process}
           </p>
         )}
-      </fieldset>
+      </div>
+      )}
 
       <fieldset className="flex flex-col gap-1.5">
         <legend className="flex items-center text-xs font-medium text-muted-foreground uppercase">
@@ -242,18 +184,6 @@ function Form({ mode, draft: initial, options, onSubmit, onClose, busy, error }:
           <p className="text-sm text-muted-foreground">Nobody to pick yet. Add people under People.</p>
         )}
       </fieldset>
-
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Field label={ACK_HELP.measure} htmlFor="ack-measure">
-          <Input id="ack-measure" value={draft.targetMeasure} maxLength={MAX_TARGET} placeholder="e.g. Wait at Check fit" onChange={(e) => set({ targetMeasure: e.target.value })} />
-        </Field>
-        <Field label={ACK_HELP.now} htmlFor="ack-now">
-          <Input id="ack-now" value={draft.targetNow} maxLength={MAX_TARGET} placeholder="e.g. 1.4 days" onChange={(e) => set({ targetNow: e.target.value })} />
-        </Field>
-        <Field label={ACK_HELP.goal} htmlFor="ack-goal">
-          <Input id="ack-goal" value={draft.targetGoal} maxLength={MAX_TARGET} placeholder="e.g. under 4 hours" onChange={(e) => set({ targetGoal: e.target.value })} />
-        </Field>
-      </div>
 
       <fieldset className="flex flex-col gap-1.5">
         <legend className="flex items-center text-xs font-medium text-muted-foreground uppercase">
@@ -327,15 +257,6 @@ function RatingChoice({ rating, on, onPick }: { rating: Rating; on: boolean; onP
       </b>
       <span className="text-xs font-normal text-muted-foreground">{RATING_MEANINGS[rating]}</span>
     </button>
-  );
-}
-
-function ScopeChoice({ id, on, onPick, children }: { id: string; on: boolean; onPick: () => void; children: ReactNode }) {
-  return (
-    <label className="flex items-center gap-2 text-sm">
-      <input type="radio" name="ack-scope" id={id} checked={on} onChange={onPick} className="size-4 accent-[var(--accent)]" />
-      {children}
-    </label>
   );
 }
 
