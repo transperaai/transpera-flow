@@ -245,9 +245,11 @@ describe("(i) help on every control", () => {
     expect(RESOLVE_HELP.solution.description).toMatch(/which solution/);
   });
 
-  it("the Solution page has only the header, what it changes, the two maps and the notes (Q12, D44)", () => {
+  it("the Solution page has only the header, the notes and sources, and the two maps (Q12, D44; QA round 2)", () => {
     const page = read("components/solutions/solution-page.tsx");
-    for (const t of ["Open in editor", "Try it in the Sandbox", "What it changes", "Notes", "Solutions never change the live map", "<SolutionMaps", "<EditableText", "<SolutionStatusMenu"]) expect(page).toContain(t);
+    for (const t of ["Open in editor", "Notes and sources", "Edited on", "Solutions never change the live map", "<SolutionMaps", "<EditableText", "<SolutionStatusMenu"]) expect(page).toContain(t);
+    // No generated list of changes, no Built by and no Sandbox button: the notes say what it changes (QA round 2).
+    for (const t of ["What it changes", "changeLines", "Built by", "Try it in the Sandbox"]) expect(page).not.toContain(t);
     expect(page).not.toContain("AdoptSolution");
     // The measures, the revenue chart, the stress test and the per-issue verdict cards were taken off.
     for (const t of ["Measures", "MRR over time", "Market stress test", "SolutionCompare", "SolvesCard", "VerdictWord", "saveSolutionVerdict"]) expect(page).not.toContain(t);

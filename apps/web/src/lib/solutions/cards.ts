@@ -37,6 +37,9 @@ export const VERDICT_WORDS: Record<SolutionVerdict, string> = { pass: "Pass", fa
 /** The automatic verdict as a word: "Pass", "Fail" or "Not checked" (the issue's target could not be turned into a number). */
 export const autoWord = (v: SolutionVerdict | null): string => (v ? VERDICT_WORDS[v] : "Not checked");
 
+/** The date a solution was last edited: "5 Oct". */
+export const editedDate = (s: Pick<SolutionRow, "updated_at">, now?: Date): string => shortDate(s.updated_at, now);
+
 /** The date a solution was built: "5 Oct". */
 export const builtDate = (s: Pick<SolutionRow, "created_at">, now?: Date): string => shortDate(s.created_at, now);
 

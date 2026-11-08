@@ -109,7 +109,7 @@ const WIDTHS = [
 const PAGES = (): { name: string; call: string; arg: object; ready: string }[] => [
   { name: "solutions-list", call: "q11cMountSolutions", arg: { editor: true }, ready: "[data-solutions-list]" },
   { name: "solutions-empty", call: "q11cMountSolutions", arg: { editor: true, empty: true }, ready: "[data-solutions-list]" },
-  { name: "solution-page", call: "q11cMountSolution", arg: { id: vettingSolutionId, editor: true }, ready: "[data-change-lines]" },
+  { name: "solution-page", call: "q11cMountSolution", arg: { id: vettingSolutionId, editor: true }, ready: "[data-map-side]" },
   { name: "blocks-library", call: "q11cMountBlocks", arg: { mode: "demo" }, ready: "[data-block]" },
   { name: "blocks-empty", call: "q11cMountBlocks", arg: { mode: "readonly" }, ready: "[data-testid=blocks-empty]" },
   { name: "history-process", call: "q11cMountHistory", arg: { editor: true }, ready: "[data-version]" },
@@ -182,12 +182,14 @@ describe("Solutions list", () => {
 });
 
 describe("Solution page", () => {
-  it("is the header, what it changes, the two maps and the notes, in reading order", async () => {
+  it("is the header, the notes and the two maps, in reading order, with live above the solution", async () => {
     const { page, errors } = await pageOf("solution-page");
     const ids = await page.locator("[data-solution-page] [id][data-section]").evaluateAll((els) => els.map((e) => e.id));
-    expect(ids).toEqual(["changes", "maps", "notes"]);
-    expect(await page.locator("#changes [data-change-lines] li").count()).toBeGreaterThan(0);
+    expect(ids).toEqual(["notes", "maps"]);
+    expect(await page.locator("[data-change-lines]").count()).toBe(0);
     expect(await page.locator("#maps [data-map-side]").count()).toBe(2);
+    const [live, solved] = await Promise.all(["live", "solution"].map((id) => page.locator(`#maps [data-map-side="${id}"]`).boundingBox()));
+    expect(solved!.y).toBeGreaterThan(live!.y + live!.height - 1);
     // The measures, the revenue chart and the stress test are gone from the page.
     for (const gone of ["#measures", "#mrr", "#stress", "[data-measure]", "[data-solves-card]"]) expect(await page.locator(gone).count(), gone).toBe(0);
     for (const id of ids) expect(await page.locator(`#${id} [role=heading][aria-level="2"]`).count()).toBe(1);
@@ -195,12 +197,14 @@ describe("Solution page", () => {
     await page.close();
   }, 300_000);
 
-  it("names the issue it fixes in the header, with Open in editor and Try it in the Sandbox beside it, and no Adopt (D55)", async () => {
+  it("names the issue it fixes in the header, with Open in editor, when it was edited, and no Adopt (D55) or Sandbox button", async () => {
     const { page } = await pageOf("solution-page");
     expect(await page.locator("[data-solution-issues] [data-solves]").count()).toBe(1);
     const actions = page.locator("[data-testid=solution-header] [data-page-actions]");
     expect(await actions.locator("[data-open-in-editor]").innerText()).toContain("Open in editor");
-    expect(await actions.locator("[data-try-in-sandbox]").getAttribute("href")).toMatch(/\/sandbox\?solution=/);
+    expect(await page.locator("[data-try-in-sandbox]").count()).toBe(0);
+    expect(await page.locator("[data-testid=solution-header] [data-edited]").innerText()).toMatch(/^Edited on \d{1,2} [A-Z][a-z]{2}/);
+    expect(await page.locator("[data-built]").count()).toBe(0);
     expect(await page.locator("[data-adopt]").count()).toBe(0);
     await page.close();
   }, 300_000);
@@ -208,7 +212,6 @@ describe("Solution page", () => {
   it("a reader gets no Open in editor", async () => {
     const { page } = await pageOf("solution-page", { editor: false });
     expect(await page.locator("[data-open-in-editor], [data-adopt]").count()).toBe(0);
-    expect(await page.locator("[data-try-in-sandbox]").count()).toBe(1);
     await page.close();
   }, 300_000);
 });
