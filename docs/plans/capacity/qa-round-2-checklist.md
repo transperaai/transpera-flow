@@ -62,5 +62,17 @@ The words, app-wide:
       divided by salaries". The Overview's revenue per employee says "MRR ÷ N people". "Retainer" as a kind of client or
       service is unchanged.
 
-The design (worst month, bigger charts with a 12–60 month filter, Where the time goes, new widgets) waits for the picks on the
-options page; it gets its own checks once built.
+The design, as picked on the options page (A1, B1, C1; no new widgets yet). Sandbox, on a laptop:
+
+- [ ] 4.3 Who's overloaded: no small bar chart under the heatmap. Above it, a red box: "Worst month: <month> · N people over
+      their utilisation threshold", with the teams over and counts underneath. That month's column is outlined on the heatmap.
+- [ ] 4.4 Move a lever: the box adds "· today's path: N in <month>" for comparison; flip the This scene / Today switch and
+      the box and outline follow the run shown.
+- [ ] 4.5 Above the charts: "Show the next 12 · 18 · 24 · 36 · 48 · 60 months". Pick 36: the charts and their headers run to
+      the 36th month ("… by Oct 2029"), and it takes a little longer to work out. The heatmap stays on the next 12 months.
+- [ ] 4.6 Clients, MRR and DLER each have a row of their own, with readable axes: every month labelled up to 12, then about a
+      dozen labels.
+- [ ] 4.7 After moving a lever, a line under each chart says how far ahead the scene is at the horizon: clients ahead, MRR
+      ahead a month and added over the months, departments at the 4.5 DLER goal.
+- [ ] 4.8 Where the time goes: two stacked bars (Today, This scene) in the same order and colours, the legend, the total
+      hours a month, and what moved most. Hover a segment for its hours. No pies.

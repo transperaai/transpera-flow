@@ -76,3 +76,30 @@ export function signedMoney(v: number, money: (v: number) => string): string {
 export function signedHours(v: number): string {
   return `${Math.round(v) < 0 ? MINUS : "+"}${Math.abs(Math.round(v))} h`;
 }
+
+/** The worst month of the first `months` (QA round 2, option A1): the month with the most people over their utilisation threshold, how many, and
+ * which teams they are in (most first). Null when nobody is over in any of those months. The first such month wins a tie. */
+export interface WorstMonth {
+  month: number;
+  count: number;
+  teams: { id: string; name: string; count: number }[];
+}
+
+export function worstMonth(
+  people: readonly { roleId?: string | null; line: number; busy: readonly (number | null)[] }[],
+  months: number,
+  teamName: (roleId: string) => string | undefined,
+): WorstMonth | null {
+  let best: WorstMonth | null = null;
+  for (let m = 0; m < months; m++) {
+    const over = people.filter((p) => p.busy[m] != null && p.busy[m]! >= p.line);
+    if (!over.length || (best && over.length <= best.count)) continue;
+    const by = new Map<string, number>();
+    for (const p of over) by.set(p.roleId ?? "", (by.get(p.roleId ?? "") ?? 0) + 1);
+    const teams = [...by]
+      .map(([id, count]) => ({ id, name: (id && teamName(id)) || "Other", count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    best = { month: m, count: over.length, teams };
+  }
+  return best;
+}

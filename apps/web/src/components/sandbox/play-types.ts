@@ -26,7 +26,11 @@ export interface PlayProcess {
   solutions: PlaySolution[];
 }
 
-/** The twelve months of the run, named. */
+/** How far ahead the free-play Sandbox runs, in months (QA round 2: the filter above its charts). */
+export const PLAY_HORIZONS = [12, 18, 24, 36, 48, 60] as const;
+export type PlayHorizon = (typeof PLAY_HORIZONS)[number];
+
+/** The months of the run, named (one per month of the horizon). */
 export interface PlayMonths {
   /** "Nov 2026". */
   long: string[];

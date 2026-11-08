@@ -19,6 +19,8 @@ export interface PlayPersonSeries {
   id: string;
   name: string;
   line: number;
+  /** Their (first) role, so the Sandbox can say which teams are over in a month; absent when unknown. */
+  roleId?: string | null;
   /** Mean busy share per month; null when they aren't there that month. */
   busy: (number | null)[];
 }

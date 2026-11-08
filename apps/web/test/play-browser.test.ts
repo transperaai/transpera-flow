@@ -8,7 +8,7 @@ import { bundleHarness } from "./build-harness";
 
 // The free-play Sandbox in a real browser, with its simulations in a real Web Worker (./play-harness/entry.tsx), on the engine fixture `capacityModel()` and
 // the Set up data that agrees with it (made-up data): the three parts (company map on top, levers left, results right), the result charts (heatmap, over-line bars, three line charts against
-// today's path dashed, time donuts), a lever that moves the charts, no automation section among the levers (D53), a map version picked from a process's popover (badge, chip, reset to
+// today's path dashed, time bars), a lever that moves the charts, no automation section among the levers (D53), a map version picked from a process's popover (badge, chip, reset to
 // today), a price rise with "Clients react", Reset levers, the levers resetting when the
 // page is left (unmounted and opened again), no save, scenario or compare UI, no automation levers (D53), pay
 // hidden, and a phone, where the page never scrolls sideways. With PLAY_SHOTS=<dir> it also saves the screenshots (light and dark, 1440 and 400 px).
@@ -105,21 +105,30 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
       // No "What happens" card: the numbers are in the chart headers. On today's path there is no change, no switch and no dashed copy.
       expect(await page.locator("[data-verdict], [data-verdict-line]").count()).toBe(0);
       expect(await page.locator("body").innerText()).not.toMatch(/What happens/);
-      expect(await text(page, "[data-chart-header='worst']")).toMatch(/^Worst month: \d+ (person|people) over their utilisation threshold$/);
-      expect(await text(page, "[data-chart-header='clients']")).toMatch(/^\d+ clients by month \d+$/);
+      // The worst month of the year, named with the teams over (QA round 2, A1); no comparison on today's path.
+      const worst = await text(page, "[data-chart-header='worst']");
+      expect(worst).toMatch(/^(Worst month: [A-Z][a-z]{2} \d{4} · \d+ (person|people) over their utilisation threshold\n+.+ \d+|Nobody goes over their utilisation threshold in the next 12 months)$/);
+      expect(worst).not.toMatch(/today's path/);
+      expect(await text(page, "[data-chart-header='clients']")).toMatch(/^\d+ clients by [A-Z][a-z]{2} \d{4}$/);
       expect(await text(page, "[data-chart-header='retainers']")).toMatch(/ MRR$/);
-      expect(await text(page, "[data-chart-header='dler']")).toMatch(/^DLER \d\.\d by month \d+$/);
+      expect(await text(page, "[data-chart-header='dler']")).toMatch(/^DLER \d\.\d by [A-Z][a-z]{2} \d{4}$/);
       expect(await page.locator("[data-heat-switch]").count()).toBe(0);
       expect(await page.locator("[data-play-chart]").count()).toBe(3);
       for (const title of ["Clients by department", "MRR", "DLER by department"]) expect(await page.locator(`[data-play-chart="${title}"]`).count(), title).toBe(1);
       expect(await page.locator("[data-play-chart] path[data-line='today']").count()).toBe(0);
       expect(await page.locator("[data-legend-today]").count()).toBe(0);
-      // The heatmap: a row for every team and a cell per month; the bars under it have today only; one donut.
+      // The heatmap: a row for every team and a cell for each of 12 months, the worst month's column outlined; no bars under it. One time bar (C1).
       expect(await page.locator("[data-heat-row]").count()).toBeGreaterThan(2);
-      expect(await page.locator("[data-heat-row]").first().locator("[data-heat-cell]").count()).toBeGreaterThanOrEqual(12);
-      expect(await page.locator("[data-over-bar='scene']").count()).toBe(0);
-      expect(await page.locator("[data-over-bar='today']").count()).toBeGreaterThanOrEqual(12);
-      expect(await page.locator("[data-play-donut]").count()).toBe(1);
+      expect(await page.locator("[data-heat-row]").first().locator("[data-heat-cell]").count()).toBe(12);
+      expect(await page.locator("[data-play-over-bars], [data-over-bar]").count()).toBe(0);
+      if (!/^Nobody/.test(worst)) expect(await page.locator("[data-heat-row] [data-worst-month]").count()).toBe(await page.locator("[data-heat-row]").count());
+      expect(await page.locator("[data-play-purpose-bar]").count()).toBe(1);
+      expect(await page.locator("[data-play-donut]").count()).toBe(0);
+      // One chart per row (B1), and the horizon filter at 12 months; no "how far ahead" lines on today's path.
+      expect(await page.locator("[data-play-horizon-option='12']").getAttribute("aria-pressed")).toBe("true");
+      expect(await page.locator("[data-payoff]").count()).toBe(0);
+      const tops = await page.locator("[data-play-card]").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+      expect(new Set(tops).size).toBe(tops.length);
       expect(await page.locator("[data-purpose-moves]").count()).toBe(0);
       // DLER has its 4.5 goal line, and every result card has its (i).
       expect(await text(page, '[data-play-chart="DLER by department"]')).toContain("Goal 4.5");
@@ -141,7 +150,7 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     const { page, errors } = await mount();
     await ready(page);
     const before = await clientsHeader(page);
-    expect(before).toMatch(/^\d+ clients by month \d+$/);
+    expect(before).toMatch(/^\d+ clients by [A-Z][a-z]{2} \d{4}$/);
     await page.locator('[data-lever="add:org"]').fill("2");
     await page.locator('[data-lever="add:perf"]').fill("1");
     await page.locator('[data-lever="addMonths"]').selectOption("6");
@@ -156,11 +165,12 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     // The charts changed too: the solid and dashed clients lines are not the same.
     const lines = await page.locator('[data-play-chart="Clients by department"] path').evaluateAll((ps) => ps.map((p) => p.getAttribute("d")));
     expect(new Set(lines).size).toBeGreaterThan(2);
-    // The change brings the switch, the coloured bars beside the grey ones, the dashed lines and the second donut.
+    // The change brings the switch, the dashed lines, the second time bar and a "how far ahead" line under each chart.
     expect(await page.locator("[data-heat-switch-option='scene']").getAttribute("aria-pressed")).toBe("true");
-    expect(await page.locator("[data-over-bar='scene']").count()).toBeGreaterThanOrEqual(12);
     expect(await page.locator('[data-play-chart="Clients by department"] path[data-line="today"]').count()).toBeGreaterThan(0);
-    expect(await page.locator("[data-play-donut]").count()).toBe(2);
+    expect(await page.locator("[data-play-purpose-bar]").count()).toBe(2);
+    expect(await text(page, "[data-payoff='clients']")).toBe(`Ahead of today's path by ${gained} clients at 12 months.`);
+    expect(await text(page, "[data-payoff='mrr']")).toMatch(/^MRR at 12 months: \+.+ a month on today's path\. Added over the 12 months: \+.+\.$/);
     expect(await page.locator("[data-purpose-moves]").count()).toBe(1);
     // The switch flips the heatmap to today's run and back.
     await page.locator("[data-heat-switch-option='today']").click();
@@ -272,11 +282,31 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     await page.locator('[data-lever="addLeaver"]').click();
     await page.locator('[aria-label="Month they leave"]').first().selectOption("0");
     await settled(page);
-    expect(await text(page, "[data-chart-header='worst']")).toMatch(/^Worst month: \d+ (person|people) over their utilisation threshold \(\d+ today\)$/);
+    expect(await text(page, "[data-chart-header='worst']")).toMatch(/· today's path: (\d+ in [A-Z][a-z]{2} \d{4}|nobody over)$/);
     await page.locator('[data-lever="addHire"]').click();
     await settled(page);
     expect(await page.locator("[data-hire-row]").count()).toBe(1);
     expect(await page.locator("[data-run-error]").count()).toBe(0);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("shows the charts for the months picked above them, 12 to 60, and the heatmap stays on the first year", async () => {
+    const { page, errors } = await mount();
+    await ready(page);
+    for (const h of ["12", "18", "24", "36", "48", "60"]) expect(await page.locator(`[data-play-horizon-option="${h}"]`).count(), h).toBe(1);
+    await page.locator("[data-play-horizon-option='36']").click();
+    await settled(page);
+    expect(await page.locator("[data-play-horizon-option='36']").getAttribute("aria-pressed")).toBe("true");
+    // 36 months from Nov 2026 (the harness's start) end in Oct 2029; the heatmap keeps 12 columns.
+    expect(await text(page, "[data-chart-header='clients']")).toMatch(/ by Oct 2029$/);
+    expect(await page.locator("[data-heat-row]").first().locator("[data-heat-cell]").count()).toBe(12);
+    expect(await text(page, "[data-time-total]")).toMatch(/over the next 36 months\.$/);
+    // A change at 36 months says how far ahead it is at 36.
+    await page.locator('[data-lever="add:org"]').fill("2");
+    await page.locator('[data-lever="addMonths"]').selectOption("6");
+    await settled(page);
+    expect(await text(page, "[data-payoff='mrr']")).toMatch(/^MRR at 36 months: .+ Added over the 36 months: .+\.$/);
     expect(errors).toEqual([]);
     await page.close();
   });
@@ -300,7 +330,7 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
         const { page } = await mount({}, width, scheme);
         await ready(page);
         // Today's path first: the charts with no change.
-        await page.waitForSelector("[data-play-donut]");
+        await page.waitForSelector("[data-play-purpose-bar]");
         await page.evaluate(() => document.fonts.ready);
         await page.waitForTimeout(400);
         await page.screenshot({ path: `${shots}/sandbox-today-${scheme}-${width}.png`, fullPage: true });

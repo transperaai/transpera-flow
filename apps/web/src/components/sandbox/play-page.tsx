@@ -48,7 +48,7 @@ import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { shortDate } from "@/lib/processes/rows";
 import { PlayView } from "./play-view";
 import type { PlayMapApi } from "./play-map";
-import type { PlayProcess } from "./play-types";
+import type { PlayHorizon, PlayProcess } from "./play-types";
 
 export interface PlayPageProps {
   /** The company model's process (the first sales pipeline), with the servicing processes it runs beside. */
@@ -103,6 +103,8 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
     return s ? { id: s.id, processId: s.process_id } : null;
   }, [initialSolutionId, solutions]);
   const [start] = useState(() => todayIso());
+  // How far ahead the run goes (QA round 2: 12 to 60 months, picked above the charts). Every run of the page uses it.
+  const [horizon, setHorizon] = useState<PlayHorizon>(DEFAULT_FORECAST_MONTHS as PlayHorizon);
 
   // The company map decides what is simulated (Q17, ADR 0023). `live` is the loader's bundle: the live map's run once a person has published a company
   // map version, today's run before. Today's path is always that. The map chosen in the select, when it isn't the live one (the open draft or an
@@ -126,19 +128,19 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
   // Today's path, and the way to prepare the levers' path. The model of today's path gives the win mix for "Win new clients".
   const base0 = useMemo(() => {
     const ctx: PlayContext = { startDate: start, setup, issueOf, winMix: () => ({}) };
-    return preparePlay(live, defaultPlay(), ctx, solutions, DEFAULT_FORECAST_MONTHS);
-  }, [live, start, setup, issueOf, solutions]);
+    return preparePlay(live, defaultPlay(), ctx, solutions, horizon);
+  }, [live, start, setup, issueOf, solutions, horizon]);
   const ctx: PlayContext = useMemo(() => {
     const model = base0.segments[0]?.model;
     return { startDate: start, setup, issueOf, winMix: (d) => (model ? winMix(setup, model, d) : {}) };
   }, [base0, start, setup, issueOf]);
   const prepare = useCallback(
     (play: PlayState) => {
-      const prepared = preparePlay(run, play, ctx, solutions, DEFAULT_FORECAST_MONTHS);
+      const prepared = preparePlay(run, play, ctx, solutions, horizon);
       // A map the run can't start from (no sales pipeline on it) is an error of the levers' path, not of today's.
       return mapProblem !== null ? { ...prepared, segments: [], error: mapProblem } : prepared;
     },
-    [run, ctx, solutions, mapProblem],
+    [run, ctx, solutions, mapProblem, horizon],
   );
 
   // The company map, open groups in place, playing the run on screen.
@@ -225,13 +227,15 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
       <EmptyState>No process has been published yet.</EmptyState>
     );
 
-  const exportSlot = ({ runs, play }: { runs: PlayRuns; play: PlayState }) => <PlayExport live={run} runs={runs} play={play} ctx={ctx} solutions={solutions} start={start} canSeeMoney={canEdit} mapMoved={mapKey !== null} />;
+  const exportSlot = ({ runs, play }: { runs: PlayRuns; play: PlayState }) => <PlayExport live={run} runs={runs} play={play} ctx={ctx} solutions={solutions} start={start} canSeeMoney={canEdit} mapMoved={mapKey !== null} horizon={horizon} />;
 
   return (
     <PlayView
       setup={setup}
       processes={processes}
       startDate={start}
+      horizon={horizon}
+      onHorizon={setHorizon}
       purposes={workspacePurposes(live.workspace.settings)}
       today={base0}
       prepare={prepare}
@@ -247,7 +251,7 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
 }
 
 /** The Export menu for the run on screen: today's path and the levers' path, as CSV, or printed (CSV and print are made in the browser). */
-function PlayExport({ live, runs, play, ctx, solutions, start, canSeeMoney, mapMoved }: { live: ProcessBundle; runs: PlayRuns; play: PlayState; ctx: PlayContext; solutions: SolutionRow[]; start: string; canSeeMoney: boolean; mapMoved: boolean }) {
+function PlayExport({ live, runs, play, ctx, solutions, start, canSeeMoney, mapMoved, horizon }: { live: ProcessBundle; runs: PlayRuns; play: PlayState; ctx: PlayContext; solutions: SolutionRow[]; start: string; canSeeMoney: boolean; mapMoved: boolean; horizon: number }) {
   const [includeCosts, setIncludeCosts] = useState(true);
   const hpw = live.workspace.settings.hours_per_week;
   const cutoffs = useMemo(() => toRatingConfig(ANALYSIS_DEFAULTS, hpw).rules.busy.cutoffs, [hpw]);
@@ -263,7 +267,7 @@ function PlayExport({ live, runs, play, ctx, solutions, start, canSeeMoney, mapM
   const data: ExportData | null =
     ready && columns && months ? { columns, months, model: changed.run.model, categories: workspacePurposes(live.workspace.settings), currency: live.workspace.settings.currency, ctx: exportCtx } : null;
   const roleNames = useMemo(() => Object.fromEntries(Object.entries(changed?.run.model.roles ?? {}).map(([id, r]) => [id, r.name])), [changed]);
-  const timingLine = ready && months ? capacityLine(capacityRunsOut(changed.run.result.monthly!, roleNames, cutoffs), months, horizonLabel(DEFAULT_FORECAST_MONTHS)) : null;
+  const timingLine = ready && months ? capacityLine(capacityRunsOut(changed.run.result.monthly!, roleNames, cutoffs), months, horizonLabel(horizon)) : null;
   return (
     <>
       <SandboxExportMenu
@@ -281,7 +285,7 @@ function PlayExport({ live, runs, play, ctx, solutions, start, canSeeMoney, mapM
           title="Free play"
           printedOn={todayIso()}
           startDate={start}
-          horizonMonths={DEFAULT_FORECAST_MONTHS}
+          horizonMonths={horizon}
           engineVersion={ENGINE_VERSION}
           model={changed!.run.model}
           bundle={live}

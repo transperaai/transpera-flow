@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PlayTeamLine } from "@transpera-flow/db";
-import { busyTone, heatRows, purposeMoves, signedCount, signedHours, signedMoney, type PurposeSlice } from "@/lib/sandbox/play-results-data";
+import { busyTone, heatRows, purposeMoves, signedCount, signedHours, signedMoney, worstMonth, type PurposeSlice } from "@/lib/sandbox/play-results-data";
 
 // What the Sandbox's result charts read (D54): the Capacity page's busy cut-offs, the heatmap's rows, the purposes that moved and the signed numbers.
 
@@ -51,5 +51,27 @@ describe("signed numbers", () => {
     expect(signedMoney(-4000, (v) => `A$${v}`)).toBe("−A$4000");
     expect(signedHours(-40.2)).toBe("−40 h");
     expect(signedHours(12)).toBe("+12 h");
+  });
+});
+
+describe("the worst month (QA round 2, A1)", () => {
+  const p = (roleId: string, line: number, busy: (number | null)[]) => ({ roleId, line, busy });
+  const names: Record<string, string> = { strat: "Strategists", ppc: "PPC managers" };
+  it("is the month with the most people over their own threshold, the first on a tie, with the teams over, most first", () => {
+    const people = [p("strat", 0.85, [0.9, 0.9, 0.7]), p("strat", 0.85, [0.5, 0.86, 0.9]), p("ppc", 0.8, [0.5, 0.8, 0.9]), p("ppc", 0.9, [null, 0.95, 0.6])];
+    expect(worstMonth(people, 3, (id) => names[id])).toEqual({
+      month: 1,
+      count: 4,
+      teams: [
+        { id: "ppc", name: "PPC managers", count: 2 },
+        { id: "strat", name: "Strategists", count: 2 },
+      ],
+    });
+    // Only the months asked for count, and a tie goes to the first month.
+    expect(worstMonth(people, 1, (id) => names[id])).toMatchObject({ month: 0, count: 1 });
+    expect(worstMonth([p("x", 0.5, [0.6, 0.6])], 2, () => undefined)).toMatchObject({ month: 0, teams: [{ name: "Other", count: 1 }] });
+  });
+  it("is null when nobody is over", () => {
+    expect(worstMonth([p("strat", 0.85, [0.84, null])], 2, (id) => names[id])).toBeNull();
   });
 });

@@ -6,12 +6,13 @@
 // `prepareOnModel`; the bundle path itself is covered by apps/web/test/sandbox-play.test.ts. `Worker` is replaced by one that starts the bundled script the
 // test hands over as `window.workerScripts`.
 
+import { useMemo, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { applyPlay, capacitySetupFromModel, defaultPlay, hireIds, winMix, type PlayContext, type PlayState } from "@transpera-flow/db";
 import { calendarMonthStarts, warmupOf, type PreparedPlay } from "@transpera-flow/db/sandbox";
 import { capacityModel, type EngineModel } from "@transpera-flow/engine";
 import { PlayView } from "@/components/sandbox/play-view";
-import type { PlayProcess } from "@/components/sandbox/play-types";
+import type { PlayHorizon, PlayProcess } from "@/components/sandbox/play-types";
 
 declare global {
   interface Window {
@@ -53,8 +54,8 @@ const processes: PlayProcess[] = Object.entries(model.servicingProcesses ?? {}).
 }));
 
 /** The run's segments on the model alone: hires, leavers and a map version are done here (the bundle path does them in the runner). */
-function prepareOnModel(play: PlayState, ctx: PlayContext): PreparedPlay {
-  const monthStarts = calendarMonthStarts(START, 52, model.hoursPerWeek);
+function prepareOnModel(play: PlayState, ctx: PlayContext, horizon = 12): PreparedPlay {
+  const monthStarts = calendarMonthStarts(START, Math.round((horizon * 52) / 12), model.hoursPerWeek);
   const at = (m: number) => (m <= 0 ? 0 : (monthStarts[m - 1] ?? 0));
   let m: EngineModel = { ...model, horizonWeeks: 52 };
   const people = { ...m.people! };
@@ -78,6 +79,8 @@ function prepareOnModel(play: PlayState, ctx: PlayContext): PreparedPlay {
   if (play.leads) m = { ...m, leadsPerWeek: m.leadsPerWeek * (1 + play.leads / 100) };
   if (play.price) m = { ...m, churnDrivers: [{ id: "price", weight: 1, enabled: true, value: Math.abs(play.price), month: play.priceFrom + 1 }] };
   m = applyPlay(m, play, ctx, planPeople);
+  // The run's length follows the horizon, as the page's prepareScenario sets it.
+  m = { ...m, horizonWeeks: Math.round((horizon * 52) / 12) };
   const start = warmupOf(model);
   const segments = [{ from: 0, model: m }];
   for (const [pid, v] of Object.entries(play.versions)) {
@@ -102,16 +105,25 @@ window.mountPlay = ({ payHidden } = {}) => {
   const setup = capacitySetupFromModel(model, { payHidden });
   for (const s of setup.services) s.price_rise_churn = 0.5;
   const ctx: PlayContext = { startDate: START, setup, winMix: (d) => winMix(setup, model, d) };
-  const todayPlan = prepareOnModel(defaultPlay(), ctx);
   root = createRoot(document.getElementById("root")!);
-  root.render(
+  root.render(<Harness setup={setup} ctx={ctx} />);
+};
+
+/** The page's part: how far ahead the run goes (the filter above the charts), and every run prepared for it. */
+function Harness({ setup, ctx }: { setup: ReturnType<typeof capacitySetupFromModel>; ctx: PlayContext }) {
+  const [horizon, setHorizon] = useState<PlayHorizon>(12);
+  const todayPlan = useMemo(() => prepareOnModel(defaultPlay(), ctx, horizon), [ctx, horizon]);
+  const prepare = useMemo(() => (play: PlayState) => prepareOnModel(play, ctx, horizon), [ctx, horizon]);
+  return (
     <div className="p-4">
       <PlayView
         setup={setup}
         processes={processes}
         startDate={START}
+        horizon={horizon}
+        onHorizon={setHorizon}
         today={todayPlan}
-        prepare={(play) => prepareOnModel(play, ctx)}
+        prepare={prepare}
         // A stand-in for the company map's canvas (a bare page has no workspace bundle): a card per process, the page's click and badge hooks.
         map={(_runs, api) => (
           <div data-company-map className="flex flex-wrap gap-6 rounded-lg border p-6">
@@ -133,9 +145,9 @@ window.mountPlay = ({ payHidden } = {}) => {
         )}
         base="/w/example"
       />
-    </div>,
+    </div>
   );
-};
+}
 
 window.unmountPlay = () => {
   root?.unmount();
