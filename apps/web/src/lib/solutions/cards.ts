@@ -3,7 +3,7 @@
 // The components render the results.
 
 import type { IssueRow, SolutionIssueRow, SolutionRow, SolutionsData, SolutionVerdict } from "@transpera-flow/db";
-import { shortDate, type SolutionSummary, type SolutionTest } from "@/lib/issues/pages";
+import { shortDate, type SolutionSummary } from "@/lib/issues/pages";
 
 // The type lives in `packages/db` (a share link's snapshot holds it, B3); re-exported so nothing else changes.
 export type { SolutionsData };
@@ -88,19 +88,6 @@ export function linkableIssues(issues: readonly IssueRow[], processId: string, a
 
 /** The longest note a solution or a verdict can hold (the table checks the same). */
 export const MAX_NOTES = 4000;
-
-/** The solutions tested for one issue, as the Issue page's table wants them. */
-export function solutionTests(issueId: string, data: SolutionsData, base: string, now?: Date): SolutionTest[] {
-  return solutionsForIssue(data, issueId).map(({ solution, link }) => ({
-    id: solution.id,
-    name: solution.name,
-    built: builtDate(solution, now),
-    auto: link.auto_verdict ?? "unchecked",
-    holds: link.holds_pct === null ? null : link.holds_pct / 100,
-    yours: link.user_verdict,
-    href: solutionHref(base, solution.id),
-  }));
-}
 
 /** Each issue's summary for the Issues list, by issue id: how many solutions were tested, and whether one passed. */
 export function solutionSummaries(data: SolutionsData): Record<string, SolutionSummary> {

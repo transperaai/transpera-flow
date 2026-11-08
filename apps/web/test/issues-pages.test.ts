@@ -24,7 +24,7 @@ import {
 import { mapFeed, registerEntries } from "@/lib/issues/register";
 import { MemoryIssueStore } from "@/lib/issues/store";
 import { parseResolveInput } from "@/lib/issues/validate";
-import { NO_SOLUTIONS_DATA, solutionSummaries, solutionTests } from "@/lib/solutions/cards";
+import { NO_SOLUTIONS_DATA, solutionSummaries } from "@/lib/solutions/cards";
 
 // The Issues pages (issue #113, A48): the list's filters and URL, the sort, resolving and reopening (with the map badges
 // and the history), the resolved bar, and the (i) on every control.
@@ -164,7 +164,6 @@ describe("the issue's address", () => {
 
 describe("solutions tested", () => {
   it("are empty with no solutions, so the list says none and the page its empty state", () => {
-    expect(solutionTests(northbeamIssues()[0]!.id, NO_SOLUTIONS_DATA, "/demo")).toEqual([]);
     expect(solutionSummaries(NO_SOLUTIONS_DATA)).toEqual({});
   });
 });

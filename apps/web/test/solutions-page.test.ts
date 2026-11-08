@@ -15,7 +15,6 @@ import {
   linkableIssues,
   solutionHref,
   solutionSummaries,
-  solutionTests,
   solutionsForIssue,
   type SolutionsData,
 } from "@/lib/solutions/cards";
@@ -91,17 +90,15 @@ describe("the cards", () => {
     expect(builtBy(null, null, true)).toBe("You");
   });
 
-  it("lists an issue's solutions newest first, for the Issue page's table and the list's counts", () => {
+  it("lists an issue's solutions newest first, for the Issue page and the list's counts; only a person's Pass counts (QA round 2)", () => {
     expect(solutionsForIssue(data, issueA!.id).map((x) => x.solution.id)).toEqual(["s2", "s1"]);
-    const tests = solutionTests(issueA!.id, data, "/w/s");
-    expect(tests.map((t) => [t.id, t.auto, t.holds, t.yours, t.href])).toEqual([
-      ["s2", "unchecked", null, null, "/w/s/solutions/s2"],
-      ["s1", "pass", 0.92, null, "/w/s/solutions/s1"],
-    ]);
+    // Issue A's links carry a stored automatic pass and no verdict of the person's: tested, but not passed. Issue B has the person's Pass.
     expect(solutionSummaries(data)).toEqual({
-      [issueA!.id]: { tested: 2, passed: true },
+      [issueA!.id]: { tested: 2, passed: false },
       [issueB!.id]: { tested: 1, passed: true },
     });
+    const yours = { ...data, links: data.links.map((l) => (l.solution_id === "s1" ? { ...l, user_verdict: "pass" as const } : l)) };
+    expect(solutionSummaries(yours)[issueA!.id]).toEqual({ tested: 2, passed: true });
     expect(solutionSummaries(NO_SOLUTIONS_DATA)).toEqual({});
     expect(solutionHref("/demo", "s1")).toBe("/demo/solutions/s1");
   });
