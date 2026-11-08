@@ -10,6 +10,7 @@ import {
   bottleneck,
   busyShares,
   departmentCeiling,
+  DLER_GOAL,
   dler,
   leaver,
   limitedBy,
@@ -25,14 +26,14 @@ import {
   type PurposeCategory,
 } from "@transpera-flow/db";
 import { capacityProblems, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
-import { namedPurposeParts } from "@/lib/capacity/purposes";
+import { namedPurposeParts, purposeColours } from "@/lib/capacity/purposes";
 import { MetaLine, PageHeader } from "@/components/page-kit";
 import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
 import { useCapacityRuns } from "@/lib/sim/use-capacity-runs";
 import { cn } from "@/lib/utils";
-import { BusyBar, Chip, Dumbbell, How, Kpi, RoomGauge, Section, StackBar, TierChips, toneOf, TONE_TEXT } from "./widgets";
+import { BusyBar, Chip, Dumbbell, HeroKpi, How, RoomGauge, Section, StackBar, TierChips, toneOf, TONE_TEXT, type KpiStatus } from "./widgets";
 
 export interface CapacityViewProps {
   setup: CapacitySetup;
@@ -120,6 +121,7 @@ export function CapacityView(props: CapacityViewProps) {
           {props.modelError}
         </div>
       )}
+      {/* A shared role's rate and unit only turned its hours into its own unit; nothing on this page uses them, so they are not asked for here. */}
       <Attention base={base} problems={problems} missing={missing.filter((m) => m.kind !== "shared_role_rate" && m.kind !== "shared_role_unit")} />
       <Headline setup={setup} />
       {runs.today.status === "error" && (
@@ -127,7 +129,7 @@ export function CapacityView(props: CapacityViewProps) {
           The simulation could not run: {runs.today.error}
         </div>
       )}
-      {!todayRun || !model ? <RunningCard what="Working out who has room, from a simulation of today's clients…" /> : <TodaySections {...props} model={model} result={todayRun} missing={missing} />}
+      {!todayRun || !model ? <RunningCard what="Working out who has room, from a simulation of today's clients…" /> : <TodaySections {...props} model={model} result={todayRun} />}
     </div>
   );
 }
@@ -203,23 +205,45 @@ function Attention({ base, problems, missing }: { base: string; problems: Return
 function Headline({ setup }: { setup: CapacitySetup }) {
   const lines = useMemo(() => serviceLines(setup), [setup]);
   const d = useMemo(() => dler(setup), [setup]);
-  const dlerKpi = (label: string, row: (typeof d)["whole"]) => (
-    <Kpi
-      key={label}
-      label={label}
-      value={row.hidden ? "Hidden" : row.ratio === null ? "—" : f1(row.ratio)}
-      sub={row.hidden ? "Pay is hidden for your role" : row.ratio === null ? "No salaries entered" : `Average of ${row.people} ${row.people === 1 ? "person's" : "people's"} DLER`}
-    />
-  );
+  const dlerKpi = (label: string, row: (typeof d)["whole"]) => {
+    const shown = !row.hidden && row.ratio !== null;
+    const status: KpiStatus | undefined = shown ? (row.ratio! >= DLER_GOAL ? { tone: "good", words: `At or above the ${f1(DLER_GOAL)} goal` } : { tone: "warn", words: `Below the ${f1(DLER_GOAL)} goal` }) : undefined;
+    return (
+      <HeroKpi
+        key={label}
+        label={label}
+        value={row.hidden ? "Hidden" : row.ratio === null ? "—" : f1(row.ratio)}
+        status={status}
+        sub={row.hidden ? "Pay is hidden for your role" : row.ratio === null ? "No salaries entered" : `Average of ${row.people} ${row.people === 1 ? "person's" : "people's"} DLER`}
+      />
+    );
+  };
+  const grid = "grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3";
+  const group = "text-xs font-semibold text-fg-2";
   return (
-    <Section title="Clients and DLER" description="Who we serve, and what the people serving them cost against what they earn.">
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-2.5" data-headline>
-        {lines.byDepartment.map((dep) => (
-          <Kpi key={dep.id} label={`Clients with ${dep.name} services`} value={f0(dep.clients)} sub="named and counted" />
-        ))}
-        <Kpi label="Clients taking both" value={f0(lines.both)} sub={`${f0(lines.unique)} clients in all`} />
-        {d.departments.map((row) => dlerKpi(`DLER ${row.name}`, row))}
-        {dlerKpi("DLER whole business", d.whole)}
+    <Section
+      title="Clients and DLER"
+      description="Who we serve, and what the people serving them cost against what they earn."
+      className="[&_[data-slot=card]]:border-accent/40 [&_[data-slot=card]]:bg-accent-soft/40 [&_[data-slot=card]]:shadow-[var(--shadow)]"
+      data-headline-section
+    >
+      <div className="flex flex-col gap-4" data-headline>
+        <div className="flex flex-col gap-2">
+          <h3 className={group}>Clients</h3>
+          <div className={grid}>
+            {lines.byDepartment.map((dep) => (
+              <HeroKpi key={dep.id} label={`Clients with ${dep.name} services`} value={f0(dep.clients)} sub="named and counted" />
+            ))}
+            <HeroKpi label="Clients taking both" value={f0(lines.both)} sub={`${f0(lines.unique)} clients in all`} />
+          </div>
+        </div>
+        <div className="flex flex-col gap-2">
+          <h3 className={group}>DLER, fees against salaries (the goal is {f1(DLER_GOAL)})</h3>
+          <div className={grid}>
+            {d.departments.map((row) => dlerKpi(`DLER ${row.name}`, row))}
+            {dlerKpi("DLER whole business", d.whole)}
+          </div>
+        </div>
       </div>
     </Section>
   );
@@ -227,7 +251,7 @@ function Headline({ setup }: { setup: CapacitySetup }) {
 
 // ---------------------------------------------------------------------------------------------------------------------
 
-function TodaySections(props: CapacityViewProps & { model: EngineModel; result: SimulationResult; missing: MissingItem[] }) {
+function TodaySections(props: CapacityViewProps & { model: EngineModel; result: SimulationResult }) {
   const { setup, model, result, base } = props;
   const busy = useMemo(() => busyShares(setup, model, result), [setup, model, result]);
   const departments = setup.departments.filter((d) => setup.services.some((s) => s.active && s.department_id === d.id && s.tier_id));
@@ -242,7 +266,6 @@ function TodaySections(props: CapacityViewProps & { model: EngineModel; result: 
       {departments.map((d) => (
         <PeopleTable key={d.id} name={d.name} setup={setup} people={busy.people.filter((p) => p.kind === "client_facing" && p.departmentId === d.id)} showChannels={/performance/i.test(d.name)} />
       ))}
-      <SharedTeams setup={setup} model={model} result={result} busy={busy} missing={props.missing} />
       <Bottleneck setup={setup} model={model} result={result} base={base} stepProcess={props.stepProcess} />
       <Leaver setup={setup} model={model} result={result} people={busy.people} />
       <TimeToServe setup={setup} model={model} purposes={props.purposes} />
@@ -359,55 +382,6 @@ function channelsOf(setup: CapacitySetup, p: PersonBusy): number {
   return total;
 }
 
-function SharedTeams({ setup, model, result, busy, missing }: { setup: CapacitySetup; model: EngineModel; result: SimulationResult; busy: ReturnType<typeof busyShares>; missing: MissingItem[] }) {
-  const teams = busy.roles.filter((r) => r.kind === "shared" && r.people > 0 && r.departmentId);
-  if (!teams.length) return null;
-  const noUnit = new Set(missing.filter((m) => m.kind === "shared_role_unit").map((m) => m.id));
-  return (
-    <Section title="Shared teams" aside={<span className="text-xs text-muted-foreground">They serve every client and own none.</span>} data-shared-teams>
-      <div className="grid gap-3 md:grid-cols-3">
-        {teams.map((t) => {
-          const members = setup.people.filter((p) => p.role_ids.includes(t.id) && p.active);
-          const demand = members.reduce((s, p) => s + Object.values(result.personTime?.stepHours[p.id] ?? {}).reduce((a, b) => a + b, 0), 0);
-          const atLine = t.busy > 0 ? (demand / t.busy) * t.line : 0;
-          const unit = setup.roles.find((r) => r.id === t.id)?.unit?.trim() || null;
-          const perHour = model.roles[t.id]?.unit?.perHour;
-          const tone = toneOf(t.busy, t.line);
-          return (
-            <div key={t.id} className="flex min-w-0 flex-col gap-1.5 rounded-token border border-line p-3" data-team={t.name}>
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold">{t.name}</h3>
-                <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", tone === "bad" ? "bg-crit-soft text-crit" : tone === "warn" ? "bg-warn-soft text-warn" : "bg-good-soft text-good")}>
-                  {formatPercent(t.busy)}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">{members.map((m) => m.name).join(", ")}</p>
-              {perHour && unit ? (
-                <p className="text-xs">
-                  <b className="tabular-nums">{f0(demand * perHour)}</b> of <span className="tabular-nums">{f0(atLine * perHour)}</span> {unit} a month at the utilisation threshold
-                </p>
-              ) : (
-                <p className="text-xs">
-                  <b className="tabular-nums">{f0(demand)}</b> of <span className="tabular-nums">{f0(atLine)}</span> hours a month at the utilisation threshold
-                  <span className="block text-muted-foreground">
-                    {unit ? `Unit: ${unit}. ` : ""}
-                    {noUnit.has(t.id) ? "No unit of work entered. " : ""}Rate not entered yet
-                  </span>
-                </p>
-              )}
-              <BusyBar busy={t.busy} line={t.line} low={t.low} high={t.high} label={t.name} />
-            </div>
-          );
-        })}
-      </div>
-      <How
-        works="Each shared team's busy share comes from the simulation: the work its steps put on it, queued for its people. The hours at the utilisation threshold are the team's capacity at its threshold (how busy it can be before it counts as full), which is what it could do before it is stretched."
-        tells="whether a team that serves everyone is close to being the limit. Once a rate is entered the hours turn into the team's own unit."
-      />
-    </Section>
-  );
-}
-
 function Bottleneck({ setup, model, result, base, stepProcess }: { setup: CapacitySetup; model: EngineModel; result: SimulationResult; base: string; stepProcess: Record<string, string> }) {
   const b = useMemo(() => bottleneck(setup, model, result), [setup, model, result]);
   if (!b) return null;
@@ -516,23 +490,28 @@ export function TimeToServe({ setup, model, purposes }: { setup: CapacitySetup; 
   const t = useMemo(() => timeToServe(setup, model), [setup, model]);
   const money = (v: number) => formatWholeCurrency(v, setup.currency);
   const nameOf = (id: string | null) => setup.people.find((p) => p.id === id)?.name ?? "—";
+  // Each tier's bar, named by the workspace's purposes, and one colour per purpose across the whole section.
+  const parts = useMemo(() => new Map(t.departments.flatMap((d) => d.tiers.map((tier) => [tier.serviceId, namedPurposeParts(tier.byPurpose, purposes)] as const))), [t, purposes]);
+  const colours = useMemo(() => purposeColours([...parts.values()]), [parts]);
   return (
-    <Section title="Time to serve one client, per month" data-time-to-serve>
+    <Section title="Avg time to serve one client, by tier, per month" data-time-to-serve>
       {t.departments.map((d) => (
         <div key={d.id} className="flex flex-col gap-2">
-          <h3 className="text-sm font-semibold">{d.name}</h3>
+          <h3 className="text-base font-semibold">{d.name}</h3>
           <div className="grid gap-3 md:grid-cols-3">
             {d.tiers.map((tier) => (
               <div key={tier.serviceId} className="flex flex-col gap-1 rounded-token border border-line p-3" data-tier-card={`${d.name} ${tier.tierKey}`}>
                 <div className="flex items-center justify-between gap-2">
                   <h4 className="text-sm font-semibold">{tier.tierName} client</h4>
-                  <span className="text-xs text-muted-foreground">{money(tier.fee)} a month</span>
+                  <span className="text-xs text-muted-foreground" data-tier-fee>
+                    Avg {money(tier.fee)} a month
+                  </span>
                 </div>
                 <p className="text-base">
                   <b className="tabular-nums">{f0(tier.hours)} hours</b> a month
                 </p>
                 <p className="mb-1 text-xs text-muted-foreground">{tier.feePerHour === null ? "No hours planned yet" : `Earns ${money(tier.feePerHour)} per hour of work`}</p>
-                {tier.byPurpose.length > 0 && <StackBar parts={namedPurposeParts(tier.byPurpose, purposes)} />}
+                {tier.byPurpose.length > 0 && <StackBar parts={(parts.get(tier.serviceId) ?? []).map((p) => ({ ...p, color: colours.get(p.name) }))} />}
               </div>
             ))}
           </div>
@@ -540,7 +519,7 @@ export function TimeToServe({ setup, model, purposes }: { setup: CapacitySetup; 
       ))}
       {t.named.length > 0 && (
         <>
-          <h3 className="text-sm font-semibold">Named clients</h3>
+          <h3 className="text-base font-semibold">Named clients</h3>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[30rem] text-sm" data-named-clients>
               <thead>

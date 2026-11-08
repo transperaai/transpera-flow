@@ -122,20 +122,26 @@ export function Dumbbell({ before, after, line }: { before: number; after: numbe
 
 const SERIES = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5", "bg-chart-1/60", "bg-chart-2/60", "bg-chart-3/60"];
 
-/** One bar split into parts with a legend; `unit` follows each figure. */
-export function StackBar({ parts, unit = "h" }: { parts: { key: string; name: string; value: number }[]; unit?: string }) {
+/** One bar split into parts with a legend; `unit` follows each figure. A part's `color` (a CSS colour) overrides the series colour by position. */
+export function StackBar({ parts, unit = "h" }: { parts: { key: string; name: string; value: number; color?: string }[]; unit?: string }) {
   const total = parts.reduce((s, p) => s + p.value, 0) || 1;
   return (
     <div data-stack>
       <div className="flex h-3.5 overflow-hidden rounded bg-panel-2" role="img" aria-label={parts.map((p) => `${p.name} ${formatNumber(p.value)} ${unit}`).join(", ")}>
         {parts.map((p, i) => (
-          <i key={p.key} className={cn("block h-full", SERIES[i % SERIES.length])} style={{ width: `${(p.value * 100) / total}%` }} title={`${p.name} ${formatNumber(p.value)} ${unit}`} />
+          <i
+            key={p.key}
+            className={cn("block h-full", !p.color && SERIES[i % SERIES.length], p.color && i > 0 && "border-l-2 border-panel")}
+            style={{ width: `${(p.value * 100) / total}%`, background: p.color }}
+            title={`${p.name} ${formatNumber(p.value)} ${unit}`}
+            data-part={p.name}
+          />
         ))}
       </div>
       <ul className="mt-1.5 flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
         {parts.map((p, i) => (
           <li key={p.key} className="flex items-center gap-1.5">
-            <i className={cn("size-2 rounded-sm", SERIES[i % SERIES.length])} />
+            <i className={cn("size-2.5 shrink-0 rounded-sm", !p.color && SERIES[i % SERIES.length])} style={p.color ? { background: p.color } : undefined} />
             {p.name} <b className="tabular-nums text-fg">{formatNumber(p.value)}</b>
           </li>
         ))}
@@ -184,6 +190,36 @@ export function Kpi({ label, value, sub }: { label: string; value: ReactNode; su
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-0.5 font-mono text-[22px] font-medium tabular-nums">{value}</div>
       {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
+    </div>
+  );
+}
+
+/** How a headline figure stands against its goal: the bar colour along the top, and the words in the badge (the words carry it, not the colour). */
+export type KpiStatus = { tone: "good" | "warn"; words: string };
+
+const STATUS_BAR: Record<KpiStatus["tone"], string> = { good: "border-t-good", warn: "border-t-warn" };
+const STATUS_BADGE: Record<KpiStatus["tone"], string> = { good: "bg-good-soft", warn: "bg-warn-soft" };
+const STATUS_DOT: Record<KpiStatus["tone"], string> = { good: "bg-good", warn: "bg-warn" };
+
+/** A page's headline figure, bigger than a `Kpi`: the label, the number large, an optional status against a goal, then the note. */
+export function HeroKpi({ label, value, sub, status }: { label: string; value: ReactNode; sub?: ReactNode; status?: KpiStatus }) {
+  return (
+    <div
+      className={cn("flex min-w-0 flex-col gap-1 rounded-token border border-line bg-panel px-4 pt-3.5 pb-3 shadow-[var(--shadow)]", status ? cn("border-t-4", STATUS_BAR[status.tone]) : "border-t-4 border-t-accent")}
+      data-kpi
+      data-kpi-status={status?.tone}
+    >
+      <div className="text-sm font-medium text-fg-2">{label}</div>
+      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+        <span className="font-mono text-4xl leading-none font-semibold tracking-tight text-fg tabular-nums">{value}</span>
+        {status && (
+          <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium text-fg", STATUS_BADGE[status.tone])} data-kpi-badge>
+            <i aria-hidden className={cn("size-2 rounded-full", STATUS_DOT[status.tone])} />
+            {status.words}
+          </span>
+        )}
+      </div>
+      {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
     </div>
   );
 }

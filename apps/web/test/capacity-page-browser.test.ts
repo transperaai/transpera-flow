@@ -71,12 +71,17 @@ describe("Capacity page", { timeout: 180_000 }, () => {
       const root = page.locator("[data-capacity]");
       console.log(`capacity run (${width}px): today ${await root.getAttribute("data-today-ms")} ms`);
 
-      // Headline: clients by service line, taking both, and DLER as the average of each person's DLER (D40, no goal).
+      // Headline: clients by service line, taking both, and DLER as the average of each person's DLER, said against its goal in words.
       const kpis = await page.locator("[data-headline] [data-kpi]").allInnerTexts();
       expect(kpis.some((k) => /Clients with Organic \(SEO\) services/.test(k))).toBe(true);
       expect(kpis.some((k) => /Clients with Performance services/.test(k))).toBe(true);
       expect(kpis.some((k) => /Clients taking both\s+\d+\s+\d+ clients in all/.test(k))).toBe(true);
-      expect(kpis.filter((k) => k.includes("DLER") && /Average of \d+ people.s DLER/.test(k) && !k.includes("goal"))).toHaveLength(3);
+      const dlerKpis = kpis.filter((k) => k.includes("DLER") && /Average of \d+ people.s DLER/.test(k));
+      expect(dlerKpis).toHaveLength(3);
+      for (const k of dlerKpis) expect(k).toMatch(/(At or above|Below) the 4\.5 goal/);
+      const statuses = await page.locator("[data-headline] [data-kpi][data-kpi-status]").evaluateAll((els) => els.map((e) => e.getAttribute("data-kpi-status")));
+      expect(statuses).toHaveLength(3);
+      for (const s of statuses) expect(["good", "warn"]).toContain(s);
       expect(kpis.some((k) => k.includes("DLER whole business"))).toBe(true);
 
       // Room for more clients: a sentence, the gauge with its limits, and chips.
@@ -91,9 +96,8 @@ describe("Capacity page", { timeout: 180_000 }, () => {
       expect(await text(page, '[data-people-table="Organic (SEO)"] thead')).not.toContain("Channels");
       expect(await text(page, '[data-people-table="Organic (SEO)"] tbody')).toContain("Laura");
 
-      // Shared teams: no rate is entered, so hours and "Rate not entered yet".
-      expect(await page.locator("[data-team]").count()).toBeGreaterThanOrEqual(5);
-      expect(await text(page, "[data-shared-teams]")).toContain("Rate not entered yet");
+      // No "Shared teams" section (removed at QA).
+      expect(await page.locator("[data-shared-teams], [data-team]").count()).toBe(0);
 
       // Bottleneck: the sentence and step links to the process page.
       expect(await text(page, "[data-bottleneck-sentence]")).toMatch(/is the most stretched, at \d+% against a utilisation threshold of \d+%/);
@@ -104,9 +108,18 @@ describe("Capacity page", { timeout: 180_000 }, () => {
       expect(await text(page, "[data-leaver-sentence]")).toMatch(/If .+ leaves/);
       expect(await page.locator("[data-dumbbell]").count()).toBeGreaterThan(0);
       expect(await page.locator("[data-tier-card]").count()).toBe(6);
+      expect(await text(page, "[data-time-to-serve]")).toContain("Avg time to serve one client, by tier, per month");
+      for (const fee of await page.locator("[data-tier-fee]").allInnerTexts()) expect(fee).toMatch(/^Avg A\$[\d,]+ a month$/);
+      // One colour per purpose across the section: a purpose's segment is the same colour in every tier's bar, and no two purposes share one.
+      const colours = await page.locator("[data-time-to-serve] [data-part]").evaluateAll((els) => els.map((e) => [e.getAttribute("data-part"), getComputedStyle(e).backgroundColor] as const));
+      const byPurpose = new Map<string, Set<string>>();
+      for (const [name, c] of colours) byPurpose.set(name!, (byPurpose.get(name!) ?? new Set()).add(c));
+      expect(byPurpose.size).toBeGreaterThan(1);
+      for (const set of byPurpose.values()) expect(set.size).toBe(1);
+      expect(new Set([...byPurpose.values()].map((v) => [...v][0])).size).toBe(byPurpose.size);
       expect(await page.locator("[data-named-clients] tbody tr").count()).toBe(13);
       // Each widget folds its "How this works".
-      expect(await page.locator("details[data-how]").count()).toBeGreaterThanOrEqual(8);
+      expect(await page.locator("details[data-how]").count()).toBeGreaterThanOrEqual(7);
       expect(await page.locator("details[data-how][open]").count()).toBe(0);
 
       // The page never scrolls sideways; wide tables scroll inside their card.
