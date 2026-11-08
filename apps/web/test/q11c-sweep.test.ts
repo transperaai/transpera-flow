@@ -299,14 +299,14 @@ describe("History pages", () => {
 });
 
 describe("Issue page, the right column and the map card", () => {
-  it("Target, Linked to and Sources are section cards with the kit's title", async () => {
+  it("Target is a section card with the kit's title, and the sources sit in What's wrong", async () => {
     const { page, errors } = await pageOf("issue-6");
-    for (const [id, title] of [["target", "Target"], ["linked", "Linked to"], ["sources", "Sources"]] as const) {
+    for (const [id, title] of [["target", "Target"]] as const) {
       const card = page.locator(`aside #${id}[data-section=${id}]`);
       expect((await card.locator("[role=heading][aria-level='2']").innerText()).startsWith(title)).toBe(true);
       expect(await card.locator(".uppercase").count()).toBe(0);
     }
-    expect(await page.locator("aside [data-section=sources] [data-edit-entry]").count()).toBeGreaterThan(0);
+    expect(await page.locator("#wrong [data-issue-sources] [data-edit-entry]").count()).toBeGreaterThan(0);
     expect(errors).toEqual([]);
     await page.close();
   }, 300_000);

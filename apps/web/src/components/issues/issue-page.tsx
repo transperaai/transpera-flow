@@ -1,12 +1,12 @@
 "use client";
 
-// The Issue page (issue #113, A48; redesigned on the page kit in Q10): a header card (the title, pills for the rating, status and where
-// it sits, owners and dates, Edit and Resolve or Reopen), then where the issue sits on the map, what is wrong (edited where it stands),
-// the solutions tried, and the history as a timeline; its target, links and sources sit beside. The status is a pill dropdown that saves
+// The Issue page (issue #113, A48; redesigned on the page kit in Q10; QA round 2): a header card (the title, pills for the rating, status and
+// its process, owners and dates, Edit and Resolve or Reopen), then where the issue sits on the map, what is wrong (edited where it stands)
+// with its sources, and the solutions tried; its target sits beside. The status is a pill dropdown that saves
 // at once; choosing Resolved opens the Resolve dialog, to pick the solution that fixed it.
 
 import { isReadOnly, type ScreenMode } from "@/lib/mode";
-import { CircleCheck, CirclePlus, FlaskConical, Link2, Pencil, RotateCcw, ArrowRightLeft, type LucideIcon } from "lucide-react";
+import { FlaskConical, Pencil } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -18,7 +18,7 @@ import { Help, HelpLabel } from "@/components/help";
 import { ISSUE_PAGE_HELP } from "@/lib/issues/help";
 import { IssueStatusMenu } from "@/components/issues/status-pill";
 import { ResolveDialog } from "@/components/issues/resolve-dialog";
-import { EditableText, EmptyState, HEADER_PILL, MetaLine, PageHeader, SectionCard, Timeline, type TimelineEntry } from "@/components/page-kit";
+import { EditableText, EmptyState, HEADER_PILL, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { VerdictWord } from "@/components/solutions/solution-cards";
 import { SolutionStatusMenu } from "@/components/solutions/status-menu";
@@ -31,7 +31,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { MapSkeleton } from "@/components/map/map-placeholder";
 import { draftFromIssue, issueFormOptions, toSaveInput } from "@/lib/issues/draft";
-import { HISTORY_FOLD, isOpenIssue, issueHref, resolvedBar, shortDate, timelineLines, type HistoryNames, type TimelineKind } from "@/lib/issues/pages";
+import { isOpenIssue, issueHref, resolvedBar, shortDate } from "@/lib/issues/pages";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { useIssues } from "@/lib/issues/use-issues";
 import { editSourceIds } from "@/lib/sources/links";
@@ -51,15 +51,6 @@ const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((
 });
 
 
-const KIND_ICON: Record<TimelineKind, LucideIcon> = {
-  created: CirclePlus,
-  edited: Pencil,
-  status: ArrowRightLeft,
-  linked: Link2,
-  solution: FlaskConical,
-  resolved: CircleCheck,
-  reopened: RotateCcw,
-};
 
 export interface IssuePageProps {
   issue: IssueRow;
@@ -86,7 +77,7 @@ export interface IssuePageProps {
 }
 
 export function IssuePage(props: IssuePageProps) {
-  const { bundle, processes, sources, mode, base, buildHref, viewerId } = props;
+  const { bundle, processes, sources, mode, base, buildHref } = props;
   const router = useRouter();
   const state = useIssues(bundle.workspace.id, props.issues, mode, props.liveRevisions ?? { [bundle.process.id]: bundle.revision.id });
   const issue = state.issues.find((i) => i.id === props.issue.id) ?? props.issue;
@@ -120,7 +111,6 @@ export function IssuePage(props: IssuePageProps) {
     () => issueFormOptions({ processes, steps: allSteps, people: namedForViewer(viewerOf(bundle), bundle.people.filter((p) => p.active)), sources }),
     [processes, allSteps, bundle, sources],
   );
-  const stepName = useMemo(() => new Map(allSteps.map((s) => [s.id, s.name])), [allSteps]);
   const processName = useMemo(() => new Map(processes.map((p) => [p.id, p.name])), [processes]);
   const personName = useMemo(() => new Map(namedForViewer(viewerOf(bundle), bundle.people).map((p) => [p.id, p.name])), [bundle]);
   const sourceTitle = useMemo(() => new Map(sources.map((s) => [s.id, s.title])), [sources]);
@@ -151,14 +141,6 @@ export function IssuePage(props: IssuePageProps) {
   // What the Resolve dialog can pick, and the one that fixed a resolved issue.
   const linked = tried.map(({ solution, link }) => ({ id: solution.id, name: solution.name, verdict: effectiveVerdict(link) }));
   const fixedBy = issue.resolved_solution_id ? (solutionData.solutions.find((s) => s.id === issue.resolved_solution_id) ?? null) : null;
-  const names: HistoryNames = {
-    step: (id) => stepName.get(id),
-    person: (id) => personName.get(id),
-    source: (id) => sourceTitle.get(id),
-    who: (actor) => (actor && actor === viewerId ? "You" : mode === "demo" ? "You" : actor ? (props.memberNames?.[actor] ?? "A team member") : "System"),
-  };
-  const lines = timelineLines(events, names);
-  const entries: TimelineEntry[] = lines.map((l) => ({ id: l.id, kind: l.kind, icon: KIND_ICON[l.kind], who: l.who, when: l.when, text: l.text }));
   const bar = resolvedBar(issue, undefined, fixedBy?.name);
   const owners = issue.owner_ids.length ? issue.owner_ids : issue.owner_person_id ? [issue.owner_person_id] : [];
   const processIdOf = issue.links.find((l) => l.process_id)?.process_id ?? issue.process_id ?? bundle.process.id;
@@ -213,8 +195,6 @@ export function IssuePage(props: IssuePageProps) {
   const putLink = (link: SolutionIssueRow) => setLocal((d) => ({ ...d, links: d.links.some((l) => l.solution_id === link.solution_id && l.issue_id === link.issue_id) ? d.links : [...d.links, link] }));
   const linkable = solutionData.solutions.filter((s) => s.process_id === processIdOf && !tried.some((t) => t.solution.id === s.id));
 
-  const stepPill = stepIds.length ? `${stepName.get(stepIds[0]!) ?? "A step"}${stepIds.length > 1 ? ` +${stepIds.length - 1} more` : ""}` : null;
-
   return (
     <div className="flex flex-col gap-5" data-issue-page={issue.number ?? issue.id}>
       <PageHeader
@@ -241,7 +221,6 @@ export function IssuePage(props: IssuePageProps) {
             <RatingPill rating={ratingOfStored(issue.severity)} />
             <IssueStatusMenu status={issue.status} onChange={(s) => void changeStatus(s)} disabled={!canEdit || state.busy} />
             <TagPill tag={processName.get(processIdOf) ?? bundle.process.name} className={HEADER_PILL} />
-            {stepPill && <TagPill tag={stepPill} className={HEADER_PILL} />}
           </>
         }
         meta={
@@ -344,7 +323,7 @@ export function IssuePage(props: IssuePageProps) {
             section="wrong"
             title={
               <span className="flex items-center">
-                What&apos;s wrong
+                What&apos;s wrong and sources
                 <Help {...ISSUE_PAGE_HELP.wrong} />
               </span>
             }
@@ -358,6 +337,37 @@ export function IssuePage(props: IssuePageProps) {
               emptyReader="Nothing written yet."
               data-evidence=""
             />
+            <div className="flex flex-col gap-2 border-t border-line pt-3" data-issue-sources>
+              <h3 className="flex items-center text-sm font-semibold">
+                Sources
+                <Help {...ISSUE_PAGE_HELP.sources} />
+                {!sourceLinking && canEdit && (
+                  <span className={`ml-auto flex items-center ${EDIT_ONLY}`} data-edit-entry>
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setLinking(true)}>
+                      + Link
+                    </Button>
+                    <Help {...ISSUE_PAGE_HELP.link} />
+                  </span>
+                )}
+              </h3>
+              {sourceLinking ? (
+                <LinkedSources
+                  target={{ kind: "issue", issueId: issue.id }}
+                  label={issue.number ? `Issue #${issue.number}` : `Issue: ${issue.title}`}
+                  empty="None yet"
+                  hideTitle
+                  className="flex flex-col gap-2"
+                />
+              ) : issue.source_ids.length ? (
+                issue.source_ids.map((id) => (
+                  <div key={id} className="text-sm font-medium">
+                    {sourceTitle.get(id) ?? "A source"}
+                  </div>
+                ))
+              ) : (
+                <span className="text-sm text-fg-2">None yet</span>
+              )}
+            </div>
           </SectionCard>
 
           <SectionCard
@@ -412,23 +422,6 @@ export function IssuePage(props: IssuePageProps) {
             )}
           </SectionCard>
 
-          <SectionCard
-            id="history"
-            section="history"
-            title={
-              <span className="flex items-center">
-                History
-                <Help {...ISSUE_PAGE_HELP.history} />
-              </span>
-            }
-            description="Everything that happened to this issue, newest first. Kept after it's resolved."
-          >
-            <Timeline entries={entries} empty="No history yet." data-history="" />
-            <details className="text-xs text-fg-2">
-              <summary className="w-fit cursor-pointer hover:underline">Where does this come from?</summary>
-              <p className="mt-1.5 max-w-prose">{HISTORY_FOLD}</p>
-            </details>
-          </SectionCard>
         </div>
 
         <aside className="flex min-w-0 flex-col gap-5">
@@ -458,79 +451,6 @@ export function IssuePage(props: IssuePageProps) {
               <span className="text-sm text-fg-2">No target yet. Edit the issue to add one.</span>
             )}
           </SectionCard>
-
-          <SectionCard
-            id="linked"
-            section="linked"
-            title={
-              <span className="flex items-center">
-                Linked to
-                <Help {...ISSUE_PAGE_HELP.linked} />
-              </span>
-            }
-          >
-            <div className="flex flex-wrap gap-1.5">
-              <Chip>Process: {processName.get(processIdOf) ?? bundle.process.name}</Chip>
-              {stepIds.map((id) => (
-                <Chip key={id}>Step: {stepName.get(id) ?? "A step"}</Chip>
-              ))}
-            </div>
-          </SectionCard>
-
-          {sourceLinking ? (
-            <SectionCard
-              id="sources"
-              section="sources"
-              title={
-                <span className="flex items-center">
-                  Sources
-                  <Help {...ISSUE_PAGE_HELP.sources} />
-                </span>
-              }
-            >
-              <LinkedSources
-                target={{ kind: "issue", issueId: issue.id }}
-                label={issue.number ? `Issue #${issue.number}` : `Issue: ${issue.title}`}
-                empty="None yet"
-                hideTitle
-                className="flex flex-col gap-2"
-              />
-            </SectionCard>
-          ) : (
-            <SectionCard
-              id="sources"
-              section="sources"
-              title={
-                <span className="flex items-center">
-                  Sources
-                  <Help {...ISSUE_PAGE_HELP.sources} />
-                </span>
-              }
-              actionIsEdit
-              actionClassName={EDIT_ONLY}
-              action={
-                canEdit ? (
-                  <span className="flex items-center">
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setLinking(true)}>
-                      + Link
-                    </Button>
-                    <Help {...ISSUE_PAGE_HELP.link} />
-                  </span>
-                ) : undefined
-              }
-              contentClassName="gap-2"
-            >
-              {issue.source_ids.length ? (
-                issue.source_ids.map((id) => (
-                  <div key={id} className="text-sm font-medium">
-                    {sourceTitle.get(id) ?? "A source"}
-                  </div>
-                ))
-              ) : (
-                <span className="text-sm text-fg-2">None yet</span>
-              )}
-            </SectionCard>
-          )}
         </aside>
       </div>
 
@@ -765,10 +685,6 @@ function MapWithBadges({ badges, onOpen, children }: { badges: Record<string, St
       {ready && <StepIssueBadges badges={badges} onOpen={onOpen} />}
     </div>
   );
-}
-
-function Chip({ children }: { children: React.ReactNode }) {
-  return <span className="inline-flex h-6 items-center rounded-full border border-border px-2 text-xs">{children}</span>;
 }
 
 function LinkSolutionDialog({ open, solutions, onLink, onClose }: { open: boolean; solutions: SolutionRow[]; onLink: (solutionId: string) => Promise<string | null>; onClose: () => void }) {

@@ -77,11 +77,6 @@ export const ISSUE_PAGE_HELP = {
     description: "Every solution built for this issue, with an automatic pass or fail against its target, how often that holds across the simulated runs, and your own verdict. You make the final call.",
     example: "“Lead scoring”: automatic pass, holds in 92% of runs, your verdict pass.",
   },
-  history: {
-    label: "History",
-    description: "Everything that happened to this issue, newest first: when it was logged, each edit, each solution tested, and when it was resolved or reopened. It stays after the issue is resolved.",
-    example: "9 Oct · You · Resolved by changing the process directly. 5 Oct · You · Logged.",
-  },
   target: {
     label: "Target",
     description: "What is measured to know the problem is fixed: where it was, where it is now and the goal. Solutions get an automatic pass or fail against the goal.",
@@ -91,11 +86,6 @@ export const ISSUE_PAGE_HELP = {
     label: "Owners",
     description: "The people responsible for sorting this out. Change them with Edit.",
     example: "Rosa Diaz and Priya Shah.",
-  },
-  linked: {
-    label: "Linked to",
-    description: "The process or the steps this issue is about. Steps listed here are outlined on the map above.",
-    example: "Step: Audit & proposal.",
   },
   sources: {
     label: "Sources",

@@ -324,7 +324,9 @@ describe("(i) help on every control", () => {
 
   it("the pages use the prototype's words", () => {
     const page = read("components/issues/issue-page.tsx");
-    for (const t of ["Where this issue sits", "What&apos;s wrong", "Solutions tried", "History", "Resolve", "+ Try a new solution", "Link an existing solution", "Reopen", "+ Link", "Linked to", "Owners", "Target"]) expect(page).toContain(t);
+    for (const t of ["Where this issue sits", "What&apos;s wrong and sources", "Solutions tried", "Resolve", "+ Try a new solution", "Link an existing solution", "Reopen", "+ Link", "Owners", "Target"]) expect(page).toContain(t);
+    // No history timeline, no Linked to card and no step pill: an issue belongs to a process (QA round 2).
+    for (const t of ["<Timeline", "Linked to", "stepPill"]) expect(page).not.toContain(t);
     const list = read("components/issues-page.tsx");
     for (const t of ["+ New issue", "Search issues", "Status", "Owner", "Rating", "Clear filters"]) expect(list).toContain(t);
   });
