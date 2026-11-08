@@ -4,18 +4,18 @@
 //
 // What it holds: the workspace and its settings; the company model (roles, people, services, client groups, named clients
 // flagged hidden, demand, market, churn drivers, levers, analysis rules); every process with ALL its versions (published,
-// superseded and draft: steps, edges and first principles of each, the company map included); scenarios, solutions and
-// blocks; issues with their links, owners, sources and history; sources and their links; pending and decided suggestions.
+// superseded and draft: steps and edges of each, the company map included); scenarios, solutions and
+// blocks; issues with their links, owners, sources and history; sources and their links.
 // Rows keep their database ids and column names so references stay intact and nothing is lost. The step `kind` and
 // `outcome` values and the edge `label` and `condition_tag` are the ones a `transpera-process/2` file uses.
 //
 // What it never holds: other workspaces' rows, people's emails, members and their user ids, API tokens, share links,
-// access lists, AI keys, who created a row (`created_by`), derived results (runs, AI analyses, narrations, robustness
-// checks, the old reports). Every read is as the signed-in user (RLS decides what a viewer may read) and filtered to the
+// access lists, who created a row (`created_by`), derived results (runs, robustness checks). Every read is as the signed-in user (RLS decides what a viewer may read) and filtered to the
 // one workspace as well, so a policy mistake could not leak another workspace's rows into the file.
 
 import { restoreSizeWarning } from "./workspace-import";
 import { ENGINE_VERSION } from "@transpera-flow/engine";
+import { sql } from "kysely";
 import type { Db } from "./queries";
 
 export const WORKSPACE_BUNDLE_FORMAT = "transpera-workspace/1";
@@ -29,8 +29,6 @@ interface TableSpec {
   table: string;
   /** Stable order, which also pages. */
   order: readonly string[];
-  /** The columns to read, when not all of them: `suggestion_proposals.proposer_email` is not readable by the app's users, so a `select *` would be refused. */
-  columns?: string;
 }
 
 const T = (table: string, ...order: string[]): TableSpec => ({ table, order: order.length ? order : ["id"] });
@@ -48,6 +46,13 @@ export const BUNDLE_TABLES = {
   services: T("services"),
   service_servicing: T("service_servicing"),
   client_groups: T("client_groups"),
+  // Capacity Set up (P1): departments, tiers, who serves which tier, and each person's counted portfolio.
+  departments: T("departments"),
+  tiers: T("tiers"),
+  person_tiers: T("person_tiers", "person_id", "tier_id"),
+  person_portfolio: T("person_portfolio", "person_id", "service_id"),
+  // Capacity changes (P7): automations and augmentations that act on parts of steps.
+  capacity_changes: T("capacity_changes"),
   clients: T("clients"),
   client_services: T("client_services", "client_id", "service_id"),
   client_assignments: T("client_assignments", "client_id", "role_id"),
@@ -57,14 +62,12 @@ export const BUNDLE_TABLES = {
   market_conditions: T("market_conditions"),
   market_schedule: T("market_schedule"),
   churn_drivers: T("churn_drivers"),
-  lever_settings: T("lever_settings", "workspace_id"),
   analysis_rules: T("analysis_rules", "workspace_id"),
   processes: T("processes"),
   process_revisions: T("process_revisions"),
   steps: T("steps"),
   edges: T("edges"),
-  first_principles: T("first_principles"),
-  scenarios: T("scenarios"),
+  sandbox_scenarios: T("sandbox_scenarios"),
   solutions: T("solutions"),
   solution_issues: T("solution_issues", "solution_id", "issue_id"),
   blocks: T("blocks"),
@@ -75,22 +78,17 @@ export const BUNDLE_TABLES = {
   issue_events: T("issue_events"),
   sources: T("sources"),
   source_links: T("source_links"),
-  suggestions: T("suggestions"),
-  suggestion_proposals: {
-    ...T("suggestion_proposals"),
-    columns: "id, workspace_id, kind, title, detail, payload, evidence, note, issue_id, status, created_via, applied, review_note, reviewed_at, created_at, updated_at, import_source",
-  },
 } as const satisfies Record<string, TableSpec>;
 
 /**
  * Keys that name an account or a person's contact details, in a column or at any depth of a JSON column: who made, changed,
  * reviewed or published something (`created_by`, `updated_by`, `reviewed_by`, `published_by`, `edited_by`, any `*_by`; the
  * `by` in `provenance` and `resolved`), who did it in a history (`actor`), `user_id`, `author`, `uid`, and emails and names
- * typed by a proposer. The migrations write `auth.uid()` into exactly these. Matched without regard to case.
+ * typed by someone. The migrations write `auth.uid()` into exactly these. Matched without regard to case.
  */
-export const ACCOUNT_KEY = /^(by|actor|actor_id|user_id|uid|author|author_id|email|proposer_email|proposer_name|user_name|user_email)$|_by$|^(created|updated|edited|reviewed|published|accepted|resolved)_by_/i;
+export const ACCOUNT_KEY = /^(by|actor|actor_id|user_id|uid|author|author_id|email|user_name|user_email)$|_by$|^(created|updated|edited|reviewed|published|accepted|resolved)_by_/i;
 
-/** Keys that end in `_by` but are not accounts: the steps that took over a retired step's work, and the person who agreed a first-principles item. */
+/** Keys that end in `_by` but are not accounts: the steps that took over a retired step's work, and the person who agreed a deleted step (older backups). */
 const NOT_ACCOUNTS = new Set(["replaced_by", "agreed_by"]);
 const isAccountKey = (k: string): boolean => ACCOUNT_KEY.test(k) && !NOT_ACCOUNTS.has(k);
 
@@ -150,26 +148,21 @@ export interface ReaderOptions {
 }
 
 /**
- * A reader over a Supabase client acting as the signed-in user, in a stable order. It asks for the next rows after what it
+ * A reader over a `Db` acting as the signed-in user, in a stable order. It asks for the next rows after what it
  * has, and stops only on an empty page, so an API that returns fewer rows than asked (a lower max-rows) can't truncate it.
  */
-export function supabaseReader(db: Db, options: ReaderOptions = {}): TableReader {
+export function dbReader(db: Db, options: ReaderOptions = {}): TableReader {
   const pageSize = options.pageSize ?? 1000;
   const maxRows = options.maxRows ?? MAX_TABLE_ROWS;
   return async (table, workspaceId) => {
     const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table);
     if (!spec) throw new Error(`Not a bundle table: ${table}`);
     const all: Row[] = [];
+    // Table and column names come from BUNDLE_TABLES (code), never from a caller, and go in as identifiers.
+    const order = sql.join(spec.order.map((c) => sql.id(c)));
     for (;;) {
-      let q = (db as unknown as { from: (t: string) => { select: (c: string) => { eq: (c: string, v: string) => { order: (c: string) => unknown } } } })
-        .from(table)
-        .select(spec.columns ?? "*")
-        .eq("workspace_id", workspaceId) as unknown as { order: (c: string) => unknown };
-      for (const col of spec.order) q = q.order(col) as typeof q;
-      const from = all.length;
-      const { data, error } = await (q as unknown as { range: (a: number, b: number) => Promise<{ data: Row[] | null; error: { message: string } | null }> }).range(from, from + pageSize - 1);
-      if (error) throw new Error(error.message);
-      if (!data || data.length === 0) break;
+      const { rows: data } = await sql<Row>`select * from ${sql.table(table)} where ${sql.id("workspace_id")} = ${workspaceId} order by ${order} limit ${pageSize} offset ${all.length}`.execute(db);
+      if (data.length === 0) break;
       all.push(...data);
       if (all.length > maxRows) throw new BundleTooLargeError(`${table} has more than ${maxRows} rows`);
     }
@@ -181,7 +174,7 @@ export interface WorkspaceBundle {
   format: typeof WORKSPACE_BUNDLE_FORMAT;
   exported_at: string;
   engine_version: string;
-  /** "everything" for an editor or owner; "published" for a viewer (no drafts, no pending suggestions or proposals). */
+  /** "everything" for an editor or owner; "published" for a viewer (no drafts). */
   scope: "everything" | "published";
   /** What the file is, for a person opening it. */
   about: string;
@@ -191,15 +184,19 @@ export interface WorkspaceBundle {
   company_model: Record<string, Row[]>;
   /** Every process, the company map included, each with all of its versions. */
   processes: Row[];
-  scenarios: Row[];
+  /** The Sandbox's scenarios (`sandbox_scenarios`, named changes). */
+  sandbox_scenarios: Row[];
+  /** Only in a backup made before the Sandbox: whole-run scenarios with `patch` rows. A restore converts them. */
+  scenarios?: Row[];
   solutions: Row[];
   solution_issues: Row[];
   blocks: Row[];
   issues: Row[];
   sources: Row[];
   source_links: Row[];
-  suggestions: Row[];
-  suggestion_proposals: Row[];
+  /** Only in a backup made before Suggestions were removed (28 Oct 2026). A restore reads and counts them, and restores neither. */
+  suggestions?: Row[];
+  suggestion_proposals?: Row[];
   /** Rows per section, so a reader can tell a truncated file. */
   counts: Record<string, number>;
 }
@@ -216,7 +213,7 @@ const group = (rows: Row[], key: string): Map<string, Row[]> => {
 export interface ExportOptions {
   /**
    * Whether the user may edit the workspace. Editors and owners get everything; `false` gives what is published (no draft
-   * versions, no pending suggestions or proposals). The export route no longer calls this for viewers (only agency admins,
+   * versions). The export route no longer calls this for viewers (only agency admins,
    * owners and editors may export, issue #39), but bundles made that way exist, and the import checker accepts them.
    */
   canEdit: boolean;
@@ -250,14 +247,12 @@ export async function exportWorkspaceBundle(
   const total = Object.values(raw).reduce((n, rows) => n + rows.length, 0);
   if (total > MAX_BUNDLE_ROWS) throw new BundleTooLargeError(`${total} rows in all`);
 
-  // A viewer gets what is published (the same as the live app shows a reader), not working drafts or pending suggestions.
+  // A viewer gets what is published (the same as the live app shows a reader), not working drafts.
   if (!options.canEdit) {
     raw.process_revisions = raw.process_revisions.filter((r) => r.status !== "draft");
     const kept = new Set(raw.process_revisions.map((r) => r.id));
-    for (const t of ["steps", "edges", "first_principles"] as const) raw[t] = raw[t].filter((r) => kept.has(r.revision_id));
+    for (const t of ["steps", "edges"] as const) raw[t] = raw[t].filter((r) => kept.has(r.revision_id));
     raw.processes = raw.processes.map((p) => ({ ...p, draft_revision_id: null }));
-    raw.suggestions = [];
-    raw.suggestion_proposals = [];
   }
 
   // Everyone's account is scrubbed from everything, by key at any depth and then by the ids those keys held.
@@ -267,7 +262,6 @@ export async function exportWorkspaceBundle(
 
   const stepsBy = group(data.steps, "revision_id");
   const edgesBy = group(data.edges, "revision_id");
-  const fpBy = group(data.first_principles, "revision_id");
   const revisionsBy = group(data.process_revisions, "process_id");
   const processes = data.processes.map((p) => ({
     ...p,
@@ -277,7 +271,6 @@ export async function exportWorkspaceBundle(
       draft: rev.id === p.draft_revision_id,
       steps: stepsBy.get(String(rev.id)) ?? [],
       edges: edgesBy.get(String(rev.id)) ?? [],
-      first_principles: (fpBy.get(String(rev.id)) ?? [])[0] ?? null,
     })),
   }));
 
@@ -295,7 +288,8 @@ export async function exportWorkspaceBundle(
 
   const companyKeys = [
     "roles", "people", "person_roles", "person_skills", "person_leave", "person_capacity_factors", "services", "service_servicing", "client_groups", "client_services",
-    "client_assignments", "lead_sources", "seasonality", "demand_settings", "market_conditions", "market_schedule", "churn_drivers", "lever_settings", "analysis_rules",
+    "client_assignments", "lead_sources", "seasonality", "demand_settings", "market_conditions", "market_schedule", "churn_drivers", "analysis_rules",
+    "departments", "tiers", "person_tiers", "person_portfolio", "capacity_changes",
   ] as const;
   const company_model: Record<string, Row[]> = Object.fromEntries(companyKeys.map((k) => [k, data[k]]));
   // Named clients are hidden in the product (D27) and never deleted: the bundle keeps them, flagged, as a backup.
@@ -307,7 +301,7 @@ export async function exportWorkspaceBundle(
   counts.process_versions = data.process_revisions.length;
   counts.steps = data.steps.length;
   counts.edges = data.edges.length;
-  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links", "suggestions", "suggestion_proposals"] as const) counts[k] = data[k].length;
+  for (const k of ["sandbox_scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"] as const) counts[k] = data[k].length;
 
   const bundle: WorkspaceBundle = {
     format: WORKSPACE_BUNDLE_FORMAT,
@@ -326,15 +320,13 @@ export async function exportWorkspaceBundle(
     },
     company_model,
     processes,
-    scenarios: data.scenarios,
+    sandbox_scenarios: data.sandbox_scenarios,
     solutions: data.solutions,
     solution_issues: data.solution_issues,
     blocks: data.blocks,
     issues,
     sources: data.sources,
     source_links: data.source_links,
-    suggestions: data.suggestions,
-    suggestion_proposals: data.suggestion_proposals,
     counts,
   };
   // Export allows far more than a restore takes (MAX_TABLE_ROWS against WORKSPACE_IMPORT_LIMITS). A workspace over a restore limit is
@@ -348,11 +340,10 @@ export async function exportWorkspaceBundle(
 }
 
 /** The reader of the `workspaces` row, as the signed-in user. */
-export function supabaseWorkspaceReader(db: Db): (id: string) => Promise<Row | null> {
+export function dbWorkspaceReader(db: Db): (id: string) => Promise<Row | null> {
   return async (id) => {
-    const { data, error } = await db.from("workspaces").select("id, name, slug, plan, settings, provenance").eq("id", id).maybeSingle();
-    if (error) throw new Error(error.message);
-    return (data as Row | null) ?? null;
+    const data = await db.selectFrom("workspaces").select(["id", "name", "slug", "plan", "settings", "provenance"]).where("id", "=", id).executeTakeFirst();
+    return (data as Row | undefined) ?? null;
   };
 }
 

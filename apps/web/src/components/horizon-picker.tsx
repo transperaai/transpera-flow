@@ -5,8 +5,9 @@
 // The value is the run's length in weeks, so a workspace set to a length that isn't one of the options shows
 // none selected and says how long it is.
 
+import { useState } from "react";
 import { Help } from "@/components/help";
-import { HORIZON_MONTHS, horizonLabel, horizonWeeks, monthsForWeeks } from "@/lib/horizon";
+import { HORIZON_MONTHS, horizonLabel, horizonWeeks } from "@/lib/horizon";
 import { cn } from "@/lib/utils";
 
 export function HorizonPicker({
@@ -14,6 +15,8 @@ export function HorizonPicker({
   onChange,
   help = true,
   className,
+  options = HORIZON_MONTHS,
+  custom,
 }: {
   /** The run's current length in weeks. */
   weeks: number;
@@ -22,8 +25,15 @@ export function HorizonPicker({
   /** Show the (i) beside the label. The Overview leaves it out. Default true. */
   help?: boolean;
   className?: string;
+  /** The months offered (default 1, 3, 6, 12, 24). The Sandbox offers 3, 6, 12, 24. */
+  options?: readonly number[];
+  /** Also offer a number field for any whole number of months in this range (the Sandbox: 1 to 24). Out of range is refused. */
+  custom?: { min: number; max: number };
 }) {
-  const selected = monthsForWeeks(weeks);
+  const selected = options.find((m) => horizonWeeks(m) === weeks) ?? null;
+  const months = Math.round((weeks * 12) / 52);
+  const [typed, setTyped] = useState<string | null>(null);
+  const [refused, setRefused] = useState(false);
   return (
     <div className={cn("flex items-center gap-2 text-xs", className)}>
       <span className="flex items-center font-medium text-fg-2">
@@ -37,7 +47,7 @@ export function HorizonPicker({
         )}
       </span>
       <div role="group" aria-label="Time horizon" className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
-        {HORIZON_MONTHS.map((m) => (
+        {options.map((m) => (
           <button
             key={m}
             type="button"
@@ -54,7 +64,43 @@ export function HorizonPicker({
           </button>
         ))}
       </div>
-      {selected === null && <span className="text-muted-foreground">{weeks} weeks</span>}
+      {custom ? (
+        <label className="flex items-center gap-1 text-muted-foreground">
+          Custom
+          <input
+            type="number"
+            inputMode="numeric"
+            min={custom.min}
+            max={custom.max}
+            step={1}
+            aria-label="Custom horizon in months"
+            aria-invalid={refused || undefined}
+            data-horizon-custom
+            value={typed ?? (selected === null ? String(months) : "")}
+            placeholder="months"
+            onChange={(e) => {
+              const text = e.target.value;
+              setTyped(text);
+              const n = Number(text);
+              const ok = text.trim() !== "" && Number.isInteger(n) && n >= custom.min && n <= custom.max;
+              setRefused(text.trim() !== "" && !ok);
+              if (ok) onChange(n);
+            }}
+            onBlur={() => {
+              setTyped(null);
+              setRefused(false);
+            }}
+            className="h-7 w-16 rounded-md border border-border bg-background px-1.5 text-foreground tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[invalid]:border-destructive"
+          />
+          {refused ? (
+            <span role="alert" className="text-destructive" data-horizon-refused>
+              {custom.min} to {custom.max}
+            </span>
+          ) : null}
+        </label>
+      ) : (
+        selected === null && <span className="text-muted-foreground">{weeks} weeks</span>
+      )}
     </div>
   );
 }

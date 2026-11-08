@@ -4,16 +4,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { simulate, type EngineModel, type EngineStep } from "@transpera-flow/engine";
-import type { IssueRow, SolutionIssueRow, SolutionRow, StepRow } from "@transpera-flow/db";
-import { AboutProcess } from "@/components/about-process";
+import type { IssueRow, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
+import { ProcessHeader } from "@/components/process-header";
 import { IssueTrackView } from "@/components/issue-track";
-import { CycleSpreadPanel, KeyPersonPanel, ReworkLoopsPanel, TimeSplit } from "@/components/process-supporting-data";
-import { aboutLine, citedNumbers, ownerOf, type About } from "@/lib/process-page/about";
-import { cycleSpread, keyPersonRows, loopRows, timeSplitRows } from "@/lib/process-page/supporting";
+import { KeyPersonPanel, TimeSplit } from "@/components/process-supporting-data";
+import { aboutLine, aboutSummary, type About } from "@/lib/process-page/about";
+import { keyPersonRows, timeSplitRows } from "@/lib/process-page/supporting";
 import { linkedSolutions, otherImprovements, trackOf, TRACK_STAGES } from "@/lib/process-page/track";
 
 // Issue #174, part 2: the process page's About line, the issue status track, "Other improvements" and the supporting data
-// (time split, cycle spread, key-person risk, rework loops), as pure functions and as rendered markup.
+// (time split and key-person risk; the hours panels are in process-hours.test.ts), as pure functions and as rendered markup.
 
 const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8");
 
@@ -24,9 +24,11 @@ const sol = (id: string, extra: Partial<SolutionRow> = {}): SolutionRow => ({
   base_revision_id: "r",
   name: `Solution ${id}`,
   notes: "",
+  status: "testing",
   steps: { steps: [], edges: [], entry_step_id: null },
   changed_step_ids: [],
   lever_changes: [],
+  step_changes: [],
   created_at: `2026-10-0${id.length}T00:00:00Z`,
   updated_at: "",
   created_by: null,
@@ -55,8 +57,7 @@ describe("the issue status track", () => {
   it("an open issue with nothing proposed is at Open", () => {
     expect(trackOf(issue("open"), []).stage).toBe(0);
   });
-  it("an AI idea waiting, or a solution with no verdict yet, is a Solution idea", () => {
-    expect(trackOf(issue("open"), [], true).stage).toBe(1);
+  it("a solution with no verdict yet is a Solution idea", () => {
     const data = { solutions: [sol("a")], links: [link("a", "i")] };
     expect(trackOf(issue("open"), linkedSolutions(data, "i")).stage).toBe(1);
   });
@@ -121,66 +122,52 @@ describe("the issue status track", () => {
 });
 
 describe("About this process", () => {
-  const about: About = {
-    type: "Pipeline",
-    owner: "Maya Collins",
-    steps: 6,
-    roles: 3,
-    trail: ["Sales"],
-    version: 4,
-    draft: true,
-    sources: 2,
-    cited: { cited: 3, of: 4 },
-    lastChange: { at: "2026-09-29T10:00:00Z", by: "Maya Collins" },
-  };
-  it("reads as plain attributes", () => {
+  const about: About = { category: "sales", steps: 6, roles: 3, version: 4 };
+  it("reads as plain attributes, with the version as a bare number", () => {
     expect(aboutLine(about)).toEqual([
-      { label: "Type", value: "Pipeline" },
-      { label: "Requirements owner", value: "Maya Collins" },
+      { label: "Type", value: "Sales" },
       { label: "Size", value: "6 steps, 3 roles" },
-      { label: "On the company map", value: "Inside Sales" },
-      { label: "Version", value: "Live is version 4, draft open" },
-      { label: "Sources", value: "2 sources, 3 of 4 step numbers cited" },
-      { label: "Last published", value: "29 Sep 2026 by Maya Collins" },
+      { label: "Version", value: "4" },
     ]);
   });
-  it("says so when things are missing", () => {
-    const rows = aboutLine({ ...about, owner: null, trail: [], version: null, draft: false, sources: 0, cited: null, lastChange: null, steps: 1, roles: 1 });
-    expect(rows.map((r) => r.value)).toEqual(["Pipeline", "Not named yet", "1 step, 1 role", "Top level", "Not published yet", "None linked", "Not published yet"]);
-    expect(aboutLine({ ...about, sources: null }).some((r) => r.label === "Sources")).toBe(false);
-    expect(aboutLine({ ...about, lastChange: null }).at(-1)).toEqual({ label: "Last published", value: "Not recorded" });
+  it("says so when there is no live version", () => {
+    const rows = aboutLine({ ...about, version: null, steps: 1, roles: 1 });
+    expect(rows.map((r) => r.value)).toEqual(["Sales", "1 step, 1 role", "Not published yet"]);
   });
-  it("counts cited step numbers out of all of them, whether or not an origin is recorded", () => {
-    const st = (id: string, provenance: StepRow["provenance"] = {}, kind: StepRow["kind"] = "task") => ({ id, kind, child_process_id: null, provenance });
-    expect(citedNumbers([], [])).toBeNull();
-    // Ten steps carry thirty numbers; one has a cited source: 1 of 30.
-    const ten = Array.from({ length: 10 }, (_, i) => st(`s${i}`, i === 0 ? { work_hours: { source: "entered", evidence: [{ source_id: "s", quote: "q" } as never] } } : {}));
-    expect(citedNumbers(ten, [])).toEqual({ cited: 1, of: 30 });
-    // Measured data counts; an estimate or an empty list of evidence does not; start and end steps carry no numbers.
-    const mixed = [
-      st("a", { work_hours: { source: "measured" }, wait_hours: { source: "estimated" }, rework_rate: { source: "entered", evidence: [] } }),
-      st("start", {}, "start"),
-      st("end", {}, "end"),
-    ];
-    expect(citedNumbers(mixed, [])).toEqual({ cited: 1, of: 3 });
-    // A step with two ways out also counts its branch odds.
-    const split = [st("a", { branch_odds: { source: "measured" } })];
-    expect(citedNumbers(split, [{ from_step_id: "a" }, { from_step_id: "a" }])).toEqual({ cited: 1, of: 4 });
-    expect(citedNumbers(split, [{ from_step_id: "a" }])).toEqual({ cited: 0, of: 3 });
+  it("no longer shows the company map trail, sources or last published", () => {
+    const labels = aboutLine(about).map((r) => r.label);
+    expect(labels).not.toContain("On the company map");
+    expect(labels).not.toContain("Sources");
+    expect(labels).not.toContain("Last published");
   });
-  it("names the owner most requirements name, both when two tie, and shared when more", () => {
-    const req = (id: string | null, text = "") => ({ text: "", owner_person_id: id, owner_text: text, why: "", verdict: "keep" as const, step_id: null });
-    const who = (id: string) => ({ a: "Rosa Diaz", b: "Maya Collins", c: "Priya Shah" })[id] ?? null;
-    expect(ownerOf({ requirements: [req("a"), req(null, "Finance"), req("a")] } as never, who)).toBe("Rosa Diaz");
-    expect(ownerOf({ requirements: [req("a"), req("b")] } as never, who)).toBe("Maya Collins and Rosa Diaz");
-    expect(ownerOf({ requirements: [req("a"), req("b"), req("c")] } as never, who)).toBe("Shared");
-    expect(ownerOf(null, () => null)).toBeNull();
+  it("says the same in one muted line under the title", () => {
+    expect(aboutSummary(about)).toBe("6 steps · 3 roles · Version 4");
+    expect(aboutSummary({ ...about, version: null, steps: 1, roles: 1 })).toBe("1 step · 1 role · Draft, not published yet");
   });
-  it("renders in a labelled section with no (i)", () => {
-    const html = renderToStaticMarkup(createElement(AboutProcess, { about }));
-    expect(html).toContain("About this process");
-    expect(html).toContain("Live is version 4, draft open");
-    expect(read("components/about-process.tsx")).not.toContain("<Help");
+  const header = (props: Partial<Parameters<typeof ProcessHeader>[0]> = {}) =>
+    renderToStaticMarkup(createElement(ProcessHeader, { name: "Lead to live", about, actions: createElement("span", null, "actions"), ...props }));
+  it("is the page title with the category and department as pills, and the summary line, with no (i)", () => {
+    const html = header({ department: { value: null, options: [], workedOut: "Sales", current: "Performance", chosen: false } });
+    expect(html).toContain("<h1");
+    expect(html).toContain("Lead to live");
+    expect(html).toContain("Sales");
+    expect(html).toContain("Performance");
+    expect(html).toContain("6 steps · 3 roles · Version 4");
+    expect(html).not.toContain("About this process");
+    expect(read("components/process-header.tsx")).not.toContain("<Help");
+  });
+  it("gives a reader the pills only, and someone who can edit a pencil that opens the Type and Department selects", () => {
+    const reader = header();
+    expect(reader).not.toContain("data-process-edit");
+    expect(reader).not.toContain("<select");
+    const editor = header({ editCategory: async () => ({ status: "ok" as const }) });
+    expect(editor).toContain("data-process-edit");
+    expect(editor).toContain("Edit type and department");
+    // The selects live in the popover, which opens on a click (the browser test of the page covers that).
+    const src = read("components/process-header.tsx");
+    expect(src).toContain("PROCESS_CATEGORIES.map");
+    expect(src).toContain("{departmentEditor}");
+    expect(read("components/process-page.tsx")).toMatch(/departmentEditor=\{department && mode === "live" \? <ProcessDepartmentField/);
   });
 });
 
@@ -218,12 +205,6 @@ describe("the supporting data", () => {
     expect(timeSplitRows(model, null, ids)).toEqual([]);
     expect(timeSplitRows(model, result, new Set())).toEqual([]);
   });
-  it("gives the cycle time's median and 90th percentile", () => {
-    const s = cycleSpread(result)!;
-    expect(s.p90).toBeGreaterThanOrEqual(s.p50);
-    expect(s.ratio).toBeCloseTo(s.p90 / s.p50, 9);
-    expect(cycleSpread(null)).toBeNull();
-  });
   it("lists the steps one person can do, and steps nobody can", () => {
     const one: EngineModel = {
       ...model,
@@ -238,59 +219,27 @@ describe("the supporting data", () => {
     expect(rows[0]!.person).toBeTruthy();
     expect(keyPersonRows(model, simulate(model, 3, 1), ids)).toEqual([]);
   });
-  it("makes a row per rework loop with its cost, and the issues and solutions on its steps", () => {
-    const i = { id: "i1", number: 7, title: "Reviews bounce", status: "open", process_id: "p1", step_id: "review", links: [{ process_id: "p1", step_id: "review" }] } as unknown as IssueRow;
-    const done = { ...i, id: "i2", number: 8, status: "resolved" } as IssueRow;
-    const rows = loopRows(model, result, { processId: "p1", stepIds: ids, issues: [i, done], solutions: [{ id: "a", name: "Solution a", process_id: "p1", changed_step_ids: ["draft"] }] });
-    expect(rows.map((r) => r.kind).sort()).toEqual(["back-edge", "redo"]);
-    const back = rows.find((r) => r.kind === "back-edge")!;
-    expect(back.title).toBe("REVIEW sends work back to DRAFT");
-    expect(back.steps).toEqual(["DRAFT", "REVIEW"]);
-    expect(back.share.mean).toBeGreaterThan(0.1);
-    expect(back.hoursPerMonth.mean).toBeGreaterThan(0);
-    expect(back.issues.map((x) => x.id)).toEqual(["i1"]);
-    expect(back.solutions).toEqual([{ id: "a", name: "Solution a" }]);
-    expect(rows[0]!.hoursPerMonth.mean).toBeGreaterThanOrEqual(rows[1]!.hoursPerMonth.mean);
-    expect(loopRows(model, null, { processId: "p1", stepIds: ids, issues: [], solutions: [] })).toEqual([]);
-  });
-  it("stays quiet when nothing loops", () => {
-    const straight = { ...model, steps: [step("draft", [{ to: "review", p: 1 }]), step("review", [{ to: "done", p: 1 }])] };
-    expect(loopRows(straight, simulate(straight, 3, 1), { processId: "p1", stepIds: ids, issues: [], solutions: [] })).toEqual([]);
-  });
 });
 
 describe("the supporting data panels", () => {
-  const rows = loopRows(model, result, { processId: "p1", stepIds: ids, issues: [], solutions: [] });
   const html = renderToStaticMarkup(
     createElement("div", null, [
       createElement(TimeSplit, { key: 1, rows: timeSplitRows(model, result, ids), result }),
-      createElement(CycleSpreadPanel, { key: 2, spread: cycleSpread(result), hoursPerWeek: 40, result }),
       createElement(KeyPersonPanel, { key: 3, rows: [{ id: "draft", step: "Draft", person: "Pat", placeholder: false }, { id: "x", step: "Send", person: null, placeholder: false }, { id: "y", step: "Check", person: "Reviewer 1", placeholder: true }], result }),
-      createElement(ReworkLoopsPanel, { key: 4, rows, result, hoursPerWeek: 40, base: "/demo" }),
     ]),
   );
-  it("shows all four panels with plain headings", () => {
-    for (const h of ["Time split per step", "Cycle time spread", "Key-person risk per step", "Rework loops"]) expect(html).toContain(h);
+  it("shows the time split and key-person panels with plain headings, and says what the time split shows", () => {
+    for (const h of ["Time split per step", "Key-person risk per step"]) expect(html).toContain(h);
+    expect(html).toContain("Hands-on work against waiting (for a person, or on others), for one visit to the step.");
+    for (const gone of ["Cycle time spread", "Rework loops"]) expect(html).not.toContain(gone);
     expect(html).toContain("Hands-on");
-    expect(html).toContain("Typical (median)");
     expect(html).toContain("Pat");
     expect(html).toContain("Nobody can do it");
     expect(html).toContain("Reviewer 1");
     expect(html).toContain("placeholder, no named person");
     expect(html).toContain("Waiting on others (hatched)");
-    expect(html).toContain("REVIEW sends work back to DRAFT");
-    expect(html).toContain("Redo at REVIEW");
-  });
-  it("words a loop that never happens and a cycle with a zero median plainly", () => {
-    const never = { ...rows[0]!, share: { mean: 0, p10: 0, p90: 0 } };
-    expect(renderToStaticMarkup(createElement(ReworkLoopsPanel, { rows: [never], result, hoursPerWeek: 40, base: "/demo" }))).toContain("Never in this run");
-    const zero = renderToStaticMarkup(createElement(CycleSpreadPanel, { spread: { p50: 0, p90: 20, ratio: 0 }, hoursPerWeek: 40, result }));
-    expect(zero).toContain("Most items finish straight away");
-    expect(zero).not.toContain("about as long");
   });
   it("says what is missing instead of an empty chart", () => {
-    const empty = renderToStaticMarkup(createElement(ReworkLoopsPanel, { rows: [], result, hoursPerWeek: 40, base: "/demo" }));
-    expect(empty).toContain("Nothing goes back to an earlier step.");
     expect(renderToStaticMarkup(createElement(TimeSplit, { rows: [], result: null }))).toContain("Simulating");
     expect(renderToStaticMarkup(createElement(KeyPersonPanel, { rows: [], result }))).toContain("No step depends on one person.");
   });
@@ -303,8 +252,8 @@ describe("the supporting data panels", () => {
 describe("the process page layout", () => {
   const page = read("components/process-page.tsx");
   const at = (s: string) => page.indexOf(s);
-  it("runs About, First principles, Map, Insights, Issues and solutions, Supporting data, then Sources", () => {
-    const order = ["<AboutProcess", 'id="first-principles"', 'id="map"', 'id="insights"', 'id="issues"', 'id="supporting-data"', "<ProcessSources"].map(at);
+  it("runs the header, Process map, What the run shows (facts, then the supporting panels), Issues and solutions, then Sources", () => {
+    const order = ["<ProcessHeader", 'id="map"', 'id="run"', 'id="facts"', 'id="supporting-data"', "issuesUi.issuesList", "<ProcessSources"].map(at);
     expect(order.every((n) => n > 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(page).toContain("Other improvements");

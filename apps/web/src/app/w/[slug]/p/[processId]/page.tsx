@@ -4,9 +4,6 @@ import { isId } from "@/lib/editor/validate";
 import { parseVersion } from "@/lib/process-version";
 
 /** Any process of the workspace on the canvas, including one never published (issue #76); `?version=N` shows an earlier version. */
-/** AI analysis runs here after a response (A46): allow it time. */
-export const maxDuration = 120;
-
 export default async function ProcessPage(props: PageProps<"/w/[slug]/p/[processId]">) {
   const { slug, processId } = await props.params;
   if (!isId(processId)) notFound();

@@ -2,11 +2,12 @@ export * from "./model";
 export { flattenModel, isNested, NestingError } from "./flatten";
 export { detectLoops, type Loop, type LoopKind } from "./loops";
 export { ENGINE_VERSION } from "./version";
-export { DEFAULT_AVAILABILITY_FLOOR, SEED_STRIDE, initialState, monthBounds, pct, pooledMonthlyFee, resolvePeople, runOnce, simulate, stat, type SimulateOptions } from "./simulate";
+export { DEFAULT_AVAILABILITY_FLOOR, SEED_STRIDE, initialState, monthBounds, pct, pooledMonthlyFee, resolvePeople, runOnce, afterSaleSteps, simulate, stat, type SimulateOptions } from "./simulate";
 export { FORECAST_KEY_PREFIX, UNCOVERED_KEY, firstCrossing, forecastAlerts, isTooBusy, monthOfHour, type BusyCrossing, type Crossing, type ForecastAlertOptions } from "./forecast";
 export { checkDemand, demandFactor, isFlatDemand, WEEKS_PER_CALENDAR_MONTH } from "./demand";
 export * from "./market";
 export * from "./churn-drivers";
+export { activeChannels, capacityFactors, channelMonth, checkChannels, planChannels, withMaxRework, type ChannelPlan, type FeeRise } from "./channels";
 export { mulberry32 } from "./random";
 export {
   NORTHBEAM_CLIENT_GROUPS,
@@ -16,7 +17,10 @@ export {
   NORTHBEAM_TEAM,
   northbeamClientKey,
   northbeamModel,
+  northbeamWithChances,
+  northbeamWithChannels,
   northbeamWithChurnDrivers,
+  northbeamWithMoney,
   northbeamWithClientGroups,
   northbeamWithClients,
   northbeamWithServices,
@@ -40,6 +44,8 @@ export {
   LARKSPUR_TEAM,
   larkspurClientKey,
   larkspurModel,
+  larkspurWithPurposes,
+  LARKSPUR_PURPOSES,
   type LarkspurClient,
   type LarkspurDist,
   type LarkspurEdge,
@@ -55,6 +61,7 @@ export {
   DEFAULT_HEALTH_RULES,
   churnProbability,
   clientChurnSensitivity,
+  clientTasksPerWeek,
   hasServicing,
   healthRules,
   modelHasServicing,
@@ -95,48 +102,6 @@ export {
   type AbsenceOptions,
   type AbsenceTest,
 } from "./absence";
-export {
-  FP_MAX_CHAIN,
-  FP_MAX_JSON_BYTES,
-  oversizedParts,
-  FP_MAX_ITEMS,
-  FP_MAX_TEXT,
-  FP_STEPS,
-  FP_STAGES,
-  FP_VERDICTS,
-  FP_KINDS,
-  FP_COMPARATORS,
-  SUCCESS_KPI_FORM,
-  causeStopsAtPerson,
-  countFilled,
-  countFlags,
-  describeTarget,
-  emptyFirstPrinciples,
-  firstPrinciplesFlags,
-  firstPrinciplesSummary,
-  isAttention,
-  isBlank,
-  measuresMetToday,
-  normalizeFirstPrinciples,
-  ownerProblem,
-  stepsFilled,
-  successMeasureSource,
-  type FirstPrinciples,
-  type FpComparator,
-  type FpContext,
-  type FpDeleteCandidate,
-  type FpFlag,
-  type FpFlagLevel,
-  type FpFlags,
-  type FpImprovement,
-  type FpKind,
-  type FpMeasure,
-  type FpRequirement,
-  type FpStage,
-  type FpStatement,
-  type FpStepKey,
-  type FpVerdict,
-} from "./first-principles";
 export {
   NO_SUCCESS_MEASURES,
   SUCCESS_KPIS,
@@ -235,7 +200,6 @@ export {
   localExecutor,
   parameterLabel,
   plannedReplications,
-  leadsProvenance,
   provenanceFromRows,
   provenanceSource,
   robustness,
@@ -364,52 +328,20 @@ export {
   type ResolvedAnalysisRule,
 } from "./analysis-settings";
 export {
-  CALIBRATION_MIN_SAMPLE,
-  CALIBRATION_MIN_WEEKS,
-  calibrate,
-  type CalibrationBranch,
-  type CalibrationEdge,
-  type CalibrationInput,
-  type CalibrationKind,
-  type CalibrationLeadSource,
-  type CalibrationProposal,
-  type CalibrationResult,
-  type CalibrationStep,
-  type CalibrationStepKind,
-  type CalibrationValueSource,
-  type StepLogRow,
-  normStepName,
-  stepIdsByName,
-} from "./calibration";
-export {
-  PERSON_TIME_MAX,
-  PERSON_TIME_MIN,
-  proposePersonTimes,
-  type PersonTimeProposal,
-  type PersonTimesInput,
-  type PersonTimesPerson,
-} from "./person-times";
-export {
-  CHURN_BACKSOLVE_MAX_RUNS,
-  CHURN_BACKSOLVE_REPS,
-  CHURN_BACKSOLVE_SEED,
-  CHURN_BACKSOLVE_TOLERANCE,
-  CHURN_MIN_LEAVERS,
-  CHURN_MIN_WEEKS,
-  CHURN_WINDOW_WEEKS,
-  backSolveChurn,
-  churnMultipliers,
-  churnProposals,
-  measureChurn,
-  servicingChecks,
-  type BackSolvedChurn,
-  type ChurnServiceInput,
-  type ClientRow,
-  type MeasureChurnResult,
-  type MeasuredChurn,
-  type ServicingCheck,
-  type ServicingCheckId,
-  type ServicingChecksResult,
-  type ServicingLinkInput,
-  type ServicingRow,
-} from "./client-calibration";
+  CAPACITY_WEEKS_PER_MONTH,
+  DELIVERABLE_KEYS,
+  availableShare,
+  changeRamp,
+  effectiveDeliverables,
+  rampShare,
+  stepParts,
+  stepPartsDetail,
+  stepTimeFactor,
+  tasksPerMonth,
+  type EffectiveDeliverables,
+  type StepFreed,
+  type StepParts,
+  type StepPartsDetail,
+} from "./capacity-inputs";
+export { SPLIT_TOLERANCE, capacityProblems, checkCapacityInputs, type CapacityProblem, type CapacityProblemCode } from "./capacity-check";
+export { capacityModel, capacityServiceId } from "./fixtures/capacity";

@@ -5,14 +5,14 @@ import { canEditWorkspace, canManageWorkspace } from "@/lib/access-data";
 import { loadWorkspaceHead } from "@/lib/data";
 import { NOT_EMPTY_MESSAGE, ROLE_MESSAGE } from "@/lib/restore/errors";
 import { workspaceIsEmpty } from "@/lib/restore/empty";
-import { supabaseEnv } from "@/lib/supabase/env";
-import { createClient } from "@/lib/supabase/server";
+import { authEnv } from "@/lib/auth/env";
+import { getDb } from "@/lib/auth/session";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 /**
  * Restore a backup (issue #39, B10 2b): fill this new, empty workspace from a JSON backup another workspace exported. Only
- * agency admins, owners and editors can; creating the workspace is an agency admin's job (ADR 0012), so owners and editors
- * restore into a workspace one has set up for them. Not signed in: the proxy has already redirected.
+ * Agency admins and the Owner can; creating the workspace is the Owner's job (ADR 0012), so Agency admins restore into a
+ * workspace the Owner has set up for them. Not signed in: the proxy has already redirected.
  */
 export default async function RestorePage(props: PageProps<"/w/[slug]/restore">) {
   const { slug } = await props.params;
@@ -24,11 +24,11 @@ export default async function RestorePage(props: PageProps<"/w/[slug]/restore">)
       </p>
     </Page>
   );
-  if (!supabaseEnv()) return refused("Restoring needs a connected workspace; the demo has none.");
+  if (!authEnv()) return refused("Restoring needs a connected workspace; the demo has none.");
   const head = await loadWorkspaceHead(slug);
   if (!head) notFound();
   if (!(await canEditWorkspace(head.id))) return refused(ROLE_MESSAGE);
-  if (!(await workspaceIsEmpty(await createClient(), head.id))) return refused(NOT_EMPTY_MESSAGE);
+  if (!(await workspaceIsEmpty(await getDb(), head.id))) return refused(NOT_EMPTY_MESSAGE);
   return (
     <Page title="Restore a backup" eyebrow="Workspace" description={description} width="max-w-3xl">
       <PhoneReadOnly>

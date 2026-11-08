@@ -54,9 +54,11 @@ const solution: SolutionRow = {
   base_revision_id: live.revision.id,
   name: "Faster audits",
   notes: "",
+  status: "testing",
   steps: copy,
   changed_step_ids: [target.id],
   lever_changes: [],
+  step_changes: [],
   created_at: "2026-09-01T00:00:00Z",
   updated_at: "2026-09-01T00:00:00Z",
   created_by: null,
@@ -91,7 +93,8 @@ window.mountOverview = () =>
         startDate={DEMO_FORECAST_START}
         hrefs={{}}
         processesHref="/processes"
-        issuesHref="/issues"
+        forecastHref="/sandbox"
+        companyHistoryHref="/w/x/p/company/history"
       />
     </SidebarProvider>,
   );

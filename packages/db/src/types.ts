@@ -1,13 +1,23 @@
 // Row shapes the app and engine work with. The database shape itself lives in
-// `database.types.ts` (generated: `pnpm --filter @transpera-flow/db gen:types`); these
+// `db-types.ts` (generated: `pnpm --filter @transpera-flow/db gen:types`); these
 // narrow its check-constrained text and jsonb columns, and the checks at the
 // bottom fail the typecheck if they drift from it.
 
+import type { ProcessCategory } from "./process-category";
 import type { IssueType, ScenarioPatch, StoredSeverity } from "@transpera-flow/engine";
-import type { Database, Json } from "./database.types";
+import type { Selectable } from "kysely";
+import type { DB } from "./db-types";
 import type { Viewer } from "./queries";
+import type { SandboxChange } from "./sandbox-levers";
+import type { StoredStepChange } from "./capacity-changes";
 
-export type MembershipRole = "agency_admin" | "owner" | "editor" | "member" | "viewer";
+/**
+ * What `memberships.role` can hold (migration 20270103000000): `owner` is an Agency admin, `viewer` is a Viewer. The Owner needs
+ * no membership (the agency-admin flag). The database enum still has the legacy labels, which a check keeps out of the table.
+ */
+export type MembershipRole = "owner" | "viewer";
+/** The product's three roles, as the "Who can sign in" list stores them (`deployment_access.role`). */
+export type DeploymentRole = "owner" | "agency_admin" | "viewer";
 export type StepKind = "task" | "wait" | "decision" | "subprocess" | "group" | "start" | "end";
 export type StepOutcome = "won" | "lost" | "done";
 export type Distribution = "constant" | "triangular" | "lognormal";
@@ -54,19 +64,43 @@ export interface WorkspaceSettings {
    */
   client_health_benchmark_low?: number;
   client_health_benchmark_high?: number;
+  /**
+   * Fixed costs a month (rent, tools, insurance) in the workspace currency, 0 to 100,000,000; the forecast takes them off
+   * revenue with pay to show profit (sandbox phase 2). Absent or null: none. Not pay, so Viewers see it. Checked by
+   * `workspaces_overhead_monthly`.
+   */
+  overhead_monthly?: number | null;
+  /**
+   * The categories a step's purpose is chosen from (sandbox phase 4): 5 to 12, in display order. Absent or null: the defaults
+   * (`DEFAULT_PURPOSES`). Shape-checked by `workspaces_purposes`; read through `workspacePurposes`.
+   */
+  purposes?: { key: string; name: string; description: string }[] | null;
+  /**
+   * The built-in churn drivers deleted from Settings' list (their keys, such as "price"). A deleted one is also switched off, so the
+   * simulation leaves it out; + Add driver puts it back. Absent or null: none deleted.
+   */
+  churn_drivers_removed?: string[] | null;
   /** Per-person times (capacity factors, C6): off unless true. Owners and editors switch it; see `person_capacity_factors`. */
   capacity_factor_enabled?: boolean;
+  /**
+   * Capacity Set up (P1): the share of full capacity a new starter has in each month from their start date, e.g. [0.4, 0.6, 0.8]
+   * (then full). Absent or null: that default. A person's own `ramp` replaces it. Stored only; the capacity figures (P2) use it.
+   * Checked by `workspaces_ramp_default`.
+   */
+  ramp_default?: number[] | null;
+  /**
+   * Capacity Set up (P1, D10, D37): whether DLER counts leadership's salary. Absent or null: true. "To confirm with the client."
+   * Stored only. Checked by `workspaces_dler_includes_leadership`.
+   */
+  dler_includes_leadership?: boolean | null;
 }
 
-/** One per-person time as `team_capacity` returns it (`step_id` null is the person's time on every step; `source` is entered or measured). */
+/** One per-person time as `team_capacity` returns it (`step_id` null is the person's time on every step). */
 export interface PersonCapacityFactorRow {
   person_id: string;
   workspace_id: string;
   step_id: string | null;
   factor: number;
-  source: string;
-  /** How many visits a measured time rests on; null or absent when entered (#227). */
-  items?: number | null;
 }
 
 export interface WorkspaceRow {
@@ -88,6 +122,8 @@ export interface RoleRow {
   ongoing_hours_per_client_week: number;
   /** Inactive roles are hidden from pickers; what already names one keeps it, and it still simulates. */
   active: boolean;
+  /** Leadership: left out of clients and revenue per employee (D22). */
+  leadership: boolean;
 }
 
 export interface PersonRow {
@@ -133,6 +169,8 @@ export interface ProcessRow {
   kind: "pipeline" | "servicing";
   entity_name: string;
   description: string | null;
+  /** What the process is for, in words people use (Q3, D41). The engine `kind` stays underneath. */
+  category: ProcessCategory;
   live_revision_id: string | null;
   /**
    * The process this one sits inside (a child process, held by one of the
@@ -150,6 +188,19 @@ export interface ProcessRow {
    * absent for a process in use.
    */
   archived_at?: string | null;
+  /**
+   * The department the company map puts this process under (Q4, migration 20270127000000): the owner's choice, or null when it is worked
+   * out from the tier services its servicing links use (`processDepartment`). Absent on fixtures.
+   */
+  department_id?: string | null;
+  /** The owner put it under "Sales and whole business" although its servicing links would work out a department. Never with `department_id`. */
+  whole_business?: boolean;
+  /**
+   * The company map only (Q17, D51, migration 20270134000000): true once a person has published a version of it, from when its processes and
+   * hand-off lines are what the live run simulates. False: the live run is still today's, whatever the map holds. Absent (true) on fixtures and
+   * on every process but the company map.
+   */
+  map_drives_run?: boolean;
 }
 
 export interface ProcessRevisionRow {
@@ -159,6 +210,12 @@ export interface ProcessRevisionRow {
   number: number;
   status: "draft" | "published" | "superseded";
 }
+
+/** The three parts of a step's hands-on time (`EngineStep.split`). Type aliases, so they stay assignable to the jsonb columns. */
+export type StepSplit = { automatable: number; augmentable: number; manual: number };
+export type StepSplitNotes = { automatable?: string; augmentable?: string; manual?: string };
+/** Tier key → × on the step's time. */
+export type TierMultiplier = { [tier: string]: number };
 
 export interface StepRow {
   id: string;
@@ -180,6 +237,16 @@ export interface StepRow {
   /** Step a rework goes back to; null means the same step. Not simulated yet. */
   rework_to_step_id: string | null;
   tool: string | null;
+  /** What the step achieves: a key of the workspace's `settings.purposes`; null is Automatic (`resolvePurpose`). Sandbox phase 4. */
+  purpose: string | null;
+  /** Shares of the step's hands-on time that can be automated, augmented or only done by hand; sum to 1. Null: all manual (capacity P4). */
+  split: StepSplit | null;
+  /** One line of words for each part of the split. */
+  split_notes: StepSplitNotes | null;
+  /** × on the step's time per tier key; a tier not listed is 1. Null: 1 for every tier. */
+  tier_multiplier: TierMultiplier | null;
+  /** The step goes to the client's manager (D32), falling back to its role. */
+  to_client_manager: boolean;
   notes: string | null;
   /** Target hours for one visit to the step (queue + hands-on + wait); visits over it are SLA breaches. */
   sla_hours: number | null;
@@ -269,6 +336,9 @@ export interface ServiceRow {
   churn_health_sensitivity: number;
   /** Relative share of arrivals. */
   mix_share: number;
+  /** Fee range of a client won on this service (sandbox phase 3, A5): its fee is drawn between these, most often near `price`. Null: no range. */
+  price_low: number | null;
+  price_high: number | null;
   /** Process its arrivals enter; null means the workspace's pipeline (whichever process is simulated). */
   entry_process_id: string | null;
   /** Condition tags its entities follow (`edges.condition_tag`). */
@@ -289,20 +359,24 @@ export interface ServiceRow {
 export type FallbackLoad = { [roleId: string]: number };
 
 /** Where a parameter's value came from (docs/PRD.md §3 Parameter provenance). */
-export type ProvenanceSource = "estimated" | "entered" | "measured";
+export type ProvenanceSource = "estimated" | "entered";
+
+/** The source labels a step's base values carry (requirements section 7), in `steps.provenance.{work|split|tier_multiplier}.source`. */
+export type StepSourceLabel = "interview" | "calculator" | "measured" | "estimate";
+export const STEP_SOURCE_LABELS: readonly StepSourceLabel[] = ["interview", "calculator", "measured", "estimate"];
+/** The step values that carry a source label. `work` is the time per occurrence (`work_hours`). */
+export type StepSourcedValue = "work" | "split" | "tier_multiplier";
 
 /**
  * One value's provenance (the §5 `provenance jsonb` shape). A type alias, not
  * an interface, so it stays assignable to the jsonb column.
  */
 export type Provenance = {
-  source: ProvenanceSource;
+  source: ProvenanceSource | StepSourceLabel;
   /** When it was set (ISO timestamp). */
   at?: string;
   /** User who set it. */
   by?: string;
-  /** Dataset a measured value came from. */
-  dataset_id?: string;
   /** Why the value is what it is (e.g. Claude's reasoning for an assumption). */
   note?: string;
   /** Filled in without a source (a default or an inference); listed for confirmation until someone confirms it. */
@@ -417,141 +491,6 @@ export interface ClientGroupRow {
   starting_health: number;
   /** Provenance of the five numbers. */
   provenance: ProvenanceMap;
-}
-
-/**
- * A process revision's first principles (issue #119, A54): the job and root cause as text, the lists the rule checks
- * read as jsonb arrays. `FirstPrinciples` (engine) is the app-side shape of the whole, read with
- * `firstPrinciplesFromRow`.
- */
-export interface FirstPrinciplesRow {
-  id: string;
-  workspace_id: string;
-  process_id: string;
-  revision_id: string;
-  job_who: string;
-  job_progress: string;
-  job_situation: string;
-  job_done: string;
-  statements: Json;
-  requirements: Json;
-  deletes: Json;
-  improvements: Json;
-  why_problem: string;
-  why_chain: Json;
-  root_cause: string;
-  measures: Json;
-  updated_at: string;
-}
-
-/** The five switches on Settings -> AI analysis (issue #111, A46). No row means the defaults. */
-export interface AiSettingsRow {
-  workspace_id: string;
-  review_on_publish: boolean;
-  review_on_market: boolean;
-  suggest_issues: boolean;
-  suggest_solutions: boolean;
-  read_sources: boolean;
-  /** A market change whose review hasn't started (debounces the market trigger); not a switch. */
-  market_pending_at: string | null;
-  updated_at: string;
-}
-
-/** A model run that was started (A46): the log the daily cap and the cooldown count. Written only by `reserve_ai_run`. */
-export interface AiRunRow {
-  id: string;
-  workspace_id: string;
-  process_id: string;
-  trigger: "publish" | "market" | "manual";
-  user_id: string | null;
-  user_name: string | null;
-  started_at: string;
-}
-
-export type AiAnalysisStatus = "ok" | "unavailable" | "failed";
-export type AiAnalysisTrigger = "publish" | "market" | "manual";
-
-/**
- * What AI wrote about one process version (issue #111, A46): the read, the insights and the first-principles review,
- * each as jsonb whose app-side shape lives in apps/web/src/lib/ai/types.ts.
- */
-export interface AiAnalysisRow {
-  id: string;
-  workspace_id: string;
-  process_id: string;
-  revision_id: string;
-  status: AiAnalysisStatus;
-  reason: string | null;
-  trigger: AiAnalysisTrigger;
-  summary: Json;
-  insights: Json;
-  review: Json;
-  checked: number;
-  dropped: number;
-  input_hash: string;
-  model: string | null;
-  /** A hash of the model it read (engine model, first principles, prompt version): a different hash now means it is out of date (B17). Null on rows from before. */
-  model_hash: string | null;
-  usage: Json;
-  /** The reserved run that wrote it, and so who ran it. */
-  run_id: string;
-  /** The labels its text uses ("Team member A") and the person each stands for: `{ label: person id }` (B1 2b). Names go back at render. */
-  person_labels: Json;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export type FindingOrigin = "ai" | "manual";
-export type FindingStatus = "proposed" | "accepted" | "dismissed" | "superseded";
-export type FindingRating = "risk" | "bad" | "good" | "great";
-export const FINDING_TYPES = ["bottleneck", "spof", "manual", "delay", "failure", "idea", "capacity", "sla", "churn_risk"] as const;
-export type FindingType = (typeof FINDING_TYPES)[number];
-
-/** A fact or quote a finding rests on, as it read when cited. */
-export interface FindingCitation {
-  kind: "fact" | "quote";
-  /** The fact's key (`<detector>:<subject>:<id>`), or the step a quote is cited on. */
-  key: string;
-  text: string;
-}
-
-/**
- * A finding (issue #175, B17; decision D40): what AI or a person concludes from the engine's facts. AI findings arrive
- * proposed and a person accepts, edits or dismisses them; findings by hand start accepted. Only accepted ones show on the
- * pages, and one can be acknowledged as an issue (`detected_key = 'finding:<origin>:<id>'`).
- */
-export interface FindingRow {
-  id: string;
-  workspace_id: string;
-  /** Null: across the company. */
-  process_id: string | null;
-  step_id: string | null;
-  origin: FindingOrigin;
-  status: FindingStatus;
-  rating: FindingRating;
-  type: FindingType;
-  title: string;
-  evidence: string;
-  why: string;
-  facts: Json;
-  /** The labels its title, evidence, why and facts use ("Team member A") and the person each stands for (B1 2b). `{}` for a finding by hand. */
-  person_labels: Json;
-  source_ids: string[];
-  ai_key: string | null;
-  analysis_id: string | null;
-  /** The run that last proposed it (analyses are kept one per version; each run has its own id). */
-  run_id: string | null;
-  /** 'connector' when Claude proposed it over the MCP connector (B20); null otherwise. Set by the database. */
-  proposed_via: "connector" | null;
-  /** An AI finding a person has changed (set by the database only): its words are no longer only AI's. */
-  edited: boolean;
-  created_by: string | null;
-  created_at: string;
-  updated_by: string | null;
-  updated_at: string;
-  decided_by: string | null;
-  decided_at: string | null;
 }
 
 export type SourceKind = "transcript" | "notes" | "sop" | "spreadsheet" | "data" | "screenshot" | "other";
@@ -684,7 +623,16 @@ export interface ChurnDriverRow {
   value: number | null;
   /** Price changes: the month of the run the rise takes effect. */
   month: number | null;
-  /** Provenance of weight, enabled, value and month. */
+  /**
+   * Chance mode (sandbox phase 3, B4): the chance a client is hit in a month, in percent (0-100). Null: measured for late, resp, onb,
+   * rework and load, a default for the rest. Only an `effect` switches the driver from its weight to events.
+   */
+  chance: number | null;
+  /** Chance mode: how much a hit raises that client's churn, in percent (0-500). Null: the driver runs on its weight. */
+  effect: number | null;
+  /** Chance mode: months a hit lasts (1-24). Null: 3. */
+  effect_months: number | null;
+  /** Provenance of weight, enabled, value, month, chance, effect and effect_months. */
   provenance: ProvenanceMap;
 }
 
@@ -703,7 +651,14 @@ export interface MarketScheduleRow {
  * week or month, or ad-hoc requests at random, `poisson_per_month` a month on
  * average. A type alias, so it stays assignable to the jsonb column.
  */
-export type RecurrenceJson = { every: "week" | "month"; times: number } | { poisson_per_month: number };
+export type RecurrenceJson =
+  | { every: "week" | "month"; times: number }
+  | { poisson_per_month: number }
+  /** Follows what the client's tier gets: `perMonth × value ÷ (per ?? 1)` tasks a month (`Recurrence` in the engine). */
+  | { perMonth: number; driver: RecurrenceDriver; per?: number };
+
+/** What a driver recurrence follows: a tier deliverable, or "adhoc" (the chance of a request × how many). */
+export type RecurrenceDriver = "words" | "links" | "techHours" | "meetings" | "builds" | "creativeSets" | "channels" | "adhoc";
 
 /**
  * A servicing process a service's clients run, and how often (docs/PRD.md
@@ -720,6 +675,12 @@ export interface ServiceServicingRow {
   sla_hours: number;
   /** Provenance of `recurrence` and `sla_hours`. */
   provenance: ProvenanceMap;
+}
+
+/** One hand-off line of the company map the run honours: work won or done in process `from` goes on in process `to` (both process ids). */
+export interface CompanyHandoff {
+  from: string;
+  to: string;
 }
 
 /** One process at one revision: what a run needs of a process other than the one on screen. */
@@ -803,11 +764,76 @@ export interface ProcessBundle {
    */
   servicingLinks?: ServiceServicingRow[];
   otherProcesses?: ProcessPart[];
+  /**
+   * Hand-offs between pipelines (Q17, ADR 0023), set only by `companyBundle` when the company map has a line from a pipeline to another
+   * pipeline: in order from the sales pipeline (`process`), each says that every client won in `from` carries on into `to`. Each `to` is in
+   * `otherProcesses`. Absent: nothing is handed on and `toEngineModel` takes the path it always took.
+   */
+  handoffs?: CompanyHandoff[];
+  /** Set by `companyBundle`: the name of every process on the company map, for notes about one that isn't in the run. */
+  companyNames?: Record<string, string>;
+  /**
+   * The capacity Set up data the engine reads (P1's columns, mapped by P2b: `docs/plans/capacity/p2b-mapping-brief.md`). Present only
+   * for a workspace that has at least one tier service (a service with a department and a tier); absent, the model is exactly the
+   * one built before capacity existed.
+   */
+  capacity?: CapacityInputs;
+}
+
+/** A deliverable column on a service or a client (the tier's, or a named client's own value). `null`: not entered. */
+export interface CapacityDeliverableColumns {
+  words: number | null;
+  links: number | null;
+  tech_hours: number | null;
+  meetings: number | null;
+  builds: number | null;
+  creative_sets: number | null;
+  channels: number | null;
+}
+
+/** A service's capacity columns (`services.department_id` …). */
+export interface CapacityServiceRow extends CapacityDeliverableColumns {
+  id: string;
+  department_id: string | null;
+  tier_id: string | null;
+  adhoc_chance: number | null;
+  adhoc_requests: number | null;
+  /** The tier's total clients, typed in (Q13). Left out when not set: then the count is worked out as before. */
+  client_total?: number | null;
+}
+
+/** A named client's own values (`clients.<same names>`): each replaces its tier's; null uses the tier's. */
+export interface CapacityClientRow extends CapacityDeliverableColumns {
+  id: string;
+  hand_holding_hours: number | null;
+  adhoc_chance: number | null;
+  adhoc_requests: number | null;
+  adhoc_hours: number | null;
+  step_factor: number | null;
+}
+
+/** What the capacity mapping reads of the Set up data. Plain numbers, so a bundle can be saved and compared. */
+export interface CapacityInputs {
+  /** Tiers, in their order (`tiers.sort`): the engine's tier is the key. */
+  tiers: { id: string; key: string; sort: number }[];
+  services: CapacityServiceRow[];
+  clients: CapacityClientRow[];
+  /** Roles' kind (a client-facing role's holder is a client's manager) and unit of work. */
+  roles: { id: string; kind: "client_facing" | "shared"; unit: string | null }[];
+  /**
+   * People's team time and ramp. Read straight from `people`, so a viewer who can't see people gets none (as pay is hidden):
+   * everyone then has all their hours and no ramp.
+   */
+  people: { id: string; reserved_share: number; ramp: number[] | null }[];
+  personTiers: { person_id: string; tier_id: string }[];
+  portfolio: { person_id: string; service_id: string; client_count: number }[];
 }
 
 /**
- * A saved scenario: patches applied in order on top of the baseline model
- * (docs/PRD.md §5; the grammar is in packages/engine/src/scenario.ts).
+ * A saved whole-run scenario as the process page, the issues register, share snapshots and MCP read it: patches applied in order on
+ * top of the baseline model (docs/PRD.md §5; the grammar is in packages/engine/src/scenario.ts). Since the Sandbox (sandbox
+ * phase 1) these are the standalone whole-run `sandbox_scenarios` (no parent, every change a patch with no `from`), read through
+ * `loadScenarios`; `parent_scenario_id` is always null.
  */
 export interface ScenarioRow {
   id: string;
@@ -853,6 +879,12 @@ export interface BlockRow {
 /** How a solution did against an issue's target, or what the user decided. */
 export type SolutionVerdict = "pass" | "fail";
 
+/** Where a solution stands (Q10, D43): a person's call, shown as a pill. The per-issue verdicts stay under it as detail. */
+export const SOLUTION_STATUSES = ["idea", "testing", "works", "doesnt_work", "adopted"] as const;
+export type SolutionStatus = (typeof SOLUTION_STATUSES)[number];
+export const SOLUTION_STATUS_LABELS: Record<SolutionStatus, string> = { idea: "Idea", testing: "Testing", works: "Works", doesnt_work: "Doesn't work", adopted: "Adopted" };
+export const isSolutionStatus = (v: unknown): v is SolutionStatus => typeof v === "string" && (SOLUTION_STATUSES as readonly string[]).includes(v);
+
 /** A separate copy of a process with changed steps, plus optional lever changes (A49, D25). Never a draft: drafts stay single (D18). */
 export interface SolutionRow {
   id: string;
@@ -863,35 +895,35 @@ export interface SolutionRow {
   base_revision_id: string;
   name: string;
   notes: string;
+  status: SolutionStatus;
   /** The whole map as the solution has it (the same shape as a block's bundle). */
   steps: BlockBundle;
   /** Stable ids of the steps it added or changed against the base revision. */
   changed_step_ids: string[];
   /** Lever changes, as scenario patches. */
   lever_changes: ScenarioPatch[];
+  /** Automations and augmentations in this version of the process (D53). The Sandbox runs them from the month the version is picked. */
+  step_changes: StoredStepChange[];
   created_at: string;
   updated_at: string;
   created_by: string | null;
 }
 
 /**
- * One marker of a forecast plan (B7, #36). Dates are absolute ISO dates, never month offsets. The ids are checked at write
- * time but are not foreign keys: a role, person or solution deleted later leaves its marker "needs attention" in the app.
+ * A scenario of the Sandbox: a named list of changes (one lever each, for the whole run or from a month), optionally built on
+ * another scenario (`parent_id`: the parent's changes apply first). It never changes the live model; it is run against it.
  */
-export type ForecastPlanMarker =
-  /** A new person in a role from `date` (the 1st of a month). `fte` 0.1-2. `name` optional; the app shows "New <role>". */
-  | { id: string; kind: "hire"; date: string; role_id: string; fte: number; name?: string }
-  /** An existing person away for `weeks` whole weeks from `date` (a Monday). */
-  | { id: string; kind: "leave"; date: string; person_id: string; weeks: number }
-  /** A saved solution live from `date` (the 1st of a month). */
-  | { id: string; kind: "solution"; date: string; solution_id: string };
-
-/** A named set of forecast markers: hires, leave and solutions going live. It never changes the live model. */
-export interface ForecastPlanRow {
+export interface SandboxScenarioRow {
   id: string;
   workspace_id: string;
   name: string;
-  markers: ForecastPlanMarker[];
+  description: string | null;
+  parent_id: string | null;
+  changes: SandboxChange[];
+  /** The horizon the scenario opens on, 1 to 24 months. */
+  horizon_months: number;
+  /** The 1st of the month the run starts in; null: today. */
+  start_date: string | null;
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -901,8 +933,6 @@ export interface ForecastPlanRow {
 export interface SolutionsData {
   solutions: SolutionRow[];
   links: SolutionIssueRow[];
-  /** Ids of solutions that were built from an AI idea (a built proposal names them). Left out when that isn't known: they read "By hand". */
-  aiIds?: string[];
 }
 
 /** One issue a solution solves: the automatic verdict against the issue's target, and the user's own. */
@@ -963,7 +993,7 @@ export interface IssueLinkRef {
 export type ResolveHow = "solution" | "process_change" | "not_a_problem";
 export const RESOLVE_HOWS = ["solution", "process_change", "not_a_problem"] as const satisfies readonly ResolveHow[];
 
-export type IssueEventKind = "created" | "edited" | "solution_tested" | "resolved" | "reopened";
+export type IssueEventKind = "created" | "edited" | "solution_tested" | "resolved" | "reopened" | "solution_status";
 /** Logged by hand, detected by a stored run (reserved), or promoted from a detection. */
 export type IssueSource = "manual" | "detected" | "promoted";
 
@@ -1035,149 +1065,10 @@ export interface IssueEventRow {
   tx: number | null;
 }
 
-/** The company-model tables a suggestion can change (docs/PRD.md §7.1c). */
-export type SuggestionTarget = "workspaces" | "services" | "people" | "clients" | "lead_sources" | "seasonality" | "demand_settings" | "roles";
-export type SuggestionStatus = "pending" | "accepted" | "rejected";
-export type SuggestionValue = string | number | boolean | null;
-
-/**
- * What a suggestion changes (issue #25). `set` holds column values (for
- * `workspaces`, settings keys). People take `roles` (the full set, by id) and
- * `leave` (periods to add); clients take `services` (the full set, by id) and
- * `assignments` (role id → person id, or null to clear). A type alias, so it
- * stays assignable to the jsonb column.
- */
-export type SuggestionPatch = {
-  set: { [column: string]: SuggestionValue };
-  roles?: string[];
-  services?: string[];
-  assignments?: { [roleId: string]: string | null };
-  leave?: { start_date: string; end_date: string; note?: string | null }[];
-};
-
-/** What accepting a suggestion changed: the row, and its values before and after. */
-export type SuggestionApplied = {
-  target_id: string;
-  /** Null when the suggestion created the row. */
-  before: { [field: string]: unknown } | null;
-  after: { [field: string]: unknown };
-};
-
-/**
- * A proposed change to the company model from the MCP server, awaiting a
- * person's accept or reject (docs/PRD.md §3 Suggestion, §5 `suggestions`).
- */
-export interface SuggestionRow {
-  id: string;
-  workspace_id: string;
-  target_table: SuggestionTarget;
-  /** The row it changes; null: a new row (workspaces and demand_settings: the workspace's own). */
-  target_id: string | null;
-  patch: SuggestionPatch;
-  evidence: EvidenceCitation[];
-  /** The suggester's reasoning. */
-  note: string | null;
-  status: SuggestionStatus;
-  created_via: "mcp" | "upload";
-  /** The file or link an upload came from (shown as "Upload (name)"). */
-  import_source: string | null;
-  applied: SuggestionApplied | null;
-  review_note: string | null;
-  reviewed_by: string | null;
-  reviewed_at: string | null;
-  created_at: string;
-  created_by: string | null;
-}
-
-/** What is proposed besides company-model changes (A52, docs/PRD.md §7.1c): an issue, or an idea for a solution. */
-export type ProposalKind = "issue" | "solution_idea";
-/** An issue is accepted or rejected; a solution idea is dismissed (or, in slice 2, built). */
-export type ProposalStatus = "pending" | "accepted" | "rejected" | "dismissed" | "built";
-
-/** A proposed issue's payload: what it would be logged with. A type alias, so it stays assignable to jsonb. */
-export type IssueProposalPayload = {
-  severity?: "critical" | "serious" | "warning" | "info";
-  type?: IssueType;
-  /** What it touches: a whole process (step_id null) or steps. */
-  links?: IssueLinkRef[];
-  target_measure?: string;
-  target_now?: string;
-  target_goal?: string;
-};
-
-/** One step an idea would place. `block_id` names the library block it comes from; `ai` marks an AI block. */
-export type ProposedStep = { key: string; name: string; kind?: string; role?: string; block_id?: string | null; ai?: boolean };
-
-/** A solution idea's payload: the steps it would place and the ones they replace. Its block map is slice 2. */
-export type SolutionIdeaPayload = {
-  steps: ProposedStep[];
-  edges?: { from: string; to: string }[];
-  replaces_step_ids?: string[];
-  /** What the AI expects, in plain words. Not simulated. */
-  expect?: string;
-  /** Lever changes (scenario patches) the idea brings (B4: a play-link visitor's moves). Read through `parsePatches`: anything invalid is dropped. */
-  levers?: ScenarioPatch[];
-  /** A visitor's idea: the process their link shared, and the version the link was made from. */
-  process_id?: string;
-  base_revision_id?: string;
-};
-
-/** What a decision did: accepting a proposed issue made `issue_id` (and its number); building a solution idea made `solution_id`. */
-export type ProposalApplied = { issue_id?: string; number?: number | null; solution_id?: string };
-
-/** A proposed issue or solution idea waiting for a person (docs/PRD.md §5 `suggestion_proposals`). */
-export interface ProposalRow {
-  id: string;
-  workspace_id: string;
-  kind: ProposalKind;
-  title: string;
-  detail: string | null;
-  payload: IssueProposalPayload | SolutionIdeaPayload;
-  evidence: EvidenceCitation[];
-  note: string | null;
-  /** The issue a solution idea is for. */
-  issue_id: string | null;
-  status: ProposalStatus;
-  created_via: "mcp" | "play_link" | "upload";
-  import_source: string | null;
-  /** A play-link visitor's name (B4), or "A visitor" when what they typed names someone, gives an email or an amount. Their email and the held original are not readable by the app's users: owners and editors get them through `play_proposal_contacts`. */
-  proposer_name: string | null;
-  /** The play link a visitor's idea came from (B4). */
-  share_link_id: string | null;
-  applied: ProposalApplied | null;
-  review_note: string | null;
-  reviewed_by: string | null;
-  reviewed_at: string | null;
-  created_at: string;
-  created_by: string | null;
-}
-
-/** An allowed email domain: managed Google accounts on it join as `member`. */
-export interface WorkspaceDomainRow {
-  id: string;
-  workspace_id: string;
-  domain: string;
-}
-
-/** A pre-assigned email: whoever signs in with it gets exactly this role. */
-export interface AccessEmailRow {
-  id: string;
-  workspace_id: string;
-  email: string;
-  role: Exclude<MembershipRole, "agency_admin">;
-  person_id: string | null;
-}
-
-/** Who can get into a workspace without an invitation (issue #51). */
-export interface WorkspaceAccess {
-  domains: WorkspaceDomainRow[];
-  emails: AccessEmailRow[];
-}
-
-type TableRow<T extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][T]["Row"];
+type TableRow<T extends keyof DB> = Selectable<DB[T]>;
 
 /** `true` when every field of `Row` is a column of table `T` with a compatible type. */
-type Matches<Row, T extends keyof Database["public"]["Tables"]> = [Exclude<keyof Row, keyof TableRow<T>>] extends [never]
+type Matches<Row, T extends keyof DB> = [Exclude<keyof Row, keyof TableRow<T>>] extends [never]
   ? Row extends Pick<TableRow<T>, keyof Row & keyof TableRow<T>>
     ? true
     : { mismatch: T }
@@ -1194,8 +1085,8 @@ export type _SchemaDriftChecks = [
   Assert<Matches<PersonSkillRow, "person_skills">>,
   Assert<Matches<PersonLeaveRow, "person_leave">>,
   // is_company and archived_at are optional here (absent on fixtures).
-  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at">, "processes">>,
-  Assert<Matches<Required<Pick<ProcessRow, "archived_at">>, "processes">>,
+  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "category" | "department_id" | "whole_business" | "map_drives_run">, "processes">>,
+  Assert<Matches<Required<Pick<ProcessRow, "archived_at" | "department_id" | "whole_business" | "map_drives_run">>, "processes">>,
   Assert<Matches<ProcessRevisionRow, "process_revisions">>,
   // replaced_by defaults to '{}' in the table; the app leaves it out of new steps.
   Assert<Matches<Omit<StepRow, "replaced_by">, "steps">>,
@@ -1207,13 +1098,6 @@ export type _SchemaDriftChecks = [
   Assert<Matches<ClientServiceRow, "client_services">>,
   Assert<Matches<ClientAssignmentRow, "client_assignments">>,
   Assert<Matches<ClientGroupRow, "client_groups">>,
-  Assert<Matches<FirstPrinciplesRow, "first_principles">>,
-  Assert<Matches<AiSettingsRow, "ai_settings">>,
-  Assert<Matches<AiAnalysisRow, "ai_analyses">>,
-  // origin, status, rating, type and proposed_via are check-constrained.
-  Assert<Matches<Omit<FindingRow, "origin" | "status" | "rating" | "type" | "proposed_via">, "findings">>,
-  // trigger is check-constrained to the three triggers.
-  Assert<Matches<Omit<AiRunRow, "trigger">, "ai_runs">>,
   // recurrence and provenance are jsonb; RecurrenceJson and ProvenanceMap are their app-side shapes.
   Assert<Matches<Omit<ServiceServicingRow, "recurrence">, "service_servicing">>,
   Assert<Matches<LeadSourceRow, "lead_sources">>,
@@ -1224,10 +1108,8 @@ export type _SchemaDriftChecks = [
   Assert<Matches<MarketScheduleRow, "market_schedule">>,
   // driver is check-constrained to ChurnDriverKey; provenance is jsonb.
   Assert<Matches<Omit<ChurnDriverRow, "driver" | "provenance">, "churn_drivers">>,
-  Assert<Matches<WorkspaceDomainRow, "workspace_domains">>,
-  Assert<Matches<AccessEmailRow, "workspace_access_emails">>,
-  // patch is jsonb; ScenarioPatch[] is its checked shape.
-  Assert<Matches<Omit<ScenarioRow, "patch">, "scenarios">>,
+  // changes is jsonb; SandboxChange[] is its checked shape.
+  Assert<Matches<Omit<SandboxScenarioRow, "changes">, "sandbox_scenarios">>,
   // evidence_metrics is jsonb; Record<string, number> is its app-side shape.
   // The three relation arrays are embedded from the link tables.
   Assert<Matches<Omit<IssueRow, "evidence_metrics" | "links" | "owner_ids" | "source_ids" | "status" | "resolved_how">, "issues">>,
@@ -1237,13 +1119,7 @@ export type _SchemaDriftChecks = [
   Assert<Matches<Omit<SourceLinkRow, "kind">, "source_links">>,
   // steps is jsonb; BlockBundle is its checked shape, and the check constraint limits type to BlockType.
   Assert<Matches<Omit<BlockRow, "steps" | "type">, "blocks">>,
-  // steps, changed_step_ids and lever_changes are jsonb; SolutionRow has their checked shapes. The verdicts are check-constrained.
-  Assert<Matches<Omit<SolutionRow, "steps" | "changed_step_ids" | "lever_changes">, "solutions">>,
+  // steps, changed_step_ids, lever_changes and step_changes are jsonb; SolutionRow has their checked shapes. The verdicts are check-constrained.
+  Assert<Matches<Omit<SolutionRow, "steps" | "changed_step_ids" | "lever_changes" | "step_changes">, "solutions">>,
   Assert<Matches<Omit<SolutionIssueRow, "auto_verdict" | "user_verdict">, "solution_issues">>,
-  // markers is jsonb; ForecastPlanRow has its checked shape.
-  Assert<Matches<Omit<ForecastPlanRow, "markers">, "forecast_plans">>,
-  // patch, evidence and applied are jsonb; the check constraints limit the text columns.
-  Assert<Matches<Omit<SuggestionRow, "patch" | "evidence" | "applied">, "suggestions">>,
-  // payload, evidence and applied are jsonb; the check constraints limit the text columns.
-  Assert<Matches<Omit<ProposalRow, "payload" | "evidence" | "applied" | "kind" | "status" | "created_via">, "suggestion_proposals">>,
 ];

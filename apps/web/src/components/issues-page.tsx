@@ -6,29 +6,30 @@
 import { isReadOnly, type ScreenMode } from "@/lib/mode";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Download } from "lucide-react";
 import { useMemo, useState } from "react";
-import { ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
-import { RATING_LABELS, detectBrokenScenarios, ratingOfStored, resolveMoney, type FirstPrinciples, type IssueCost, type Rating } from "@transpera-flow/engine";
+import { retiredSteps, ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
+import { RATING_LABELS, detectBrokenScenarios, ratingOfStored, resolveMoney, type IssueCost, type Rating } from "@transpera-flow/engine";
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help } from "@/components/help";
 import { LIST_HELP } from "@/lib/issues/help";
+import { IssueStatusPill } from "@/components/issues/status-pill";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { emptyDraft, issueFormOptions, toSaveInput } from "@/lib/issues/draft";
-import { NO_SOLUTIONS, RATINGS_WORST_FIRST, SHOW_FILTERS, SHOW_LABELS, isOpenIssue, issueHref, listIssues, listQuery, parseListState, ratingCounts, shortDate, showCounts, statusLabel, type ListState } from "@/lib/issues/pages";
-import { NO_SOLUTIONS_DATA, solutionSummaries, type SolutionsData } from "@/lib/solutions/cards";
+import { DEFAULT_LIST_STATE, LISTED_STATUSES, NO_SOLUTIONS, RATINGS_WORST_FIRST, UNASSIGNED, facetCounts, filtersOn, isOpenIssue, issueHref, listIssues, listQuery, ownersOf, parseListState, processesOf, shortDate, visibleIssues, type ListState } from "@/lib/issues/pages";
+import { STATUS_LABELS } from "@/lib/issues/register";
+import { STATUS_TONE } from "@/components/issues/status-pill";
+import { ClearFilters, FilterMenu, Toolbar, ToolbarSearch, type FilterOption } from "@/components/page-kit";
+import { NO_SOLUTIONS_DATA, solutionSummaries, solutionsListHref, type SolutionsData } from "@/lib/solutions/cards";
+import { startSolutionHref } from "@/lib/solutions/list";
+import { solutionEditorHref } from "@/lib/solutions/links";
 import { useDemoSolutions } from "@/lib/solutions/demo";
 import { perceptionGapDetections } from "@/lib/issues/perception";
 import { useIssues } from "@/lib/issues/use-issues";
-import { downloadBlob, exportFileName } from "@/lib/export/map-image";
-import { issuesCsv } from "@/lib/issues/csv";
 import { useDetectedIssues } from "@/lib/issues/use-detected";
-import { useSuccessMeasures } from "@/lib/first-principles/use-measures";
 import { visibleFindings } from "@/lib/rules/edit";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
-import { retiredSteps } from "@/lib/scenarios/broken";
 import { useAbsenceTest } from "@/lib/sim/absence";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import { cn } from "@/lib/utils";
@@ -48,14 +49,11 @@ export function IssuesPage({
   processes,
   sources = [],
   mode,
-  firstPrinciples,
   base,
   liveRevisions,
   solutions,
 }: {
   bundle: ProcessBundle;
-  /** The live version's first principles, whose success measures rule 11 (goals met) rates. */
-  firstPrinciples?: FirstPrinciples | null;
   issues: IssueRow[];
   scenarios: ScenarioRow[];
   processes: Named[];
@@ -74,14 +72,30 @@ export function IssuesPage({
   // The filters are the URL's: Back and Forward change them, and so does a link.
   const params = useSearchParams();
   const filters = useMemo<ListState>(() => parseListState(Object.fromEntries(params.entries())), [params]);
-  const [newOpen, setNewOpen] = useState(false);
+  // "Log a new issue" on the Solutions list opens the Issues list with the New issue dialog already open (`?new=1`), and `then=solution`
+  // takes the person on to the Editor for the issue once it is saved (Q12: every solution starts from an issue).
+  const [newOpen, setNewOpen] = useState(!isReadOnly(mode) && params.get("new") === "1");
+  const thenSolution = params.get("then") === "solution";
 
   const setFilter = (next: ListState) => {
     // The filters are in the URL, so a link or a reload shows the same list.
     router.push(`${pathname}${listQuery(next)}`, { scroll: false });
   };
+  // The search box is typed into at once; the URL follows (replacing, so each keystroke is not a history step).
+  const [search, setSearch] = useState(filters.q);
+  const [seen, setSeen] = useState(filters.q);
+  if (seen !== filters.q) {
+    // Back, Forward or Clear filters changed the URL's search.
+    setSeen(filters.q);
+    setSearch(filters.q);
+  }
+  const onSearch = (v: string) => {
+    setSearch(v);
+    setSeen(v.trim());
+    router.replace(`${pathname}${listQuery({ ...filters, q: v.trim() })}`, { scroll: false });
+  };
 
-  const costs = useIssueCosts(bundle, scenarios, mode, firstPrinciples);
+  const costs = useIssueCosts(bundle, scenarios);
   const costOf = (i: IssueRow): IssueCost | null => (i.detected_key ? (costs?.get(i.detected_key) ?? null) : null);
 
   const options = useMemo(
@@ -101,63 +115,44 @@ export function IssuesPage({
   const solutionData = mode === "demo" ? inTab : (solutions ?? NO_SOLUTIONS_DATA);
   const summaries = useMemo(() => solutionSummaries(solutionData), [solutionData]);
 
-  const counts = showCounts(state.issues);
-  const ratings = ratingCounts(state.issues, filters.show);
+  const facets = {
+    status: facetCounts(state.issues, filters, "status"),
+    ratings: facetCounts(state.issues, filters, "ratings"),
+    owners: facetCounts(state.issues, filters, "owners"),
+    processes: facetCounts(state.issues, filters, "processes"),
+  };
   const list = listIssues(state.issues, filters, costOf);
   const canEdit = !isReadOnly(mode);
-  // The CSV is the list as drawn: the same filters, order and costs.
-  const exportCsv = () => {
-    const names = { processes: processNames, steps: stepNames, people: peopleNames };
-    const csv = issuesCsv(list, names, costOf, bundle.workspace.settings.currency);
-    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), exportFileName(`${bundle.workspace.name} issues ${filters.show}${filters.rating ? ` ${filters.rating}` : ""}`, "csv", new Date().toISOString().slice(0, 10)));
-  };
+  const statusOptions: FilterOption[] = LISTED_STATUSES.map((s) => ({ value: s, label: STATUS_LABELS[s], count: facets.status.get(s) ?? 0, dot: `var(--${STATUS_TONE[s]})` }));
+  const ratingOptions: FilterOption[] = RATINGS_WORST_FIRST.map((r) => ({ value: r, label: RATING_LABELS[r], count: facets.ratings.get(r) ?? 0, dot: `var(--rate-${r})` }));
+  const ownerIds = [...new Set(visibleIssues(state.issues).flatMap(ownersOf))];
+  const ownerOptions: FilterOption[] = [
+    ...ownerIds.map((id) => ({ value: id, label: peopleNames.get(id) ?? "Someone", count: facets.owners.get(id) ?? 0 })).sort((a, b) => a.label.localeCompare(b.label)),
+    { value: UNASSIGNED, label: "Unassigned", count: facets.owners.get(UNASSIGNED) ?? 0 },
+  ];
+  const processIds = [...new Set(visibleIssues(state.issues).flatMap(processesOf))].filter((id) => processNames.has(id));
+  const processOptions: FilterOption[] = processIds
+    .map((id) => ({ value: id, label: processNames.get(id) ?? "A process", count: facets.processes.get(id) ?? 0 }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <div role="group" aria-label="Show" className="inline-flex rounded-lg border border-border bg-panel p-0.5">
-            {SHOW_FILTERS.map((k) => (
-              <button
-                key={k}
-                type="button"
-                data-show={k}
-                data-allow-on-phone /* a filter (Resolved), not an edit */
-                aria-pressed={filters.show === k}
-                onClick={() => setFilter({ ...filters, show: k })}
-                className={cn("rounded-md px-3 py-1 text-sm", filters.show === k ? "bg-accent font-medium text-accent-fg" : "text-fg-2 hover:bg-muted")}
-              >
-                {SHOW_LABELS[k]} <span className="tabular-nums">{counts[k]}</span>
-              </button>
-            ))}
-          </div>
-          <span className="contents" data-allow-on-phone>
-            <Help {...LIST_HELP.show} className="ml-0" />
+      <Toolbar>
+        <ToolbarSearch value={search} onChange={onSearch} label="Search issues" placeholder="Search issues" />
+        <FilterMenu name="Status" options={statusOptions} selected={filters.status} onChange={(status) => setFilter({ ...filters, status: LISTED_STATUSES.filter((s) => status.includes(s)) })} help={<Help {...LIST_HELP.show} />} />
+        <FilterMenu name="Owner" options={ownerOptions} selected={filters.owners} onChange={(owners) => setFilter({ ...filters, owners })} help={<Help {...LIST_HELP.owner} />} />
+        <FilterMenu name="Rating" options={ratingOptions} selected={filters.ratings} onChange={(ratings) => setFilter({ ...filters, ratings: RATINGS_WORST_FIRST.filter((r) => ratings.includes(r)) })} help={<Help {...LIST_HELP.rating} />} />
+        {processOptions.length > 1 && <FilterMenu name="Process" options={processOptions} selected={filters.processes} onChange={(processes) => setFilter({ ...filters, processes })} help={<Help {...LIST_HELP.process} />} />}
+        {filtersOn(filters) && <ClearFilters onClick={() => setFilter(DEFAULT_LIST_STATE)} />}
+        {canEdit && (
+          <span className={`ml-auto flex items-center ${EDIT_ONLY}`} data-edit-entry>
+            <Button type="button" onClick={() => setNewOpen(true)}>
+              + New issue
+            </Button>
+            <Help {...LIST_HELP.newIssue} />
           </span>
-          <RatingChips ratings={ratings} value={filters.rating} onChange={(rating) => setFilter({ ...filters, rating })} />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            data-export-csv
-            disabled={list.length === 0 || costs === null}
-            title={costs === null ? "Waiting for the costs from the latest run." : "Download the issues listed here as a CSV file. It follows the filters above."}
-            onClick={exportCsv}
-          >
-            <Download aria-hidden />
-            Export CSV
-          </Button>
-          {canEdit && (
-            <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
-              <Button type="button" onClick={() => setNewOpen(true)}>
-                + New issue
-              </Button>
-              <Help {...LIST_HELP.newIssue} />
-            </span>
-          )}
-        </div>
-      </div>
+        )}
+      </Toolbar>
 
       {state.error && (
         <p role="alert" className="text-sm text-destructive">
@@ -181,7 +176,7 @@ export function IssuesPage({
                   </span>
                 </th>
                 <th className="px-3 py-2.5">Rating</th>
-                <th className="px-3 py-2.5">Touches</th>
+                <th className="px-3 py-2.5">Step</th>
                 <th className="px-3 py-2.5">Owners</th>
                 <th className="px-3 py-2.5">Status</th>
                 <th className="px-3 py-2.5">
@@ -219,7 +214,7 @@ export function IssuesPage({
                     <td className="max-w-56 px-3 py-2.5 text-xs text-fg-2">{touched.join(", ") || "—"}</td>
                     <td className="px-3 py-2.5 text-xs">{owners.join(", ") || <span className="text-muted-foreground">No owner</span>}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
-                      <StatusChip issue={i} />
+                      <IssueStatusPill status={i.status} />
                       {i.resolved_at && !isOpenIssue(i) && <div className="text-xs text-muted-foreground">{shortDate(i.resolved_at)}</div>}
                     </td>
                     <td className="px-3 py-2.5 text-xs whitespace-nowrap" data-solutions>
@@ -228,9 +223,8 @@ export function IssuesPage({
                           {sol.tested} tested{sol.passed ? <span className="ml-1 text-good">✓ passed</span> : null}
                         </span>
                       ) : (
-                        <span className="text-muted-foreground">{sol.ideas ? "" : "—"}</span>
+                        <span className="text-muted-foreground">—</span>
                       )}
-                      {sol.ideas ? <div className="text-muted-foreground">{sol.ideas} AI idea{sol.ideas === 1 ? "" : "s"}</div> : null}
                     </td>
                   </tr>
                 );
@@ -248,7 +242,13 @@ export function IssuesPage({
         busy={state.busy}
         error={state.error}
         onClose={() => setNewOpen(false)}
-        onSubmit={(draft) => state.save(toSaveInput(draft, options))}
+        onSubmit={async (draft) => {
+          const saved = await state.save(toSaveInput(draft, options));
+          if (saved && thenSolution) {
+            router.push(startSolutionHref(base, saved, solutionsListHref(base)) ?? solutionEditorHref(base, bundle.process.id, { issueId: saved.id, from: solutionsListHref(base) }));
+          }
+          return saved;
+        }}
       />
     </div>
   );
@@ -260,47 +260,6 @@ export function RatingPillOf({ issue }: { issue: Pick<IssueRow, "severity"> }) {
 
 const ratingOf = (i: Pick<IssueRow, "severity">): Rating => ratingOfStored(i.severity);
 
-/** The status as a small chip: open ones in the accent, closed ones quiet. */
-export function StatusChip({ issue }: { issue: Pick<IssueRow, "status"> }) {
-  return (
-    <span
-      data-status={issue.status}
-      className={cn(
-        "inline-flex h-5 items-center rounded-full border px-2 text-xs font-medium whitespace-nowrap",
-        isOpenIssue(issue) ? "border-accent/40 bg-accent/10 text-fg" : "border-border bg-muted text-fg-2",
-      )}
-    >
-      {statusLabel(issue.status)}
-    </span>
-  );
-}
-
-function RatingChips({ ratings, value, onChange }: { ratings: ReturnType<typeof ratingCounts>; value: Rating | ""; onChange: (r: Rating | "") => void }) {
-  const chip = "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs disabled:opacity-40";
-  return (
-    <div role="group" aria-label="Filter by rating" className="flex flex-wrap items-center gap-1.5">
-      <button type="button" data-rating="" aria-pressed={!value} onClick={() => onChange("")} className={cn(chip, !value ? "border-accent bg-accent/10 font-medium" : "border-border")}>
-        All <b className="tabular-nums">{ratings.all}</b>
-      </button>
-      {RATINGS_WORST_FIRST.map((r) => (
-        <button
-          key={r}
-          type="button"
-          data-rating={r}
-          aria-pressed={value === r}
-          disabled={!ratings.byRating[r] && value !== r}
-          onClick={() => onChange(value === r ? "" : r)}
-          className={cn(chip, value === r ? "border-accent bg-accent/10 font-medium" : "border-border")}
-        >
-          <i aria-hidden className="size-2 rounded-full" style={{ background: `var(--rate-${r})` }} />
-          {RATING_LABELS[r]} <b className="tabular-nums">{ratings.byRating[r]}</b>
-        </button>
-      ))}
-      <Help {...LIST_HELP.rating} />
-    </div>
-  );
-}
-
 /**
  * What the latest run of the live process says each issue costs a month, by detection key: the list sorts by rating and
  * then by this. The run is simulated in a worker. Null until every cost is in (the "too busy" ones need an extra run),
@@ -309,8 +268,6 @@ function RatingChips({ ratings, value, onChange }: { ratings: ReturnType<typeof 
 function useIssueCosts(
   bundle: ProcessBundle,
   scenarios: ScenarioRow[],
-  mode: ScreenMode,
-  firstPrinciples: FirstPrinciples | null | undefined,
 ): Map<string, IssueCost> | null {
   const model = useMemo(() => {
     try {
@@ -326,8 +283,7 @@ function useIssueCosts(
   const gaps = useMemo(() => perceptionGapDetections(bundle.steps), [bundle.steps]);
   const rules = ANALYSIS_DEFAULTS;
   const absence = useAbsenceTest(model && result && sim.status === "done" ? model : null, result?.seed ?? 1, resolveMoney(rules).absenceWeeks);
-  const successMeasures = useSuccessMeasures(bundle.process.id, mode === "demo", firstPrinciples);
-  const found = useDetectedIssues(model, result, rules, bundle.process.id, bundle.workspace.settings.currency, absence, successMeasures);
+  const found = useDetectedIssues(model, result, rules, bundle.process.id, bundle.workspace.settings.currency, absence);
   return useMemo(() => {
     // A model that can't be simulated has no costs to wait for.
     if (model && !found) return null;

@@ -25,6 +25,14 @@ describe("parseServiceField", () => {
     expect(parseServiceField(seo, "active", true, false)?.value).toBe(false);
   });
 
+  it("accepts a fee range (a low and a high, or none) and refuses a negative or absurd one", () => {
+    expect(parseServiceField(seo, "price_low", null, 3000)?.value).toBe(3000);
+    expect(parseServiceField(seo, "price_high", 6000, null)?.value).toBeNull();
+    expect(parseServiceField(seo, "price_high", null, "6000")).toBeNull();
+    expect(parseServiceField(seo, "price_low", null, -1)).toBeNull();
+    expect(parseServiceField(seo, "price_high", null, 1e9)).toBeNull();
+  });
+
   it.each([
     ["name", ""],
     ["name", "   "],

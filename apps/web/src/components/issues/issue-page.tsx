@@ -1,37 +1,45 @@
 "use client";
 
-// The Issue page (issue #113, A48; prototype: "Issue"): where the issue sits on the map, what is wrong, the solutions
-// tested, AI ideas and the history on the left; its target, owners, links and sources on the right. Edit reuses the
-// Acknowledge dialog, Mark resolved opens the Resolve dialog, and a resolved issue offers Reopen and shows a
-// "Resolved <date> · by …" bar. The history is kept after resolving.
+// The Issue page (issue #113, A48; redesigned on the page kit in Q10): a header card (the title, pills for the rating, status and where
+// it sits, owners and dates, Edit and Resolve or Reopen), then where the issue sits on the map, what is wrong (edited where it stands),
+// the solutions tried, and the history as a timeline; its target, links and sources sit beside. The status is a pill dropdown that saves
+// at once; choosing Resolved opens the Resolve dialog, to pick the solution that fixed it.
 
 import { isReadOnly, type ScreenMode } from "@/lib/mode";
+import { CircleCheck, CirclePlus, FlaskConical, Link2, Pencil, RotateCcw, ArrowRightLeft, type LucideIcon } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { IssueEventRow, IssueRow, ProcessBundle, SourceRow } from "@transpera-flow/db";
+import type { IssueEventRow, IssueRow, IssueStatus, ProcessBundle, SolutionIssueRow, SolutionRow, SourceRow } from "@transpera-flow/db";
 import type { StepBadge } from "@/lib/issues/register";
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help, HelpLabel } from "@/components/help";
 import { ISSUE_PAGE_HELP } from "@/lib/issues/help";
+import { IssueStatusMenu } from "@/components/issues/status-pill";
 import { ResolveDialog } from "@/components/issues/resolve-dialog";
-import { StatusChip } from "@/components/issues-page";
+import { EditableText, EmptyState, HEADER_PILL, MetaLine, PageHeader, SectionCard, Timeline, type TimelineEntry } from "@/components/page-kit";
 import { RatingPill } from "@/components/overview/rating-pill";
+import { VerdictWord } from "@/components/solutions/solution-cards";
+import { SolutionStatusMenu } from "@/components/solutions/status-menu";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { StepIssueBadges } from "@/components/step-issue-badges";
+import { TagPill } from "@/components/tag-pill";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/ui/native-select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { MapSkeleton } from "@/components/map/map-placeholder";
 import { draftFromIssue, issueFormOptions, toSaveInput } from "@/lib/issues/draft";
-import { historyLines, isOpenIssue, issueHref, loggedLine, resolvedBar, type HistoryNames, type SolutionTest } from "@/lib/issues/pages";
+import { HISTORY_FOLD, isOpenIssue, issueHref, resolvedBar, shortDate, timelineLines, type HistoryNames, type TimelineKind } from "@/lib/issues/pages";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { useIssues } from "@/lib/issues/use-issues";
 import { editSourceIds } from "@/lib/sources/links";
-import { NO_SOLUTIONS_DATA, effectiveVerdict, solutionHref, solutionTests, solutionsForIssue, type SolutionsData } from "@/lib/solutions/cards";
-import { useDemoSolutions } from "@/lib/solutions/demo";
+import { NO_SOLUTIONS_DATA, autoWord, changesLine, effectiveVerdict, solutionHref, solutionsForIssue, type SolutionsData } from "@/lib/solutions/cards";
+import { addDemoLink, setDemoNotes, useDemoSolutions } from "@/lib/solutions/demo";
+import { demoLinkVerdict } from "@/lib/solutions/demo-link";
+import { linkSolutionToIssue } from "@/app/w/[slug]/solution-actions";
+import { saveSolutionNotes } from "@/app/w/[slug]/solution-page-actions";
 import { ratingOfStored } from "@transpera-flow/engine";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
 import { EDIT_ONLY } from "@/lib/phone";
@@ -43,8 +51,15 @@ const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((
 });
 
 
-const CARD_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
-const EYEBROW = "flex items-center text-2xs font-semibold tracking-wider text-muted-foreground uppercase";
+const KIND_ICON: Record<TimelineKind, LucideIcon> = {
+  created: CirclePlus,
+  edited: Pencil,
+  status: ArrowRightLeft,
+  linked: Link2,
+  solution: FlaskConical,
+  resolved: CircleCheck,
+  reopened: RotateCcw,
+};
 
 export interface IssuePageProps {
   issue: IssueRow;
@@ -59,19 +74,15 @@ export interface IssuePageProps {
   mode: ScreenMode;
   /** Where the workspace's pages live: `/w/<slug>` or `/demo`. */
   base: string;
-  /** The Editor in solution mode for this issue (A49). Until A49 builds it the Editor says "Coming soon". */
+  /** The Editor in solution mode for this issue: "+ Try a new solution" opens it. */
   buildHref: string;
   /** The signed-in person's id, so their entries in the history say "You". */
   viewerId?: string | null;
   liveRevisions?: Record<string, string>;
-  /** The "AI ideas" section's content (A52): the ideas waiting for this issue, each with Build it and Dismiss. Without it the section says there are none. */
-  ideas?: ReactNode;
   /** The workspace's solutions and which issues they solve (the demo keeps its own in this tab). */
   solutions?: SolutionsData;
   /** Member names by user id (the person linked to each membership), so the history says who by name. */
   memberNames?: Readonly<Record<string, string>>;
-  /** The Share button (owners and editors, B3), made by the page that knows what is shared. */
-  share?: ReactNode;
 }
 
 export function IssuePage(props: IssuePageProps) {
@@ -99,6 +110,8 @@ export function IssuePage(props: IssuePageProps) {
   const [edit, setEdit] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [linking, setLinking] = useState(false);
+  const [linkingSolution, setLinkingSolution] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
   // Where the page loads source links, Sources are the links (the Add / Link source dialog); otherwise the issue's own list and its small dialog.
   const sourceLinking = useSourceLinking();
 
@@ -125,11 +138,18 @@ export function IssuePage(props: IssuePageProps) {
     if (target && target.id !== issue.id) router.push(issueHref(base, target));
   };
 
+  // The workspace's solutions as loaded, kept up to date as they change here; the demo reads what this tab has saved.
   const inTab = useDemoSolutions();
-  const solutionData = mode === "demo" ? inTab : (props.solutions ?? NO_SOLUTIONS_DATA);
-  const solutions: SolutionTest[] = solutionTests(issue.id, solutionData, base);
+  const [local, setLocal] = useState<SolutionsData>(props.solutions ?? NO_SOLUTIONS_DATA);
+  const [seen, setSeen] = useState(props.solutions);
+  if (seen !== props.solutions) {
+    setSeen(props.solutions);
+    setLocal(props.solutions ?? NO_SOLUTIONS_DATA);
+  }
+  const solutionData = mode === "demo" ? inTab : local;
+  const tried = solutionsForIssue(solutionData, issue.id);
   // What the Resolve dialog can pick, and the one that fixed a resolved issue.
-  const linked = solutionsForIssue(solutionData, issue.id).map(({ solution, link }) => ({ id: solution.id, name: solution.name, verdict: effectiveVerdict(link) }));
+  const linked = tried.map(({ solution, link }) => ({ id: solution.id, name: solution.name, verdict: effectiveVerdict(link) }));
   const fixedBy = issue.resolved_solution_id ? (solutionData.solutions.find((s) => s.id === issue.resolved_solution_id) ?? null) : null;
   const names: HistoryNames = {
     step: (id) => stepName.get(id),
@@ -137,15 +157,70 @@ export function IssuePage(props: IssuePageProps) {
     source: (id) => sourceTitle.get(id),
     who: (actor) => (actor && actor === viewerId ? "You" : mode === "demo" ? "You" : actor ? (props.memberNames?.[actor] ?? "A team member") : "System"),
   };
-  const lines = historyLines(events, names);
+  const lines = timelineLines(events, names);
+  const entries: TimelineEntry[] = lines.map((l) => ({ id: l.id, kind: l.kind, icon: KIND_ICON[l.kind], who: l.who, when: l.when, text: l.text }));
   const bar = resolvedBar(issue, undefined, fixedBy?.name);
   const owners = issue.owner_ids.length ? issue.owner_ids : issue.owner_person_id ? [issue.owner_person_id] : [];
   const processIdOf = issue.links.find((l) => l.process_id)?.process_id ?? issue.process_id ?? bundle.process.id;
+  const lastChange = events.length ? events.reduce((a, e) => (e.at > a ? e.at : a), events[0]!.at) : issue.updated_at;
+
+  // The draft the dialogs start from. Where source links are loaded, the sources it shows are the links (they change under "+ Link" and the x,
+  // which this issue's copy from the page load doesn't see): it starts from those, or saving would put back what was just removed.
+  const currentDraft = () => ({
+    ...draftFromIssue(issue),
+    sourceIds: editSourceIds(issue.source_ids, sourceLinking ? sourceLinking.linkedTo({ kind: "issue", issueId: issue.id }).map((x) => x.source.id) : null),
+  });
+  const saveDraft = (draft: ReturnType<typeof currentDraft>) =>
+    state.save(toSaveInput(draft, options)).then((r) => r && (void sourceLinking?.syncIssue(issue.id, draft.sourceIds), refresh(), r));
+
+  // The status pill: saves at once through the per-field status save; Resolved asks which solution fixed it first.
+  const changeStatus = async (next: IssueStatus) => {
+    if (next === issue.status) return;
+    if (next === "resolved") return setResolving(true);
+    setPageError(null);
+    let from = issue.status;
+    if (!open && (next === "open" || next === "testing")) {
+      const reopened = await state.reopen(issue.id);
+      if (!reopened) return;
+      from = reopened.status;
+      if (next === "open") return refresh();
+    }
+    const out = await state.saver(issue.id, "status")(from, next);
+    if (out.status === "saved") return refresh();
+    setPageError(out.status === "conflict" ? "Someone else changed the status first. Reload to see theirs." : out.status === "error" ? out.message : "You don't have permission to change issues here.");
+  };
+
+  const saveEvidence = async (next: string) => {
+    const out = await state.saver(issue.id, "evidence")(issue.evidence ?? null, next || null);
+    if (out.status === "saved") {
+      refresh();
+      return null;
+    }
+    return out.status === "conflict" ? "Someone else changed this first. Reload to see theirs." : out.status === "error" ? out.message : "You don't have permission to change issues here.";
+  };
+
+  const saveNotes = async (solution: SolutionRow, notes: string) => {
+    if (mode === "demo") {
+      setDemoNotes(solution.id, notes);
+      return null;
+    }
+    const r = await saveSolutionNotes(bundle.workspace.id, solution.id, notes);
+    if (r.status === "error") return r.message;
+    setLocal((d) => ({ ...d, solutions: d.solutions.map((s): SolutionRow => (s.id === solution.id ? { ...s, notes: r.notes } : s)) }));
+    return null;
+  };
+
+  const putLink = (link: SolutionIssueRow) => setLocal((d) => ({ ...d, links: d.links.some((l) => l.solution_id === link.solution_id && l.issue_id === link.issue_id) ? d.links : [...d.links, link] }));
+  const linkable = solutionData.solutions.filter((s) => s.process_id === processIdOf && !tried.some((t) => t.solution.id === s.id));
+
+  const stepPill = stepIds.length ? `${stepName.get(stepIds[0]!) ?? "A step"}${stepIds.length > 1 ? ` +${stepIds.length - 1} more` : ""}` : null;
 
   return (
     <div className="flex flex-col gap-5" data-issue-page={issue.number ?? issue.id}>
-      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-        <div className="flex min-w-0 max-w-prose flex-col gap-1.5">
+      <PageHeader
+        label="Issue"
+        testId="issue-header"
+        eyebrow={
           <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Link href={`${base}/issues`} className="hover:underline">
               Issues
@@ -153,52 +228,69 @@ export function IssuePage(props: IssuePageProps) {
             <span aria-hidden>/</span>
             <span>{issue.number ? `#${issue.number}` : "Issue"}</span>
           </nav>
-          <h1 className="font-heading text-2xl leading-tight font-semibold tracking-tight">{issue.title}</h1>
-          <div className="flex flex-wrap items-center gap-2">
+        }
+        title={
+          <>
+            {issue.number != null && <span className="font-mono font-normal text-fg-3">#{issue.number}</span>}
+            {issue.number != null && " "}
+            {issue.title}
+          </>
+        }
+        pills={
+          <>
             <RatingPill rating={ratingOfStored(issue.severity)} />
-            <StatusChip issue={issue} />
-            <span className="text-sm text-muted-foreground">{loggedLine(issue)}</span>
-          </div>
-        </div>
-        {canEdit && (
-          <div className={`flex flex-wrap items-center gap-2 ${EDIT_ONLY}`} data-edit-entry>
-            {props.share}
-            <span className="flex items-center">
-              <Button type="button" variant="outline" onClick={() => setEdit(true)}>
-                Edit
-              </Button>
-              <Help {...ISSUE_PAGE_HELP.edit} />
-            </span>
-            {open ? (
-              <>
+            <IssueStatusMenu status={issue.status} onChange={(s) => void changeStatus(s)} disabled={!canEdit || state.busy} />
+            <TagPill tag={processName.get(processIdOf) ?? bundle.process.name} className={HEADER_PILL} />
+            {stepPill && <TagPill tag={stepPill} className={HEADER_PILL} />}
+          </>
+        }
+        meta={
+          <MetaLine>
+            <OwnersEditor
+              ownerIds={owners}
+              people={options.people}
+              names={personName}
+              canEdit={canEdit}
+              busy={state.busy}
+              onChange={(ownerIds) => void saveDraft({ ...currentDraft(), ownerIds })}
+            />
+            <span>Created {shortDate(issue.created_at)}</span>
+            <span>Last change {shortDate(lastChange)}</span>
+          </MetaLine>
+        }
+        actionsLabel="Issue actions"
+        actions={
+          canEdit ? (
+            <span className={`flex flex-wrap items-center gap-2 ${EDIT_ONLY}`} data-edit-entry>
+              <span className="flex items-center">
+                <Button type="button" variant="outline" onClick={() => setEdit(true)}>
+                  Edit
+                </Button>
+                <Help {...ISSUE_PAGE_HELP.edit} />
+              </span>
+              {open ? (
                 <span className="flex items-center">
                   <Button type="button" variant="outline" onClick={() => setResolving(true)}>
-                    Mark resolved
+                    Resolve
                   </Button>
                   <Help {...ISSUE_PAGE_HELP.resolve} />
                 </span>
+              ) : (
                 <span className="flex items-center">
-                  <Button asChild className="bg-edit text-edit-fg hover:bg-edit/90">
-                    <Link href={buildHref}>✎ Build solution</Link>
+                  <Button type="button" variant="outline" disabled={state.busy} onClick={() => void state.reopen(issue.id).then((r) => r && refresh())}>
+                    Reopen
                   </Button>
-                  <Help {...ISSUE_PAGE_HELP.build} />
+                  <Help {...ISSUE_PAGE_HELP.reopen} />
                 </span>
-              </>
-            ) : (
-              <span className="flex items-center">
-                <Button type="button" variant="outline" disabled={state.busy} onClick={() => void state.reopen(issue.id).then((r) => r && refresh())}>
-                  Reopen
-                </Button>
-                <Help {...ISSUE_PAGE_HELP.reopen} />
-              </span>
-            )}
-          </div>
-        )}
-      </header>
+              )}
+            </span>
+          ) : undefined
+        }
+      />
 
-      {state.error && (
+      {(state.error || pageError) && (
         <p role="alert" className="text-sm text-destructive">
-          {state.error}
+          {pageError ?? state.error}
         </p>
       )}
 
@@ -220,12 +312,17 @@ export function IssuePage(props: IssuePageProps) {
 
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex min-w-0 flex-col gap-5">
-          <section className="flex min-w-0 flex-col gap-2" data-section="where">
-            <h2 className={`${CARD_TITLE} flex items-center`}>
-              Where this issue sits
-              <Help {...ISSUE_PAGE_HELP.where} />
-            </h2>
-            {/* A plain block, not a Card: the map sizes itself to the width it is given. */}
+          <SectionCard
+            id="where"
+            section="where"
+            title={
+              <span className="flex items-center">
+                Where this issue sits
+                <Help {...ISSUE_PAGE_HELP.where} />
+              </span>
+            }
+          >
+            {/* A plain block: the map sizes itself to the width it is given. */}
             <MapWithBadges badges={feed.badges} onOpen={openBadge}>
               <ProcessCanvas
                 // The highlight is opened into the map once, at the start.
@@ -240,177 +337,213 @@ export function IssuePage(props: IssuePageProps) {
                 legend={false}
               />
             </MapWithBadges>
-          </section>
+          </SectionCard>
 
-          <Card className="gap-2 px-4 py-3" data-section="wrong">
-            <h2 className={`${CARD_TITLE} flex items-center`}>
-              What&apos;s wrong
-              <Help {...ISSUE_PAGE_HELP.wrong} />
-            </h2>
-            <p className="text-sm whitespace-pre-line">{issue.evidence?.trim() || "Nothing written yet. Edit the issue to say what you saw."}</p>
-          </Card>
+          <SectionCard
+            id="wrong"
+            section="wrong"
+            title={
+              <span className="flex items-center">
+                What&apos;s wrong
+                <Help {...ISSUE_PAGE_HELP.wrong} />
+              </span>
+            }
+          >
+            <EditableText
+              value={issue.evidence}
+              canEdit={canEdit}
+              label="What's wrong"
+              onSave={saveEvidence}
+              emptyMessage="Say what you saw: what goes wrong, how often, and what it costs."
+              emptyReader="Nothing written yet."
+              data-evidence=""
+            />
+          </SectionCard>
 
-          <section className="flex flex-col gap-2" data-section="solutions">
-            <div>
-              <h2 className={`${CARD_TITLE} flex items-center`}>
-                Solutions tested
+          <SectionCard
+            id="solutions"
+            section="solutions"
+            title={
+              <span className="flex items-center">
+                Solutions tried
                 <Help {...ISSUE_PAGE_HELP.solutions} />
-              </h2>
-              <p className="text-sm text-muted-foreground">Each solution lives on its own. Here is how each one did against this issue&apos;s target.</p>
-            </div>
-            {solutions.length ? <SolutionsTable solutions={solutions} /> : (
-              <Card className="px-4 py-6 text-sm text-muted-foreground" data-empty="solutions">
-                Nothing tested yet. Build solution opens the Editor with this issue&apos;s steps outlined.
-              </Card>
+              </span>
+            }
+            description="Each solution lives on its own. Here is how each one is getting on against this issue."
+            actionIsEdit
+            actionClassName={EDIT_ONLY}
+            action={
+              canEdit && open ? (
+                <span className="flex flex-wrap items-center gap-2">
+                  <Button type="button" size="sm" variant="outline" onClick={() => setLinkingSolution(true)} data-link-solution>
+                    Link an existing solution
+                  </Button>
+                  <Button asChild size="sm" className="bg-edit text-edit-fg hover:bg-edit/90">
+                    <Link href={buildHref} data-try-solution>
+                      + Try a new solution
+                    </Link>
+                  </Button>
+                  <Help {...ISSUE_PAGE_HELP.build} />
+                </span>
+              ) : undefined
+            }
+          >
+            {tried.length ? (
+              <ul className="flex flex-col gap-2" aria-label="Solutions tried" data-solutions-tried>
+                {tried.map(({ solution, link }) => (
+                  <TriedRow
+                    key={solution.id}
+                    solution={solution}
+                    link={link}
+                    base={base}
+                    mode={mode}
+                    canEdit={canEdit}
+                    onStatus={(status) => setLocal((d) => ({ ...d, solutions: d.solutions.map((s): SolutionRow => (s.id === solution.id ? { ...s, status } : s)) }))}
+                    onError={setPageError}
+                    onNotes={(notes) => saveNotes(solution, notes)}
+                    onLogged={refresh}
+                  />
+                ))}
+              </ul>
+            ) : (
+              <EmptyState icon={FlaskConical} data-empty="solutions">
+                No solutions tried yet. Copy the map, change it, and compare it with today.
+              </EmptyState>
             )}
-          </section>
+          </SectionCard>
 
-          <section className="flex flex-col gap-2" data-section="ideas">
-            <div>
-              <h2 className={`${CARD_TITLE} flex items-center`}>
-                AI ideas
-                <Help {...ISSUE_PAGE_HELP.ideas} />
-              </h2>
-              <p className="text-sm text-muted-foreground">Proposed by AI, not built or simulated yet.</p>
-            </div>
-            {props.ideas ?? (
-              <Card className="px-4 py-6 text-sm text-muted-foreground" data-empty="ideas">
-                No AI ideas for this issue yet.
-              </Card>
-            )}
-          </section>
-
-          <section className="flex flex-col gap-2" data-section="history">
-            <div>
-              <h2 className={`${CARD_TITLE} flex items-center`}>
+          <SectionCard
+            id="history"
+            section="history"
+            title={
+              <span className="flex items-center">
                 History
                 <Help {...ISSUE_PAGE_HELP.history} />
-              </h2>
-              <p className="text-sm text-muted-foreground">Everything that happened to this issue, oldest first. Kept after it&apos;s resolved.</p>
-            </div>
-            <ol className="flex flex-col gap-1.5 border-l border-border pl-4" data-history>
-              {lines.length ? (
-                lines.map((l) => (
-                  <li key={l.id} className="flex flex-wrap gap-x-3 text-sm" data-history-line>
-                    <span className="w-14 shrink-0 text-muted-foreground tabular-nums">{l.when}</span>
-                    <span className="shrink-0 font-medium">{l.who}</span>
-                    <span className="min-w-0">{l.text}</span>
-                  </li>
-                ))
-              ) : (
-                <li className="text-sm text-muted-foreground">No history yet.</li>
-              )}
-            </ol>
-          </section>
+              </span>
+            }
+            description="Everything that happened to this issue, newest first. Kept after it's resolved."
+          >
+            <Timeline entries={entries} empty="No history yet." data-history="" />
+            <details className="text-xs text-fg-2">
+              <summary className="w-fit cursor-pointer hover:underline">Where does this come from?</summary>
+              <p className="mt-1.5 max-w-prose">{HISTORY_FOLD}</p>
+            </details>
+          </SectionCard>
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-4">
-          <Card className="gap-2 px-4 py-3" data-section="target">
-            <span className={EYEBROW}>
-              Target
-              <Help {...ISSUE_PAGE_HELP.target} />
-            </span>
+        <aside className="flex min-w-0 flex-col gap-5">
+          <SectionCard
+            id="target"
+            section="target"
+            title={
+              <span className="flex items-center">
+                Target
+                <Help {...ISSUE_PAGE_HELP.target} />
+              </span>
+            }
+            contentClassName="gap-2"
+          >
             {issue.target_measure || issue.target_now || issue.target_goal ? (
               <>
                 <b>{issue.target_measure || "Not named yet"}</b>
                 <dl className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-                  <dt className="text-xs text-muted-foreground">Now</dt>
+                  <dt className="text-xs text-fg-2">Now</dt>
                   <dd className="font-mono">{issue.target_now || "—"}</dd>
-                  <dt className="text-xs text-muted-foreground">Goal</dt>
+                  <dt className="text-xs text-fg-2">Goal</dt>
                   <dd className="font-mono">{issue.target_goal || "—"}</dd>
                 </dl>
-                <span className="text-xs text-muted-foreground">Solutions get an automatic pass or fail against this. You make the final call.</span>
+                <span className="text-xs text-fg-2">Solutions get an automatic pass or fail against this. You make the final call.</span>
               </>
             ) : (
-              <span className="text-sm text-muted-foreground">No target yet. Edit the issue to add one.</span>
+              <span className="text-sm text-fg-2">No target yet. Edit the issue to add one.</span>
             )}
-          </Card>
+          </SectionCard>
 
-          <Card className="gap-2 px-4 py-3" data-section="owners">
-            <span className={EYEBROW}>
-              Owners
-              <Help {...ISSUE_PAGE_HELP.owners} />
-            </span>
-            {owners.length ? (
-              <div className="flex flex-wrap gap-1.5">
-                {owners.map((id) => (
-                  <span key={id} className="inline-flex h-6 items-center gap-1.5 rounded-full border border-border px-2 text-xs">
-                    <span aria-hidden className="grid size-4 place-items-center rounded-full bg-muted text-[9px] font-semibold">
-                      {initials(personName.get(id) ?? "?")}
-                    </span>
-                    {personName.get(id) ?? "Someone"}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <span className="text-sm text-muted-foreground">No owner yet.</span>
-            )}
-          </Card>
-
-          <Card className="gap-2 px-4 py-3" data-section="linked">
-            <span className={EYEBROW}>
-              Linked to
-              <Help {...ISSUE_PAGE_HELP.linked} />
-            </span>
+          <SectionCard
+            id="linked"
+            section="linked"
+            title={
+              <span className="flex items-center">
+                Linked to
+                <Help {...ISSUE_PAGE_HELP.linked} />
+              </span>
+            }
+          >
             <div className="flex flex-wrap gap-1.5">
               <Chip>Process: {processName.get(processIdOf) ?? bundle.process.name}</Chip>
               {stepIds.map((id) => (
                 <Chip key={id}>Step: {stepName.get(id) ?? "A step"}</Chip>
               ))}
             </div>
-          </Card>
+          </SectionCard>
 
-          <Card className="gap-2 px-4 py-3" data-section="sources">
-            {sourceLinking ? (
+          {sourceLinking ? (
+            <SectionCard
+              id="sources"
+              section="sources"
+              title={
+                <span className="flex items-center">
+                  Sources
+                  <Help {...ISSUE_PAGE_HELP.sources} />
+                </span>
+              }
+            >
               <LinkedSources
                 target={{ kind: "issue", issueId: issue.id }}
                 label={issue.number ? `Issue #${issue.number}` : `Issue: ${issue.title}`}
                 empty="None yet"
+                hideTitle
                 className="flex flex-col gap-2"
               />
-            ) : (
-              <>
-                <div className="flex items-center justify-between gap-2">
-                  <span className={EYEBROW}>
-                    Sources
-                    <Help {...ISSUE_PAGE_HELP.sources} />
+            </SectionCard>
+          ) : (
+            <SectionCard
+              id="sources"
+              section="sources"
+              title={
+                <span className="flex items-center">
+                  Sources
+                  <Help {...ISSUE_PAGE_HELP.sources} />
+                </span>
+              }
+              actionIsEdit
+              actionClassName={EDIT_ONLY}
+              action={
+                canEdit ? (
+                  <span className="flex items-center">
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setLinking(true)}>
+                      + Link
+                    </Button>
+                    <Help {...ISSUE_PAGE_HELP.link} />
                   </span>
-                  {canEdit && (
-                    <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
-                      <Button type="button" size="sm" variant="ghost" onClick={() => setLinking(true)}>
-                        + Link
-                      </Button>
-                      <Help {...ISSUE_PAGE_HELP.link} />
-                    </span>
-                  )}
-                </div>
-                {issue.source_ids.length ? (
-                  issue.source_ids.map((id) => (
-                    <div key={id} className="text-sm font-medium">
-                      {sourceTitle.get(id) ?? "A source"}
-                    </div>
-                  ))
-                ) : (
-                  <span className="text-sm text-muted-foreground">None yet</span>
-                )}
-              </>
-            )}
-          </Card>
+                ) : undefined
+              }
+              contentClassName="gap-2"
+            >
+              {issue.source_ids.length ? (
+                issue.source_ids.map((id) => (
+                  <div key={id} className="text-sm font-medium">
+                    {sourceTitle.get(id) ?? "A source"}
+                  </div>
+                ))
+              ) : (
+                <span className="text-sm text-fg-2">None yet</span>
+              )}
+            </SectionCard>
+          )}
         </aside>
       </div>
 
       <AcknowledgeDialog
         open={edit}
         mode="edit"
-        // Where the page loads source links, the sources it shows are the links (they change under "+ Link" and the x, which this
-        // issue's copy from the page load doesn't see): the dialog starts from those, or saving would put back what was just removed.
-        draft={{ ...draftFromIssue(issue), sourceIds: editSourceIds(issue.source_ids, sourceLinking ? sourceLinking.linkedTo({ kind: "issue", issueId: issue.id }).map((x) => x.source.id) : null) }}
+        draft={currentDraft()}
         issueNumber={issue.number}
         options={options}
         busy={state.busy}
         error={state.error}
         onClose={() => setEdit(false)}
-        onSubmit={(draft) => state.save(toSaveInput(draft, options)).then((r) => r && (void sourceLinking?.syncIssue(issue.id, draft.sourceIds), refresh(), r))}
+        onSubmit={saveDraft}
       />
       <ResolveDialog
         open={resolving}
@@ -430,7 +563,149 @@ export function IssuePage(props: IssuePageProps) {
         onClose={() => setLinking(false)}
         onSubmit={(sourceId) => state.save(toSaveInput({ ...draftFromIssue(issue), sourceIds: [...issue.source_ids, sourceId] }, options)).then((r) => r && (refresh(), r))}
       />
+      <LinkSolutionDialog
+        open={linkingSolution}
+        solutions={linkable}
+        onClose={() => setLinkingSolution(false)}
+        onLink={async (solutionId) => {
+          if (mode === "demo") {
+            const solution = solutionData.solutions.find((s) => s.id === solutionId);
+            if (!solution) return "That solution isn't there any more.";
+            addDemoLink(solution.id, issue.id, await demoLinkVerdict(solution, issue));
+            return null;
+          }
+          const r = await linkSolutionToIssue(bundle.workspace.id, solutionId, issue.id);
+          if (r.status === "error") return r.message;
+          putLink(r.link);
+          // The issue moved to Testing solutions: reload what the server knows.
+          router.refresh();
+          refresh();
+          return null;
+        }}
+      />
     </div>
+  );
+}
+
+/** One solution tried: its name (the row opens its page), status, date, what it changes, how it does against today, and notes. */
+function TriedRow({
+  solution,
+  link,
+  base,
+  mode,
+  canEdit,
+  onStatus,
+  onError,
+  onNotes,
+  onLogged,
+}: {
+  solution: SolutionRow;
+  link: SolutionIssueRow;
+  base: string;
+  mode: ScreenMode;
+  canEdit: boolean;
+  onStatus: (status: SolutionRow["status"]) => void;
+  onError: (message: string | null) => void;
+  onNotes: (notes: string) => Promise<string | null>;
+  onLogged: () => void;
+}) {
+  return (
+    <li data-solution={solution.id} className="relative flex flex-col gap-1.5 rounded-lg bg-muted/40 px-4 py-3 transition-colors focus-within:bg-muted/70 hover:bg-muted/70">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        {/* The whole row opens the solution; the status and the notes sit above it. */}
+        <Link href={solutionHref(base, solution.id)} className="min-w-0 text-sm font-semibold after:absolute after:inset-0 after:content-[''] hover:underline" data-tried-name>
+          {solution.name}
+        </Link>
+        <span className="relative z-10">
+          <SolutionStatusMenu
+            solution={solution}
+            mode={mode}
+            onError={onError}
+            onSaved={(s) => {
+              onStatus(s);
+              onLogged();
+            }}
+          />
+        </span>
+        <span className="text-xs text-fg-3">Tried {shortDate(link.created_at)}</span>
+      </div>
+      <p className="text-xs text-fg-2" data-tried-changes>
+        Changes: {changesLine(solution, 3)}
+      </p>
+      <p className="flex flex-wrap items-center gap-x-2 text-xs text-fg-2" data-tried-result>
+        {link.auto_verdict ? (
+          <>
+            <span>Against today:</span>
+            <VerdictWord verdict={link.auto_verdict} className="text-xs" />
+            {link.holds_pct !== null && <span>holds in {link.holds_pct}% of runs</span>}
+            {link.user_verdict && (
+              <span>
+                · Your call: <VerdictWord verdict={link.user_verdict} className="text-xs" />
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            <span>{autoWord(null)} against today.</span>
+            <Link href={solutionHref(base, solution.id)} className="relative z-10 underline decoration-dotted underline-offset-2 hover:decoration-solid">
+              Open to compare
+            </Link>
+          </>
+        )}
+      </p>
+      {(canEdit || solution.notes) && (
+        <div className="relative z-10">
+          <EditableText value={solution.notes} canEdit={canEdit} label={`Notes on ${solution.name}`} rows={3} onSave={onNotes} emptyMessage="No notes yet." addLabel="Add a note" className="text-xs" />
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** Who owns the issue, edited in place: a popover with the people to tick. Readers see the names. */
+function OwnersEditor({
+  ownerIds,
+  people,
+  names,
+  canEdit,
+  busy,
+  onChange,
+}: {
+  ownerIds: string[];
+  people: { id: string; name: string }[];
+  names: ReadonlyMap<string, string>;
+  canEdit: boolean;
+  busy: boolean;
+  onChange: (next: string[]) => void;
+}) {
+  const label = ownerIds.length ? `${ownerIds.length > 1 ? "Owners" : "Owner"}: ${ownerIds.map((id) => names.get(id) ?? "Someone").join(", ")}` : "No owner yet";
+  if (!canEdit) return <span data-owners>{label}</span>;
+  const toggle = (id: string) => onChange(ownerIds.includes(id) ? ownerIds.filter((x) => x !== id) : [...ownerIds, id]);
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" data-owners className="inline-flex items-center gap-1 rounded-md text-left hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none max-sm:pointer-events-none" aria-label={`${label}. Change owners`}>
+          {label}
+          <Pencil aria-hidden className={`size-3 text-fg-3 ${EDIT_ONLY}`} />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 gap-0.5 p-1.5" data-owners-menu>
+        <div className="flex items-center px-2 py-1 text-2xs font-semibold tracking-wider text-muted-foreground uppercase">
+          Owners
+          <Help {...ISSUE_PAGE_HELP.owners} />
+        </div>
+        {people.length ? (
+          people.map((p) => (
+            <label key={p.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted">
+              <input type="checkbox" checked={ownerIds.includes(p.id)} disabled={busy} onChange={() => toggle(p.id)} data-option={p.id} />
+              <span className="min-w-0 flex-1 truncate">{p.name}</span>
+            </label>
+          ))
+        ) : (
+          <p className="px-2 py-1.5 text-sm text-muted-foreground">There are no people to pick yet.</p>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -441,75 +716,112 @@ export function IssuePage(props: IssuePageProps) {
 function MapWithBadges({ badges, onOpen, children }: { badges: Record<string, StepBadge>; onOpen: (stepId: string) => void; children: ReactNode }) {
   const host = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
+  // A short map is fitted to a panel that is never shorter than 16rem, which leaves a band of empty card under it. Until someone moves the
+  // map, the card is cut to the lowest step plus a little room. (Moving or zooming the map lifts the cut, so nothing is ever hidden.)
+  const [cut, setCut] = useState<number | null>(null);
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    const check = () => setReady(!!el.querySelector("[data-process-map]"));
+    let moved = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const measure = () => {
+      if (moved) return;
+      const nodes = el.querySelectorAll(".react-flow__node");
+      if (!nodes.length) return;
+      const top = el.getBoundingClientRect().top;
+      let bottom = 0;
+      nodes.forEach((n) => (bottom = Math.max(bottom, n.getBoundingClientRect().bottom)));
+      setCut(Math.ceil(bottom - top + 20));
+    };
+    const check = () => {
+      setReady(!!el.querySelector("[data-process-map]"));
+      clearTimeout(timer);
+      timer = setTimeout(measure, 450);
+    };
+    const lift = () => {
+      moved = true;
+      setCut(null);
+    };
     check();
     const observer = new MutationObserver(check);
     observer.observe(el, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    const resize = new ResizeObserver(check);
+    resize.observe(el);
+    el.addEventListener("pointerdown", lift);
+    el.addEventListener("wheel", lift, { passive: true });
+    el.addEventListener("keydown", lift);
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+      resize.disconnect();
+      el.removeEventListener("pointerdown", lift);
+      el.removeEventListener("wheel", lift);
+      el.removeEventListener("keydown", lift);
+    };
   }, []);
   return (
-    <div ref={host} className="min-w-0 overflow-hidden rounded-token border bg-card">
+    <div ref={host} className="min-w-0 overflow-hidden rounded-token border bg-card" style={cut ? { maxHeight: cut } : undefined} data-map-cut={cut ?? undefined}>
       {children}
       {ready && <StepIssueBadges badges={badges} onOpen={onOpen} />}
     </div>
   );
 }
 
-const initials = (name: string) =>
-  name
-    .split(/\s+/)
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
 function Chip({ children }: { children: React.ReactNode }) {
   return <span className="inline-flex h-6 items-center rounded-full border border-border px-2 text-xs">{children}</span>;
 }
 
-const VERDICT_LABELS = { pass: "Pass", fail: "Fail", unchecked: "Not checked" } as const;
-const Verdict = ({ v }: { v: keyof typeof VERDICT_LABELS | null }) => (v ? <span className="font-medium">{VERDICT_LABELS[v]}</span> : <span className="text-muted-foreground">—</span>);
-
-/** The solutions tested for the issue, as the prototype's table. A49 supplies the rows. */
-function SolutionsTable({ solutions }: { solutions: readonly SolutionTest[] }) {
+function LinkSolutionDialog({ open, solutions, onLink, onClose }: { open: boolean; solutions: SolutionRow[]; onLink: (solutionId: string) => Promise<string | null>; onClose: () => void }) {
+  const [picked, setPicked] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const choice = solutions.some((s) => s.id === picked) ? picked : (solutions[0]?.id ?? "");
   return (
-    <Card className="overflow-x-auto p-0">
-      <table className="w-full min-w-[32rem] text-left text-sm">
-        <thead>
-          <tr className="border-b border-border text-2xs font-semibold tracking-wider text-muted-foreground uppercase">
-            <th className="px-4 py-2">Solution</th>
-            <th className="px-3 py-2">Type</th>
-            <th className="px-3 py-2">Built</th>
-            <th className="px-3 py-2">Automatic</th>
-            <th className="px-3 py-2 text-right">Holds in</th>
-            <th className="px-3 py-2">Yours</th>
-          </tr>
-        </thead>
-        <tbody>
-          {solutions.map((s) => (
-            <tr key={s.id} className="border-b border-border last:border-0">
-              <td className="px-4 py-2">
-                <Link href={s.href} className="font-medium hover:underline">
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md" data-link-solution-dialog>
+        <DialogHeader>
+          <DialogTitle>Link an existing solution</DialogTitle>
+          <DialogDescription>Test a solution you already built for this process against this issue. It gets its own automatic verdict.</DialogDescription>
+        </DialogHeader>
+        {solutions.length ? (
+          <label className="flex flex-col gap-0.5">
+            <span className="text-sm font-medium">Solution</span>
+            <NativeSelect aria-label="Solution" value={choice} onChange={(e) => setPicked(e.target.value)}>
+              {solutions.map((s) => (
+                <option key={s.id} value={s.id}>
                   {s.name}
-                </Link>
-              </td>
-              <td className="px-3 py-2 text-xs">{s.type}</td>
-              <td className="px-3 py-2 text-xs whitespace-nowrap">{s.built}</td>
-              <td className="px-3 py-2">
-                <Verdict v={s.auto} />
-              </td>
-              <td className="px-3 py-2 text-right tabular-nums">{s.holds == null ? "—" : `${Math.round(s.holds * 100)}%`}</td>
-              <td className="px-3 py-2">
-                <Verdict v={s.yours} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
+                </option>
+              ))}
+            </NativeSelect>
+          </label>
+        ) : (
+          <p className="text-sm text-muted-foreground">There are no other solutions for this process to link.</p>
+        )}
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            disabled={!choice || busy}
+            onClick={() => {
+              setBusy(true);
+              setError(null);
+              void onLink(choice)
+                .then((message) => (message ? setError(message) : onClose()))
+                .finally(() => setBusy(false));
+            }}
+          >
+            Link solution
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

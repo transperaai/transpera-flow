@@ -30,7 +30,7 @@ export const WithAction: StoryObj = {
 // A page with nothing published yet (issue #243): a new client, with only the company map or only drafts. Editors get the next step;
 // members and viewers get one sentence, and no name or count.
 const createProcess = async () => ({});
-const WHAT = "Issues are problems you confirm on a published process: its findings, or ones you log by hand.";
+const WHAT = "Issues are problems you log on a published process.";
 
 export const NotPublishedEditor: StoryObj = {
   render: () => <NotPublished what={WHAT} canEdit base="/w/acme" firstDraft={null} create={createProcess} />,

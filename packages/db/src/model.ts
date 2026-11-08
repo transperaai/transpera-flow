@@ -5,6 +5,7 @@ import {
   isNeutralMarket,
   marketFromSchedule,
   NestingError,
+  afterSaleSteps,
   type EngineMarket,
   type EngineDemand,
   type Distribution as EngineDistribution,
@@ -20,8 +21,10 @@ import {
   type EngineServicingProcess,
   type EngineStep,
 } from "@transpera-flow/engine";
+import { resolvePurpose, workspacePurposes, type PurposeSource } from "./purposes";
+import { engineClientCapacity, enginePersonCapacity, engineRoleUnit, engineTierClientGroups, engineTierService, tierContext, type TierContext } from "./capacity-model";
 import { engineRecurrence } from "./servicing";
-import type { DistParams, Distribution, EdgeRow, LeadSourceRow, ProcessBundle, ProcessPart, SeasonalityRow, StepRow, WorkspaceSettings } from "./types";
+import { STEP_SOURCE_LABELS, type DistParams, type Distribution, type EdgeRow, type LeadSourceRow, type ProcessBundle, type ProcessPart, type SeasonalityRow, type StepRow, type StepSourceLabel, type WorkspaceSettings } from "./types";
 
 const WORKING_DAYS_PER_WEEK = 5;
 const DAY_MS = 86_400_000;
@@ -50,6 +53,11 @@ export interface ModelOptions {
    * for the whole run, as every other screen simulates it.
    */
   planned?: boolean;
+  /**
+   * Put each working step's purpose key on the model (sandbox phase 4, `EngineStep.purpose`): reporting only, no number changes.
+   * Off (the default): exactly the model as before.
+   */
+  purposes?: boolean;
 }
 
 export class ModelError extends Error {}
@@ -168,6 +176,7 @@ function resolveGraph(steps: StepRow[], edges: EdgeRow[], tags: boolean, ctx: Gr
         work: Number(step.work_hours),
         wait: Number(step.wait_hours),
         rework: Number(step.rework_rate),
+        ...stepBaseValues(step),
         ...optional("workDist", engineDistribution(step.work_dist, step.work_params, Number(step.work_hours))),
         ...optional("waitDist", engineDistribution(step.wait_dist, step.wait_params, Number(step.wait_hours))),
         // Entered WIP (0 included) makes the run start from it instead of a warm-up.
@@ -257,6 +266,11 @@ export function speedsNormalisedFor(b: ProcessBundle): boolean {
  *   simulation, doesn't depend on database row order.
  */
 export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {}): EngineModel {
+  return engineModelOf(bundle, options).model;
+}
+
+/** `toEngineModel`, and the steps of the processes the company map hands work on to (after the sale, for purposes). */
+function engineModelOf(bundle: ProcessBundle, options: ModelOptions): { model: EngineModel; handed: ReadonlySet<string> } {
   const { workspace, roles } = bundle;
   const s = workspace.settings;
   // The company map's steps are holders of whole processes, laid out as a picture: nothing to simulate (B11).
@@ -276,11 +290,15 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     // The database requires an outcome on every end step; "done" is the harmless reading of a missing one.
     if (step.id !== sinks.won && step.id !== sinks.lost) ends[step.id] = { outcome: step.outcome ?? "done" };
   }
+  // The company map's hand-off lines (Q17): processes the pipeline's won clients carry on into. Nothing without `bundle.handoffs`.
+  const handed = handedOn(bundle, held, Boolean(baseServices), endSteps, ends);
 
   const servicing = engineServicing(bundle, baseServices, held);
-  const services = servicing.services;
-  const working = [...pipelineSteps, ...servicing.steps];
-  const groups = { ...pipelineGroups, ...servicing.groups };
+  // A workspace with a tier service feeds the capacity Set up data to the engine (capacity-model.ts); any other is mapped as before.
+  const tier = tierContext(bundle);
+  const services = tier && servicing.services ? withTierServices(servicing.services, tier) : servicing.services;
+  const working = [...pipelineSteps, ...handed.steps, ...servicing.steps];
+  const groups = { ...pipelineGroups, ...handed.groups, ...servicing.groups };
   Object.assign(ends, servicing.ends);
 
   const engineRoles: EngineModel["roles"] = {};
@@ -290,15 +308,19 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
       count: role.headcount,
       cost: Number(role.default_cost_rate),
       ongoing: Number(role.ongoing_hours_per_client_week),
+      ...(tier && engineRoleUnit(tier, role.id) ? { unit: engineRoleUnit(tier, role.id)! } : {}),
     };
   }
 
   const startDate = options.startDate ?? new Date().toISOString().slice(0, 10);
-  const people = resolvePeopleRows(bundle, working, startDate, options.planned === true);
+  const people = resolvePeopleRows(bundle, working, startDate, options.planned === true, tier, services);
   const demand = engineDemand(bundle, startDate);
-  // Client groups replace the named roster, which stays stored but is not simulated.
-  const clientGroups = engineClientGroups(bundle, services);
-  const clients = clientGroups ? undefined : engineClients(bundle, services, startDate);
+  // Client groups replace the named roster, which stays stored but is not simulated. In a tier workspace they are added to it instead.
+  // A typed tier total (Q13) takes the named clients the engine will simulate off the counted remainder (active, and started by the run's start).
+  const namedOn = (serviceId: string) =>
+    (bundle.clients ?? []).filter((c) => c.active && !(c.start_date && c.start_date > startDate) && (bundle.clientServices ?? []).some((cs) => cs.client_id === c.id && cs.service_id === serviceId)).length;
+  const clientGroups = tier && services ? engineTierClientGroups(tier, bundle.clientGroups ?? [], services, namedOn) : engineClientGroups(bundle, services);
+  const clients = clientGroups && !tier ? undefined : engineClients(bundle, services, startDate, tier);
   const market = engineMarket(bundle);
   const churnDrivers = engineChurnDrivers(bundle);
 
@@ -311,11 +333,13 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     ...(demand ? { demand } : {}),
     ...(market ? { market } : {}),
     ...(churnDrivers ? { churnDrivers } : {}),
-    activeClients: clientGroups
-      ? Object.values(clientGroups).reduce((a, g) => a + Math.round(g.count), 0)
-      : clients
-        ? Object.keys(clients).length
-        : s.active_clients,
+    activeClients: tier
+      ? (clients ? Object.keys(clients).length : 0) + (clientGroups ? Object.values(clientGroups).reduce((a, g) => a + Math.round(g.count), 0) : 0) || s.active_clients
+      : clientGroups
+        ? Object.values(clientGroups).reduce((a, g) => a + Math.round(g.count), 0)
+        : clients
+          ? Object.keys(clients).length
+          : s.active_clients,
     churnMonthly: s.churn_monthly,
     retainer: s.retainer,
     roles: engineRoles,
@@ -323,8 +347,12 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     ...(people ? { people } : {}),
     ...(s.availability_floor !== undefined ? { availabilityFloor: s.availability_floor } : {}),
     ...(s.overtime_cap !== undefined && s.overtime_cap !== null ? { overtimeCap: Number(s.overtime_cap) } : {}),
+    // Overheads are not pay: kept for a Viewer or a share link too. Absent, null, 0 or junk adds nothing (a model as before).
+    ...((num(s.overhead_monthly) ?? 0) > 0 ? { overheadMonthly: num(s.overhead_monthly)! } : {}),
     ...(clients ? { clients } : {}),
     ...(clientGroups ? { clientGroups } : {}),
+    // Capacity (P2b): counted clients come on top of the named ones, and a won client goes to the least busy person who serves its tier.
+    ...(tier ? { placeNewClients: "least-busy" as const, ...(clientGroups ? { clientMix: "groups-add" as const } : {}) } : {}),
     ...(Object.keys(servicing.processes).length ? { servicingProcesses: servicing.processes } : {}),
     ...optional("health", healthRules(s)),
     ...(targetCycleHours !== null ? { targetCycleHours } : {}),
@@ -336,7 +364,9 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
   };
   // Groups and child processes are a view: the engine's model is the leaf steps (a no-op without any).
   try {
-    return flattenModel(model);
+    const flat = flattenModel(model);
+    const handedIds = new Set(handed.steps.map((st) => st.id));
+    return { model: options.purposes ? withStepPurposes(flat, bundle, handedIds) : flat, handed: handedIds };
   } catch (err) {
     // A group with nowhere to go, or a loop of groups, is a problem with the process, as any other bad graph is.
     if (err instanceof NestingError) {
@@ -350,6 +380,87 @@ export function toEngineModel(bundle: ProcessBundle, options: ModelOptions = {})
     }
     throw err;
   }
+}
+
+/** Each step of the bundle's processes (the one in view and any it carries) with its row and its process's kind. */
+function stepRowsOf(bundle: ProcessBundle): Map<string, { row: StepRow; kind: string }> {
+  const rows = new Map<string, { row: StepRow; kind: string }>();
+  for (const part of [{ process: bundle.process, steps: bundle.steps }, ...(bundle.otherProcesses ?? [])]) {
+    for (const row of part.steps) rows.set(row.id, { row, kind: part.process.kind });
+  }
+  return rows;
+}
+
+/** Every step's resolved purpose (`resolvePurpose`), given the pipeline steps after the sale. Pure. */
+function resolveAll(bundle: ProcessBundle, afterSale: ReadonlySet<string>): Map<string, { key: string; source: PurposeSource }> {
+  const keys = new Set(workspacePurposes(bundle.workspace.settings).map((c) => c.key));
+  const out = new Map<string, { key: string; source: PurposeSource }>();
+  for (const [id, { row, kind }] of stepRowsOf(bundle)) {
+    out.set(id, resolvePurpose(row, kind, keys, afterSale.has(id)));
+  }
+  return out;
+}
+
+/**
+ * The resolved purpose of every step the bundle carries, for the editor and MCP to show ("Automatic: Winning work"). The sale side
+ * comes from the engine model; a graph that can't be modelled yet (a draft half drawn) just has no sale side. Pure.
+ */
+export function resolveBundlePurposes(bundle: ProcessBundle): Map<string, { key: string; source: PurposeSource }> {
+  let afterSale: ReadonlySet<string> = new Set();
+  try {
+    const { model, handed } = engineModelOf(bundle, { startDate: "2026-01-05" });
+    afterSale = new Set([...afterSaleSteps(model), ...handed]);
+  } catch {
+    // Not a model yet.
+  }
+  return resolveAll(bundle, afterSale);
+}
+
+/**
+ * The model with a purpose key on every working step (`resolvePurpose`, with Austin's 29 Oct defaults): each step is looked up in
+ * the bundle's processes for its row and its process's kind, and the sale side of the pipeline comes from the engine. Pure.
+ */
+function withStepPurposes(model: EngineModel, bundle: ProcessBundle, handed: ReadonlySet<string> = new Set()): EngineModel {
+  // Steps of a process the company map hands work on to are after the sale, though no win comes after them (the engine reads won-or-lost reach).
+  const resolved = resolveAll(bundle, new Set([...afterSaleSteps(model), ...handed]));
+  return { ...model, steps: model.steps.map((s) => (resolved.has(s.id) ? { ...s, purpose: resolved.get(s.id)!.key } : s)) };
+}
+
+/**
+ * The company map's hand-offs (Q17, ADR 0023) as the engine runs them: in order, each process's graph is resolved as a held child's is, its
+ * steps join the model, and the ends of the process before it carry on at its entry (`EngineEnd.handoff`): the sales pipeline's won ends
+ * (the won sink among them), then every end of a handed-to process, which are all `done` here (a win sticks in the engine, so a client who
+ * reaches a lost or won end of onboarding is not lost and not won again). `ends` gets the won sink too when it carries a hand-off.
+ * Nothing (the same arrays, no ends touched) for a bundle with no `handoffs`.
+ */
+function handedOn(
+  bundle: ProcessBundle,
+  held: ReadonlyMap<string, ProcessPart>,
+  tags: boolean,
+  rootEnds: readonly StepRow[],
+  ends: Record<string, EngineEnd>,
+): { steps: EngineStep[]; groups: Record<string, EngineGroup> } {
+  const out: { steps: EngineStep[]; groups: Record<string, EngineGroup> } = { steps: [], groups: {} };
+  let before = rootEnds.filter((e) => e.outcome === "won").map((e) => e.id);
+  let outcome: EngineEnd["outcome"] = "won";
+  for (const hand of bundle.handoffs ?? []) {
+    const part = held.get(hand.to);
+    const name = bundle.companyNames?.[hand.to] ?? part?.process.name ?? "A process";
+    if (!part) throw new ModelError(`Publish '${name}' first: the company map hands work on to it, and it has no published version yet`);
+    let graph: Graph;
+    try {
+      graph = resolveGraph(part.steps, part.edges, tags, { parts: held, stack: [part.process.id] });
+    } catch (err) {
+      throw err instanceof ModelError ? new ModelError(`Process '${name}', handed work on from the company map: ${err.message}`) : err;
+    }
+    for (const id of before) ends[id] = { outcome, handoff: graph.entry };
+    out.steps.push(...graph.working);
+    Object.assign(out.groups, graph.groups);
+    before = graph.endSteps.map((e) => e.id);
+    outcome = "done";
+    for (const id of before) ends[id] = { outcome };
+  }
+  return out;
 }
 
 /**
@@ -399,6 +510,9 @@ function engineServices(bundle: ProcessBundle, processId: string): Record<string
       mixShare: Number(sv.mix_share),
       pathTags: sv.path_tags.map((t) => t.trim()).filter(Boolean),
       ...(fallback ? { fallbackOngoing: fallback } : {}),
+      // A fee range (sandbox phase 3): when either end is set (a blank end is the price itself: "up to 6,000" with no lowest is price to
+      // 6,000), and not when both are the price.
+      ...(feeRange(sv) ? { priceRange: feeRange(sv)! } : {}),
     };
   }
   return services;
@@ -481,6 +595,13 @@ function engineServicing(
   return { services: withLinks, steps, ends, processes, groups };
 }
 
+/** The services with their tier fields (department, tier, deliverables, ad-hoc rule) in a tier workspace; a service that isn't a tier service is as it was. */
+function withTierServices(services: Record<string, EngineService>, tier: TierContext): Record<string, EngineService> {
+  const out: Record<string, EngineService> = {};
+  for (const [id, sv] of Object.entries(services)) out[id] = { ...sv, ...engineTierService(tier, id) };
+  return out;
+}
+
 /** Health rules from the workspace settings; undefined when none is set, so the engine's estimated defaults apply. */
 function healthRules(s: WorkspaceSettings): EngineHealthRules | undefined {
   const pick = (v: unknown) => (v !== undefined && v !== null && Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : undefined);
@@ -508,6 +629,7 @@ function engineClients(
   bundle: ProcessBundle,
   services: Record<string, EngineService> | undefined,
   startDate: string,
+  tier?: TierContext,
 ): Record<string, EngineClient> | undefined {
   const rows = bundle.clients ?? [];
   if (!rows.length) return undefined;
@@ -530,6 +652,8 @@ function engineClients(
       mrr: Number(c.mrr),
       ...(c.health !== null && c.health !== undefined ? { health: Number(c.health) } : {}),
       assignments,
+      // A tier workspace: its own values, its manager and its hand-holding hours (capacity-model.ts).
+      ...(tier ? engineClientCapacity(tier, c.id, assignments) : {}),
     };
   }
   return clients;
@@ -550,6 +674,10 @@ export function engineChurnDrivers(bundle: ProcessBundle): EngineChurnDriver[] |
       ...(d.value !== null && d.value !== undefined ? { value: Number(d.value) } : {}),
       ...(d.month !== null && d.month !== undefined ? { month: Number(d.month) } : {}),
       ...(d.driver === null ? { name: d.name ?? "" } : {}),
+      // Chance mode (sandbox phase 3): stored in percent, the engine takes fractions. A row with none maps exactly as before.
+      ...(d.chance !== null && d.chance !== undefined ? { chance: Number(d.chance) / 100 } : {}),
+      ...(d.effect !== null && d.effect !== undefined ? { effect: Number(d.effect) / 100 } : {}),
+      ...(d.effect_months !== null && d.effect_months !== undefined ? { effectMonths: Number(d.effect_months) } : {}),
     });
   }
   return out.length ? out : undefined;
@@ -660,7 +788,7 @@ function engineDemand(bundle: ProcessBundle, startDate: string): EngineDemand | 
  * steps of this process they are skilled for, and leave as simulation hours.
  * Returns undefined when the workspace has no people, so head-counts apply.
  */
-function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDate: string, planned = false) {
+function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDate: string, planned = false, tier?: TierContext, services?: Record<string, EngineService>) {
   const s = bundle.workspace.settings;
   const hoursPerDay = s.hours_per_week / WORKING_DAYS_PER_WEEK;
   const roleIds = new Set(bundle.roles.map((r) => r.id));
@@ -713,9 +841,55 @@ function resolvePeopleRows(bundle: ProcessBundle, working: EngineStep[], startDa
         : {}),
       ...(planned && p.start_date && p.start_date > startDate ? { from: hoursTo(p.start_date) } : {}),
       ...(planned && p.end_date ? { until: hoursTo(nextDay(p.end_date)) } : {}),
+      // A tier workspace: team time, the new-starter ramp (only for someone who starts during the run), the tiers they serve and their counted clients.
+      ...(tier
+        ? enginePersonCapacity(tier, p.id, {
+            rampStarts: planned && !!p.start_date && p.start_date > startDate,
+            rampDefault: bundle.workspace.settings.ramp_default,
+            serviceIds: new Set(Object.keys(services ?? {})),
+          })
+        : {}),
     };
   }
   return people;
+}
+
+/**
+ * A step's base values for the engine (capacity P4, ADR 0022): `split`, `tierMultiplier`, `toClientManager` and the `sources` of
+ * each value. Every one is left out when the column is null or false (and `sources` when no label is stored), so a step with none of
+ * them maps exactly as it did before the columns existed. Never an empty object.
+ */
+export function stepBaseValues(step: Pick<StepRow, "split" | "tier_multiplier" | "to_client_manager" | "provenance">): Partial<
+  Pick<EngineStep, "split" | "tierMultiplier" | "toClientManager" | "sources">
+> {
+  const out: Partial<Pick<EngineStep, "split" | "tierMultiplier" | "toClientManager" | "sources">> = {};
+  const sp = step.split;
+  if (sp && typeof sp === "object") {
+    const a = num(sp.automatable);
+    const g = num(sp.augmentable);
+    const m = num(sp.manual);
+    if (a !== null && g !== null && m !== null) out.split = { automatable: a, augmentable: g, manual: m };
+  }
+  const tm = step.tier_multiplier;
+  if (tm && typeof tm === "object") {
+    const entries = Object.entries(tm).flatMap(([k, v]) => (num(v) !== null ? [[k, num(v)!] as const] : []));
+    if (entries.length) out.tierMultiplier = Object.fromEntries(entries);
+  }
+  if (step.to_client_manager === true) out.toClientManager = true;
+  const prov = step.provenance as Record<string, { source?: unknown } | undefined> | null;
+  const label = (key: string) => {
+    const src = prov?.[key]?.source;
+    return typeof src === "string" && (STEP_SOURCE_LABELS as readonly string[]).includes(src) ? (src as StepSourceLabel) : undefined;
+  };
+  const sources: NonNullable<EngineStep["sources"]> = {};
+  const work = label("work");
+  const split = label("split");
+  const tier = label("tier_multiplier");
+  if (work) sources.work = work;
+  if (split) sources.split = split;
+  if (tier) sources.tierMultiplier = tier;
+  if (Object.keys(sources).length) out.sources = sources;
+  return out;
 }
 
 const optional = <K extends string, V>(key: K, value: V | undefined) =>
@@ -724,6 +898,16 @@ const optional = <K extends string, V>(key: K, value: V | undefined) =>
 /** A finite number from a jsonb value, or null. */
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() && Number.isFinite(Number(v)) ? Number(v) : null;
+
+/** A service's fee range as the engine takes it: a blank end is the price; none when both ends are blank or both are the price. */
+function feeRange(sv: { price: number | string; price_low?: number | string | null; price_high?: number | string | null }): { low: number; high: number } | null {
+  const low = num(sv.price_low);
+  const high = num(sv.price_high);
+  if (low === null && high === null) return null;
+  const price = Number(sv.price);
+  const range = { low: low ?? price, high: high ?? price };
+  return range.low === price && range.high === price ? null : range;
+}
 
 /**
  * A triangular range in hours from a step's params. Missing or inconsistent

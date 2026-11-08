@@ -3,9 +3,8 @@ import type { ReactNode } from "react";
 import { partOf } from "@transpera-flow/db";
 import { Card } from "@/components/ui/card";
 import { MrrChart } from "@/components/overview/charts";
-import { BeforeAfterChart, IssuesDonut, OpenedResolvedChart, TimeSplitChart } from "@/components/overview/trend-charts";
-import { impactNumbers, type SolutionImpact } from "@/lib/overview/impact-run";
-import { timeSplitByProcess, type MonthCount } from "@/lib/overview/health";
+import { IssuesDonut, TimeSplitChart } from "@/components/overview/trend-charts";
+import { timeSplitByProcess } from "@/lib/overview/health";
 import type { MrrPoint } from "@/lib/overview/projection";
 import { northbeamRun } from "../fixtures";
 
@@ -98,66 +97,4 @@ export const TimeSplit: StoryObj = {
       </Frame>
     );
   },
-};
-
-const months: MonthCount[] = [
-  { month: "2026-05", label: "May 26", opened: 3, resolved: 1 },
-  { month: "2026-06", label: "Jun", opened: 5, resolved: 2 },
-  { month: "2026-07", label: "Jul", opened: 2, resolved: 4 },
-  { month: "2026-08", label: "Aug", opened: 4, resolved: 3 },
-  { month: "2026-09", label: "Sep", opened: 6, resolved: 2 },
-  { month: "2026-10", label: "Oct", opened: 1, resolved: 1 },
-];
-
-export const OpenedResolved: StoryObj = {
-  name: "OpenedResolvedChart",
-  tags: ["visual-phone"],
-  render: () => (
-    <Frame>
-      <OpenedResolvedChart months={months} />
-    </Frame>
-  ),
-};
-
-export const OpenedResolvedEmpty: StoryObj = {
-  name: "OpenedResolvedChart (empty)",
-  render: () => (
-    <Frame>
-      <OpenedResolvedChart months={months.map((m) => ({ ...m, opened: 0, resolved: 0 }))} />
-    </Frame>
-  ),
-};
-
-export const BeforeAfter: StoryObj = {
-  name: "BeforeAfterChart",
-  tags: ["visual-phone"],
-  render: () => {
-    const { bundle, model, result } = northbeamRun();
-    const before = impactNumbers(model, result);
-    const after = { handsOnPerItem: before.handsOnPerItem * 0.7, itemsPerMonth: before.itemsPerMonth * 1.1, cycleHours: before.cycleHours === null ? null : before.cycleHours * 0.8 };
-    const impact = (id: string, name: string, implemented: boolean): SolutionImpact => ({
-      id,
-      name,
-      implemented,
-      processId: bundle.process.id,
-      processName: bundle.process.name,
-      baseRevisionId: bundle.revision.id,
-      before,
-      after,
-    });
-    return (
-      <Frame>
-        <BeforeAfterChart impacts={[impact("s1", "AI lead qualifier", true), impact("s2", "Faster proposals", false)]} hoursPerWeek={model.hoursPerWeek} />
-      </Frame>
-    );
-  },
-};
-
-export const BeforeAfterEmpty: StoryObj = {
-  name: "BeforeAfterChart (empty)",
-  render: () => (
-    <Frame>
-      <BeforeAfterChart impacts={[]} hoursPerWeek={37.5} />
-    </Frame>
-  ),
 };

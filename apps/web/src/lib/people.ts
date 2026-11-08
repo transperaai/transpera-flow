@@ -159,32 +159,28 @@ export function untestedSoleHolders(model: EngineModel, test: AbsenceTest): stri
     .filter((id) => !tested.has(id));
 }
 
-/** Completed items for a person-step before a capacity factor counts as measured (PRD §6.3.7, D20). */
-export const CAPACITY_FACTOR_MIN_ITEMS = 10;
-
 /**
- * Whether a person's capacity factors may be shown (PRD §6.3.7, D20; #31). Only when the workspace has switched them on
- * and the factor is measured (at least 10 completed items for that person-step) or entered. C6 (#198) stores entered ones
- * (`person_capacity_factors`); calibration from a log that names people (#227) stores measured ones, with how many visits they
- * rest on (`measuredItems`), and proposes only from 10, so an applied one always shows.
+ * Whether a person's capacity factors may be shown (PRD §6.3.7, D20; #31): only when the workspace has switched them on. Every
+ * time is a person's own entry (`person_capacity_factors`, C6 #198); the measured ones that calibration stored were cut with
+ * Historical data (D71).
  */
-export function capacityFactorsShown<F extends { measuredItems: number; entered: boolean }>(settings: unknown, factors: readonly F[]): F[] {
+export function capacityFactorsShown<F>(settings: unknown, factors: readonly F[]): F[] {
   const on = typeof settings === "object" && settings !== null && (settings as { capacity_factor_enabled?: unknown }).capacity_factor_enabled === true;
-  return on ? factors.filter((f) => f.entered || f.measuredItems >= CAPACITY_FACTOR_MIN_ITEMS) : [];
+  return on ? [...factors] : [];
 }
 
 /** The (i) text for "Time on each step", the same in Settings and on the People page. */
 export const FACTOR_HELP = {
   description:
-    "How long this person takes compared with their role's normal time. 1 is normal, 0.8 is 20% faster, 1.25 is 25% slower; from 0.5 to 2. Blank uses their time for every step, or the normal time. The simulation multiplies the hands-on time they spend on the step by this. Only owners and editors set it; the person sees their own.",
+    "How long this person takes compared with their role's normal time. 1 is normal, 0.8 is 20% faster, 1.25 is 25% slower; from 0.5 to 2. Blank uses their time for every step, or the normal time. The simulation multiplies the hands-on time they spend on the step by this. Only Agency admins set it; the person sees their own.",
   example: "Every step 1, Kickoff 0.8: Maya's kickoffs take 20% less time than the role's normal; everything else takes the normal time.",
 } as const;
 
 /** The note a member or viewer sees when the switch is on: their numbers use everyone's normal time. */
 export const SPEEDS_NORMALISED_NOTE = {
-  text: "Per-person times are on in this workspace. Your numbers use each role's normal time, so they can differ a little from what owners and editors see.",
-  description: "Each person's times are visible only to them and to owners and editors.",
-  example: "Maya sees her own times and an editor sees everyone's, so a member's run uses each role's normal time instead.",
+  text: "Per-person times are on in this workspace. Your numbers use each role's normal time, so they can differ a little from what Agency admins see.",
+  description: "Each person's times are visible only to them and to Agency admins.",
+  example: "Maya sees her own times and an Agency admin sees everyone's, so a Viewer's run uses each role's normal time instead.",
 } as const;
 
 /** How a factor reads in words: "normal time" at 1, "20% faster" below, "25% slower" above. */
@@ -200,9 +196,6 @@ export interface ShownFactor {
   stepId: string | null;
   stepName: string;
   factor: number;
-  /** Visits behind it when measured (#227); 0 for an entered one. */
-  measuredItems: number;
-  entered: boolean;
 }
 
 /**
@@ -228,13 +221,7 @@ export function stepsPersonCanDo<S extends { id: string; role_id: string | null 
  */
 export function personFactors(bundle: ProcessBundle, personId: string, stepNames: Map<string, string>): ShownFactor[] {
   const mine = (bundle.personCapacityFactors ?? []).filter((f) => f.person_id === personId);
-  const shown = (stepId: string | null, stepName: string, f: { factor: number; source: string; items?: number | null }): ShownFactor => ({
-    stepId,
-    stepName,
-    factor: Number(f.factor),
-    measuredItems: f.source === "measured" ? Number(f.items ?? 0) : 0,
-    entered: f.source !== "measured",
-  });
+  const shown = (stepId: string | null, stepName: string, f: { factor: number }): ShownFactor => ({ stepId, stepName, factor: Number(f.factor) });
   const out: ShownFactor[] = [];
   const every = mine.find((f) => f.step_id === null);
   if (every) out.push(shown(null, "Every step", every));

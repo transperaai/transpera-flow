@@ -28,7 +28,7 @@ const audit = northbeamStepIds.audit;
 beforeAll(async () => {
   db = await createTestDb();
   other = (await db.client.query("insert into workspaces (name, slug) values ('Other Co', 'other-co') returning id")).rows[0].id;
-  otherScenario = (await db.client.query("select id from scenarios where workspace_id = $1 limit 1", [other])).rows[0].id;
+  otherScenario = (await db.client.query("select id from sandbox_scenarios where workspace_id = $1 limit 1", [other])).rows[0].id;
   await db.client.query(
     "insert into issues (workspace_id, type, severity, title) values ($1, 'idea', 'info', 'Other workspace idea')",
     [other],
@@ -36,7 +36,7 @@ beforeAll(async () => {
   users.admin = await createUser(db, "admin@agency.example", { agency_admin: true });
   for (const role of ["owner", "editor", "member", "viewer"] as const) {
     users[role] = await createUser(db, `${role}@northbeam.example`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
   }
   users.stranger = await createUser(db, "stranger@example.com");
 });
@@ -229,10 +229,10 @@ describe("constraints", () => {
 
   it("a deleted scenario or person unlinks from the issue instead of blocking the delete", async () => {
     const { scenario, person } = await db.as(users.admin!.claims, async (c) => {
-      const s = (await c.query("insert into scenarios (workspace_id, name) values ($1, 'Temp') returning id", [ws])).rows[0].id;
+      const s = (await c.query("insert into sandbox_scenarios (workspace_id, name) values ($1, 'Temp') returning id", [ws])).rows[0].id;
       const p = (await c.query("insert into people (workspace_id, name) values ($1, 'Temp') returning id", [ws])).rows[0].id;
       const i = (await logIssue(c, ws, { scenario_id: s, owner_person_id: p, person_id: p })).rows[0].id;
-      await c.query("delete from scenarios where id = $1", [s]);
+      await c.query("delete from sandbox_scenarios where id = $1", [s]);
       await c.query("delete from people where id = $1", [p]);
       return (await c.query("select scenario_id as scenario, owner_person_id as person, workspace_id from issues where id = $1", [i])).rows[0];
     });

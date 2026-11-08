@@ -1,84 +1,74 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Page } from "@/components/shell/page";
+import { workspacePurposes } from "@transpera-flow/db";
+import { PurposesSettings } from "@/components/purposes/purposes-settings";
+import { LinkRows } from "@/components/settings/link-rows";
+import { SettingsPage } from "@/components/settings/settings-page";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
-import { buttonVariants } from "@/components/ui/button";
-import { loadLiveProcess, loadWorkspaceClients, loadWorkspaceSettings } from "@/lib/data";
-import { clientSources } from "@/lib/clients";
-import { loadLatestChecks } from "@/lib/calibration/client-data";
-import { addClient, saveClientAssignment, saveClientField, saveClientServices } from "./client-actions";
-import { ClientsSettings } from "./clients-settings";
+import { loadLiveProcess, loadPurposeUse, loadStoredPurposes, loadWorkspaceSettings } from "@/lib/data";
 import { ChurnDriversSettings } from "./churn-drivers-settings";
-import { ClientGroupsSettings } from "./client-groups-settings";
 import { DemandSettings } from "./demand-settings";
-import { MarketSettings } from "./market-settings";
-import { PeopleSettings, SimulationSettings } from "./people-settings";
-import { RolesSettings } from "./roles-settings";
-import { ServicesSettings } from "./services-settings";
-import { HealthSettings } from "./servicing-settings";
+import { SimulationSettings } from "./people-settings";
+import { SettingsSection } from "./section";
+import { saveOverheadMonthly, savePurposes } from "./actions";
 import { saveWorkspaceCurrency, saveWorkspaceName } from "./workspace-actions";
 import { WorkspaceDetails } from "./workspace-details";
 
-/** AI analysis runs here after a publish or a market change (A46): allow it time. */
-export const maxDuration = 300;
+/** The stored overheads as a number, or null when none are set (the database keeps only null or a number from 0 to 100,000,000). */
+const overheadOf = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/settings">) {
   const { slug } = await props.params;
   const [data, bundle] = await Promise.all([loadWorkspaceSettings(slug), loadLiveProcess(slug)]);
   if (!data) notFound();
-  const [roster, history] = await Promise.all([loadWorkspaceClients(data.workspace.id), loadLatestChecks(data.workspace.id)]);
+  const [purposes, purposeUse] = await Promise.all([loadStoredPurposes(data.workspace.id), loadPurposeUse(data.workspace.id)]);
   return (
-    <Page
+    <SettingsPage
       title="Settings"
       eyebrow="Company"
-      actions={
-        <>
-          <Link href={`/w/${slug}/settings/branding`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            Branding
-          </Link>
-          <Link href={`/w/${slug}/settings/levers`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            Levers
-          </Link>
-          <Link href={`/w/${slug}/settings/ai`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            AI analysis
-          </Link>
-          <Link href={`/w/${slug}/settings/calibration`} className={buttonVariants({ variant: "outline", size: "sm" })}>
-            Historical data
-          </Link>
-        </>
-      }
       description="Changes save as you go. If someone else changes the same field at the same time, you'll be asked which value to keep."
     >
       <PhoneNotice />
+      <SettingsSection id="services" title="Clients, team and access" description="Tiers and clients, people and roles, and who can sign in have a page each.">
+        <LinkRows
+          label="Settings pages"
+          items={[
+            { href: `/w/${slug}/settings/clients`, title: "Tiers & clients", description: "Tiers (pricing, entry process, servicing steps, path tags), tier client counts and optional named clients." },
+            { href: `/w/${slug}/settings/people`, title: "People & roles", description: "Roles, shared teams, people (hours, leave, skills, dates, per-person times), salaries and portfolios." },
+            // Access is for whoever manages the workspace (its page answers 404 to anyone else).
+            ...(data.canManage ? [{ href: `/w/${slug}/settings/access`, title: "Access", description: "Who can sign in, their role, and which person in the team each sign-in is." }] : []),
+          ]}
+        />
+      </SettingsSection>
       <WorkspaceDetails
         workspaceId={data.workspace.id}
         name={data.workspace.name}
         currency={data.workspace.settings.currency}
+        overheadMonthly={overheadOf(data.workspace.settings.overhead_monthly)}
         canManage={data.canManage}
         saveName={saveWorkspaceName}
         saveCurrency={saveWorkspaceCurrency}
+        saveOverhead={saveOverheadMonthly}
       />
       <SimulationSettings data={data} />
-      <RolesSettings data={data} />
-      <ServicesSettings data={data} />
-      <ClientGroupsSettings data={data} />
-      <ClientsSettings
+      <PurposesSettings
+        mode={data.canEdit ? "live" : "readonly"}
         workspaceId={data.workspace.id}
-        currency={data.workspace.settings.currency}
-        {...roster}
-        services={data.services}
-        roles={data.roles}
-        people={data.people}
-        personRoles={data.personRoles}
-        canEdit={data.canEdit}
-        sources={clientSources(data.processes, data.services, data.clientGroups)}
-        ops={{ add: addClient, saveField: saveClientField, saveServices: saveClientServices, saveAssignment: saveClientAssignment }}
-      />
-      <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} history={history} />
-      <HealthSettings data={data} />
+        stored={purposes}
+        initial={workspacePurposes({ purposes })}
+        use={purposeUse}
+        save={savePurposes}
+      >
+        <p className="text-sm text-muted-foreground">
+          Time by these categories is shown in the{" "}
+          <Link href={`/w/${slug}/sandbox`} className="underline">
+            Sandbox
+          </Link>{" "}
+          and on the Overview.
+        </p>
+      </PurposesSettings>
+      <ChurnDriversSettings mode={data.canEdit ? "live" : "readonly"} workspaceId={data.workspace.id} bundle={bundle} rows={data.churnDrivers} removed={data.workspace.settings.churn_drivers_removed} />
       <DemandSettings data={data} />
-      <MarketSettings data={data} />
-      <PeopleSettings data={data} />
-    </Page>
+    </SettingsPage>
   );
 }

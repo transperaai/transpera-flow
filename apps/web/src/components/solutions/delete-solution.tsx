@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
-// "Delete solution" on the Solution page (issue #182, B19), for owners and editors: a confirm that says what goes and what is
+// "Delete solution" on the Solution page (issue #182, B19), for Agency admins: a confirm that says what goes and what is
 // kept. The issues it was linked to keep a line in their history, and the links are kept in the audit log (the database does
 // both). The delete comes in as `remove`, so the browser tests can stand in for the server.
 

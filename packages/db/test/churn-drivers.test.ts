@@ -15,7 +15,7 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const role of ["owner", "editor", "member", "viewer"] as const) {
     users[role] = await createUser(db, `${role}@drivers.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
   }
   users.stranger = await createUser(db, "stranger@drivers.example.com");
   otherWs = (await db.client.query("insert into workspaces (name, slug) values ('Other', 'other-drivers') returning id")).rows[0].id;
@@ -133,7 +133,7 @@ describe("provenance and the company-model triggers", () => {
     await db.as(users.editor!.claims, async (c) => {
       await c.query("insert into churn_drivers (workspace_id, driver, weight, value) values ($1, 'results', 1.5, 6)", [ws]);
       const first = (await c.query("select provenance from churn_drivers where driver = 'results'")).rows[0].provenance;
-      expect(Object.keys(first).sort()).toEqual(["enabled", "month", "value", "weight"]);
+      expect(Object.keys(first).sort()).toEqual(["chance", "effect", "effect_months", "enabled", "month", "value", "weight"]);
       expect(first.weight).toMatchObject({ source: "entered", by: users.editor!.id });
       await c.query("update churn_drivers set weight = 2 where driver = 'results'");
       expect((await c.query("select provenance from churn_drivers where driver = 'results'")).rows[0].provenance.weight.source).toBe("entered");
@@ -141,7 +141,7 @@ describe("provenance and the company-model triggers", () => {
     await db.client.query("delete from churn_drivers");
   });
 
-  it("audits every change, and refuses an API token (it suggests instead)", async () => {
+  it("audits every change, and refuses an API token", async () => {
     // As the editor, then read the log as the owner of the database (the audit log isn't readable by members).
     await db.client.query("begin");
     try {
@@ -160,7 +160,7 @@ describe("provenance and the company-model triggers", () => {
       db.as({ ...users.editor!.claims, api_token_id: "00000000-0000-0000-0000-000000000001" }, async (c) =>
         c.query("insert into churn_drivers (workspace_id, driver) values ($1, 'late')", [ws]),
       ),
-    ).rejects.toThrow(/by review|suggestion/);
+    ).rejects.toThrow(/can't be changed through an API token/);
   });
 });
 
@@ -175,6 +175,9 @@ describe("the engine model", () => {
     example: null,
     value: null,
     month: null,
+    chance: null,
+    effect: null,
+    effect_months: null,
     provenance: {},
     ...over,
   });
@@ -218,3 +221,65 @@ describe("the engine model", () => {
     expect(churned(3)).toBeGreaterThan(churned(1));
   });
 });
+
+describe("chances and effects (sandbox phase 3)", () => {
+  const start = { startDate: "2026-10-05" };
+  const row = (over: Partial<ChurnDriverRow>): ChurnDriverRow => ({
+    id: "00000000-0000-0000-0000-0000000000cc",
+    workspace_id: ws,
+    driver: "late",
+    name: null,
+    description: null,
+    example: null,
+    weight: 1,
+    enabled: true,
+    value: null,
+    month: null,
+    chance: null,
+    effect: null,
+    effect_months: null,
+    provenance: {},
+    ...over,
+  });
+
+  it("maps percent to the engine's fractions, and leaves a row with none exactly as it was", () => {
+    const b = northbeamBundle();
+    const plain = engineChurnDrivers({ ...b, churnDrivers: [row({})] });
+    expect(plain).toEqual([{ id: "late", weight: 1, enabled: true }]);
+    const drivers = engineChurnDrivers({
+      ...b,
+      churnDrivers: [
+        row({ chance: 4.5, effect: 60, effect_months: 3 }),
+        row({ id: "00000000-0000-0000-0000-0000000000dd", driver: null, name: "Competitor", value: 15, chance: 10, effect: 50 }),
+        row({ id: "00000000-0000-0000-0000-0000000000ee", driver: "results", value: 7, effect: 0 }),
+      ],
+    });
+    expect(drivers![0]).toEqual({ id: "late", weight: 1, enabled: true, chance: 0.045, effect: 0.6, effectMonths: 3 });
+    expect(drivers![1]).toEqual({ id: "custom:00000000-0000-0000-0000-0000000000dd", name: "Competitor", weight: 1, enabled: true, value: 15, chance: 0.1, effect: 0.5 });
+    // An effect of 0 is still an effect: the driver runs as events and adds nothing.
+    expect(drivers![2]).toEqual({ id: "results", weight: 1, enabled: true, value: 7, effect: 0 });
+  });
+
+  it("a workspace with chance columns runs a model whose driver is in chance mode", () => {
+    const b = northbeamBundle();
+    const model = toEngineModel({ ...b, churnDrivers: [row({ effect: 60 })] }, start);
+    expect(model.churnDrivers).toEqual([{ id: "late", weight: 1, enabled: true, effect: 0.6 }]);
+  });
+});
+
+describe("chances and effects: who may set them (sandbox phase 3)", () => {
+  it("an editor sets and clears them, a member can't, and a driver's chance and effect go with the row", async () => {
+    await db.as(users.editor!.claims, async (c) => {
+      await c.query("insert into churn_drivers (workspace_id, driver, chance, effect, effect_months) values ($1, 'resp', 20, 50, 2)", [ws]);
+      const r = (await c.query("select chance, effect, effect_months from churn_drivers where driver = 'resp'")).rows[0];
+      expect([Number(r.chance), Number(r.effect), Number(r.effect_months)]).toEqual([20, 50, 2]);
+      await c.query("update churn_drivers set chance = null, effect = null, effect_months = null where driver = 'resp'");
+      expect((await c.query("select chance, effect, effect_months from churn_drivers where driver = 'resp'")).rows[0]).toEqual({ chance: null, effect: null, effect_months: null });
+    });
+    await expect(
+      db.as(users.member!.claims, (c) => c.query("insert into churn_drivers (workspace_id, driver, effect) values ($1, 'load', 50)", [ws])),
+    ).rejects.toThrow();
+    await db.client.query("delete from churn_drivers");
+  });
+});
+

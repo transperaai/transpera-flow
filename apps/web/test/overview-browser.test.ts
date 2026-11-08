@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { demoBundle } from "@/lib/sources/demo";
 
 // The Overview in a real browser (issue #173, B15): Play on the company map moves the work and counts it on the process
-// cards, the horizon picker runs the model again for the length picked, and the findings rows open and close. React Flow
+// cards, the horizon picker runs the model again for the length picked, and the by-process rows open and close. React Flow
 // and the playback layer measure the DOM, so none of this can be seen in a unit test. The page is the harness in
 // ./overview-harness bundled by esbuild, with just enough CSS for its layout.
 
@@ -114,27 +114,45 @@ describe("the Overview's company map", () => {
     expect(errors).toEqual([]);
     await page.close();
   }, 90_000);
-});
-
-describe("the Overview's findings by process", () => {
-  it("opens a row to show all of its findings, and closes it again", async () => {
+  it("expanding and collapsing a card while playing keeps playing, from the same time (Q1 item 10)", async () => {
     const { page, errors } = await mount();
-    const rows = page.locator("[data-findings-group]");
-    await expect.poll(() => rows.count()).toBe(parts.length + 1);
-    expect(await rows.first().getAttribute("data-findings-group")).toBe("company");
-    expect(await page.locator("[data-findings-panel]").count()).toBe(0);
-    const lead = page.locator(`[data-findings-group="${parts[0]!.process.id}"]`);
-    const toggle = lead.locator("button[aria-expanded]");
-    await toggle.click();
-    await lead.locator("[data-findings-panel]").waitFor();
-    expect(await toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(await lead.locator("[data-rendered] li").count()).toBeGreaterThan(0);
-    // Only that row opened.
-    expect(await page.locator("[data-findings-panel]").count()).toBe(1);
-    await toggle.click();
-    await lead.locator("[data-findings-panel]").waitFor({ state: "detached" });
-    expect(await toggle.getAttribute("aria-expanded")).toBe("false");
+    const time = () => page.locator('input[type="range"]').inputValue().then(Number);
+    await page.getByRole("button", { name: "Play", exact: true }).click();
+    await page.waitForFunction(() => Number((document.querySelector('input[type="range"]') as HTMLInputElement).value) > 20, null, { timeout: 30_000 });
+    const before = await time();
+    await page.getByRole("button", { name: "Expand" }).first().click();
+    await page.waitForFunction((n) => document.querySelectorAll(".react-flow__node").length > n, parts.length, { timeout: 30_000 });
+    // Still playing (the button offers Pause), and the clock did not go back to the start.
+    expect(await page.getByRole("button", { name: "Pause", exact: true }).count()).toBe(1);
+    expect(await time()).toBeGreaterThanOrEqual(before);
+    const opened = await time();
+    await page.getByRole("button", { name: /^Collapse/ }).first().click();
+    await page.waitForFunction((n) => document.querySelectorAll(".react-flow__node").length === n, parts.length, { timeout: 30_000 });
+    expect(await page.getByRole("button", { name: "Pause", exact: true }).count()).toBe(1);
+    expect(await time()).toBeGreaterThanOrEqual(opened);
     expect(errors).toEqual([]);
     await page.close();
-  }, 60_000);
+  }, 90_000);
+  it("has a Stop button left of the speed (no Exit playback) that returns the map to its normal view, and four speeds (Q1 items 12, 13)", async () => {
+    const { page, errors } = await mount();
+    expect(await page.getByRole("button", { name: "Exit playback" }).count()).toBe(0);
+    const stop = page.getByRole("button", { name: "Stop", exact: true });
+    expect(await stop.innerText()).toContain("Stop");
+    expect(await stop.locator("svg").count()).toBe(1);
+    // Left of the speed select, after Play.
+    const order = await page.locator('[role="group"][aria-label="Playback"] > *').evaluateAll((els) => els.map((e) => e.getAttribute("aria-label") ?? e.id));
+    expect(order.slice(0, 2)).toEqual(["Play", "Stop"]);
+    expect(order.indexOf("playback-speed")).toBeGreaterThan(1);
+    expect(await page.locator("#playback-speed option").allInnerTexts()).toEqual(["1 hour per second", "1 day per second", "1 week per second", "1 month per second"]);
+    expect(await page.locator("#playback-speed").inputValue()).toBe("1");
+    await page.getByRole("button", { name: "Play", exact: true }).click();
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLElement>(".playback-badge")].some((b) => b.style.display !== "none" && b.textContent), null, { timeout: 30_000 });
+    await stop.click();
+    await expect.poll(() => page.getByRole("button", { name: "Play", exact: true }).count()).toBe(1);
+    expect(Number(await page.locator('input[type="range"]').inputValue())).toBe(0);
+    expect(await page.locator(".playback-badge:visible").count()).toBe(0);
+    expect(await stop.isDisabled()).toBe(true);
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 90_000);
 });

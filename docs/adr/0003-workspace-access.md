@@ -1,6 +1,6 @@
 # 3. Workspace access by allowed domain and pre-assigned email
 
-Date: 29 Sep 2026 · Status: accepted · Issue: #51 (replaces "invite by email" in #30)
+Date: 29 Sep 2026 · Status: **Superseded: removed 28 Oct 2026, docs/plans/cut-list.md item 9** (the per-workspace lists, domain joins, `resolve_my_access` and the keep-an-owner guard are gone; the per-person privacy and saved-text addenda stand, with Agency admin where they say owner or editor and Viewer where they say member or viewer; see docs/adr/0020-three-roles.md) · Issue: #51 (replaces "invite by email" in #30)
 
 ## Context
 

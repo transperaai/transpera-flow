@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { History } from "lucide-react";
 import { useState } from "react";
 import { DuplicateDialog, RestoreDialog, type VersionActions, type VersionLinks } from "@/components/history/version-dialogs";
-import { Badge } from "@/components/ui/badge";
+import { EmptyState, ListRow, SectionCard, StatusPill } from "@/components/page-kit";
 import { Button } from "@/components/ui/button";
 import { authorLabel, describeChanges, formatPublished, type VersionMeta } from "@/lib/history/versions";
 import { EDIT_ONLY } from "@/lib/phone";
@@ -36,72 +37,60 @@ export function HistoryView({
 
   if (versions.length === 0) {
     return (
-      <p className="rounded-token border border-dashed border-line p-6 text-sm text-muted-foreground">
-        {processName} hasn&apos;t been published yet, so it has no history. Publish its first version from the Editor.
-      </p>
+      <SectionCard id="versions" section="versions" title="Versions">
+        <EmptyState icon={History} data-empty="versions">
+          {processName} hasn&apos;t been published yet, so it has no history. Publish its first version from the Editor.
+        </EmptyState>
+      </SectionCard>
     );
   }
 
   return (
     <>
-      <p className="max-w-prose text-sm text-muted-foreground">
-        Every published version, with who published it and what changed. {actions ? "Restore one, or duplicate it as a new process." : "Open one to see how it looked."}
-      </p>
-
-      <div className="relative overflow-x-auto rounded-token border bg-card">
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
-              <th className="px-3 py-2 font-medium whitespace-nowrap">Version</th>
-              <th className="px-3 py-2 font-medium whitespace-nowrap">Published</th>
-              <th className="px-3 py-2 font-medium whitespace-nowrap">By</th>
-              <th className="px-3 py-2 font-medium">What changed</th>
-              <th className="px-3 py-2 font-medium whitespace-nowrap">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {versions.map((v) => {
-              return (
-                <tr key={v.revisionId} data-version={v.number} className="border-b align-top last:border-0">
-                  <td className="px-3 py-2.5 font-mono whitespace-nowrap">
-                    v{v.number}
-                    {v.live && (
-                      <Badge variant="outline" className="ml-2 border-accent bg-accent-soft font-sans text-fg">
-                        Live
-                      </Badge>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs whitespace-nowrap">{formatPublished(v.publishedAt)}</td>
-                  <td className="px-3 py-2.5 text-xs">{authorLabel(v)}</td>
-                  <td className="min-w-48 px-3 py-2.5">{describeChanges(v.changes, v.number === firstNumber)}</td>
-                  <td className="px-3 py-2.5">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {!v.live && (
-                        <Button variant="outline" size="sm" asChild>
-                          <Link href={`${viewBase}?version=${v.number}`}>View</Link>
-                        </Button>
-                      )}
-                      {actions && !v.live && (
-                        <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry onClick={() => setDialog({ kind: "restore", version: v })}>
-                          Restore
-                        </Button>
-                      )}
-                      {actions && (
-                        <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry onClick={() => setDialog({ kind: "duplicate", version: v })}>
-                          Duplicate
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {note && <p className="text-xs text-muted-foreground">{note}</p>}
+      <SectionCard
+        id="versions"
+        section="versions"
+        title="Versions"
+        description={`Every published version, with who published it and what changed. ${actions ? "Restore one, or duplicate it as a new process." : "Open one to see how it looked."}`}
+      >
+        <ul className="flex flex-col gap-2" aria-label="Versions">
+          {versions.map((v) => (
+            <ListRow
+              key={v.revisionId}
+              data-version={v.number}
+              title={<span className="font-mono">v{v.number}</span>}
+              pills={v.live ? <StatusPill label="Live" tone="auto" /> : undefined}
+              meta={
+                <>
+                  {formatPublished(v.publishedAt)} · {authorLabel(v)}
+                </>
+              }
+              actions={
+                <>
+                  {!v.live && (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href={`${viewBase}?version=${v.number}`}>View</Link>
+                    </Button>
+                  )}
+                  {actions && !v.live && (
+                    <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry onClick={() => setDialog({ kind: "restore", version: v })}>
+                      Restore
+                    </Button>
+                  )}
+                  {actions && (
+                    <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry onClick={() => setDialog({ kind: "duplicate", version: v })}>
+                      Duplicate
+                    </Button>
+                  )}
+                </>
+              }
+            >
+              {describeChanges(v.changes, v.number === firstNumber)}
+            </ListRow>
+          ))}
+        </ul>
+      </SectionCard>
+      {note && <p className="text-xs text-fg-2">{note}</p>}
 
       {actions && dialog?.kind === "restore" && (
         <RestoreDialog

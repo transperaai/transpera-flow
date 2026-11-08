@@ -51,14 +51,14 @@ export function linkedSolutions(data: Pick<SolutionsData, "solutions" | "links">
 /**
  * Where an issue is:
  * - Open: nothing proposed yet.
- * - Solution idea: an AI idea is waiting for it, or a solution is linked that has no verdict yet.
+ * - Solution idea: a solution is linked that has no verdict yet.
  * - Being built: a solution has been tested against it (a verdict, or the issue is in Testing solutions).
  * - Implemented: the issue is resolved by a solution or a change to the process.
  * - Verified: resolved by a solution, and that solution (the one picked when it was resolved, not another linked one)
  *   passed its check (a person's Pass counts; where it overrides a simulation Fail the page shows both).
  * Won't fix, and resolved as not a problem, leave the track.
  */
-export function trackOf(issue: Pick<IssueRow, "status" | "resolved_how" | "resolved_solution_id">, solutions: readonly LinkedSolution[], hasIdea = false): IssueTrack {
+export function trackOf(issue: Pick<IssueRow, "status" | "resolved_how" | "resolved_solution_id">, solutions: readonly LinkedSolution[]): IssueTrack {
   const base = { solutions: [...solutions], implementing: null, verified: null };
   if (issue.status === "wont_fix") return { ...base, stage: null, closed: "wont_fix" };
   if (issue.status === "resolved") {
@@ -68,7 +68,7 @@ export function trackOf(issue: Pick<IssueRow, "status" | "resolved_how" | "resol
     return implementing?.verdict === "pass" ? { ...resolved, stage: 4, verified: implementing } : { ...resolved, stage: 3 };
   }
   if (issue.status === "testing" || solutions.some((s) => s.verdict !== null)) return { ...base, stage: 2, closed: null };
-  if (solutions.length > 0 || hasIdea) return { ...base, stage: 1, closed: null };
+  if (solutions.length > 0) return { ...base, stage: 1, closed: null };
   return { ...base, stage: 0, closed: null };
 }
 

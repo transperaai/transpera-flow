@@ -6,7 +6,7 @@
 
 import { GROUP_LABELS, type Lever, type LeverGroup } from "./levers";
 
-export const LEVER_GROUP_ORDER: readonly LeverGroup[] = ["demand", "people", "process", "clients", "finances", "market"];
+export const LEVER_GROUP_ORDER: readonly LeverGroup[] = ["demand", "people", "process", "clients", "finances"];
 
 /** Where a lever kind can be changed today. */
 export type LeverControl =
@@ -14,6 +14,8 @@ export type LeverControl =
   | "slider"
   /** Not a slider: changed on a Settings page, which the row links to. */
   | "settings"
+  /** Changed in the Sandbox (a hire, leave, a role's cost): not a slider; hiding it takes it off the Sandbox's list for new changes. */
+  | "sandbox"
   /** No control built yet: the choice is kept and applies when one arrives. */
   | "later";
 
@@ -50,7 +52,7 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     label: "How many enquiries become leads",
     description: "Out of every enquiry, how many are worth following up.",
     example: "6 in 10 partner enquiries, but only 1 in 4 website ones.",
-    control: "later",
+    control: "sandbox",
   },
   {
     id: "demand.seasonal",
@@ -91,7 +93,7 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     label: "New starters",
     description: "When someone new joins. They take a while to get up to speed.",
     example: "A new strategist starts in February.",
-    control: "later",
+    control: "sandbox",
   },
   {
     id: "people.leave",
@@ -99,7 +101,7 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     label: "Time off",
     description: "Holidays and leave.",
     example: "Maya is away for 2 weeks in July.",
-    control: "later",
+    control: "sandbox",
   },
   // Process
   {
@@ -186,7 +188,7 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     label: "Cost of each role",
     description: "What an hour of each role costs you.",
     example: "A strategist hour costs A$95.",
-    control: "later",
+    control: "sandbox",
   },
   {
     id: "finances.fixed",
@@ -195,27 +197,6 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     description: "Monthly costs that don't change, like rent and software.",
     example: "A$18,000 a month.",
     control: "later",
-  },
-  // Market
-  {
-    id: "market.conditions",
-    group: "market",
-    label: "Market conditions",
-    description: "How good or bad business conditions are (Settings → Market conditions).",
-    example: "Switch to a downturn: far fewer enquiries.",
-    control: "settings",
-    settingsPath: "/settings#market-heading",
-    settingsLabel: "Settings → Market conditions",
-  },
-  {
-    id: "market.schedule",
-    group: "market",
-    label: "Market changes over time",
-    description: "When the market is expected to change over the next 2 years.",
-    example: "Business slows from month 7.",
-    control: "settings",
-    settingsPath: "/settings#market-heading",
-    settingsLabel: "Settings → Market conditions",
   },
 ];
 

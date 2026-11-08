@@ -6,6 +6,7 @@ import { NumberField, TextField } from "@/components/fields";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { EmptyState } from "@/components/page-kit";
 import { SettingsSection } from "./section";
 import type { WorkspaceSettingsData } from "@/lib/data";
 import {
@@ -39,14 +40,13 @@ const sourceSaver =
     saveLeadSourceField(sourceId, field, base, next) as Promise<SaveOutcome<T>>;
 
 
-const PROVENANCE_LABEL = { estimated: "Estimated", entered: "Entered", measured: "Measured" } as const;
+const PROVENANCE_LABEL = { estimated: "Estimated", entered: "Entered" } as const;
 const PROVENANCE_CLASS = {
   estimated: "border-warn bg-warn-soft",
   entered: "border-line bg-panel-2",
-  measured: "border-good bg-good-soft",
 } as const;
 
-/** Where a value came from: estimated (an assumption to confirm), entered by a person, or measured from data. */
+/** Where a value came from: estimated (an assumption to confirm), or entered by a person. */
 function ProvenanceBadge({ provenance, field }: { provenance: ProvenanceMap | null | undefined; field: string }) {
   const source = provenanceOf(provenance, field);
   const entry = provenance?.[field];
@@ -82,15 +82,15 @@ export function DemandSettings({ data }: { data: WorkspaceSettingsData }) {
         . Seasonality and growth then raise or lower it month by month.
       </p>
 
-      {!canEdit && <p className="mb-3 text-fg-2">You can view demand here; owners and editors can change it.</p>}
+      {!canEdit && <p className="mb-3 text-fg-2">You can view demand here; Agency admins can change it.</p>}
 
       <h3 className="mb-2 font-semibold">Lead sources</h3>
       {canEdit && <AddLeadSource workspaceId={data.workspace.id} />}
       {leadSources.length === 0 ? (
-        <p className="mb-6 rounded-lg border border-dashed border-line p-4 text-fg-2">
+        <EmptyState className="mb-6">
           No lead sources yet. Until you add one, simulations use {formatNumber(data.workspace.settings.leads_per_week, 2)}{" "}
           leads a week.
-        </p>
+        </EmptyState>
       ) : (
         <ul className="mb-6 flex flex-col divide-y divide-line border-y border-line">
           {leadSources.map((src) => (

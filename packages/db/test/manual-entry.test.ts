@@ -32,7 +32,7 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const role of ["owner", "editor", "member", "viewer"] as const) {
     users[role] = await createUser(db, `${role}@manual.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
   }
 });
 
@@ -202,14 +202,14 @@ describe("deleting a solution", () => {
 });
 
 describe("the workspace's name and currency", () => {
-  it("lets an owner change both, and refuses editors and viewers", async () => {
+  it("lets an Agency admin change both, and refuses viewers", async () => {
     await db.as(users.owner!.claims, async (c) => {
       const before = (await c.query("select name, settings ->> 'currency' as currency from workspaces where id = $1", [ws])).rows[0];
       expect((await saveFields(c, "workspaces", { id: ws }, { name: before.name }, { name: "Northbeam Digital" })).status).toBe("saved");
       expect((await saveFields(c, "workspaces", { id: ws }, { "settings.currency": before.currency }, { "settings.currency": "AUD" })).status).toBe("saved");
       expect((await c.query("select name, settings ->> 'currency' as currency from workspaces where id = $1", [ws])).rows[0]).toEqual({ name: "Northbeam Digital", currency: "AUD" });
     });
-    for (const role of ["editor", "viewer"]) {
+    for (const role of ["viewer"]) {
       await db.as(users[role]!.claims, async (c) => {
         expect((await saveFields(c, "workspaces", { id: ws }, { "settings.currency": "GBP" }, { "settings.currency": "USD" })).status).toBe("not_found");
         expect((await c.query("update workspaces set name = 'Mine now' where id = $1", [ws])).rowCount).toBe(0);

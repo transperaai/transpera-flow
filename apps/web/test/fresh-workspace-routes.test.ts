@@ -11,7 +11,7 @@ import { COMPANY_ID, DISTINCTIVE_SETUP, DRAFT, FRESH_SLUG, SECRET_PEOPLE, UNKNOW
 const state = vi.hoisted(() => ({
   variant: "company map only" as FreshVariant,
   known: true,
-  /** Something is published, but the page was asked for a process that isn't one (only the calibration page asks by id). */
+  /** Something is published, but the page was asked for a process that isn't one. */
   published: false,
   canEdit: true,
   setup: { roles: 0, people: 0, clients: 0, clientGroups: 0, processes: 0, published: 0, companyId: "00000000-0000-4000-8000-0000000000c1" as string | null },
@@ -19,7 +19,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({}) }));
+vi.mock("@/lib/auth/session", () => ({ getDb: async () => ({}), getSessionUser: async () => null }));
 vi.mock("next/navigation", () => ({
   notFound: () => {
     state.notFound++;
@@ -32,12 +32,6 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/shell/shell-header", () => ({ ShellHeader: ({ title }: { title: string }) => createElement("header", null, title) }));
 vi.mock("@/lib/access-data", () => ({ canEditWorkspace: async () => state.canEdit, currentUserId: async () => "user-1" }));
 vi.mock("@/lib/restore/empty", () => ({ workspaceIsEmpty: async () => true }));
-vi.mock("@/lib/calibration/data", () => ({ loadCalibrationPage: async () => null }));
-vi.mock("@/lib/calibration/client-data", () => ({ loadClientCalibration: async () => null }));
-vi.mock("@/lib/calibration/import-data", () => ({
-  loadImports: async () => ({ imports: [], previous: {} }),
-  loadLeadSourceOptions: async () => [{ id: "ls1", name: "Website", volumeWeek: 5 }],
-}));
 vi.mock("@/lib/data", async () => {
   const fixture = await import("./fresh-workspace-fixture");
   return {
@@ -79,9 +73,8 @@ const html = async (page: Page, p: unknown = props()) => renderToStaticMarkup((a
 const PAGES: [string, () => Promise<Page>][] = [
   ["/issues", async () => (await import("@/app/w/[slug]/issues/page")).default as Page],
   ["/solutions", async () => (await import("@/app/w/[slug]/solutions/page")).default as Page],
-  ["/people", async () => (await import("@/app/w/[slug]/people/page")).default as Page],
-  ["/forecast", async () => (await import("@/app/w/[slug]/forecast/page")).default as Page],
-  ["/settings/calibration", async () => (await import("@/app/w/[slug]/settings/calibration/page")).default as Page],
+  ["/capacity", async () => (await import("@/app/w/[slug]/capacity/page")).default as Page],
+  ["/sandbox", async () => (await import("@/app/w/[slug]/sandbox/page")).default as Page],
   ["/overview", async () => (await import("@/app/w/[slug]/overview/page")).default as Page],
   ["/", async () => (await import("@/app/w/[slug]/page")).default as Page],
 ];
@@ -117,8 +110,8 @@ describe.each(VARIANTS)("a new client's workspace: %s", (variant) => {
 
     it.each(PAGES)("%s gives an edit button to editors and none to readers", async (path, load) => {
       const out = await html(await load());
-      // The People page has no action to call (role-gating.test.ts), so with no draft to open its editors get links only.
-      if (canEdit && path === "/people" && variant === "company map only") {
+      // The Capacity page has no action to call (role-gating.test.ts), so with no draft to open its editors get links only.
+      if (canEdit && path === "/capacity" && variant === "company map only") {
         expect(out).not.toContain("data-edit-entry");
         expect(out).toContain(`href="/w/${FRESH_SLUG}/processes"`);
       } else if (canEdit) expect(out).toContain("data-edit-entry");
@@ -147,40 +140,32 @@ describe.each(VARIANTS)("a new client's workspace: %s", (variant) => {
     expect(out).toContain("Publish a process and this page fills in.");
   });
 
-  it("tells a reader that an owner or editor publishes first", async () => {
+  it("tells a reader that an Agency admin publishes first", async () => {
     state.variant = variant;
     state.canEdit = false;
-    const out = await html(await (await import("@/app/w/[slug]/forecast/page")).default as Page);
-    expect(out).toContain("An owner or editor publishes a process first, then this page fills in.");
+    const out = await html(await (await import("@/app/w/[slug]/sandbox/page")).default as Page);
+    expect(out).toContain("An Agency admin publishes a process first, then this page fills in.");
     expect(out).not.toContain("Open Processes");
   });
 });
 
-describe("People with nothing published", () => {
-  it("points an editor to Settings, People and shows a reader nothing more than the sentence", async () => {
-    const people = (await import("@/app/w/[slug]/people/page")).default as Page;
-    const editor = await html(people);
-    expect(editor).toContain("Add people in Settings");
-    expect(editor).toContain(`href="/w/${FRESH_SLUG}/settings#people-heading"`);
-    state.canEdit = false;
-    const reader = await html(people);
-    expect(reader).not.toContain("Add people in Settings");
-    expect(reader).toContain("How busy each person is, and how healthy your clients are, come from a simulation of a published process.");
+describe("People redirects to Capacity", () => {
+  it("sends the old People address to the Capacity page", async () => {
+    const people = (await import("@/app/w/[slug]/people/page")).default as unknown as Page;
+    await expect(html(people)).rejects.toThrow(`REDIRECT /w/${FRESH_SLUG}/capacity`);
   });
 });
 
-describe("Historical data with nothing published", () => {
-  it("still offers the workspace-wide imports", async () => {
-    const out = await html((await import("@/app/w/[slug]/settings/calibration/page")).default as Page);
-    expect(out).toContain("Calibrating compares a stage history, deals or time logs with a published process.");
-    expect(out).toContain("Historical data");
-  });
-
-  it("still answers 404 for a ?process= that names no process once something is published", async () => {
-    state.published = true;
-    const page = (await import("@/app/w/[slug]/settings/calibration/page")).default as Page;
-    await expect(html(page, props(FRESH_SLUG, { process: UNKNOWN_ID }))).rejects.toThrow("NOT_FOUND");
-    expect(state.notFound).toBe(1);
+describe("Capacity with nothing published", () => {
+  it("points an editor to Set up, People & roles and shows a reader nothing more than the sentence", async () => {
+    const people = (await import("@/app/w/[slug]/capacity/page")).default as Page;
+    const editor = await html(people);
+    expect(editor).toContain("Add people in Settings");
+    expect(editor).toContain(`href="/w/${FRESH_SLUG}/settings/people"`);
+    state.canEdit = false;
+    const reader = await html(people);
+    expect(reader).not.toContain("Add people in Settings");
+    expect(reader).toContain("Capacity, and who has room for more clients, comes from a simulation of a published process.");
   });
 });
 
@@ -207,7 +192,6 @@ describe("the start page for editors", () => {
 // The route returns the page component unevaluated; resolving it runs the page, as Next does.
 const route = (load: () => Promise<unknown>) => async () => async (p: unknown) => resolve(await ((await load()) as (p: unknown) => Promise<ReactNode>)(p));
 const processPage = route(() => import("@/app/w/[slug]/p/[processId]/page").then((m) => m.default));
-const principlesPage = route(() => import("@/app/w/[slug]/p/[processId]/first-principles/page").then((m) => m.default));
 
 describe("the company map's own URLs", () => {
   const at = (processId: string, searchParams: Record<string, string> = {}) => ({ params: Promise.resolve({ slug: FRESH_SLUG, processId }), searchParams: Promise.resolve(searchParams) });
@@ -221,15 +205,9 @@ describe("the company map's own URLs", () => {
     await expect((await processPage())(at(COMPANY_ID, { version: "2" }))).rejects.toThrow(`REDIRECT /w/${FRESH_SLUG}?version=2`);
   });
 
-  it("/p/<companyId>/first-principles redirects to the Overview", async () => {
-    await expect((await principlesPage())(at(COMPANY_ID))).rejects.toThrow(`REDIRECT /w/${FRESH_SLUG}`);
-    expect(state.notFound).toBe(0);
-  });
-
   it("still answers 404 for any other unknown id", async () => {
     await expect((await processPage())(at(UNKNOWN_ID))).rejects.toThrow("NOT_FOUND");
-    await expect((await principlesPage())(at(UNKNOWN_ID))).rejects.toThrow("NOT_FOUND");
-    expect(state.notFound).toBe(2);
+    expect(state.notFound).toBe(1);
   });
 });
 
@@ -246,7 +224,6 @@ describe("a workspace that doesn't exist", () => {
   it("answers 404 for the company map's URLs too", async () => {
     const at = { params: Promise.resolve({ slug: "no-such-workspace", processId: COMPANY_ID }), searchParams: Promise.resolve({}) };
     await expect((await processPage())(at)).rejects.toThrow("NOT_FOUND");
-    await expect((await principlesPage())(at)).rejects.toThrow("NOT_FOUND");
   });
 });
 

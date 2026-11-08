@@ -80,6 +80,29 @@ describe("the shared simulation pool", () => {
     pool.dispose();
   });
 
+  it("cache: false neither stores a finished run nor evicts the page's own, but still shares a run in flight and uses a kept one", async () => {
+    const f = fakeWorkers();
+    const pool = new SimPool(f.create, 1);
+    // A kept run, then 60 uncached ones (more than the cache holds): the kept one is still there, the uncached are not.
+    await pool.request(model(0), STARTS).promise;
+    for (let n = 1; n <= 60; n++) await pool.request(model(n), STARTS, null, { cache: false }).promise;
+    const before = pool.started;
+    await pool.request(model(0), STARTS).promise;
+    expect(pool.started).toBe(before);
+    await pool.request(model(5), STARTS, null, { cache: false }).promise;
+    expect(pool.started).toBe(before + 1);
+    // In flight, an uncached asker and a caching asker share one run, and it is kept because one of them wanted it.
+    const a = pool.request(model(99), STARTS, null, { cache: false });
+    const b = pool.request(model(99), STARTS);
+    await Promise.all([a.promise, b.promise]);
+    expect(pool.started).toBe(before + 2);
+    await pool.request(model(99), STARTS).promise;
+    expect(pool.started).toBe(before + 2);
+    // A kept run is used by an uncached asker without being touched.
+    await pool.request(model(0), STARTS, null, { cache: false }).promise;
+    expect(pool.started).toBe(before + 2);
+  });
+
   it("uses a result it was given (the live forecast's own run) without running it", async () => {
     const f = fakeWorkers();
     const pool = new SimPool(f.create, 3);

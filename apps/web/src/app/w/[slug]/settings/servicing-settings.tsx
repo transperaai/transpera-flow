@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { SettingsSection } from "./section";
 import type { WorkspaceSettingsData } from "@/lib/data";
-import { HEALTH_SETTINGS, recurrenceFromValue, recurrenceOptions, type HealthSetting } from "@/lib/servicing";
+import { DRIVER_CHOICES, HEALTH_SETTINGS, TIER_RECURRENCE_START, recurrenceFromValue, recurrenceOptions, type HealthSetting } from "@/lib/servicing";
 import { linkServicingProcess, saveHealthSetting, saveServicingRecurrence, saveServicingSla, unlinkServicingProcess } from "./servicing-actions";
 
 
@@ -49,7 +49,10 @@ export function ServicingLinks({ service: sv, data }: { service: ServiceRow; dat
               <SelectField
                 label="How often, per client"
                 value={JSON.stringify(l.recurrence)}
-                options={recurrenceOptions(l.recurrence as RecurrenceJson)}
+                options={[
+                  ...recurrenceOptions(l.recurrence as RecurrenceJson),
+                  ...("driver" in (l.recurrence as RecurrenceJson) ? [] : [{ value: JSON.stringify(TIER_RECURRENCE_START), label: "From the tier" }]),
+                ]}
                 save={async (base, next) => {
                   const b = recurrenceFromValue(base);
                   const n = recurrenceFromValue(next);
@@ -77,6 +80,7 @@ export function ServicingLinks({ service: sv, data }: { service: ServiceRow; dat
                   example: "5 working days: a report finished on day 4 is on time, day 7 is late, day 11 is missed.",
                 }}
               />
+              {"driver" in (l.recurrence as RecurrenceJson) && <TierRecurrence linkId={l.id} recurrence={l.recurrence as DriverRecurrence} disabled={disabled} />}
               {!disabled && (
                 <Button variant="link" size="xs" className="h-auto p-0 text-muted-foreground underline hover:text-destructive mb-1" type="button" disabled={pending} onClick={() => run(() => unlinkServicingProcess(l.id))}>
                   Unlink
@@ -134,6 +138,66 @@ export function ServicingLinks({ service: sv, data }: { service: ServiceRow; dat
   );
 }
 
+type DriverRecurrence = Extract<RecurrenceJson, { driver: unknown }>;
+
+/**
+ * "From the tier": a deliverable of the client's tier (words, links ...), × n, per m. Tasks a month = n × the
+ * deliverable ÷ m. Saves `{perMonth, driver, per}` whole, against the value shown.
+ */
+function TierRecurrence({ linkId, recurrence: r, disabled }: { linkId: string; recurrence: DriverRecurrence; disabled: boolean }) {
+  const per = r.per ?? 1;
+  const change = (patch: Partial<DriverRecurrence>) => ({ ...r, per, ...patch }) as DriverRecurrence;
+  const base = { ...r, per } as DriverRecurrence;
+  const saveWhole = async (next: DriverRecurrence) => {
+    const out = await saveServicingRecurrence(linkId, base, next);
+    return out;
+  };
+  return (
+    <div className="grid gap-3 sm:col-span-4 sm:grid-cols-3">
+      <SelectField
+        label="From the tier"
+        value={r.driver}
+        options={DRIVER_CHOICES}
+        save={async (_b, next) => {
+          const out = await saveWhole(change({ driver: next as DriverRecurrence["driver"] }));
+          return out.status === "saved" ? { status: "saved", value: next } : out.status === "conflict" ? { status: "conflict", theirs: r.driver } : out;
+        }}
+        disabled={disabled}
+        help={{
+          description: "What the client's tier gets each month that sets how much of this work there is. Set the amounts for the tier in Settings, under Tiers & clients.",
+          example: "Words: a tier that gets 4,000 words a month makes more reports than one that gets 1,000.",
+        }}
+      />
+      <NumberField
+        label="Tasks a month (× n)"
+        value={r.perMonth}
+        save={async (_b, next) => {
+          const out = await saveWhole(change({ perMonth: next ?? r.perMonth }));
+          return out.status === "saved" ? { status: "saved", value: next } : out.status === "conflict" ? { status: "conflict", theirs: r.perMonth } : out;
+        }}
+        min={0.01}
+        max={1000}
+        step={0.25}
+        disabled={disabled}
+        help={{ description: "Tasks a month for each whole amount of the deliverable (see per).", example: "1 per 1000 words: 4,000 words a month is 4 tasks a month." }}
+      />
+      <NumberField
+        label="For every (per m)"
+        value={per}
+        save={async (_b, next) => {
+          const out = await saveWhole(change({ per: next ?? per }));
+          return out.status === "saved" ? { status: "saved", value: next } : out.status === "conflict" ? { status: "conflict", theirs: per } : out;
+        }}
+        min={0.01}
+        max={1000000}
+        step={1}
+        disabled={disabled}
+        help={{ description: "How much of the deliverable makes one lot of tasks. Use 1 for links, meetings and builds, 1000 for words.", example: "1000 for words: one task a month for every 1,000 words." }}
+      />
+    </div>
+  );
+}
+
 const HEALTH_HELP: Record<HealthSetting, { description: string; example: string }> = {
   health_initial: {
     description: "How healthy a client is when you haven't entered a health for them, and when a new client is won. Health runs from 0 to 100.",
@@ -177,7 +241,7 @@ export function HealthSettings({ data }: { data: WorkspaceSettingsData }) {
               step={1}
               placeholder={`${rule.fallback} (estimated)`}
               disabled={!canEdit}
-              hint={canEdit ? rule.hint : "You can view these; owners and editors can change them."}
+              hint={canEdit ? rule.hint : "You can view these; Agency admins can change them."}
               help={HEALTH_HELP[key]}
             />
           );

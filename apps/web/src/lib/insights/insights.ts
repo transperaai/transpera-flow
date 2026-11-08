@@ -2,33 +2,16 @@
 // acted on; once acknowledged it is a tracked issue and the row says "Issue #N". Pure: the components render the
 // results, and nothing here touches the map (D24: only acknowledged issues reach it).
 
-import type { FindingCitation, IssueRow } from "@transpera-flow/db";
+import type { IssueRow } from "@transpera-flow/db";
 import { compareCostsDesc, compareRatingsDesc, noCost, ruleOfFinding, type DetectedIssue, type IssueCost, type IssueType, type Rating } from "@transpera-flow/engine";
 import { RULES_UI } from "@/lib/rules/catalogue";
 import { TYPE_LABELS, type RegisterEntry } from "@/lib/issues/register";
 
-/**
- * What produced an insight: one of the analysis rules (only insights acknowledged before B17: rules now give facts, not
- * findings), AI (A46), or a person who added it by hand (B17).
- */
-export type InsightSource = { kind: "rule"; name: string; ruleId: string | null } | { kind: "ai"; name: "AI" | "AI, edited" | "Claude (connector)" | "Claude (connector), edited"; edited?: boolean } | { kind: "manual"; name: "By hand" };
+/** What produced an insight: one of the analysis rules. */
+export type InsightSource = { kind: "rule"; name: string; ruleId: string | null };
 
-/**
- * A detection that may carry its origin. A rule's has none; the AI's (A46) is `origin: "ai"`, with its own "why it
- * matters"; a finding (B17) also carries its id, where it sits (`findingProcessId`, null across the company) and the facts
- * it rests on.
- */
-export type Detection = DetectedIssue & {
-  origin?: "rule" | "ai" | "manual";
-  why?: string;
-  findingId?: string;
-  findingProcessId?: string | null;
-  facts?: FindingCitation[];
-  /** An AI finding someone has changed since AI wrote it. */
-  edited?: boolean;
-  /** Claude proposed it over the MCP connector (B20). */
-  via?: "connector";
-};
+/** A detection of the engine (a rule's, or the forecast's). */
+export type Detection = DetectedIssue;
 
 export interface Insight {
   key: string;
@@ -42,7 +25,7 @@ export interface Insight {
   found: string;
   /** Why it matters, in plain words. */
   why: string;
-  /** The steps it touches (today one; the field is a list so a finding on several steps can say so). */
+  /** The steps it touches (a list, so a detection on several steps can say so). */
   stepIds: string[];
   source: InsightSource;
   detection: Detection;
@@ -52,7 +35,7 @@ export interface Insight {
   dismissed: IssueRow | null;
 }
 
-/** Why a finding of each type matters, in plain words (the detection itself carries the numbers). */
+/** Why a detection of each type matters, in plain words (the detection itself carries the numbers). */
 export const WHY_IT_MATTERS: Record<IssueType, string> = {
   bottleneck: "Work queues up here, so everything after it waits and the whole process slows down.",
   spof: "If this one person or role is away, the work stops. Clients feel it first.",
@@ -72,16 +55,13 @@ export function rest(evidence: string): string {
   return evidence.slice(headline(evidence).length).trim();
 }
 
-/** The first sentence of a finding's evidence, which carries its main number. */
+/** The first sentence of a detection's evidence, which carries its main number. */
 export function headline(evidence: string): string {
   const end = evidence.search(/[.!?](\s|$)/);
   return end === -1 ? evidence : evidence.slice(0, end + 1);
 }
 
 export function sourceOf(d: Detection): InsightSource {
-  if (d.origin === "ai" && d.via === "connector") return { kind: "ai", name: d.edited ? "Claude (connector), edited" : "Claude (connector)", ...(d.edited ? { edited: true } : {}) };
-  if (d.origin === "ai") return d.edited ? { kind: "ai", name: "AI, edited", edited: true } : { kind: "ai", name: "AI" };
-  if (d.origin === "manual") return { kind: "manual", name: "By hand" };
   const id = ruleOfFinding(d);
   return { kind: "rule", ruleId: id, name: id ? RULES_UI[id].name : TYPE_LABELS[d.type] };
 }
@@ -93,7 +73,7 @@ export function sourceOf(d: Detection): InsightSource {
 export function buildInsights(entries: readonly RegisterEntry[]): Insight[] {
   const out: Insight[] = [];
   for (const e of entries) {
-    const d = e.detection as Detection | null;
+    const d = e.detection;
     if (!d) continue;
     if (e.kind === "tracked" && (!e.issue.detected_key || e.issue.status === "dismissed")) continue;
     const issue = e.kind === "tracked" ? e.issue : null;
@@ -105,7 +85,7 @@ export function buildInsights(entries: readonly RegisterEntry[]): Insight[] {
       cost: d.cost,
       number: headline(d.evidence),
       found: rest(d.evidence),
-      why: d.why ?? WHY_IT_MATTERS[d.type],
+      why: WHY_IT_MATTERS[d.type],
       stepIds: d.stepId ? [d.stepId] : [],
       source: sourceOf(d),
       detection: d,
@@ -120,7 +100,7 @@ export function buildInsights(entries: readonly RegisterEntry[]): Insight[] {
     .map(({ x }) => x);
 }
 
-/** Ratings the filter chips show, worst first. Findings are never Great, so that chip only appears if something is. */
+/** Ratings the filter chips show, worst first. Detections are never Great, so that chip only appears if something is. */
 export function ratingCountsOf(insights: readonly Insight[]): { rating: Rating; count: number }[] {
   const order: Rating[] = ["risk", "bad", "good", "great"];
   return order.map((rating) => ({ rating, count: insights.filter((i) => i.rating === rating).length })).filter((c) => c.rating !== "great" || c.count > 0);
@@ -128,14 +108,5 @@ export function ratingCountsOf(insights: readonly Insight[]): { rating: Rating; 
 
 export const filterByRating = (insights: readonly Insight[], rating: Rating | ""): Insight[] => (rating ? insights.filter((i) => i.rating === rating) : [...insights]);
 
-/**
- * The first `n` insights for a short list (the Overview shows five). AI insights have no cost, so they sort after the
- * costed rule findings of their rating and could all fall below the cut; if any exists and none is in the first `n`, the
- * top AI insight takes the last place, so the AI's view is never hidden behind "Show all".
- */
-export function limitInsights(insights: readonly Insight[], n: number): Insight[] {
-  const head = insights.slice(0, n);
-  if (head.length < n || head.some((i) => i.source.kind === "ai")) return head;
-  const ai = insights.slice(n).find((i) => i.source.kind === "ai");
-  return ai ? [...head.slice(0, n - 1), ai] : head;
-}
+/** The first `n` insights for a short list. */
+export const limitInsights = (insights: readonly Insight[], n: number): Insight[] => insights.slice(0, n);

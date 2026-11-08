@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { RATINGS } from "@transpera-flow/engine";
-import { contrastRatio, normaliseHex, oklchToHex, type Hex } from "@/lib/branding/contrast";
+import { contrastRatio, normaliseHex, oklchToHex, type Hex } from "./contrast-helpers";
 import { formatHours, formatNumber } from "@/lib/format";
 import { RATING_STYLE } from "@/lib/map/rating";
 import { tileColours, tileHeadline } from "@/lib/map/tile";

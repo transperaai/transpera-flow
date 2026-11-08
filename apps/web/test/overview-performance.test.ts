@@ -3,10 +3,8 @@ import { northbeamBundle, northbeamIssues, partOf, toEngineModel } from "@transp
 import { simulate, type EngineModel } from "@transpera-flow/engine";
 import { forecastInsights, forecastModel } from "@/lib/forecast/forecast";
 import { timelineData } from "@/lib/forecast/timeline";
-import { buildInsights } from "@/lib/insights/insights";
-import { registerEntries } from "@/lib/issues/register";
-import { findingsByProcess } from "@/lib/overview/by-process";
-import { countByRating, openIssues, openedVersusResolved, timeSplitByProcess, timeSplitOf } from "@/lib/overview/health";
+import { groupByProcess } from "@/lib/overview/by-process";
+import { countByRating, openIssues, timeSplitByProcess, timeSplitOf } from "@/lib/overview/health";
 import { rerate } from "@/lib/rules/edit";
 
 // The Overview stays fast (issue #173, B15). It simulates the company twice, each once, in workers: the workspace's own
@@ -44,11 +42,9 @@ describe("the Overview at 24 months, full seeded Northbeam", { tags: ["perf"] },
     const issues = northbeamIssues();
     const derive = () => {
       const findings = [...rerate(r.base, r.baseResult, {}, r.bundle.process.id), ...forecastInsights(r.horizonModel, r.horizonResult, {}, START)];
-      const insights = buildInsights(registerEntries(issues, findings));
-      const groups = findingsByProcess({ parts, pipelineId: r.bundle.process.id, insights, issues, solutions: [] });
+      const groups = groupByProcess({ parts, pipelineId: r.bundle.process.id, facts: findings, issues, solutions: [] });
       countByRating(groups.map((g) => g.rating));
       openIssues(issues, new Date());
-      openedVersusResolved(issues, new Date());
       timeSplitOf(r.horizonModel, r.horizonResult);
       timeSplitByProcess(r.horizonModel, r.horizonResult, parts);
       return timelineData(r.horizonModel, r.horizonResult, r.bundle, START);

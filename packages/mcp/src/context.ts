@@ -1,21 +1,16 @@
 import { listProcesses, type Db, type ProcessRow } from "@transpera-flow/db";
 import { ToolError } from "./result";
 
-/** Per-request state: a Supabase client acting as the token's user, and which token it is. */
+/** Per-request state: a database handle acting as the token's user (claims set per query), and which token it is. */
 export interface ToolContext {
   db: Db;
   tokenHash: string;
-  /** Who acts, when it is known without looking the token up (the web app's upload acts as the signed-in user, with no token). */
+  /** The token's owner. */
   userId?: string | null;
   /** The token's active workspace (set_active_workspace), if any. */
   activeWorkspaceId: string | null;
   /** ISO date used when a tool needs "today". */
   today: string;
-  /**
-   * Called after `publish_process` has made a version live (A46: the web app starts its AI analysis here, after the
-   * response). A failure in it never reaches the caller.
-   */
-  onPublished?: (processId: string) => void;
 }
 
 export interface WorkspaceRef {
@@ -27,14 +22,9 @@ export interface WorkspaceRef {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function check<T>(r: { data: T | null; error: unknown }): T {
-  if (r.error) throw r.error;
-  return r.data as T;
-}
-
 /** Workspaces the user can see; RLS decides. */
 export async function visibleWorkspaces(db: Db): Promise<WorkspaceRef[]> {
-  return check(await db.from("workspaces").select("id, name, slug, settings").order("name"));
+  return await db.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).orderBy("name").execute();
 }
 
 const summary = (w: WorkspaceRef) => ({ id: w.id, name: w.name, slug: w.slug });

@@ -15,15 +15,22 @@
 //   * a step's hands-on time or wait that took the server default has a provenance note starting with SERVER_DEFAULT_NOTE_PREFIX;
 //   * a step whose branches took the share the others leave has `provenance.branch_odds.defaulted`, which goes away the moment
 //     anyone writes one of its branches' probabilities (a trigger, migration 20261129000000).
-// Filling the value in (a person edits it, or confirms it) replaces the marker, so the gap clears. Pure: no I/O.
+// Filling the value in (a person edits it, or confirms it) replaces the marker, so the gap clears.
+//
+// Capacity (P4, docs/plans/capacity/p4-editor-brief.md) adds one more kind of line to the same list, from `capacityBlockers`: what the
+// engine's `capacityProblems` names (a split that doesn't add up, a servicing link that follows a deliverable its service doesn't have, a
+// step for the client's manager with no role). The run goes ahead on the value the engine can use; the list says what to fix. (The
+// "worth adding for capacity" notes, a missing split or source, were removed in Q3.)
+// Pure: no I/O.
 
+import { capacityProblems, type EngineModel } from "@transpera-flow/engine";
 import type { ProcessFile } from "./process-file";
 import type { ProcessBundle, StepRow } from "./types";
 
 /** What a step's provenance note starts with when its value is the server's default for the kind of step (building tools write it). */
 export const SERVER_DEFAULT_NOTE_PREFIX = "Server default for a";
 
-export type GapKind = "role" | "hands_on" | "wait" | "odds" | "volume";
+export type GapKind = "role" | "hands_on" | "wait" | "odds" | "volume" | "capacity";
 
 /** The step, in the terms the check needs: what kind of step it is, and which of its values are present. */
 export interface GapStep {
@@ -43,8 +50,6 @@ export interface GapInput {
   steps: GapStep[];
   /** Incoming volume: known, missing, or not known here (a page that did not load demand says nothing about it). */
   volume: "known" | "missing" | "unknown";
-  /** For a file: it carries lead volume as a suggestion, so the volume gap says to accept it. */
-  volumeSuggested?: boolean;
 }
 
 export type GapFix = { type: "step"; stepId: string } | { type: "settings"; where: "demand" | "services" };
@@ -80,9 +85,7 @@ export function findGaps(input: GapInput): SimulationGap[] {
       text:
         input.kind === "servicing"
           ? "No recurrence: link this process to a service and set how often it repeats in Settings"
-          : input.volumeSuggested
-            ? "No incoming volume yet: accept the lead volume suggestion, or add it in Settings"
-            : "No incoming volume: add lead volume in Settings or accept the suggestion",
+          : "No incoming volume: add lead volume in Settings",
       fix: { type: "settings", where: input.kind === "servicing" ? "services" : "demand" },
     });
   }
@@ -100,7 +103,7 @@ export const gapLines = (gaps: readonly SimulationGap[]): string[] => gaps.map((
  * The check's input for a checked file. `hasRole` says whether a role the file names will end up on its step (the company has
  * it, or the person uploading mapped it): the preview calls this again as the person maps roles.
  */
-export function gapInputFromFile(file: ProcessFile, opts: { hasRole: (role: string) => boolean; volume: GapInput["volume"]; volumeSuggested?: boolean }): GapInput {
+export function gapInputFromFile(file: ProcessFile, opts: { hasRole: (role: string) => boolean; volume: GapInput["volume"]}): GapInput {
   const outgoing = new Map<string, ProcessFile["links"]>();
   for (const l of file.links) outgoing.set(l.from, [...(outgoing.get(l.from) ?? []), l]);
   // A reason for assuming a value is not a value: without a number the importer still fills in its default.
@@ -109,7 +112,6 @@ export function gapInputFromFile(file: ProcessFile, opts: { hasRole: (role: stri
   return {
     kind: file.kind,
     volume: opts.volume,
-    ...(opts.volumeSuggested ? { volumeSuggested: true } : {}),
     steps: file.steps.map((s): GapStep => {
       const kind = s.type === "step" ? "work" : s.type === "wait" ? "wait" : s.type === "decision" ? "decision" : "other";
       const leaving = outgoing.get(s.id) ?? [];
@@ -195,4 +197,34 @@ export function gapInputFromBundle(bundle: Pick<ProcessBundle, "steps" | "edges"
       };
     }),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Capacity: what the engine cannot use (P4)
+// ---------------------------------------------------------------------------
+
+/** The step a capacity problem is about, from the path the engine gives (`steps.<id>...`). */
+const stepOfPath = (where: string, ids: ReadonlySet<string>): string | null => {
+  const id = /^steps\.([^.]+)/.exec(where)?.[1];
+  return id && ids.has(id) ? id : null;
+};
+
+/**
+ * What the engine's `capacityProblems` finds in a model, as blockers. A problem about a step links to it; the others (a service's
+ * deliverables, a person's portfolio) link to Settings. `model` is null when the process can't be turned into a model yet.
+ */
+export function capacityBlockers(model: EngineModel | null): SimulationGap[] {
+  if (!model) return [];
+  const ids = new Set(model.steps.map((s) => s.id));
+  const names = new Map(model.steps.map((s) => [s.id, s.name]));
+  return capacityProblems(model).map((p): SimulationGap => {
+    const stepId = stepOfPath(p.where, ids);
+    return {
+      kind: "capacity",
+      stepId,
+      stepName: stepId ? (names.get(stepId) ?? null) : null,
+      text: p.message,
+      fix: stepId ? { type: "step", stepId } : { type: "settings", where: "services" },
+    };
+  });
 }

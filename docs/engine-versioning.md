@@ -1,7 +1,7 @@
 # Engine versioning and golden models
 
 The engine's numbers are the product, so none may move unnoticed (docs/PRD.md §6.9 layer 3, decision D16;
-issue #22; ADR 0009). Five golden models are run at a fixed seed on every push, their key outputs are compared
+issue #22; ADR 0009). Eleven golden models are run at a fixed seed on every push, their key outputs are compared
 exactly with approved baselines, and every change that moves one needs a new baseline and a new `ENGINE_VERSION`,
 which every run records.
 
@@ -13,9 +13,14 @@ which every run records.
 | `northbeam-seeded` | `northbeamWithServicing()` | Northbeam with its 26 named clients (the seed now counts clients per service: see `northbeam-groups`): SEO and PPC services with condition-tag routing, 11 named people, the 26-client roster, a 10% overtime cap, and two servicing processes whose late and missed tasks move health and churn. |
 | `northbeam-groups` | `northbeamWithClientGroups()` | Northbeam with its clients counted per service (17 SEO clients at health 83, 12 PPC clients at health 52, from `NORTHBEAM_CLIENT_GROUPS`) and simulated as unnamed clients, with the same servicing (issue #120). |
 | `northbeam-drivers` | `northbeamWithChurnDrivers()` | `northbeam-groups` with all ten churn drivers switched on at the prototype's weights and one of the user's own (a competitor undercutting): who the churn is blamed on, and what each cause measured (A56, below). |
+| `northbeam-money` | `northbeamWithMoney()` | `northbeam-groups` with 18,000 a month of overheads and PPC priced hourly at 95, run month by month (engine 1.11.0): billed revenue by kind, hourly work, paid labour, overheads, profit, and the monthly sales, revenue and money series. |
+| `northbeam-chances` | `northbeamWithChances()` | `northbeam-drivers` with `late` measured as events (effect 0.6, 3 months), `handoff` entered (chance 0.05, effect 1, 2 months), the custom driver at chance 0.1 effect 0.5, a PPC fee range 3,000 to 6,000 and a `fee` channel of PPC +8% from month 4 with the price driver on, run month by month (engine 1.12.0). |
+| `northbeam-channels` | `northbeamWithChannels()` | `northbeam-money` with monthly channels from month 3: leads x1.2, conversion x0.9, hands-on time x0.7 on the heaviest step, a wait of 0 to 8 h, rework 0 to 0.1, role cost x1.1, overheads x1.25, one person's capacity x0.9 and base churn x1.3 (engine 1.12.0). |
+| `larkspur-time` | `larkspurWithPurposes()` | Larkspur with a purpose on every step (a mapping by step id: `LARKSPUR_PURPOSES`), run month by month for six months of its week-26 horizon: where working time goes (engine 1.14.0), first-pass hands-on hours by purpose, rework, client hours, idle and hours available, for the team and each role. Every other number is `larkspur`'s. |
+| `capacity` | `capacityModel()` | The client capacity app's example agency (engine 1.17.0; re-baselined from 1.16.0 for least-busy placement counting the full step time, and from 1.15.0 for step splits, tier multipliers and changes, below): six tier services in two departments with driver-based servicing steps, 26 people with team time, portfolios and tiers, 13 named clients (with overrides and hand-holding) beside 145 counted ones, won clients placed on the least busy person who serves the tier. Run month by month with where each person's time goes. |
 | `larkspur` | `larkspurModel()` | Larkspur Creative, the "second, messier sample agency" (§6.9): overloaded designers, a copywriter past her week on overtime, an 18-client named roster whose health drives churn, and the corners Northbeam leaves alone (below). |
 
-Each runs with the app's defaults, 30 replications at seed 1. The outputs kept (`keyOutputs` in
+Each runs with the app's defaults, 30 replications at seed 1 (`northbeam-money`, `northbeam-chances`, `northbeam-channels`, `larkspur-time` and `capacity` also ask for the monthly series; `capacity` also asks for `personTime`). The outputs kept (`keyOutputs` in
 `packages/engine/test/golden.ts`) are throughput (won, lost, done, wins a week), cycle time (mean, P50, P90), new
 MRR, billed, LTV added and lost revenue, labour, overtime hours and cost, clients at risk and churned, servicing
 touchpoints, the bottleneck role, step and person, utilisation per role (total with its 10–90% range, and its
@@ -107,8 +112,8 @@ true; the pooled month-by-month `mrr`, added in 1.9.0, decays with the pool's `c
 count, while a won retainer's `billed` uses that service's own `churnMonthly`, so the two can differ when the rates do).
 `withMarketCondition` replaces any schedule on the model. The
 `northbeam-downturn` golden model runs Northbeam as seeded under Downturn, so a change to this maths shows up in the
-golden test. Time to hire and late payments are stored but change
-nothing, as the engine has no hiring or cash-flow model yet. To run a model under one condition (the stress test
+golden test. Late payments are stored but change nothing, as the engine
+has no cash-flow model yet; Time to hire acts through the Sandbox's hiring delay only (below, engine 1.12.0). To run a model under one condition (the stress test
 on solution pages): `simulate(withMarketCondition(model, MARKET_PRESETS.downturn.factors), reps, seed)`.
 
 ## Churn drivers (engine 1.6.0)
@@ -154,6 +159,215 @@ today's price and tenure, and the pooled billing estimate still uses the won-mon
 measured on the clients that are still active, so a driver that makes clients leave also thins the sample it is
 measured on; the share is of expected churn each week, which keeps that small.
 
+## Capacity inputs (engine 1.15.0, capacity P2)
+
+Added 31 Oct 2026 (`docs/plans/capacity/p2-engine-inputs-brief.md`, ADR 0022). **No existing simulated number moved.** Every field below is optional and unset it changes nothing; the approved diff of the ten existing golden models is `engineVersion` and nothing else. `capacity` is new. Approved with `golden:approve --bump "capacity inputs (P2): new golden; no existing number moved"`. The step work split, tier multipliers and changes (`EngineStep.split`, `tierMultiplier`, `EngineModel.changes`) were P3's, read since 1.16.0 (next section).
+
+- **Driver recurrences** (`{ perMonth, driver, per }`): each client's tasks a month are `tasksPerMonth` of its effective deliverables (its `overrides`, else its tier's). A non-ad-hoc driver runs the `{ every: "month", times }` path with the per-client rate, on its `servicing:<client>:<service>:<process>` stream (only driver links use it, so no existing stream moves). `"adhoc"`: each client-month draws Bernoulli(`chance`), then Poisson(`requests`) tasks placed uniformly in the month, from the new stream `adhoc:<client>:<service>:<process>`. Poisson counts use exponential gaps (`log` from det-math only). A month on the clock is 4.33 weeks, as `{ every: "month" }` and `tasksPerWeek` read it (ADR 0022 note 3); `clientTasksPerWeek` resolves a driver for the loads and `servicingTasksPerWeek`.
+- **`clientMix: "groups-add"`** adds the counted clients to `clients` in `withClientGroups`; keys stay unique (a taken number is skipped). `"groups-replace"` and omitted are the old code. Copies of an expanded model (`carryExpanded`) are not expanded twice.
+- **Portfolios and managers.** `withClientGroups` deals a service's counted clients to people with a `portfolio[service]` in people order (assigned in each of their roles the service's steps use, and `manager` set); the rest stay unassigned. A `toClientManager` step queues for the client's manager whatever their role (the step joins their list for those clients only, never the shared queue), else the client's assignee in the role, else the pool; leave and end dates fall back to the pool. The manager's hours are theirs in `PersonResult`, and their own (first) role's in the role results; they count in `PersonResult.clients` and the client's team.
+- **Per-client overrides.** `adhocHours` scales the drawn times of the client's ad-hoc process so the steps' mean total is `adhocHours`; `stepFactor` multiplies the client's drawn times (number, or per step); both after the draw. `handHoldingHours[role]` is ongoing load (`hours / 4.33` a week) on the client's assignee in the role, its manager for a role a `toClientManager` step uses, on top of the servicing tasks (`clientHandHolding`, also in `rosterLoads`).
+- **Team time and ramp** (`availability.ts`). Capacity in a month is capacity x `availableShare`. It is the existing capacity channel (channels.ts): the shares are injected as that channel for the people who have them, multiplied into the model's own capacity channel, on the model's channel months, the run's calendar months, or 52/12-week months. The hours for work, the utilisation denominator and the roles' hours follow. Paid hours (`labourCost`) don't fall. `availabilityFloor` is untouched.
+- **`placeNewClients: "least-busy"`** picks, per needed role, the person with the lowest busy share who serves the service's `tier` (`EnginePerson.tiers`; omitted serves all). Busy share here is planned: the servicing hours a week their current clients are expected to bring plus their ongoing load, over their hours now (realised hours lag the assignment, so a run of wins would all land on one person). A role nobody serving the tier holds stays shared. The won client's manager is the person placed in the role of its `toClientManager` steps.
+- **`SimulateOptions.personTime`** returns `SimulationResult.personTime`: mean hands-on hours a month per person per step and mean clients per person per service. Read off the run; not asked for, nothing is allocated.
+- **`capacityProblems(model)`** is `checkCapacityInputs`. `simulate` doesn't call it or throw on problems.
+
+**Timing** (`capacity`, 30 replications, month by month with `personTime`, one container with a load average of about 8 on 4 cores): about 4.4 to 6 s. 158 clients at about 25 tasks each a month through 28 steps for 52 weeks is about 20 times the seeded Northbeam's work (250 ms for 13 weeks), so the 1.5 s target of the 40-step model doesn't apply; the golden test runs it with the absence test and the issue ratings in about 6 s.
+
+## Step splits, tier multipliers and changes (engine 1.16.0, capacity P3)
+
+Added 31 Oct 2026 (`docs/plans/capacity/p3-engine-changes-brief.md`, ADR 0022 "Engine 1.16.0"). **Only the `capacity` golden moved**: the approved diff of the ten other golden models is `engineVersion` and nothing else (checked by running the golden test unapproved first, when `capacity` alone failed). `capacity` moved because `capacityModel()` has splits, tier multipliers and the prototype's 13 changes, which the run now reads. Approved with `golden:approve --bump "step splits, tier multipliers and changes (P3)"`. A model with none of `EngineStep.split`, `EngineStep.tierMultiplier` and `EngineModel.changes` takes exactly the old path (one null test per draw).
+
+- **What is read.** A step's drawn hands-on time is multiplied, after the draw (no stream moves), by `stepTimeFactor(step, tier, changes, month, clientStepFactor)`: the tier multiplier, the split with the changes in force that month, and the client's own `stepFactor` (applied once, inside the factor). A client's `adhocHours` replaces the step's base time before the split (the residual of a change is not scaled by it). The tier is the tier of the task's service; pipeline work and work with no client uses no tier and no client factor (its split and changes still act, a change limited by `tiers` does not).
+- **Months.** A change is read by the month the hands-on time starts in: the model's channel months when it has channels (team time and ramp make them), else the calendar months of a monthly run, else 52/12-week months from the start. The warm-up is month 1 (as for team time).
+- **Cache.** The factor and the parts are cached per step, tier and month (and per work scale for the rare client with its own ad-hoc hours): `capacity-time.ts`.
+- **Repairs.** `simulate` doesn't throw on what `checkCapacityInputs` names. A split that is not three shares of 0 to 1 adding to 1 (within `SPLIT_TOLERANCE`) is no split: the step is all manual. A change's adoption is held to 0 to 1; a start month below 1 acts from month 1, one that is not a number never starts; a bad ramp is no ramp; `remove` is held to 0 to 1; a bad residual is 0; a speed-up below 1 or not a number is 1. A negative tier multiplier counts as 0 and one that is not a number as 1. An effect on an unknown step acts on nothing.
+- **`PersonTime`** (asked for with `personTime: true`) gains, when a step has a split: `partHours` (hands-on hours a month per person and step by automatable / augmentable / manual, `actual` after the changes and `before` for the same draws without any change), `freed` (`total`, `byChange`, `byPerson`: the hours the changes freed a month; the hours freed are `before − actual`), and with `monthly: true` `monthly` (everyone together, hours in each month: parts after and before, and the hours freed per change). Not asked for, nothing is allocated.
+- **Ordering rule for the hours freed.** Changes act in the order of the model's `changes` list (and a change's effects in their order); a change is credited with the time its effects take off a part given the changes before it have already acted. The savings add up to the base time less the time taken, so when two changes act on one part the earlier one is credited first. The pure version is `stepPartsDetail`.
+- **Not in scope.** Changes act on hands-on time only. Rework, waits and routing stay as they are; "also changes rework or waiting" is later.
+
+**Timing** (`capacity`, 30 replications, month by month with `personTime`, same container, load average about 8): 4.6 to 4.9 s before, 4.85 to 5.06 s after (within the noise; the changes also shorten the work the run does).
+
+## Least-busy placement uses the full step time (engine 1.17.0, capacity P2b)
+
+Added 31 Oct 2026 (`docs/plans/capacity/p2b-mapping-brief.md`). **Only the `capacity` golden moved**: the approved diff of the ten other golden models is `engineVersion` and nothing else (checked by running the golden test unapproved first, when `capacity` alone failed). Approved with `golden:approve --bump "least-busy placement counts tier multipliers and changes"`.
+
+- **What changed.** `plannedHours` (the busy share used to place a won client with `placeNewClients: "least-busy"`) took a step's plain `work` times the client's factor. For a step with a split or a tier multiplier it now takes `work` times `capacityEntry(...).f` (the tier multiplier of the service's tier and the changes in force in the month the client is placed) times the client's factor, the same number the run scales a drawn time by. A step with neither takes exactly the old expression.
+- **Months.** The month is the one the client is added in, fixed when it is placed (the planned hours are taken off again by the same amount when it leaves).
+- **Scope.** Only models with `placeNewClients: "least-busy"` and a step with `split` or `tierMultiplier` are affected.
+
+## Time by purpose (engine 1.14.0, sandbox phase 4)
+
+Added 29 Oct 2026 (`docs/plans/sandbox-p4-brief.md`). **No existing simulated number moved.** The approved diff of the nine existing golden models is `engineVersion` and nothing else; `larkspur-time` is new. Approved with `golden:approve "Time and what it achieves (sandbox phase 4): ..."`. Beyond the goldens, the full `simulate` output of nine fixture models at two seeds, monthly on and off (8 replications), is byte-identical to the parent commit's once `monthly.time` is taken out (hashed with sha256), and Larkspur with a purpose on every step equals Larkspur without one.
+
+- **`EngineStep.purpose`** is an opaque key (omitted: `""`). The engine never reads it for a decision: nothing draws a random number, reorders a sum or changes an event. The app maps keys to the workspace's categories (names, order and the two mappings below live outside the engine, so a rename or a reorder needs no run).
+- **`MonthlyResult.time`** (`purposes`, `roles`, `people`, `team`; each a `TimeSplit` of `Stat`s over replications, hours in the month): `purpose[key]` first-pass hands-on hours; `rework` hands-on hours on repeat passes (a back-edge or a same-step redo, by `repeatLoop`, whatever the step's purpose, never in `purpose`); `ongoing` = max(0, work - sum of purposes - rework): the client hours that are not steps; `idle` = max(0, hours - work); `hours` = hours available + overtime worked, the 100%; `uncovered` (roles and team) = work nobody was there to do. Per replication, purposes + rework + ongoing + idle = max(hours, work). The team is the sum over people (so a person in two roles is counted once); a role is attributed by the step's role, the same as `roleWork`, so a role's split adds up to its busy share's work. A step with no model role counts for the person only.
+- **Where it is booked** (`startService`, in the existing `if (mon)` block): from the *final* `handsOn`, after the per-person factor and the step-work channel (`chWork`). `repeatLoop` is pure, so it is now called whether or not `t >= 0` (the run's own `rework` totals keep their `t >= 0` guard). The warm-up and a job straddling the horizon count only their in-window part (`spread` clips). A month's rework therefore differs a little from `rework.roleHours`, which counts a pass whole at its start: documented, not reconciled.
+- **The sale side** (`afterSaleSteps(model)`, pure, exported): every step that can reach a win but no longer a loss, i.e. the steps after the deciding step (an edge only to a win and an edge only to a loss), which is not in the set: it counts as winning work (Austin, 30 Oct; before that the set included it). Pure, so no run and no golden number moved; empty when no lost end is reachable. The app uses it for the Automatic purpose of a pipeline step (Austin, 29 Oct: after the sale moves the client's job forward; 30 Oct: the deciding step is Winning work).
+- **Output size and cost.** `MonthlyResult` grows by keys x (roles + people + 1) x months x 3 numbers; only monthly runs pay.
+- **Review fixes (29 Oct, same version: only `time` changed and no golden value moved).** (1) Client hours of someone on leave that no colleague of the role was there to take that month (`MonthlyReplication.roleAwayUnshared`; a one-person role on holiday) were in the role's work but no one's: the role's split showed them as work above its hours ("overtime capped") and the team's dropped them. They are now `uncovered` for the role and the team, and not the role's work in the split (busy shares are unchanged). (2) `TimeSplit.withRework[key]`: each key's first-pass hours plus all rework as one series per replication, so the app's Fixing row (its steps and every repeat pass) has the range of the sum; adding the two ranges is not a range of anything and can be narrower as well as wider. Checked by hand in `time-hand.test.ts` (purposes, the per-person factor, client upkeep, leave with and without a colleague, overtime, a mid-month hire and leaver, rework).
+
+**Timings** (30 replications, seed 1, one container with noise of about 5%, the parent commit `93f67f9a` against this branch, interleaved in separate processes, best of 12 per run, best of 5 runs; budget: no case more than 5% or 10 ms slower). A model without purposes pays only the extra bookings and the larger monthly output:
+
+| Engine case | Before (ms) | After (ms) | Change |
+| --- | --- | --- | --- |
+| northbeam pipeline 13w | 26 | 27 | +3.5% |
+| northbeam groups+servicing 13w | 68 | 74 | +8.9% (+6 ms) |
+| northbeam named roster 13w | 38 | 40 | +4.7% |
+| larkspur 26w | 63 | 64 | +1.7% |
+| large 40 steps 25 people 26w | 606 | 578 | -4.6% |
+| northbeam groups 24m, no monthly | 387 | 392 | +1.1% |
+| northbeam groups 24m, monthly | 492 | 516 | +4.9% |
+| larkspur 24m, monthly | 296 | 312 | +5.4% (+16 ms) |
+| northbeam pipeline 12m, monthly | 74 | 83 | +11.9% (+9 ms) |
+| large 40 steps 26w, monthly | 661 | 709 | +7.1% (+47 ms) |
+| larkspur 24m, monthly, a purpose on every step (new; before = without purposes) | 282 | 299 | +6.3% |
+
+The two cases above the budget in that table are noise, not cost: re-measured alone, interleaved the same way (6 runs of 20), the 40-step monthly case reads 590 and 585 ms (-0.9%), and Larkspur 24m monthly reads between +2.3% (+7 ms) and +9% (+25 ms) from one set of runs to the next. A copy of the engine with the new bookings taken out read between +0.8% and +9% against the parent in the same runs, and a CPU profile of Larkspur 24m monthly (30 runs) totals 390.8 ms a run against 389.8 ms, so the run-to-run spread on this container is as large as the change. Two things keep the cost down: hands-on time is spread to a person, a role, a purpose and an overtime row from one decomposition into months (`spreadParts` / `addParts`, the same values `spread` adds, bit for bit) instead of one per row, and the month-by-month `Stat`s of the split come from typed buffers (`splitFrom`) rather than a sorted copy per series (the first version cost 5 to 14% on the monthly cases). Only monthly runs pay anything.
+
+**Review re-measurement (29 Oct).** Wall-clock timings on this shared container swing ±5-10% even interleaved in one process (the parent against a copy of itself reads -5% to +5%), so the review counted instructions instead (`valgrind --tool=cachegrind --cache-sim=no`, `node --single-threaded`, 3 runs of 30 replications at seed 1 in one process, less the start-up; repeat runs agree to 0.1%). Against the parent: northbeam pipeline 12 months monthly +5.4% (about 4 ms of 75, inside the 10 ms floor; most of it is building the split's `Stat`s, which runs once per `simulate` and mostly unoptimised), Larkspur 24 months monthly +1.9%, the 40-step 25-person 26-week monthly run +4.0%. With the review's fixes (`withRework`, unshared leave hours) and a single-month fast path in the booking (the same additions in the same order), the large run is +2.1%, Larkspur +2.4% and the pipeline +5.9% (about 4.4 ms): every case within budget.
+
+The web app's timing tests (`pnpm --filter @transpera-flow/web test:perf`: `horizon-performance`, `sandbox-performance`, `overview-performance`, `scenarios`; 16 tests) pass on the parent commit and on this branch, run alone, in separate processes, twice each. Their own best-of-3 figures (ms; parent run 1 / run 2, this branch run 1 / run 2; this branch's Sandbox and Overview runs use the model with purposes on):
+
+| Case (limit) | Parent | This branch |
+| --- | --- | --- |
+| 24 months, pipeline-only Northbeam (1,200) | 238 / 258 | 234 / 227 |
+| 24 months, full Northbeam (2,000) | 576 / 756 | 652 / 545 |
+| 24 months, full Larkspur (2,000) | 359 / 383 | 395 / 398 |
+| 24 months, full Northbeam in a downturn (2,000) | 489 / 442 | 432 / 484 |
+| 24 months, full Northbeam, monthly output (2,000) | 668 / 596 | 888 / 619 |
+| 24 months, full Larkspur, monthly output (2,000) | 378 / 372 | 498 / 425 |
+| 12 months, 2,000 clients a group, 4 reps, weights / three chances (5,000 and 2 x) | 2,276 / 2,516 and 1,741 / 2,722 | 2,051 / 2,802 and 1,521 / 2,366 |
+| Sandbox, seven segments at 12 months, total (7,000) | 2,787 / 3,506 | 3,256 / 3,502 |
+| Sandbox, channel-heavy, one run (1,000) | 507 / 392 | 373 / 365 |
+| Sandbox, price rise, two runs (1,000 each) | 448, 375 / 668, 561 | 700, 642 / 441, 375 |
+| Overview runs at 24 months, full Northbeam (2,250) | 647 / 662 | 738 / 646 |
+| Overview page work at 24 months (100) | 11.3 / 20.6 | 10.5 / 11.4 |
+
+The run-to-run spread between two runs of the same commit (up to 30%: full Northbeam 576 and 756 on the parent) is larger than any difference between the commits, so the engine table above, interleaved and best of many, is the controlled comparison; every web case is far inside its limit.
+
+## Warm-up hits and three review fixes (engine 1.13.0, sandbox phase 3 review)
+
+Added 29 Oct 2026, from the adversarial review of phase 3. **Only `northbeam-chances` moved** (its two entered chances: account manager
+changes and the competitor); every other golden value, and the full `simulate` output of eleven fixture models at two seeds, 52-week
+horizons, planned starts, leave, every market preset and calendar months, is 1.11.0's to the last bit, monthly on and off.
+
+- **Hits during the warm-up carry into the window** (brief Q11, which 1.12.0 missed: weekly ticks only run from week 1, so every
+  client started the run unhit and an entered chance ramped up over its first `months`). At its first tick in chance mode, a client on
+  the book from the start draws, on its own `hit:<driver>:<client>` stream and before the window's draw, one draw for each earlier
+  warm-up week whose hit would still last (at most the hit's weeks less one, at most the warm-up). It then starts as likely to be under
+  a hit as at any later tick: 1 - (1 - q)^(weeks a hit lasts), checked by hand in `chances-review.test.ts`. Those hits are not counted in
+  the reported chance. A driver a channel switches to chance mode from a month starts that month fresh, so the months before it stay
+  the run without it. Measured drivers have no warm-up events to draw from (touchpoints, visits and onboarding count from t = 0), so they
+  still start unhit.
+- **"Same expected churn" is about the same, not the same.** `equivalentEvents` gives the expected churn of a client on the book at the
+  start. Over a run a chance-mode driver comes out lower than its weight: hits fall on fewer clients, those clients leave sooner (so the
+  ones left are less often hit), and measured causes start unhit. On a 2,000-client group over 12 months with the warm-up's hits: results
+  and your own drivers at chance 1 match exactly, the price driver matches exactly, handoff (2.5% a month, +410% for 3 months) gives 82%
+  of the weight's extra churn, late work and team overload (measured) 85% and 79%. Settings says so.
+- **The price driver's equivalent** was the generic `weight × pressure / exposure`, about a third of the right effect (its pressure is
+  averaged over the whole run, its events last only after a rise). It is now `priceEffectOfWeight`: `weight × 2 × 0.1 × 13 / (months ×
+  52/12)` per 10% rise (0.2 at weight 1 for 3 months), and `projectChurn` converts a weight-mode price pressure the same way.
+- **A churn channel on merged clients:** clients worked out together (a group without servicing) took the market's multiplier for their
+  reported churn, not the run's with the channel's factor. Simulated churn was right; the per-client `churnMonthly` now is too.
+- **The overtime limit** was multiplied as `cap × (capacity × weeks)` for everyone in 1.12.0, which moves the last bit of overtime (and
+  profit) of some models outside the goldens (Northbeam's named roster at seed 7: P90 overtime 39.64915296714574 against 39.64915296714573).
+  Without a capacity channel it is `cap × capacity × weeks` again.
+
+## Chances, fee ranges, price rises and channels (engine 1.12.0, sandbox phase 3)
+
+Added 28 Oct 2026 (`docs/plans/sandbox-p3-brief.md`). **No existing simulated number moved.** The approved diff of the seven existing golden models is `engineVersion` and added keys only (`mode`, `chance`, `exposure` on each churn cause, `rise` on the revenue series of `northbeam-money`); `northbeam-chances` and `northbeam-channels` are new. Approved with `golden:approve "Sandbox phase 3: ..."` (`golden/versions.json`). Nothing below changes a draw on a path a model without the new fields takes: new randomness has new stream labels, and every multiplier is applied after the draw.
+
+**Monthly channels** (`EngineModel.channels`, `channels.ts`): per-month values the engine reads while it runs, for leads, conversion, the service mix, the fee a new client pays (`newFee`), the fee every active client pays (`fee`), fee ranges, base churn, churn drivers, hands-on time, external waits, rework, role cost, overheads and capacity. `starts` are the run's month starts, so the Sandbox's months are calendar months (`simulate` throws if `monthly` and `monthStarts` disagree with them); the market keeps its 52/12-week months. `activeChannels` drops every neutral array, and a model whose channels are all neutral takes the old code path, bit for bit (a test runs every golden model with neutral channels). A wait channel on a step with no wait creates its sampler on the step's existing `wait:<id>` label, only when used; a rework channel on a step with no rework builds the redo loop from the largest rework in any month.
+
+**Churn drivers as chances (B4).** A driver with an `effect` runs as events instead of weight x pressure. For each roster client at each weekly tick:
+
+    weekly chance = base x churn(t) x (1 + sum over weight-mode w x p + sum over chance-mode effect x hit) x market(t) / (52/12)
+
+`hit` is 1 while the client is under a hit (a hit at time h lasts `months` x 52/12 weeks; a hit during a hit extends it, effects never stack). An **entered** chance c (handoff, results, custom, price) draws once per tick per active client from the client's own stream `hit:<driver>:<client>`, hit if u < 1 - exp(log(1 - c) / (52/12)); c >= 1 hits every tick with no draw, c <= 0 never. A **measured** driver (late, resp, onb, rework, load) is hit by the event itself (a task finished late or missed, an ad-hoc task late, a servicing visit redone, a first delivery later than normal, a tick above 85% busy) and draws nothing. Run merging is off in any tick where a driver is in chance mode. Tenure and market have no events. A stored driver has no chance or effect (new nullable columns), so every workspace stays in weight mode; Settings pre-fills `equivalentEvents` (the chance and effect that give the same expected churn, in expectation not draw for draw). Each cause reports `mode`, `chance` (hits per active client-month, measured in both modes so Settings can show it before anyone switches) and `exposure` (share of client-weeks under the effect).
+
+**Client value range (A5).** A service with a `priceRange` (low, high) draws each client won on it from a triangular low - price - high on the new stream `fee:<service>`, one draw per win; the engine uses min(low, price) and max(high, price). Lifetime value and lost revenue use the range's mean. Existing clients keep their entered fee; low = high = price draws nothing.
+
+**Price rise (B5) and fees for existing clients.** The `fee` channel multiplies what every active client of a service pays from its month, existing and won; `weeklyBill` stays the base fee so nothing is counted twice with `newFee`. The part above the base fee is booked as `riseRevenue` (`ReplicationResult.revenue.rise`, `MonthlyResult.revenue.rise`). The rise's churn comes through the Price changes driver: in weight mode a rise r adds `2 x r` pressure for 13 weeks from its month (to that service's clients), in chance mode each client is hit with the driver's chance (default 1; stream `hit:price:<client>`) and its churn rises by `effect x r / 0.1` (the effect is per 10% rise) for `months`. A cut has no churn effect. With `monthly`, `SimulationResult.monthlySamples` holds each replication's own months (revenue, rise, clients lost).
+
+**The trade-off is measured, not modelled.** The Sandbox runs the scenario (R) and the same scenario without its B5 changes and without the forced price driver (B), with the same seed, the same pinned warm-up and the same segments. Per replication i and month m: gained G = rise_R, net N = revenue_R - revenue_B, lost L = G - N, extra leavers X = lost_R - lost_B (L includes everything the rise changed besides the higher fees: the work and fees a lost client would have brought). Each is shown as a mean and 10 to 90% range, per month and over the run (summed per replication, then the stat). Break-even = mean G / (sum L / sum X); with fewer than 0.05 extra leavers the loss per leaver is estimated (fee after the rise x half the months left) and labelled. A difference under a millionth of a unit is float noise and reads 0. (`packages/db/src/sandbox/price-rise.ts`.)
+
+**The warm-up finding, and the pinned start.** A scenario's months before a timed change used to move: the automatic warm-up (`autoWarmupHours`) runs a pilot of the whole model, the change included, and sizes the warm-up from its P90 cycle, so a hire from January shifted every arrival of October by a different warm-up (live 1002.81 h, with the hire 1007.05 h). `SimulateOptions.initialState` lets the caller hand `simulate` the start to use; the Sandbox pins one per scenario, `initialState(model with only the scenario's whole-run changes)`, for every segment, the price-rise pair and the compare columns. Goldens do not pass it (`simulate(m, ...)` deep-equals `simulate(m, ..., { initialState: initialState(m) })` for every golden model). Months before any kind of timed change equal the live run (money to the last bits: a stay's fee is spread over its months as amount / length x overlap, so a client who leaves at another time after the change has early months that differ by a rounding; tolerance 1e-12 relative, every case measured under 1e-13 in the review).
+
+**Hiring delay (D9).** Runner only, no engine change: a D9 change delays every scenario hire (D1), whole-run hires included (from the start of the run), by round(delay x the market's Time to hire in the hire's month) months, so Time to hire is now used (only through D9). Late payments (`pay`) are still stored and unused; "pay inflation" is the role-cost channel (C1 from a month), not the market.
+
+**Random streams.**
+
+| Stream | Status |
+|---|---|
+| arrivals, mix, work, wait, rework, route, churn, servicing, wip (and their warm-up labels) | unchanged count and order on every path without the new fields; with channels the same draws, multiplied after |
+| `hit:<driver>:<client>` | new; chance mode with an entered chance < 1; one draw per tick per active client |
+| `hit:price:<client>` | new; at a rise with a price chance < 1 |
+| `fee:<service>` | new; a ranged service, one draw per win |
+| `wait:<step>` for a step with no wait | created only when a `wait` channel gives it a mean |
+| `churn:client:sandbox:<change>:<i>` | new; the average clients a Sandbox B1 adds to a named roster |
+
+**Timings** (30 replications, seed 1, one container, the parent commit `e4501cc4` against this branch, interleaved in separate processes, best of 20 per run, best of 4 to 7 runs; budget: no case more than 5% or 10 ms slower). A model without channels or chance mode takes the old paths:
+
+| Engine case | Before (ms) | After (ms) | Change |
+| --- | --- | --- | --- |
+| northbeam pipeline 13w | 27 | 26 | -3.7% |
+| northbeam groups+servicing 13w | 67 | 70 | +3.9% |
+| northbeam named roster 13w | 39 | 41 | +4.6% |
+| larkspur 26w | 79 | 68 | -13.0% |
+| large 40 steps 25 people 26w | 551 | 563 | +2.1% |
+| northbeam groups 24m, no monthly | 401 | 415 | +3.4% |
+| northbeam groups 24m, monthly | 450 | 464 | +3.0% |
+| larkspur 24m, monthly | 291 | 299 | +2.7% |
+| northbeam pipeline 12m, monthly | 78 | 76 | -1.9% |
+| downturn groups 24m | 296 | 294 | -0.9% |
+| named roster 24m (client roster, 1.11 fixture) | 153 | 156 | +1.9% |
+
+The Sandbox's worst case (`apps/web/test/sandbox-performance.test.ts`, seven segments at 12 months, now built from six headcount cuts and a solution going live, the levers that still splice): 473, 574, 327, 325, 384, 319, 299 ms, total 2.7 s (limit 7 s), against about 0.7 s a segment and 4.9 s recorded for phase 1 (another day's load, so not strictly comparable; the engine cases above are the controlled comparison). The margin against the 1 s limit is now about 2x rather than 1.4x. A scenario of channel and people levers is **one** run at any number of months: a channel-heavy scenario (leads in five months, step time, waiting, rework, role cost, overheads, hours, a price rise and four drivers as chances) takes 381 ms; a price rise runs as a pair, 449 and 329 ms (limit 1 s each). Chance mode on 2,000 clients per group with three drivers (12 months, 4 replications): 2.2 to 2.6 s against 1.4 to 1.5 s as weights (1.45 to 1.75 x: chance mode turns run merging off). The brief's "30 replications in 5 s" is not reachable even as weights (about 0.35 s a replication), so the test holds 4 replications under 5 s and under 2 x the weights.
+
+Phase 4 (time by purpose, engine 1.14.0, above) counts its hands-on hours after the `work` channel.
+
+## Profit (engine 1.11.0, sandbox phase 2)
+
+Added 28 Oct 2026 (`docs/plans/sandbox-p2-brief.md`). 1.11.0 adds what a run earns, what its team costs and the profit left, and the monthly sales, revenue and money series the Forecast page and the Sandbox read. **No existing simulated number moved**: nothing below draws a random number or reorders an existing sum, and the approved diff for the six existing golden models is only added keys (`money`, and `engineVersion`); `northbeam-money` is new. Approved with `golden:approve "Profit first (sandbox phase 2): ..."`.
+
+**Revenue by kind** (`ReplicationResult.revenue`, `Kpis.revenue`): total = recurring + one-off + hourly.
+- *Recurring*: every active client's fee, pro rata while active in the window. With a client roster (named clients or client groups) it is the amount `bill()` already books, so recurring + one-off equals `billed` (to rounding: the two add in a different order). Without a roster the pool accrues week by week (`accruePooled`) and **includes the interim clients, which `billed` leaves out**; `billed` is kept exactly as it was (the goldens and PRD §13 define it), and the two are documented side by side.
+- *One-off*: the price (× the market's) when the job is won.
+- *Hourly*: a client's entered fee is its bill. An existing client (a named client's `mrr`, a client group's `fee`) bills that whatever its service's pricing, so nothing already simulated moves and nothing is counted twice. A client **won during the run** on an hourly service bills the rate (service price × the market's price factor in the month it was won) for hands-on hours: (1) post-sale pipeline steps (onboarding and so on, repeat passes included: hours worked), (2) its servicing tasks while it is active, (3) its ongoing (fallback) client hours while it is active (the shape's `parts`, not `uncovered`), and for a model without a roster (4) the ongoing hours of the roles with people on the team, for each hourly client in the pool. Selling time before the win, work for existing clients and wins in the warm-up are not billed. Only the in-window part of a job is added, so nothing is reset at the end of the warm-up. An hourly service whose clients generate no work earns 0 (`hourly[id].hours` is 0 and the Forecast says so).
+- `fromNew` is the part from clients won in the run; `mrrLost` (monthly) is the fee of each client that churned, in the month of the tick that closed the week.
+
+**Labour cost** (`labourCost`): contracted capacity × weeks on the team (`presentWeeks`) × `rateOf(p)` (the person's own cost, or the mean of their roles', the rate overtime uses). **Leave is paid**; a planned hire is paid from `from`, a leaver until `until`; role-count models are covered by the synthesised people. Overtime is separate (no premium). `kpi.labour` (pipeline labour, cost per unit) is unchanged. Null when `payHidden`, as are `overtimeCost`, `profit` and the whole `MonthlyResult.money`; revenue and `overheads` are never hidden.
+
+**Overheads and profit**: `overheads = overheadMonthly × weeks × 12 / 52` (so 12 months of a 52-week run cost exactly 12 × the figure; calendar months vary by their working days, about 5%). Profit per replication = total revenue − labour − overtime − overheads; per month the same with that month's figures, and `money.profit[m]` is the spread of each replication's own profit. Overtime is worked out month by month (as `monthlyOut` always did), so the months' profits do not sum exactly to `kpi.profit`. `services.margin` stays recorded and unused: profit comes from the paid hours, so applying a margin as well would count the cost of delivery twice.
+
+**Monthly series** (`MonthlyReplication` and `MonthlyResult`): opportunities, wins, losses and conversion (`ratioStat`), clients won (not one-offs) and lost, revenue by kind, `fromNew`, fees lost to churn, overtime hours, and labour (by role and person), overtime cost, overheads and profit.
+
+**Scenario patches**: `finances.overhead_monthly` (set, multiply, add; never below 0) beside `finances.retainer`, mirrored by `private.is_scenario_patch` in migration `20270108000000_overheads.sql`, which also gives `workspaces.settings.overhead_monthly` its shape check (null, or a number from 0 to 100,000,000).
+
+**Cost of the new work** (30 replications, seed 1, one machine, run alone, best of 3; "before" is the parent commit, "after" this branch): a few array adds per arrival, win, tick and service start, and O(people × months) in `monthlyOut`.
+
+Measured on a shared 4-core container (another agent's tests were running: load average 2 to 15), so the numbers are noisy by about 5 to 10%. Each side's figure is the best of 15 to 40 runs of the case, before and after interleaved in separate processes, the engine bundled from the parent commit (`d19f92ff`) and from this branch. Budget (brief §7): no case more than 5% slower, or 10 ms, whichever is larger.
+
+| Engine case (30 replications, seed 1) | Before (ms) | After (ms) | Change |
+| --- | --- | --- | --- |
+| northbeam pipeline 13w | 32 | 32 | -0.8% |
+| northbeam groups+servicing 13w | 97 | 87 | -9.5% |
+| northbeam named roster 13w | 79 | 84 | +6.5% |
+| larkspur 26w | 91 | 77 | -15.0% |
+| large 40 steps 25 people 26w | 633 | 619 | -2.2% |
+| northbeam groups 24m, no monthly | 428 | 429 | +0.1% |
+| northbeam groups 24m, monthly | 505 | 510 | +1.0% |
+| larkspur 24m, monthly | 329 | 339 | +2.9% |
+| northbeam pipeline 12m, monthly | 80 | 86 | +7.8% |
+| downturn groups 24m | 333 | 327 | -1.8% |
+| downturn named roster 24m | 309 | 315 | +1.9% |
+| named roster 24m | 458 | 442 | -3.4% |
+
+Every case is within the budget: the three that read above +5% (the named-roster 13-week run and the 12-month pipeline run with months, +5 and +6 ms, and the same cases re-measured alone at -1.9% and +2.8%) are inside the 10 ms allowance and the noise. The cases that came out faster are noise too: nothing in the change speeds a run up.
+
+The web suite's timing tests (`apps/web/test/horizon-performance.test.ts`, best of 3 each, parent commit against this branch, same noisy machine) read the same: pipeline-only Northbeam at 24 months 266 and 266 ms (limit 1,200), full Northbeam 744 and 651 ms (limit 2,000), full Larkspur 512 and 467 ms, full Northbeam in a downturn 458 and 522 ms, and the new month-by-month cases (the Forecast's own run: calendar months, with the sales, revenue and money series) full Northbeam 691 and 719 ms, full Larkspur 430 and 453 ms (limit 2,000 each). Under heavy load (load average above 10) one case fails on the parent commit and on this branch alike; re-run alone they pass. The engine's `test:perf` passes.
+
 ## Per-person times (engine 1.10.0, C6)
 
 `EnginePerson.capacityFactor` (`{ default?, steps? }`, `packages/engine/src/simulate.ts` `factorsFor`) multiplies the hands-on time a person takes on a step: `st.work() × factor`, after the draw, so no random stream moves and a model with no factors (or every factor exactly 1) takes the old path with one null check per service start. `steps` wins over `default`; a step in neither is 1; the engine accepts any positive finite number (the database limits 0.5 to 2) and throws, naming the person, for anything else. No fixture has a factor and the app's switch is off by default, so no golden number moved: 1.10.0 was approved with `golden:approve --bump` and the ledger digest equals 1.9.0's. Analytic estimates stay at the role's normal time (`offeredLoad`'s `stepHours`, work at unstaffed steps, the issues' "hands-on X h"). A saved run's `resolvedPeople` echoes the model's people, so it carries the factors of an editor's run (saved runs are editor-only).
@@ -182,6 +396,39 @@ All sit well inside the scaled limits (about a fifth to a sixth), and they are a
 target (< 5 s for a 40-step model). The 40-step, 25-person model was not measured at 24 months: its 12-month target
 is 5 s, and the numbers above leave plenty of room, but a 24-month run of it should be timed when a model that size
 exists to test with. Timing tests can fail on a loaded machine; re-run them alone before concluding.
+
+## Sandbox scenarios: seven segments (sandbox phase 1, no engine change)
+
+*Since engine 1.12.0 only a solution going live and a headcount cut splice; every other timed lever is a channel in one run (see above). The seven-segment case below is built from those two.*
+
+A scenario with changes from several months runs once per distinct change month, each a full 30-replication run, and the monthly
+numbers are spliced (`spliceMonthly`). The most the database allows is six capped change months, so seven runs
+(`MAX_SEGMENTS`). The browser spreads them over the page's three workers and keeps finished runs by what they were run from, so a
+change that leaves a segment alone does not run it again. `apps/web/test/sandbox-performance.test.ts` (tagged `perf`) builds the
+worst scenario on the demo's full Northbeam (five timed patches and a solution going live in six different months, plus a hire, a leave and a leaver in
+those months: seven segments), times each segment's `simulate(model, 30, 1, { monthly, monthStarts })` at 12 months one after the other
+(the slowest case), and holds each under 4 × 250 ms (the full Northbeam's 250 ms, scaled for a year as the 24-month test scales it)
+and the seven together under 7 s. Measured on a quiet 4-core container, engine 1.11.0:
+
+| Run | Segments (ms) | Total | Limit |
+| --- | --- | --- | --- |
+| 1 | 538, 810, 761, 784, 757, 596, 737 | 4,984 ms | 7,000 ms |
+| 2 | 802, 733, 583, 689, 733, 556, 710 | 4,807 ms | 7,000 ms |
+
+Each run is about 0.7 s, inside the 1 s limit but not by a wide margin: with another process using the CPU one segment reached
+1.2 s and the test failed, so re-run it alone before concluding. Spliced numbers cost about 4 ms.
+
+## Won clients and a named client leaving (P7, no version bump)
+
+Two optional fields for the free-play Sandbox (`docs/plans/capacity/p7-sandbox-brief.md` section 3). Unset or empty, the code paths are not taken, no random stream is
+touched and every golden is byte-identical, so `ENGINE_VERSION` did not move (`packages/engine/test/won-clients.test.ts`, and the goldens run unapproved).
+
+- `EngineModel.wonClients: { service, month, count }[]` (1-based month). Each client is its own `inject` event, spread evenly through the month (nothing drawn).
+  It skips the sales steps: it enters the first step after the sale (`afterSaleSteps`, the onboarding hand-off) if the pipeline has one, else becomes a won client
+  at once. It is then an ordinary won client (`addWonClient`, `placeNewClients`), counts in `won` and `clientsWon`, and stays out of the cycle times (it has no time to win).
+  Entries for an unknown service, a month past the end or a count under 1 are ignored; a count is capped at 500 an entry.
+- `EngineClient.leavesMonth` (1-based). At the first weekly churn tick on or after that month's start the named client is removed as a churned client (lost, with its
+  fee). Its churn draw is still made, so no other client's draws move. Counted clients have no such field.
 
 ## Where the version goes
 
@@ -229,9 +476,8 @@ rest.
 ## Where Larkspur lives
 
 - Engine: `larkspurModel()` from `packages/engine/src/fixtures/larkspur.ts`, built from `larkspur-data.ts`.
-- Seed: `larkspurBundle()` in `packages/db/src/fixtures/larkspur.ts`, in `seed.sql` and `bootstrap.sql` beside
-  Northbeam (slug `larkspur`), so it loads locally (`supabase db reset`) and on preview branches, which run the
-  seed. `packages/db/test/larkspur.test.ts` checks the rows resolve on 5 October 2026 to exactly
+- Seed: `larkspurBundle()` in `packages/db/src/fixtures/larkspur.ts`, in `seed.sql` beside Northbeam (slug
+  `larkspur`), so it loads wherever the seed does (`pnpm --filter @transpera-flow/db migrate --seed`, and the tests). `packages/db/test/larkspur.test.ts` checks the rows resolve on 5 October 2026 to exactly
   `larkspurModel()`; `database.test.ts` checks the seeded database round-trips to the same model.
 - App: `/demo/larkspur`, read-only from the fixtures, on any deployment.
 - Production: not loaded. It is a test and demo agency; add it by hand only if wanted.
@@ -243,3 +489,7 @@ A step can hold its own steps: a group, or a child process. The engine flattens 
 as the same object). A nested model therefore gives exactly the numbers of the same model drawn flat, which `test/nesting.test.ts` and
 `packages/db/test/nested-model.test.ts` check, and the golden models (all flat) did not move: introducing groups needed no `ENGINE_VERSION` bump.
 Draw a group open or closed, or move a step into one, and no number changes; adding or removing steps still does, as before.
+
+### Goal seek and the tornado (sandbox phase 5b, 29 Oct 2026)
+
+No engine change: both are sets of ordinary Sandbox runs (30 replications, seed 1, the pinned warm-up), so no golden moved. `apps/web/test/sandbox-performance.test.ts`, seeded Northbeam, 12 months, one run after another on the calling thread (the page spreads them over three workers): a goal seek over 0 to 10 more PPC specialists that has to bisect: 6 runs, 2.2 s (limit 8 runs, 8 s); a tornado for profit: 9 levers, 20 runs, 7.0 to 7.5 s (limit 25 runs, 25 s); for peak busy: 8 levers, 18 runs, 5.7 to 6.0 s. The seeded workspace has no overheads, so the overheads lever is left out of its tornado (a model with overheads has 10 levers and 22 runs). Wall time on three workers is about a third of these. A run for a probe or a bar is asked of the pool with `cache: false`, so the page's own runs are not pushed out of its 48-run cache.

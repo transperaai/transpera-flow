@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BUILTIN_CHURN_DRIVER_IDS, CHURN_DRIVER_SPECS, simulate } from "@transpera-flow/engine";
 import { NORTHBEAM_WORKSPACE_ID, northbeamBundle, toEngineModel, type ChurnDriverRow } from "@transpera-flow/db";
 import { ChurnDriversSettings } from "@/app/w/[slug]/settings/churn-drivers-settings";
@@ -17,6 +17,9 @@ import {
   valueNow,
 } from "@/lib/churn-drivers";
 
+// The screen imports its Server Actions, which are server-only; nothing here calls them.
+vi.mock("server-only", () => ({}));
+
 // Settings, Churn drivers (A56, issue #121): the screen's state, wording and input checks.
 
 const UUID = "00000000-0000-4000-8000-000000000042";
@@ -31,6 +34,9 @@ const row = (over: Partial<ChurnDriverRow>): ChurnDriverRow => ({
   enabled: true,
   value: null,
   month: null,
+  chance: null,
+  effect: null,
+  effect_months: null,
   provenance: {},
   ...over,
 });
@@ -68,7 +74,7 @@ describe("the ten drivers", () => {
       results: "You enter it",
       tenure: "You enter it",
       price: "Lever",
-      market: "From market settings",
+      market: "From the Sandbox's Market lever",
     });
   });
 
@@ -184,6 +190,20 @@ describe("input checks", () => {
     expect(parseDriverPatch("late", { value: 5 })).toBeNull();
   });
 
+  it("accepts the chance mode's chance, effect and months for a driver with events, null to clear them, and refuses the rest", () => {
+    expect(parseDriverPatch("late", { chance: 5, effect: 40, effectMonths: 4 })).toEqual({ chance: 5, effect: 40, effectMonths: 4 });
+    expect(parseDriverPatch("late", { chance: null, effect: null, effectMonths: null })).toEqual({ chance: null, effect: null, effectMonths: null });
+    expect(parseDriverPatch(UUID, { effect: 500 })).toEqual({ effect: 500 });
+    expect(parseDriverPatch("late", { chance: 101 })).toBeNull();
+    expect(parseDriverPatch("late", { chance: -1 })).toBeNull();
+    expect(parseDriverPatch("late", { effect: 501 })).toBeNull();
+    expect(parseDriverPatch("late", { effectMonths: 0 })).toBeNull();
+    expect(parseDriverPatch("late", { effectMonths: 25 })).toBeNull();
+    expect(parseDriverPatch("late", { effectMonths: 2.5 })).toBeNull();
+    // Early tenure and the market have no events to hit.
+    for (const key of ["tenure", "market"]) expect(parseDriverPatch(key, { chance: 5 })).toBeNull();
+  });
+
   it("lets your own driver be named and described, within the limits", () => {
     expect(parseDriverPatch(UUID, { name: "  A rival  ", description: "  Cheaper.  ", example: "" })).toEqual({ name: "A rival", description: "Cheaper.", example: null });
     expect(parseDriverPatch(UUID, { name: "   " })).toBeNull();
@@ -206,11 +226,20 @@ describe("the screen", () => {
       expect(html, d.name).toContain(`aria-label="About ${d.name}"`);
       expect(html, d.name).toContain(`aria-label="About Use ${d.name}"`);
       expect(html, d.name).toContain(`aria-label="About Weight for ${d.name}"`);
+      expect(html, d.name).toContain(`aria-label="Delete ${d.name}"`);
+      expect(html, d.name).toContain(`aria-label="About Delete ${d.name}"`);
     }
     expect(html).toContain("Churn drivers");
     expect(html).toContain("Projected churn");
     expect(html).toContain("+ Add driver");
     expect(html).toContain("About Normal churn");
+  });
+
+  it("leaves a deleted built-in off the list, and keeps the others with their switches", () => {
+    const less = renderToStaticMarkup(createElement(ChurnDriversSettings, { mode: "demo", workspaceId: null, bundle: null, rows: [], removed: ["price"] }));
+    const price = driverStates([]).find((d) => d.key === "price")!;
+    expect(less).not.toContain(`aria-label="Use ${price.name}"`);
+    expect(less).toContain(`aria-label="Use ${driverStates([])[0]!.name}"`);
   });
 
   it("gives every number you enter an (i) of its own", () => {
@@ -225,7 +254,7 @@ describe("the screen", () => {
 
   it("is read-only for someone who can't edit, and the sliders are disabled", () => {
     const readonly = renderToStaticMarkup(createElement(ChurnDriversSettings, { mode: "readonly", workspaceId: null, bundle: null, rows: [] }));
-    expect(readonly).toContain("Only owners and editors can change the churn drivers.");
+    expect(readonly).toContain("Only Agency admins can change the churn drivers.");
     expect(readonly).toMatch(/<input[^>]*type="range"[^>]*disabled/);
   });
 });

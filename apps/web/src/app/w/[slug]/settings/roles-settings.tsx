@@ -1,13 +1,12 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import type { RoleRow } from "@transpera-flow/db";
 import { TextField, ToggleField } from "@/components/fields";
 import { HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { SettingsSection } from "./section";
-import type { WorkspaceSettingsData } from "@/lib/data";
+import { cn } from "@/lib/utils";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
 import { inUse, type RoleField, type RoleUsage } from "@/lib/roles";
 import { createRole, removeRole, saveRoleField, type ActionResult } from "./actions";
@@ -20,38 +19,18 @@ const roleSaver =
   (base, next) =>
     saveRoleField(roleId, field, base, next) as Promise<SaveOutcome<T>>;
 
-const noUsage: RoleUsage = { steps: 0, people: 0, clients: 0, services: 0 };
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-export function RolesSettings({ data }: { data: WorkspaceSettingsData }) {
-  const { roles, canEdit } = data;
-  return (
-    <SettingsSection id="roles" title="Roles" description={<>Kinds of work. Steps, people and client assignments name roles. A role that is in use can&apos;t be removed; make it
-          inactive to hide it from pickers.</>}>
-      {canEdit ? (
-        <AddRole workspaceId={data.workspace.id} />
-      ) : (
-        <p className="mb-3 text-fg-2">You can view roles here; owners and editors can change them.</p>
-      )}
-      {roles.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">No roles yet. Add the kinds of work your team does.</p>
-      ) : (
-        <ul className="flex flex-col divide-y divide-line border-y border-line">
-          {roles.map((r) => (
-            <li key={r.id}>
-              <RoleItem role={r} usage={data.roleUsage[r.id] ?? noUsage} canEdit={canEdit} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </SettingsSection>
-  );
-}
+const NOT_SENT: ActionResult = {};
 
-function AddRole({ workspaceId }: { workspaceId: string }) {
-  const [state, action, pending] = useActionState<ActionResult, FormData>(createRole.bind(null, workspaceId), {});
+/** `onAdded` runs once a role has been added (the Set up page closes its dialog); `className` replaces the form's spacing. */
+export function AddRole({ workspaceId, onAdded, className }: { workspaceId: string; onAdded?: () => void; className?: string }) {
+  const [state, action, pending] = useActionState<ActionResult, FormData>(createRole.bind(null, workspaceId), NOT_SENT);
+  useEffect(() => {
+    if (state !== NOT_SENT && !state.error) onAdded?.();
+  }, [state, onAdded]);
   return (
-    <form action={action} className="mb-4 flex flex-wrap items-end gap-2">
+    <form action={action} className={cn("flex flex-wrap items-end gap-2", className ?? "mb-4")}>
       <label className="flex min-w-0 flex-col gap-1">
         <HelpLabel label="Name" description="The kind of work, as your team says it. Steps, people and clients name roles." example="Strategist" />
         <Input name="name" required maxLength={200} />
@@ -68,19 +47,12 @@ function AddRole({ workspaceId }: { workspaceId: string }) {
   );
 }
 
-function RoleItem({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" | "color" | "active">; usage: RoleUsage; canEdit: boolean }) {
+/** What else a role has (the part of a row that opens): Set up shows it under "More". */
+export function RoleMore({ role, usage, canEdit, hideName }: { role: Pick<RoleRow, "id" | "name" | "color" | "active" | "leadership">; usage: RoleUsage; canEdit: boolean; /** The Set up panel shows the name at the top. */ hideName?: boolean }) {
   const disabled = !canEdit;
   return (
-    <details className="group py-2">
-      <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-1 py-1 hover:bg-panel-2">
-        <span aria-hidden className="text-fg-3 transition-transform group-open:rotate-90">
-          ›
-        </span>
-        <span className={`font-semibold ${role.active ? "" : "text-fg-3 line-through"}`}>{role.name}</span>
-        {!role.active && <span className="rounded-lg bg-panel-2 px-1.5 text-xs text-fg-2">Inactive</span>}
-      </summary>
-      <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2">
-        <TextField label="Name" value={role.name} save={roleSaver(role.id, "name")} disabled={disabled} help={{ description: "The kind of work, as your team says it. Steps and people name roles.", example: "Strategist" }} />
+    <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2">
+        {!hideName && <TextField label="Name" value={role.name} save={roleSaver(role.id, "name")} disabled={disabled} help={{ description: "The kind of work, as your team says it. Steps and people name roles.", example: "Strategist" }} />}
         <ToggleField
           label="Status"
           value={role.active}
@@ -88,6 +60,17 @@ function RoleItem({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" 
           onLabel="Active"
           offLabel="Inactive: hidden from pickers; steps and people that have it keep it"
           disabled={disabled} help={{ description: "Inactive roles are hidden from pickers. Steps and people that already have the role keep it.", example: "Make a role inactive when you stop using it, instead of removing it." }} />
+        {(
+          <ToggleField
+            label="Leadership"
+            value={role.leadership}
+            save={roleSaver(role.id, "leadership")}
+            onLabel="Leadership: left out of clients per employee and revenue per employee"
+            offLabel="Not leadership: counted in clients per employee and revenue per employee"
+            disabled={disabled}
+            help={{ description: "Leadership roles are left out of the clients-per-employee and revenue-per-employee figures. Their salaries are not counted in DLER either.", example: "Founder, Head of Client Services." }}
+          />
+        )}
         <p className="text-fg-2 sm:col-span-2">
           Used by {plural(usage.steps, "step")} · {plural(usage.people, "person", "people")}
           {usage.services > 0 && <> · {plural(usage.services, "service")} (fallback load)</>}
@@ -97,8 +80,7 @@ function RoleItem({ role, usage, canEdit }: { role: Pick<RoleRow, "id" | "name" 
             <RemoveRole roleId={role.id} name={role.name} />
           </div>
         )}
-      </div>
-    </details>
+    </div>
   );
 }
 

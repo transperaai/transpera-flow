@@ -11,6 +11,7 @@ import {
   northbeamServicingStepIds,
   northbeamStepIds,
   toEngineModel,
+  DEFAULT_PURPOSES,
   speedsNormalisedFor,
   usesCapacityFactors,
   workingDaysBetween,
@@ -94,6 +95,35 @@ function beforeServicesAndClients(): ProcessBundle {
 }
 
 describe("toEngineModel", () => {
+  describe("overheads (sandbox phase 2)", () => {
+    const withOverhead = (value: unknown, extra: Partial<ProcessBundle> = {}): ProcessBundle => {
+      const b = northbeamBundle();
+      return { ...b, ...extra, workspace: { ...b.workspace, settings: { ...b.workspace.settings, overhead_monthly: value as number } } };
+    };
+
+    it("overhead_monthly 18000 becomes overheadMonthly (a number written as a string too)", () => {
+      expect(toEngineModel(withOverhead(18000), { startDate: START }).overheadMonthly).toBe(18000);
+      expect(toEngineModel(withOverhead("12000"), { startDate: START }).overheadMonthly).toBe(12000);
+    });
+
+    it("absent, null, 0 or junk adds nothing: the model deep-equals today's", () => {
+      const today = toEngineModel(northbeamBundle(), { startDate: START });
+      for (const value of [null, 0, "", "abc", -5, Number.NaN]) {
+        const m = toEngineModel(withOverhead(value), { startDate: START });
+        expect(m, String(value)).toEqual(today);
+        expect(m).not.toHaveProperty("overheadMonthly");
+      }
+      expect(today).not.toHaveProperty("overheadMonthly");
+    });
+
+    it("is kept for a Viewer, whose model hides pay, and for a share bundle", () => {
+      const viewer = toEngineModel(withOverhead(18000, { viewer: { seesEveryone: false, ownPersonId: null } }), { startDate: START });
+      expect(viewer.payHidden).toBe(true);
+      expect(viewer.overheadMonthly).toBe(18000);
+      expect(toEngineModel(withOverhead(18000, { payHidden: true }), { startDate: START }).overheadMonthly).toBe(18000);
+    });
+  });
+
   it("resolves the Northbeam rows into exactly the engine's Northbeam with services, people, its client groups and servicing", () => {
     expect(withKeys(toEngineModel(northbeamBundle(), { startDate: START }))).toEqual(northbeamWithClientGroups());
   });
@@ -335,6 +365,21 @@ describe("services", () => {
     b.services = b.services.map((sv) => (sv.id === id ? { ...sv, ...change } : sv));
     return b;
   };
+
+  it("maps a fee range to priceRange when an end is set (a blank end is the price), and not when both are unset or both the price (sandbox phase 3)", () => {
+    const withRange = (low: number | null, high: number | null) => toEngineModel(patch(pipelineOnly(), seo, { price_low: low, price_high: high }), { startDate: START }).services![seo]!;
+    expect(withRange(3000, 6000).priceRange).toEqual({ low: 3000, high: 6000 });
+    // A range that doesn't hold the price still maps (the engine uses the price as an end).
+    expect(withRange(4000, 4500).priceRange).toEqual({ low: 4000, high: 4500 });
+    expect(withRange(null, null).priceRange).toBeUndefined();
+    // One end entered: the other is the price (3,500), as Settings says ("Leave both blank for one fee"); before the review it was ignored.
+    expect(withRange(3000, null).priceRange).toEqual({ low: 3000, high: 3500 });
+    expect(withRange(null, 6000).priceRange).toEqual({ low: 3500, high: 6000 });
+    expect(withRange(3500, null).priceRange).toBeUndefined();
+    expect(withRange(3500, 3500).priceRange).toBeUndefined();
+    // No range at all is the model as it was.
+    expect(toEngineModel(patch(pipelineOnly(), seo, { price_low: null, price_high: null }), { startDate: START })).toEqual(toEngineModel(pipelineOnly(), { startDate: START }));
+  });
 
   it("maps each service's pricing, tenure, churn, mix and path tags", () => {
     const model = toEngineModel(pipelineOnly(), { startDate: START });
@@ -602,5 +647,61 @@ describe("per-person times (C6)", () => {
     expect(JSON.stringify(off)).toBe(JSON.stringify(base));
     const on = simulate(toEngineModel(withFactors(true), { startDate: START }), 10, 1);
     expect(JSON.stringify(on)).not.toBe(JSON.stringify(base));
+  });
+});
+
+
+describe("step purposes (sandbox phase 4)", () => {
+  const purposeOf = (m: EngineModel, id: string) => m.steps.find((s) => s.id === id)?.purpose;
+  const bundleWith = (extra: Partial<ProcessBundle> = {}, step: Partial<StepRow> & { id: string } = { id: "" }): ProcessBundle => {
+    const b = northbeamBundle();
+    return { ...b, ...extra, steps: b.steps.map((s) => (s.id === step.id ? { ...s, ...step } : s)) };
+  };
+
+  it("without the option the model is exactly today's: no step has a purpose", () => {
+    const b = northbeamBundle();
+    expect(toEngineModel(b, { startDate: START }).steps.every((s) => s.purpose === undefined)).toBe(true);
+  });
+
+  it("the option changes only the purpose: every other field of the model is the same", () => {
+    const b = northbeamBundle();
+    const plain = toEngineModel(b, { startDate: START });
+    const withPurposes = toEngineModel(b, { startDate: START, purposes: true });
+    expect({ ...withPurposes, steps: withPurposes.steps.map(({ purpose: _p, ...s }) => s) }).toEqual(plain);
+  });
+
+  it("pipeline steps up to and including the sale decision are winning work; what follows it, and servicing steps, move the client's job forward", () => {
+    const m = toEngineModel(northbeamBundle(), { startDate: START, purposes: true });
+    for (const k of ["qualify", "discovery", "audit", "decision"] as const) expect(purposeOf(m, northbeamStepIds[k]), k).toBe("winning");
+    for (const k of ["onboard", "kickoff"] as const) expect(purposeOf(m, northbeamStepIds[k]), k).toBe("client_job");
+    const servicing = m.steps.filter((s) => Object.values(northbeamServicingStepIds).includes(s.id));
+    expect(servicing.length).toBeGreaterThan(0);
+    for (const s of servicing) expect(s.purpose, s.name).toBe("client_job");
+  });
+
+  it("a chosen purpose wins; a deleted category reads as Automatic", () => {
+    const audit = northbeamStepIds.audit;
+    const decision = northbeamStepIds.decision;
+    const m = toEngineModel(bundleWith({}, { id: decision, purpose: "coordination" }), { startDate: START, purposes: true });
+    expect(purposeOf(m, audit)).toBe("winning");
+    expect(purposeOf(m, decision)).toBe("coordination");
+    const gone = toEngineModel(bundleWith({}, { id: audit, purpose: "c12345678" }), { startDate: START, purposes: true });
+    expect(purposeOf(gone, audit)).toBe("winning");
+  });
+
+  it("a renamed category keeps its key; a workspace list without 'required' reads a step that chose it as Automatic", () => {
+    const b = northbeamBundle();
+    const list = DEFAULT_PURPOSES.filter((c) => c.key !== "required");
+    const ws = { ...b.workspace, settings: { ...b.workspace.settings, purposes: list } };
+    const m = toEngineModel(bundleWith({ workspace: ws }, { id: northbeamStepIds.audit, purpose: "required" }), { startDate: START, purposes: true });
+    expect(purposeOf(m, northbeamStepIds.audit)).toBe("winning");
+  });
+
+  it("a purpose never changes a simulated number", () => {
+    const b = northbeamBundle();
+    const a = simulate(toEngineModel(b, { startDate: START }), 4, 1, { monthly: true });
+    const c = simulate(toEngineModel(b, { startDate: START, purposes: true }), 4, 1, { monthly: true });
+    const strip = (r: typeof a) => ({ ...r, monthly: { ...r.monthly!, time: undefined } });
+    expect(strip(c)).toEqual(strip(a));
   });
 });

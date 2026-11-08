@@ -1,36 +1,58 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { northbeamBundle, northbeamRoleIds, northbeamScenarios, northbeamServiceIds, northbeamStepIds, toEngineModel, type ScenarioRow } from "@transpera-flow/db";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { northbeamBundle, northbeamRoleIds, northbeamScenarios, northbeamServiceIds, northbeamStepIds, patchOf, toEngineModel, type SandboxChange, type ScenarioRow } from "@transpera-flow/db";
 import { applyPatches, simulate } from "@transpera-flow/engine";
 import { buildLevers, leverPatches, neutral } from "@/lib/scenarios/levers";
 import { copyName, describePatch, effectivePatches, headlineSubject, scenarioProblems } from "@/lib/scenarios/scenarios";
 import { MemoryScenarioStore } from "@/lib/scenarios/store";
 import { parseScenarioInput } from "@/lib/scenarios/validate";
+import { createWorld, signInAs, signOut, type World } from "./action-harness";
 
-// A stand-in for Supabase behind the scenario Server Actions: records what
-// reaches the database, so the tests can show malformed input never does.
-const db = vi.hoisted(() => ({ calls: [] as { op: string; args: unknown[] }[], signedIn: true, result: { data: null as unknown, error: null as unknown } }));
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => {
-    const chain = {
-      insert: (...args: unknown[]) => (db.calls.push({ op: "insert", args }), chain),
-      delete: () => (db.calls.push({ op: "delete", args: [] }), chain),
-      eq: (...args: unknown[]) => (db.calls.push({ op: "eq", args }), chain),
-      select: () => chain,
-      single: async () => db.result,
-      then: (resolve: (v: unknown) => void) => resolve(db.result),
-    };
-    return {
-      auth: { getClaims: async () => ({ data: db.signedIn ? { claims: { sub: "u1" } } : null }) },
-      from: (table: string) => (db.calls.push({ op: "from", args: [table] }), chain),
-    };
-  },
-}));
+// The scenario Server Actions run against a real database as an editor (RLS applies).
+vi.mock("@/lib/auth/session", async () => (await import("./action-harness")).sessionMock);
 const { createScenario, deleteScenario } = await import("@/app/w/[slug]/scenario-actions");
 
 const START = { startDate: "2026-10-05" };
 const model = () => toEngineModel(northbeamBundle(), START);
 const WS = northbeamBundle().workspace.id;
 const valid = { name: " Automate proposals ", description: "  ", patch: [{ path: "steps.x.work_hours", op: "multiply", value: 0.4 }] };
+
+describe("the pooled client count and churn have levers only where the engine reads them", () => {
+  const paths = (m: ReturnType<typeof model>) => buildLevers(m).map((l) => l.path);
+
+  it("leaves both out when clients are counted per type or named (the engine ignores the pool there)", () => {
+    const grouped = model();
+    expect(Object.values(grouped.clientGroups ?? {}).some((g) => g.count > 0) || grouped.clients !== undefined).toBe(true);
+    expect(paths(grouped)).not.toContain("demand.active_clients");
+    expect(paths(grouped)).not.toContain("demand.churn_monthly");
+  });
+
+  it("offers both for a pooled model", () => {
+    const pooled = { ...model(), clients: undefined, clientGroups: {} };
+    expect(paths(pooled)).toEqual(expect.arrayContaining(["demand.active_clients", "demand.churn_monthly"]));
+  });
+
+  it("offers both when the only client groups are for services the model doesn't have (the engine keeps the pool)", () => {
+    const m = model();
+    const stray = { ...m, clients: undefined, clientGroups: { "no-such-service": { count: 5, churnMonthly: 0.02, stayMonths: 24, fee: 1000, health: 80 } } } as unknown as typeof m;
+    expect(paths(stray)).toEqual(expect.arrayContaining(["demand.active_clients", "demand.churn_monthly"]));
+    // Moving churn there changes the run: the slider does something.
+    const run = (x: typeof m) => simulate({ ...x, horizonWeeks: 26 }, 3, 1, { monthly: true }).monthly!.clientsLost.reduce((a, st) => a + st.mean, 0);
+    expect(run({ ...stray, churnMonthly: 0.3 })).not.toBe(run({ ...stray, churnMonthly: 0 }));
+  });
+
+  it("keeps churn for a named roster with a client of no known service (it churns at the pooled rate), not the count", () => {
+    const m = model();
+    const named = { ...m, clientGroups: undefined, clients: { c1: { name: "Acme", services: [], mrr: 2000, assignments: {} } } } as unknown as typeof m;
+    expect(paths(named)).toContain("demand.churn_monthly");
+    expect(paths(named)).not.toContain("demand.active_clients");
+    const run = (x: typeof m) => simulate({ ...x, horizonWeeks: 52 }, 5, 1, { monthly: true }).monthly!.clientsLost.reduce((a, st) => a + st.mean, 0);
+    expect(run({ ...named, churnMonthly: 0.5 })).not.toBe(run({ ...named, churnMonthly: 0 }));
+    // Every named client on a known service: churn is per service, so no pooled slider.
+    const sid = Object.keys(m.services ?? {})[0]!;
+    const served = { ...named, clients: { c1: { name: "Acme", services: [sid], mrr: 2000, assignments: {} } } } as typeof m;
+    expect(paths(served)).not.toContain("demand.churn_monthly");
+  });
+});
 
 describe("levers are generated from the model", () => {
   const levers = buildLevers(model());
@@ -190,42 +212,64 @@ describe("parseScenarioInput", () => {
 });
 
 describe("scenario Server Actions", () => {
-  beforeEach(() => {
-    db.calls = [];
-    db.signedIn = true;
-    db.result = { data: null, error: null };
+  let world: World;
+  let W: string;
+  // The Sandbox's table: a scenario's patch is its changes, each one a whole-run patch.
+  const scenarios = async () =>
+    (await world.tdb.client.query("select id, workspace_id, name, description, changes, parent_id from sandbox_scenarios where workspace_id = $1", [W])).rows.map(({ changes, parent_id, ...row }) => ({
+      ...row,
+      patch: (changes as SandboxChange[]).map((c) => patchOf(c)),
+      parent_scenario_id: parent_id,
+    }));
+
+  beforeAll(async () => {
+    world = await createWorld("scenco");
+    W = world.workspaceId;
+  });
+  afterAll(async () => {
+    await world?.tdb.close();
+  });
+  beforeEach(async () => {
+    await world.tdb.client.query("delete from sandbox_scenarios where workspace_id = $1", [W]);
+    signInAs(world, "editor");
   });
 
   it("reject malformed input before touching the database", async () => {
     expect(await createScenario("not-a-uuid", valid)).toMatchObject({ status: "error" });
-    expect(await createScenario(WS, { ...valid, patch: [{ path: "nope", op: "set", value: 1 }] })).toMatchObject({ status: "error" });
-    expect(await createScenario(WS, { ...valid, name: "" })).toEqual({ status: "error", message: "Give the scenario a name." });
+    expect(await createScenario(W, { ...valid, patch: [{ path: "nope", op: "set", value: 1 }] })).toMatchObject({ status: "error" });
+    expect(await createScenario(W, { ...valid, name: "" })).toEqual({ status: "error", message: "Give the scenario a name." });
     expect(await deleteScenario("x")).toMatchObject({ status: "error" });
-    expect(db.calls).toEqual([]);
+    expect(await scenarios()).toEqual([]);
   });
 
   it("refuse a signed-out user", async () => {
-    db.signedIn = false;
-    expect(await createScenario(WS, valid)).toEqual({ status: "error", message: "Your session has ended. Sign in again." });
-    expect(db.calls).toEqual([]);
+    signOut(world);
+    expect(await createScenario(W, valid)).toEqual({ status: "error", message: "Your session has ended. Sign in again." });
+    expect(await scenarios()).toEqual([]);
   });
 
   it("insert the parsed scenario into the given workspace as the user", async () => {
-    const row = { id: "s1", workspace_id: WS, name: "Automate proposals", description: null, patch: valid.patch, parent_scenario_id: null };
-    db.result = { data: row, error: null };
-    expect(await createScenario(WS, { ...valid, workspace_id: "someone-elses", id: "forged" })).toEqual({ status: "ok", scenario: row });
-    expect(db.calls[0]).toEqual({ op: "from", args: ["scenarios"] });
-    expect(db.calls[1]).toEqual({
-      op: "insert",
-      args: [{ name: "Automate proposals", description: null, patch: valid.patch, parent_scenario_id: null, workspace_id: WS }],
-    });
+    const made = await createScenario(W, { ...valid, workspace_id: "someone-elses", id: "forged" });
+    expect(made).toMatchObject({ status: "ok", scenario: { workspace_id: W, name: "Automate proposals", description: null, patch: valid.patch, parent_scenario_id: null } });
+    const rows = await scenarios();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ workspace_id: W, name: "Automate proposals", description: null, patch: valid.patch, parent_scenario_id: null });
+    expect(rows[0].id).not.toBe("forged");
   });
 
   it("turn RLS refusals into a sentence", async () => {
-    db.result = { data: null, error: { code: "42501" } };
-    expect(await createScenario(WS, valid)).toEqual({ status: "error", message: "You don't have permission to change scenarios here." });
+    signInAs(world, "viewer");
+    expect(await createScenario(W, valid)).toEqual({ status: "error", message: "You don't have permission to change scenarios here." });
+    expect(await scenarios()).toEqual([]);
     // A delete RLS filters out removes nothing.
-    db.result = { data: [], error: null };
-    expect(await deleteScenario(northbeamScenarios()[0]!.id)).toEqual({ status: "error", message: "You don't have permission to change scenarios here." });
+    signInAs(world, "editor");
+    const made = await createScenario(W, valid);
+    if (made.status !== "ok") throw new Error("setup failed");
+    signInAs(world, "viewer");
+    expect(await deleteScenario(made.scenario.id)).toEqual({ status: "error", message: "You don't have permission to change scenarios here." });
+    expect(await scenarios()).toHaveLength(1);
+    signInAs(world, "editor");
+    expect(await deleteScenario(made.scenario.id)).toEqual({ status: "ok" });
+    expect(await scenarios()).toEqual([]);
   });
 });

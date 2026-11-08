@@ -1,7 +1,8 @@
 import "server-only";
 import type { Json } from "@transpera-flow/db";
 import type { HealthSetting } from "@/lib/servicing";
-import { createClient } from "@/lib/supabase/server";
+import { rpc } from "@transpera-flow/db/client";
+import { getDb } from "@/lib/auth/session";
 import type { SaveOutcome } from "./field-controller";
 
 // Server half of per-field saves (docs/adr/0001-per-field-saves.md). Calls the
@@ -26,10 +27,14 @@ export type EditableTable =
   | "clients"
   | "client_assignments"
   | "client_groups"
-  | "service_servicing";
+  | "service_servicing"
+  | "departments"
+  | "tiers"
+  | "person_portfolio"
+  | "solutions";
 
 /** Link tables `save_links` accepts, and their member column. */
-export const LINK_MEMBERS = { person_roles: "role_id", person_skills: "step_id", client_services: "service_id" } as const;
+export const LINK_MEMBERS = { person_roles: "role_id", person_skills: "step_id", client_services: "service_id", person_tiers: "tier_id" } as const;
 export type LinkTable = keyof typeof LINK_MEMBERS;
 
 interface FieldsResult {
@@ -60,6 +65,15 @@ function errorOutcome(error: { code?: string; message: string }): SaveOutcome<ne
   return { status: "error", message: "Couldn't save. Try again." };
 }
 
+/** A database call's result, or the error it threw (pg errors carry the same SQLSTATE `code` PostgREST passed on). */
+async function attempt<T>(call: () => Promise<T>): Promise<{ data: T } | { error: { code?: string; message: string } }> {
+  try {
+    return { data: await call() };
+  } catch (err) {
+    return { error: err instanceof Error ? (err as { code?: string } & Error) : { message: String(err) } };
+  }
+}
+
 /**
  * Save one field of one row if its stored value is still `base`.
  * `field` is a column, or `column.key` for one key of a jsonb column. A
@@ -72,14 +86,15 @@ export async function saveField<T extends string | number | boolean | null | str
   base: T,
   value: T,
 ): Promise<SaveOutcome<T>> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc("save_fields", {
+  const db = await getDb();
+  const out = await attempt(() => rpc(db, "save_fields", {
     target,
     key,
     base: { [field]: base },
     changes: { [field]: value },
-  });
-  if (error) return errorOutcome(error);
+  }));
+  if ("error" in out) return errorOutcome(out.error);
+  const data = out.data;
   const result = data as unknown as FieldsResult;
   if (result.status === "not_found") return { status: "not_found" };
   if (result.status === "conflict" && result.conflicts && field in result.conflicts) {
@@ -89,14 +104,15 @@ export async function saveField<T extends string | number | boolean | null | str
 }
 
 /**
- * Save one Client health rule (a `settings.<key>` of the workspace) if its stored value is still `base`. Owners and editors may
+ * Save one Client health rule (a `settings.<key>` of the workspace) if its stored value is still `base`. Agency admins may
  * (`save_health_rules`, a SECURITY DEFINER function that writes nothing but those four keys; `save_fields('workspaces')` is
  * owner-only). `value` is a number from 0 to 100, or null to restore the estimated default.
  */
 export async function saveHealthRule(workspaceId: string, key: HealthSetting, base: number | null, value: number | null): Promise<SaveOutcome<number | null>> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc("save_health_rules", { ws: workspaceId, base: { [key]: base }, changes: { [key]: value } });
-  if (error) return errorOutcome(error);
+  const db = await getDb();
+  const out = await attempt(() => rpc(db, "save_health_rules", { ws: workspaceId, base: { [key]: base }, changes: { [key]: value } }));
+  if ("error" in out) return errorOutcome(out.error);
+  const data = out.data;
   const result = data as unknown as FieldsResult;
   if (result.status === "not_found") return { status: "not_found" };
   const field = `settings.${key}`;
@@ -107,15 +123,16 @@ export async function saveHealthRule(workspaceId: string, key: HealthSetting, ba
 }
 
 /**
- * Switch Per-person times (`settings.capacity_factor_enabled`, C6) if its stored value is still `base`. Owners and editors may
+ * Switch Per-person times (`settings.capacity_factor_enabled`, C6) if its stored value is still `base`. Agency admins may
  * (`save_capacity_factor_switch`, a SECURITY DEFINER function that writes nothing but this key; `save_fields('workspaces')` is
  * owner-only). Absent, null and false all mean off, so the outcome is a plain boolean.
  */
 export async function saveCapacityFactorSwitch(workspaceId: string, base: boolean | null, value: boolean): Promise<SaveOutcome<boolean>> {
-  const supabase = await createClient();
+  const db = await getDb();
   const key = "capacity_factor_enabled";
-  const { data, error } = await supabase.rpc("save_capacity_factor_switch", { ws: workspaceId, base: { [key]: base }, changes: { [key]: value } });
-  if (error) return errorOutcome(error);
+  const out = await attempt(() => rpc(db, "save_capacity_factor_switch", { ws: workspaceId, base: { [key]: base }, changes: { [key]: value } }));
+  if ("error" in out) return errorOutcome(out.error);
+  const data = out.data;
   const result = data as unknown as FieldsResult;
   if (result.status === "not_found") return { status: "not_found" };
   if (result.status === "conflict" && result.conflicts && key in result.conflicts) {
@@ -126,14 +143,15 @@ export async function saveCapacityFactorSwitch(workspaceId: string, base: boolea
 
 /**
  * Save one person's time on one step (`stepId` null: on every step they do) if the stored factor is still `base` (null: none).
- * `value` null removes it. Owners and editors only (`save_capacity_factor` is SECURITY INVOKER, so RLS decides).
+ * `value` null removes it. Agency admins only (`save_capacity_factor` is SECURITY INVOKER, so RLS decides).
  */
 export async function saveCapacityFactor(personId: string, stepId: string | null, base: number | null, value: number | null): Promise<SaveOutcome<number | null>> {
-  const supabase = await createClient();
+  const db = await getDb();
   // The generated types make every argument non-null; the function takes null for the default step, no base and no value.
   const args = { person: personId, step: stepId, base, value } as unknown as { person: string; step: string; base: number; value: number };
-  const { data, error } = await supabase.rpc("save_capacity_factor", args);
-  if (error) return errorOutcome(error);
+  const out = await attempt(() => rpc(db, "save_capacity_factor", args));
+  if ("error" in out) return errorOutcome(out.error);
+  const data = out.data;
   const result = data as unknown as { status: "saved" | "conflict" | "not_found"; value?: number | null; theirs?: number | null };
   if (result.status === "not_found") return { status: "not_found" };
   if (result.status === "conflict") return { status: "conflict", theirs: result.theirs ?? null };
@@ -160,9 +178,10 @@ export async function saveFields<V extends Scalar | object = Scalar>(
   base: Record<string, V>,
   changes: Record<string, V>,
 ): Promise<FieldsOutcome<V>> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc("save_fields", { target, key, base: base as Json, changes: changes as Json });
-  if (error) return errorOutcome(error);
+  const db = await getDb();
+  const out = await attempt(() => rpc(db, "save_fields", { target, key, base: base as Json, changes: changes as Json }));
+  if ("error" in out) return errorOutcome(out.error);
+  const data = out.data;
   const result = data as unknown as FieldsResult;
   if (result.status === "not_found") return { status: "not_found" };
   const conflicts = result.conflicts ?? {};
@@ -179,15 +198,16 @@ export async function saveLinks(
   base: readonly string[],
   next: readonly string[],
 ): Promise<SaveOutcome<string[]>> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc("save_links", {
+  const db = await getDb();
+  const out = await attempt(() => rpc(db, "save_links", {
     target,
     owner,
     member: LINK_MEMBERS[target],
     base: [...base],
     next: [...next],
-  });
-  if (error) return errorOutcome(error);
+  }));
+  if ("error" in out) return errorOutcome(out.error);
+  const data = out.data;
   const result = data as unknown as LinksResult;
   if (result.status === "not_found") return { status: "not_found" };
   const members = result.members ?? [];

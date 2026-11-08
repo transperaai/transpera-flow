@@ -84,7 +84,7 @@ beforeAll(async () => {
   db = await createTestDb();
   editor = await createUser(db, "editor@nested.example.com");
   viewer = await createUser(db, "viewer@nested.example.com");
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor'), ($1, $3, 'viewer')", [ws, editor.id, viewer.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner'), ($1, $3, 'viewer')", [ws, editor.id, viewer.id]);
   otherWs = (await db.client.query("insert into workspaces (name, slug) values ('Elsewhere', 'elsewhere-nested') returning id")).rows[0].id;
 });
 

@@ -1,35 +1,21 @@
 import "server-only";
 import { cache } from "react";
-import type { AccessEmailRow, MembershipRole, WorkspaceDomainRow } from "@transpera-flow/db";
-import { createClient } from "./supabase/server";
+import type { MembershipRole } from "@transpera-flow/db";
+import { rpc, rpcRows } from "@transpera-flow/db/client";
+import { getDb, getSessionUser } from "./auth/session";
 
-/**
- * Brings the signed-in user's memberships in line with the workspaces'
- * allowed domains and pre-assigned emails (SECURITY DEFINER function, scoped
- * to the caller). Idempotent; run after every sign-in. Returns how many
- * workspaces the user can now open through a membership.
- */
-export async function resolveMyAccess(): Promise<number> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc("resolve_my_access");
-  if (error) throw error;
-  return data.length;
-}
-
-/** Whether the signed-in user is an agency admin (may create workspaces). */
+/** Whether the signed-in user is the Owner (the agency-admin flag; may create workspaces). */
 export async function isAgencyAdmin(): Promise<boolean> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc("is_agency_admin");
-  if (error) throw error;
-  return data === true;
+  const db = await getDb();
+  return (await rpc(db, "is_agency_admin")) === true;
 }
 
+/** Someone who has signed in to a workspace: an `owner` membership is an Agency admin, a `viewer` one a Viewer. */
 export interface WorkspaceMember {
   membershipId: string;
   userId: string;
   email: string;
   role: MembershipRole;
-  source: "manual" | "access_list" | "domain";
   active: boolean;
   personId: string | null;
   lastSignInAt: string | null;
@@ -37,82 +23,57 @@ export interface WorkspaceMember {
 
 export interface AccessSettings {
   workspace: { id: string; name: string; slug: string };
-  isAgencyAdmin: boolean;
-  domains: WorkspaceDomainRow[];
-  emails: AccessEmailRow[];
   members: WorkspaceMember[];
   people: { id: string; name: string }[];
 }
 
-/** Everything the Access page shows, or null if the user can't manage this workspace. */
+/** Everything the Access page shows about a workspace's people, or null if the user can't manage this workspace. */
 export async function loadAccessSettings(slug: string): Promise<AccessSettings | null> {
-  const supabase = await createClient();
-  const { data: workspace, error } = await supabase.from("workspaces").select("id, name, slug").eq("slug", slug).maybeSingle();
-  if (error) throw error;
+  const db = await getDb();
+  const workspace = await db.selectFrom("workspaces").select(["id", "name", "slug"]).where("slug", "=", slug).executeTakeFirst();
   if (!workspace) return null;
   const ws = workspace.id;
-  const [canManage, isAgencyAdmin, domains, emails, members, people] = await Promise.all([
-    supabase.rpc("can_manage_workspace", { ws }),
-    supabase.rpc("is_agency_admin"),
-    supabase.from("workspace_domains").select("id, workspace_id, domain").eq("workspace_id", ws).order("domain"),
-    supabase.from("workspace_access_emails").select("id, workspace_id, email, role, person_id").eq("workspace_id", ws).order("email"),
-    supabase.rpc("workspace_members", { ws }),
-    supabase.from("people").select("id, name").eq("workspace_id", ws).order("name"),
+  const [canManage, members, people] = await Promise.all([
+    rpc(db, "can_manage_workspace", { ws }),
+    rpcRows(db, "workspace_members", { ws }),
+    db.selectFrom("people").select(["id", "name"]).where("workspace_id", "=", ws).orderBy("name").execute(),
   ]);
-  for (const r of [canManage, isAgencyAdmin, domains, emails, members, people]) if (r.error) throw r.error;
-  if (!canManage.data) return null;
+  if (!canManage) return null;
   return {
     workspace,
-    isAgencyAdmin: Boolean(isAgencyAdmin.data),
-    domains: domains.data ?? [],
-    // The check constraint keeps agency_admin off the list.
-    emails: (emails.data ?? []) as AccessEmailRow[],
-    members: (members.data ?? []).map((m) => ({
+    members: (members ?? []).map((m) => ({
       membershipId: m.membership_id,
       userId: m.user_id,
-      email: m.email,
-      role: m.role,
-      source: m.source as WorkspaceMember["source"],
+      // auth.users.email is nullable, though the Better Auth mirror always sets it.
+      email: m.email ?? "",
+      role: m.role as MembershipRole,
       active: m.active,
       personId: m.person_id,
       lastSignInAt: m.last_sign_in_at,
     })),
-    people: people.data ?? [],
+    people,
   };
 }
 
 /** The signed-in user's id, or null. */
 export async function currentUserId(): Promise<string | null> {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  const sub = data?.claims?.sub;
-  return typeof sub === "string" ? sub : null;
+  return (await getSessionUser())?.id ?? null;
 }
 
-/** The signed-in user as others see them in presence (issue #10): id, a display name and email. */
+/** The signed-in user: id, a display name and email. */
 export const currentViewer = cache(async (): Promise<{ userId: string; name: string; email: string | null } | null> => {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getClaims();
-  const claims = data?.claims;
-  if (!claims || typeof claims.sub !== "string") return null;
-  const email = typeof claims.email === "string" && claims.email ? claims.email : null;
-  const meta = (claims.user_metadata ?? {}) as Record<string, unknown>;
-  const given = [meta.full_name, meta.name].find((v): v is string => typeof v === "string" && v.trim() !== "");
-  return { userId: claims.sub, name: given?.trim() ?? email?.split("@")[0] ?? "Someone", email };
+  const user = await getSessionUser();
+  if (!user) return null;
+  const email = user.email || null;
+  return { userId: user.id, name: user.name ?? email?.split("@")[0] ?? "Someone", email };
 });
 
-/** Whether the signed-in user can edit the workspace's processes and people (RLS helper). */
+/** Whether the signed-in user can edit the workspace's processes and people (the Owner or an Agency admin; RLS helper). */
 export const canEditWorkspace = cache(async (workspaceId: string): Promise<boolean> => {
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc("can_edit_workspace", { ws: workspaceId });
-  if (error) throw error;
-  return data === true;
+  return (await rpc(await getDb(), "can_edit_workspace", { ws: workspaceId })) === true;
 });
 
-/** Whether the signed-in user can manage the workspace's access (RLS helper). */
+/** Whether the signed-in user can manage the workspace's settings and who is linked to whom (the Owner or an Agency admin). */
 export const canManageWorkspace = cache(async (workspaceId: string): Promise<boolean> => {
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc("can_manage_workspace", { ws: workspaceId });
-  if (error) throw error;
-  return Boolean(data);
+  return Boolean(await rpc(await getDb(), "can_manage_workspace", { ws: workspaceId }));
 });

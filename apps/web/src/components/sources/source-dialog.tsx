@@ -26,7 +26,6 @@ import {
   type SourceDraft,
   type SourceDraftErrors,
 } from "@/lib/sources/links";
-import { SOURCE_FILE_ACCEPT, checkSourceFile, fileSize, fileTypeOf } from "@/lib/sources/file-check";
 import { MAX_TITLE, SOURCE_KIND_LABELS, type SourceInput } from "@/lib/sources/validate";
 import { cn } from "@/lib/utils";
 
@@ -67,10 +66,10 @@ export const SOURCE_DIALOG_HELP = {
     description: "A source you have already added. Linking it here doesn't change what else it is linked to.",
     example: "Interview: Maya Collins.",
   },
-  file: {
-    label: "File (optional)",
-    description: "The original, kept with the source so anyone in the workspace can download it. Its text is read and becomes the source's full text, so values can quote it. A .txt, .md, .csv, .xlsx or .pdf file, up to 10 MB.",
-    example: "The onboarding SOP as a PDF, or last year's deals as a spreadsheet.",
+  link: {
+    label: "Link to the original (optional)",
+    description: "Where the original lives: a Google Drive, Notion or SharePoint link, a recording, or any other web address. It opens in a new tab from the source. Nothing is uploaded here.",
+    example: "The Google Drive link to the onboarding SOP.",
   },
   target: {
     label: "Which one",
@@ -97,8 +96,6 @@ export interface SourceDialogProps {
   presetLabel?: string;
   /** Sources that could be linked to `preset` instead of adding a new one (the ones not linked to it yet). */
   existingSources?: readonly SourceRow[];
-  /** Offer a file to keep with a new source (issue #182): where the page can upload one. */
-  allowFile?: boolean;
   /** Saves it. Resolve to an error message, or null when it saved (the dialog then closes). */
   onSubmit: (submission: SourceSubmission) => Promise<string | null>;
   onClose: () => void;
@@ -133,10 +130,8 @@ export function SourceDialog(props: SourceDialogProps) {
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-function Form({ targets, source, preset, presetLabel, existingSources, allowFile, onSubmit, onClose }: SourceDialogProps) {
+function Form({ targets, source, preset, presetLabel, existingSources, onSubmit, onClose }: SourceDialogProps) {
   const [draft, setDraft] = useState<SourceDraft>(() => emptyDraft(preset, today()));
-  const [file, setFile] = useState<File | null>(null);
-  const [fileError, setFileError] = useState<string | null>(null);
   // From a screen's "+ Link", a source you already have can be linked to that screen's thing instead of adding a new one.
   const canPickExisting = !source && !!preset && (existingSources?.length ?? 0) > 0;
   const [use, setUse] = useState<"new" | "existing">("new");
@@ -167,12 +162,12 @@ function Form({ targets, source, preset, presetLabel, existingSources, allowFile
     const found = validateDraft(draft, targets, !!source);
     setErrors(found);
     setError(null);
-    if (hasErrors(found) || fileError) return;
+    if (hasErrors(found)) return;
     const made = draftToSubmission(source ? { ...draft, title: source.title } : draft, targets);
     if (!made.ok) return setErrors(made.errors);
     setWorking(true);
     try {
-      const problem = await onSubmit(source ? { kind: "link", source, link: made.link } : { kind: "add", input: made.input, link: made.link, ...(file ? { file } : {}) });
+      const problem = await onSubmit(source ? { kind: "link", source, link: made.link } : { kind: "add", input: made.input, link: made.link });
       if (problem) setError(problem);
       else onClose();
     } finally {
@@ -249,33 +244,18 @@ function Form({ targets, source, preset, presetLabel, existingSources, allowFile
               <Input id="src-date" type="date" value={draft.date} aria-invalid={!!errors.date} aria-describedby={errors.date ? "src-date-error" : undefined} onChange={(e) => set({ date: e.target.value })} />
             </Field>
           </div>
-          {allowFile && (
-            <Field label={SOURCE_DIALOG_HELP.file.label} help={SOURCE_DIALOG_HELP.file} htmlFor="src-file" error={fileError ?? undefined}>
-              <Input
-                id="src-file"
-                type="file"
-                accept={SOURCE_FILE_ACCEPT}
-                aria-invalid={!!fileError}
-                aria-describedby={fileError ? "src-file-error" : "src-file-hint"}
-                onChange={async (e) => {
-                  const picked = e.target.files?.[0] ?? null;
-                  setFile(picked);
-                  setFileError(null);
-                  if (!picked) return;
-                  // The same checks the server makes, early: its name, its size and what is in it.
-                  const check = fileTypeOf(picked.name) ? checkSourceFile(picked.name, new Uint8Array(await picked.arrayBuffer())) : ({ ok: false, error: "Upload a .txt, .md, .csv, .xlsx or .pdf file." } as const);
-                  if (!check.ok) return setFileError(check.error);
-                  // A title from the file's name, if there isn't one yet.
-                  setDraft((d) => (d.title.trim() ? d : { ...d, title: picked.name.replace(/\.[A-Za-z0-9]+$/, "").slice(0, MAX_TITLE) }));
-                }}
-              />
-              {!fileError && (
-                <p id="src-file-hint" className="text-xs text-muted-foreground">
-                  {file ? `${file.name} · ${fileSize(file.size)}. Its text becomes the full text, in place of the quote.` : ".txt, .md, .csv, .xlsx or .pdf, up to 10 MB."}
-                </p>
-              )}
-            </Field>
-          )}
+          <Field label={SOURCE_DIALOG_HELP.link.label} help={SOURCE_DIALOG_HELP.link} htmlFor="src-original" error={errors.fileUrl}>
+            <Input
+              id="src-original"
+              type="url"
+              inputMode="url"
+              value={draft.fileUrl}
+              placeholder="https://drive.google.com/…"
+              aria-invalid={!!errors.fileUrl}
+              aria-describedby={errors.fileUrl ? "src-original-error" : undefined}
+              onChange={(e) => set({ fileUrl: e.target.value })}
+            />
+          </Field>
           <Field label="Quote or excerpt" help={SOURCE_DIALOG_HELP.quote} htmlFor="src-quote" error={errors.quote}>
             <Textarea
               id="src-quote"

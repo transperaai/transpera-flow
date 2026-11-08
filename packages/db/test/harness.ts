@@ -1,9 +1,13 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+import type { Kysely } from "kysely";
+import { applyCompat, applyMigrations, type CompatOptions } from "../src/migrations";
+import { createDb, createPool, type Claims } from "../src/client";
+import type { DB } from "../src/db-types";
 
-// Creates a throwaway database, loads the auth and storage shims, every migration and the
-// seed, and lets tests run queries as a given user (RLS applies).
+// Creates a throwaway database, applies the compat layer, every migration and the seed with the
+// same code the migrate script runs on Neon, and lets tests run queries as a given user (RLS applies).
 
 const ADMIN_URL = process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/postgres";
 const dir = (p: string) => new URL(p, import.meta.url);
@@ -14,14 +18,31 @@ export interface TestDb {
   url: string;
   /** Run `fn` as `authenticated` with the given JWT claims, inside a rolled-back transaction. */
   as<T>(claims: Record<string, unknown> | null, fn: (c: pg.Client) => Promise<T>): Promise<T>;
+  /** A `Db` acting as `claims`' user (null: signed out), as the app's getDb() gives one. Changes are committed. */
+  dbAs(claims: Claims | null): Kysely<DB>;
   close(): Promise<void>;
 }
 
 export interface TestDbOptions {
-  /** Also load a stand-in for Supabase Realtime's publication and realtime.messages (./sql/realtime-shim.sql). */
+  /** The Realtime stand-in (publication and realtime.messages) loads by default; `false` leaves it out. */
   realtime?: boolean;
-  /** Give anon, authenticated and service_role full privileges on every table made from now on, as a Supabase project does. */
+  /**
+   * Give anon, authenticated and service_role full privileges on every table made from now on, as a Supabase project did.
+   * Neon has no such default, but the migrations were written and applied on Supabase, where every table started with all
+   * privileges: the tests that check what the migrations revoke or grant (and the ones on the production data's history) still
+   * run with it, to show the migrations leave the right privileges whichever way a database starts.
+   */
   supabaseDefaultPrivileges?: boolean;
+  /** Apply migrations only up to this version (inclusive), for a database as an older release left it. */
+  upTo?: string;
+  /** Load seed.sql after the migrations (the default); `false` leaves the database empty, as a fresh deployment's is. */
+  seed?: boolean;
+}
+
+/** The compat layer and legacy shims (as in production), plus the test-only grants. Run before any migration. */
+export async function loadShims(client: pg.Client, options: CompatOptions = {}): Promise<void> {
+  await applyCompat(client, options);
+  await client.query(readFileSync(dir("./sql/test-extras.sql"), "utf8"));
 }
 
 export async function createTestDb(options: TestDbOptions = {}): Promise<TestDb> {
@@ -36,21 +57,20 @@ export async function createTestDb(options: TestDbOptions = {}): Promise<TestDb>
   const client = new pg.Client({ connectionString: url.toString() });
   await client.connect();
 
-  await client.query(readFileSync(dir("./sql/auth-shim.sql"), "utf8"));
-  await client.query(readFileSync(dir("./sql/storage-shim.sql"), "utf8"));
+  await loadShims(client, { realtimeShim: options.realtime });
   if (options.supabaseDefaultPrivileges) {
     await client.query("alter default privileges in schema public grant all on tables to anon, authenticated, service_role");
   }
-  if (options.realtime) await client.query(readFileSync(dir("./sql/realtime-shim.sql"), "utf8"));
-  const migrations = readdirSync(dir("../supabase/migrations")).filter((f) => f.endsWith(".sql")).sort();
-  for (const file of migrations) {
-    await client.query(readFileSync(dir(`../supabase/migrations/${file}`), "utf8"));
-  }
-  await client.query(readFileSync(dir("../supabase/seed.sql"), "utf8"));
+  await applyMigrations(client, { seed: options.seed !== false, upTo: options.upTo });
 
+  let pool: pg.Pool | undefined;
   return {
     client,
     url: url.toString(),
+    dbAs(claims) {
+      pool ??= createPool(url.toString(), { max: 4 });
+      return createDb(pool, claims);
+    },
     async as(claims, fn) {
       await client.query("begin");
       try {
@@ -62,6 +82,7 @@ export async function createTestDb(options: TestDbOptions = {}): Promise<TestDb>
       }
     },
     async close() {
+      await pool?.end();
       await client.end();
       const a = new pg.Client({ connectionString: ADMIN_URL });
       await a.connect();

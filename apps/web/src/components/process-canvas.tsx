@@ -49,6 +49,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import { Clock, Flag, Play, Split, Undo2 } from "lucide-react";
 import { RATING_LABELS, type Rating, type SimulationResult } from "@transpera-flow/engine";
 import {
   EVIDENCE_COLUMNS,
@@ -90,13 +91,18 @@ import type { ChangeKind, DraftDiff, StepChange } from "@/lib/drafts/diff";
 import type { EditorState, ProcessEditor } from "@/lib/editor/editor";
 import type { InlineField } from "@/lib/editor/inline-edit";
 import type { Table } from "@/lib/editor/ops";
-import { laneLayout, type Lane } from "@/lib/editor/lanes";
-import { CARD_SIZE, TERMINAL_SIZE, groupIds, openGroupSize } from "@/lib/map/groups";
+import { bandLayout, laneLayout, type BandSpec, type Lane, type LaneLayout } from "@/lib/editor/lanes";
+import { CARD_SIZE, GROUP_CARD, TERMINAL_SIZE, groupIds, openGroupSize } from "@/lib/map/groups";
 import { groupsToOpen, litIds, withHighlightOpen } from "@/lib/map/highlight";
 import { ratingOfRank } from "@/lib/map/rating";
 import { ISSUE_PILL_CLASS, tileColours, tileHeadline } from "@/lib/map/tile";
 import { MAX_ZOOM, MIN_ZOOM, autoPanelHeight, fitViewport, stepZoom, type Padding } from "@/lib/map/zoom";
-import { MapLegend, ZoomControls } from "./map/map-controls";
+import { MapKey, MapLegend, ZoomControls } from "./map/map-controls";
+import { TagPill } from "./tag-pill";
+import { ProblemMark } from "./editor/problem-mark";
+import type { NodeProblems } from "@/lib/editor/problems";
+import { GO_BACK_LINK_PREFIX, branchRows, edgeOfGoBackNode, goBackNodes, isGoBackNodeId, type BranchRow } from "@/lib/editor/branch-view";
+import { Help } from "./help";
 import { FirstRunStatus } from "./map/map-placeholder";
 import { EmptyState } from "./shell/empty-state";
 import { NO_EXTRAS, StepDetail, sourcesOf, type StepExtras } from "./map/step-detail";
@@ -107,6 +113,7 @@ import { PlaybackBar } from "./playback-bar";
 import { PlaybackLayer } from "./playback-layer";
 import { NodeMenu, type CanvasCommands, type MenuState } from "./node-menu";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
+import { SplitBar } from "./split-bar";
 
 export type { CanvasCommands } from "./node-menu";
 
@@ -126,7 +133,14 @@ type StepNodeData = {
   /** Hours an item queues before work starts, in this run; null without a run. */
   avgWait: number | null;
   bottleneck: boolean;
-  warning: string | null;
+  /** What stops the process simulating, on this step (the Editor's red mark); empty when nothing does. */
+  problems: readonly string[];
+  /** A decision in the Editor: its branches, one row each on the card; null for any other step. */
+  branches: BranchRow[] | null;
+  /** The branch of this decision that is selected (its line or its row was clicked), if any. */
+  branchSelected: string | null;
+  /** The Editor's node types (Step, Wait, Decision, Start, End) each look their own way. */
+  typed: boolean;
   editable: boolean;
   /** Name of the step its rework goes back to, if not itself. */
   reworkTo: string | null;
@@ -173,7 +187,7 @@ type GroupNodeData = {
   /** Only a group opens in place; a child process has a page of its own. */
   expandable: boolean;
   roll: RollUp;
-  warning: string | null;
+  problems: readonly string[];
   editable: boolean;
   change: ChangeKind | null;
   /** The worst rating inside, which colours a closed card. */
@@ -182,19 +196,29 @@ type GroupNodeData = {
   rated: boolean;
   /** Highlighting: true outlined, false dimmed (closed cards only), null when nothing is highlighted. */
   lit: boolean | null;
+  /** The process's category as a small pill (the company map; Q4), or null. */
+  tag: string | null;
+  /** The Sandbox's "New version: <name>" on a process that runs a new map version: a pill under the card and an accent outline. */
+  badge: string | null;
 };
+
+/** The small "Go back to X" node drawn at the end of a decision's branch that loops to an earlier step (editor brainstorm, item 6). */
+type GoBackNodeData = { edgeId: string; targetName: string; branchName: string; problems: readonly string[]; editable: boolean };
 
 type StepFlowNode = Node<StepNodeData, "step">;
 type TerminalFlowNode = Node<StepNodeData, "terminal">;
 type GroupFlowNode = Node<GroupNodeData, "group">;
-type FlowNode = StepFlowNode | TerminalFlowNode | GroupFlowNode;
+type GoBackFlowNode = Node<GoBackNodeData, "goback">;
+type FlowNode = StepFlowNode | TerminalFlowNode | GroupFlowNode | GoBackFlowNode;
 
 /** Whether two node objects for a step would draw the same. */
 function sameNode(a: StepFlowNode | TerminalFlowNode, b: StepFlowNode | TerminalFlowNode): boolean {
   if (a.type !== b.type || a.selected !== b.selected || a.ariaLabel !== b.ariaLabel || a.zIndex !== b.zIndex) return false;
   if (a.position.x !== b.position.x || a.position.y !== b.position.y) return false;
   if (a.measured?.width !== b.measured?.width || a.measured?.height !== b.measured?.height) return false;
-  return (Object.keys(a.data) as (keyof StepNodeData)[]).every((k) => a.data[k] === b.data[k]);
+  // The lists (problems, branch rows) are made afresh each time: same when they hold the same.
+  const same = (x: unknown, y: unknown) => x === y || (Array.isArray(x) && Array.isArray(y) && JSON.stringify(x) === JSON.stringify(y));
+  return (Object.keys(a.data) as (keyof StepNodeData)[]).every((k) => same(a.data[k], b.data[k]));
 }
 
 /**
@@ -213,15 +237,30 @@ type BranchData = {
   rolled?: boolean;
   /** A handoff line's label, on the company map. */
   label?: string | null;
+  /** What stops the process simulating, on this line (the Editor's red mark). */
+  problems?: readonly string[];
+  /** A branch of a decision in the Editor: its name shows with its share, and it is edited from the decision's panel, not on the line. */
+  branch?: { name: string } | null;
 };
 type BranchFlowEdge = Edge<BranchData, "branch">;
 
 /** Lets custom nodes and edges reach the editor without threading it through React Flow's data. */
-const CanvasContext = createContext<{ editor: ProcessEditor | null; restore: ((table: Table, id: string) => void) | null; toggleGroup: (id: string) => void; handoffs: boolean }>({
+const CanvasContext = createContext<{
+  editor: ProcessEditor | null;
+  restore: ((table: Table, id: string) => void) | null;
+  toggleGroup: (id: string) => void;
+  handoffs: boolean;
+  /** A click on a branch's row of a decision card: select that branch (the Editor puts its decision in the panel, with the row in focus). */
+  selectBranch: (edgeId: string) => void;
+  /** "Turn into steps" on a linked process's card; null where the map can't. */
+  turnInto: ((stepId: string) => void) | null;
+}>({
   editor: null,
   restore: null,
   toggleGroup: () => undefined,
   handoffs: false,
+  selectBranch: () => undefined,
+  turnInto: null,
 });
 
 const pillClass = "rounded-full border px-1.5 text-[10px] leading-4 font-semibold";
@@ -305,19 +344,6 @@ const changeClass = (d: { ghost?: boolean; change: ChangeKind | null }) =>
 const handleClass = (editable: boolean) =>
   editable ? "!size-2.5 !border-2 !border-panel !bg-fg-3 hover:!bg-accent" : "!bg-line-2";
 
-function Warning({ text }: { text: string }) {
-  return (
-    <span
-      role="img"
-      aria-label={`Warning: ${text}`}
-      title={text}
-      className="absolute -top-2 -right-2 flex size-5 items-center justify-center rounded-full border-2 border-panel bg-warn text-[11px] font-bold text-fg"
-    >
-      !
-    </span>
-  );
-}
-
 const selectedRing = "outline-2 outline-offset-2 outline-edit";
 
 /** Highlighted cards get a heavy outline; the rest fade (issue #99). */
@@ -331,7 +357,7 @@ const percent = (p: number) => `${Math.round(p * 1000) / 10}%`;
 
 /** What a screen reader hears for a step. */
 function stepLabel(data: StepNodeData): string {
-  const { step, role, person, warning, reworkTo, change, estimate, conflict, wasName, wasWho, wasWork, wasWait, rating, bottleneck } = data;
+  const { step, role, person, problems, branches, reworkTo, change, estimate, conflict, wasName, wasWho, wasWork, wasWait, rating, bottleneck } = data;
   const draft =
     change === "added"
       ? "new in this draft"
@@ -347,9 +373,12 @@ function stepLabel(data: StepNodeData): string {
               .filter(Boolean)
               .join("")}`
           : null;
-  const flags = [rating && `rated ${RATING_LABELS[rating]}`, bottleneck && "bottleneck", draft, conflict && "sources disagree", estimate && "unconfirmed assumption", warning && `warning: ${warning}`];
+  const flags = [rating && `rated ${RATING_LABELS[rating]}`, bottleneck && "bottleneck", draft, conflict && "sources disagree", estimate && "unconfirmed assumption", problems.length > 0 && `to fix: ${problems.join(" ")}`];
   if (step.kind === "start" || step.kind === "end") {
     return [step.name, step.kind === "start" ? "start" : `end, ${step.outcome}`, ...flags].filter(Boolean).join(", ");
+  }
+  if (branches) {
+    return [step.name, "decision", `branches: ${branches.map((r) => `${r.name} ${r.percent}%${r.goBack ? " (goes back)" : ""}`).join(", ")}`, ...flags].filter(Boolean).join(", ");
   }
   return [
     step.name,
@@ -395,19 +424,96 @@ const tileClass = "relative rounded-lg shadow-token transition-[box-shadow,opaci
 const headlineRowClass = "mt-1 flex min-h-[18px] min-w-0 items-baseline gap-1.5";
 const footClass = "mt-1.5 flex items-baseline justify-between gap-2 border-t pt-1 text-xs text-fg-2";
 
-function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
-  const { step, role, person, bottleneck, warning, editable, editing, pulse, ghost } = data;
+/** A decision in the Editor: the question, then a row for each branch (its name and share). A click on a row selects that branch. */
+function DecisionCard({ data, selected }: NodeProps<StepFlowNode>) {
+  const { step, branches, problems, editable } = data;
+  const { selectBranch } = useContext(CanvasContext);
+  const flagged = data.bottleneck;
+  const colours = tileColours(data.rating, flagged);
+  return (
+    <div
+      data-lit={data.lit ?? undefined}
+      data-tile="decision"
+      data-rating={data.rating ?? "none"}
+      className={`${tileClass} w-48 border-[1.5px] border-l-[5px] px-2.5 pt-2 pb-2 ${flagged ? "ring-[1.5px] ring-crit" : ""} ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
+      style={{ background: colours.background, borderColor: colours.borderColor, borderLeftColor: "var(--accent)" }}
+    >
+      <TopPills change={data.change} bottleneck={flagged} />
+      <FlagPills estimate={data.estimate} conflict={data.conflict} quote={data.quote} />
+      <Handle type="target" position={Position.Left} className={handleClass(editable)} />
+      <p className="flex items-center gap-1 text-[11px] leading-[14px] font-semibold tracking-[0.06em] text-fg-2 uppercase">
+        <Split aria-hidden className="size-3" /> Decision
+      </p>
+      {data.wasName !== null && <p className="text-[11px] leading-tight text-fg-3 line-through">{data.wasName}</p>}
+      <p data-field="name" className="mt-0.5 text-sm leading-tight font-semibold text-fg">
+        {step.name}
+      </p>
+      <ul aria-label={`Branches of ${step.name}`} className="mt-1.5 flex flex-col gap-0.5 border-t pt-1.5" style={{ borderTopColor: colours.divider }}>
+        {branches!.map((row) => (
+          <li key={row.id}>
+            <button
+              type="button"
+              data-branch-row={row.id}
+              aria-pressed={data.branchSelected === row.id}
+              aria-label={`${row.name}, ${row.percent}%${row.goBack ? ", goes back" : ""}. Edit this branch`}
+              onClick={(e) => {
+                e.stopPropagation();
+                selectBranch(row.id);
+              }}
+              onDoubleClick={(e) => e.stopPropagation()}
+              className={`nodrag nopan flex w-full items-baseline justify-between gap-2 rounded px-1 py-0.5 text-left text-xs hover:bg-panel-2 ${data.branchSelected === row.id ? "bg-panel-2 outline-1 outline-edit" : ""}`}
+            >
+              <span className="min-w-0 truncate">
+                {row.name}
+                {row.goBack && <span aria-hidden> ↩</span>}
+              </span>
+              <span className="shrink-0 font-mono tabular-nums text-fg-2">{row.percent}%</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <ProblemMark problems={problems} />
+      <Handle type="source" position={Position.Right} className={handleClass(editable)} />
+      {/* Where a branch that goes back leaves from, to its "Go back to…" node below. Not for drawing lines from. */}
+      <Handle id="back" type="source" position={Position.Bottom} isConnectable={false} className="!pointer-events-none !size-1 !border-0 !opacity-0" />
+    </div>
+  );
+}
+
+/** The end of a decision's branch that goes back to an earlier step: "Go back to X". Clicking it selects the branch. */
+function GoBackNode({ data, selected }: NodeProps<GoBackFlowNode>) {
+  return (
+    <div
+      data-tile="goback"
+      className={`${tileClass} flex w-max max-w-[190px] items-center gap-1.5 rounded-full border-[1.5px] border-dashed border-line-2 bg-panel-2 px-2.5 py-1.5 text-xs font-semibold text-fg ${selected ? selectedRing : ""}`}
+    >
+      <Handle id="in" type="target" position={Position.Top} isConnectable={false} className="!pointer-events-none !size-1 !border-0 !opacity-0" />
+      <Undo2 aria-hidden className="size-3.5 shrink-0 text-fg-2" />
+      <span className="min-w-0 truncate" title={`Go back to ${data.targetName}`}>
+        Go back to {data.targetName}
+      </span>
+      <ProblemMark problems={data.problems} className="absolute -top-2 -right-2" />
+      <Handle id="out" type="source" position={Position.Left} isConnectable={false} className="!pointer-events-none !size-1 !border-0 !opacity-0" />
+    </div>
+  );
+}
+
+function StepNode(props: NodeProps<StepFlowNode>) {
+  const { data, selected } = props;
+  if (data.branches && !data.editing && !data.ghost) return <DecisionCard {...props} />;
+  const { step, role, person, bottleneck, problems, editable, editing, pulse, ghost } = data;
   const who = person?.name ?? role?.name;
   const staffed = role !== null || person !== null;
   const flagged = bottleneck && !editing && !ghost;
   const colours = tileColours(data.rating, flagged);
   const headline = headlineOf(data);
+  const wait = data.typed && step.kind === "wait";
   return (
     <div
       data-lit={data.lit ?? undefined}
-      data-tile="step"
+      data-tile={wait ? "wait" : "step"}
       data-rating={data.rating ?? "none"}
-      className={`${tileClass} ${editing ? "w-60 border-[1.5px] border-accent bg-panel" : ghost ? "w-48 border-[1.5px] bg-panel px-2.5 py-2" : "w-48 border-[1.5px] px-2.5 pt-2 pb-2"} ${flagged ? "ring-[1.5px] ring-crit" : ""} ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
+      className={`${tileClass} ${editing ? "w-60 border-[1.5px] border-accent bg-panel" : ghost ? "w-48 border-[1.5px] bg-panel px-2.5 py-2" : "w-48 border-[1.5px] px-2.5 pt-2 pb-2"} ${wait && !editing && !ghost ? "border-dashed" : ""} ${flagged ? "ring-[1.5px] ring-crit" : ""} ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
       style={editing || ghost ? undefined : { background: colours.background, borderColor: colours.borderColor }}
     >
       {pulse && !editing && (
@@ -425,6 +531,11 @@ function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
         </div>
       ) : (
         <>
+          {wait && (
+            <p className="flex items-center gap-1 text-[11px] leading-[14px] font-semibold tracking-[0.06em] text-fg-2 uppercase">
+              <Clock aria-hidden className="size-3" /> Wait
+            </p>
+          )}
           {data.rated && <RatingRow dot={colours.dot} label={data.rating ? RATING_LABELS[data.rating] : "Nothing to fix"} />}
           {data.wasName !== null && <p className="text-[11px] leading-tight text-fg-3 line-through">{data.wasName}</p>}
           <p data-field="name" className="mt-0.5 text-sm leading-tight font-semibold text-fg">
@@ -441,6 +552,7 @@ function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
               <Was was={data.wasWait}>{formatHours(step.wait_hours)} wait</Was>
             </p>
           )}
+          {step.split && <SplitBar split={step.split} className="mt-1.5" />}
           <div className={footClass} style={{ borderTopColor: colours.divider }}>
             <p data-field={person ? "person_id" : "role_id"} className="min-w-0 truncate">
               {who && <i aria-hidden className="mr-1.5 inline-block size-2 rounded-full align-baseline" style={{ background: role?.color ?? "var(--line-2)" }} />}
@@ -453,15 +565,24 @@ function StepNode({ data, selected }: NodeProps<StepFlowNode>) {
           </div>
         </>
       )}
-      {warning && <Warning text={warning} />}
+      <ProblemMark problems={problems} />
       <Handle type="source" position={Position.Right} className={handleClass(editable && !ghost)} />
     </div>
   );
 }
 
+/** "New version: <name>" on a process card in the Sandbox's company map. */
+function VersionBadge({ text, className }: { text: string; className?: string }) {
+  return (
+    <span data-version-badge title={text} className={`inline-block max-w-[11rem] truncate rounded-full border border-accent bg-panel px-2 text-[10.5px] leading-4 font-semibold text-accent ${className ?? ""}`}>
+      {text}
+    </span>
+  );
+}
+
 function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
-  const { step, open, expandable, roll, warning, editable } = data;
-  const { toggleGroup, handoffs } = useContext(CanvasContext);
+  const { step, open, expandable, roll, problems, editable } = data;
+  const { toggleGroup, handoffs, turnInto } = useContext(CanvasContext);
   const toggle = expandable && (
     <button
       type="button"
@@ -480,8 +601,9 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
   if (open) {
     return (
       <div
-        className={`relative h-full w-full rounded-token border-2 border-dashed bg-panel-2/40 ${changeClass(data)} ${data.lit ? "!border-solid !border-accent" : ""} ${selected ? selectedRing : "border-line-2"}`}
+        className={`relative h-full w-full rounded-token border-2 border-dashed bg-panel-2/40 ${changeClass(data)} ${data.lit || data.badge ? "!border-solid !border-accent" : ""} ${selected ? selectedRing : "border-line-2"}`}
         data-group="open"
+        data-new-version={data.badge ? "true" : undefined}
         data-lit={data.lit ?? undefined}
       >
         <Handle type="target" position={Position.Left} className={handleClass(editable)} />
@@ -493,20 +615,25 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
             <p className="text-[11px] text-fg-3">
               Group · {roll.steps} {roll.steps === 1 ? "step" : "steps"}
             </p>
+            {data.tag && <TagPill tag={data.tag} className="mt-1" />}
+            {data.badge && <VersionBadge text={data.badge} className="mt-1" />}
           </div>
           {toggle}
         </div>
-        {warning && <Warning text={warning} />}
+        <ProblemMark problems={problems} />
         <Handle type="source" position={Position.Right} className={handleClass(editable)} />
       </div>
     );
   }
   const colours = tileColours(data.rating, false);
+  // In a process's own Editor a step that holds another process is a "Linked process": it changes when that process does, and can be turned into steps.
+  const linked = !expandable && editable && !handoffs && !!turnInto;
   return (
     <div
-      className={`${tileClass} w-48 border-2 border-dashed px-2.5 pt-2 pb-2 ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
-      style={{ background: colours.background, borderColor: colours.borderColor }}
+      className={`${tileClass} w-48 border-2 border-dashed px-2.5 pt-2 pb-2 ${changeClass(data)} ${litClass(data.lit)} ${data.badge ? "outline-2 outline-offset-1 outline-accent" : ""} ${selected ? selectedRing : ""}`}
+      style={{ background: colours.background, borderColor: data.badge ? "var(--accent)" : colours.borderColor }}
       data-group="closed"
+      data-new-version={data.badge ? "true" : undefined}
       data-rating={data.rating ?? "none"}
       data-lit={data.lit ?? undefined}
     >
@@ -520,24 +647,46 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
       <p data-field="name" title={step.name} className="mt-0.5 line-clamp-2 text-sm leading-tight font-semibold text-fg">
         {step.name}
       </p>
+      {data.tag && <TagPill tag={data.tag} className="mt-1" />}
       <p className={headlineRowClass}>
         <span className="font-mono text-base leading-none font-medium text-fg tabular-nums">{roll.steps}</span>
         <span className="min-w-0 truncate text-[11.5px] leading-4 text-fg-2" title="Hands-on time of every step inside, added up">
           {roll.steps === 1 ? "step" : "steps"} · {roll.handsOnHours ? `${formatHours(roll.handsOnHours)} work` : "no work entered"}
         </span>
       </p>
+      {linked && (
+        <p data-linked-process className="mt-1 text-[11.5px] leading-snug text-fg-2">
+          Linked process: changes when &lsquo;{step.name}&rsquo; changes
+        </p>
+      )}
       <div className={footClass} style={{ borderTopColor: colours.divider }}>
-        <span>{expandable ? "Group" : handoffs ? "Process" : "Child process"}</span>
-        {toggle}
+        <span>{expandable ? "Group" : handoffs ? "Process" : linked ? "Linked" : "Child process"}</span>
+        {linked ? (
+          <button
+            type="button"
+            data-turn-into-steps
+            onClick={(e) => {
+              e.stopPropagation();
+              turnInto!(step.id);
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+            className="nodrag nopan rounded-full border border-line bg-panel px-2 py-0 text-[11px] leading-4 font-semibold text-fg hover:bg-panel-2"
+          >
+            Turn into steps
+          </button>
+        ) : (
+          toggle
+        )}
       </div>
-      {warning && <Warning text={warning} />}
+      {data.badge && <VersionBadge text={data.badge} className="absolute -bottom-3 left-2 shadow-token" />}
+      <ProblemMark problems={problems} />
       <Handle type="source" position={Position.Right} className={handleClass(editable)} />
     </div>
   );
 }
 
 function TerminalNode({ data, selected }: NodeProps<TerminalFlowNode>) {
-  const { step, warning, editing, ghost } = data;
+  const { step, problems, editing, ghost } = data;
   const editable = data.editable && !ghost;
   const tone =
     step.outcome === "won" ? "bg-good-soft text-fg" : step.outcome === "lost" ? "bg-panel-2 text-fg-2" : "bg-accent-soft text-fg";
@@ -545,7 +694,7 @@ function TerminalNode({ data, selected }: NodeProps<TerminalFlowNode>) {
     <div
       data-lit={data.lit ?? undefined}
       data-tile="terminal"
-      className={`${tileClass} border-[1.5px] ${editing ? "w-44 border-accent bg-panel" : `w-max max-w-[150px] min-w-24 border-line-2 px-2.5 py-1.5 ${tone}`} ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
+      className={`${tileClass} border-[1.5px] ${editing ? "w-44 border-accent bg-panel" : `w-max max-w-[150px] min-w-24 border-line-2 px-2.5 py-1.5 ${data.typed ? "rounded-full px-3.5" : ""} ${tone}`} ${changeClass(data)} ${litClass(data.lit)} ${selected ? selectedRing : ""}`}
     >
       <TopPills change={data.change} />
       <FlagPills estimate={data.estimate} conflict={data.conflict} quote={data.quote} />
@@ -559,13 +708,16 @@ function TerminalNode({ data, selected }: NodeProps<TerminalFlowNode>) {
         </span>
       ) : (
         <>
-          <p className="text-[11px] leading-[14px] font-semibold tracking-[0.06em] text-fg-2 uppercase">{step.kind === "start" ? "Start" : "End"}</p>
+          <p className="flex items-center gap-1 text-[11px] leading-[14px] font-semibold tracking-[0.06em] text-fg-2 uppercase">
+            {data.typed && (step.kind === "start" ? <Play aria-hidden className="size-3" /> : <Flag aria-hidden className="size-3" />)}
+            {step.kind === "start" ? "Start" : data.typed && step.outcome ? `End · ${OUTCOME_LABELS[step.outcome]}` : "End"}
+          </p>
           <p data-field="name" className={`text-[13px] leading-tight font-semibold break-words ${step.outcome === "lost" ? "text-fg-2" : "text-fg"}`}>
             <Was was={data.wasName}>{step.name}</Was>
           </p>
         </>
       )}
-      {warning && <Warning text={warning} />}
+      <ProblemMark problems={problems} />
       {step.kind === "start" && <Handle type="source" position={Position.Right} className={handleClass(editable)} />}
     </div>
   );
@@ -579,9 +731,11 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
   const [path, labelX, labelY] = getSmoothStepPath(props);
   const p = data?.probability ?? 1;
   const tag = data?.tag ?? null;
-  const editing = selected && data?.alone && editor;
+  // A branch of a decision is edited from the decision's panel; any other line, on the line.
+  const editing = selected && data?.alone && editor && !data?.branch;
+  const problems = data?.problems ?? [];
   // A handoff line says what is handed over, not a share of the work.
-  const text = handoffs ? (data?.label ?? "") : [p < 1 ? percent(p) : null, tag].filter(Boolean).join(" · ");
+  const text = handoffs ? (data?.label ?? "") : [data?.branch?.name, p < 1 || data?.branch ? percent(p) : null, tag].filter(Boolean).join(" · ");
   const ghost = data?.ghost ?? false;
   const was = data?.was ?? null;
   if (data?.rolled) return <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} interactionWidth={0} />;
@@ -625,7 +779,7 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} interactionWidth={18} />
-      {(editing || text) && (
+      {(editing || text || problems.length > 0) && (
         <EdgeLabelRenderer>
           <div
             className="nodrag nopan absolute"
@@ -634,7 +788,10 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
               // Read-only, the label sits just above the line at its start, in the gap beside the card, not on one at the middle of a short link.
               transform: editing
                 ? `translate(${labelX}px, ${labelY}px) scale(${1 / zoom}) translate(-50%, -50%)`
-                : `translate(${props.sourceX + 4}px, ${props.sourceY - 2}px) translate(0, -100%)`,
+                : data?.branch
+                  ? // A branch of a decision: its name and share on the line itself, where the lines out of one decision have drawn apart.
+                    `translate(${labelX}px, ${labelY}px) translate(-50%, -50%)`
+                  : `translate(${props.sourceX + 4}px, ${props.sourceY - 2}px) translate(0, -100%)`,
               transformOrigin: "0 0",
               zIndex: editing ? 1002 : undefined,
               pointerEvents: "all",
@@ -643,7 +800,10 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
             {editing ? (
               handoffs ? <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} /> : <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} />
             ) : (
-              <span title={text} className={`block truncate rounded-token bg-panel px-1 text-[11px] text-fg-2 ${handoffs ? "max-w-[9rem] font-sans" : "max-w-[5.5rem] font-mono tabular-nums"}`}>{text}</span>
+              <span className="flex items-center">
+                {text && <span title={text} className={`block truncate rounded-token bg-panel px-1 text-[11px] text-fg-2 ${handoffs ? "max-w-[9rem] font-sans" : data?.branch ? "max-w-[8rem] font-sans" : "max-w-[5.5rem] font-mono tabular-nums"}`}>{text}</span>}
+                <ProblemMark problems={problems} className="relative ml-0.5" />
+              </span>
             )}
           </div>
         </EdgeLabelRenderer>
@@ -652,7 +812,7 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
   );
 }
 
-/** A handoff line's label and removal, on the company map: no share or tag, the lines are pictures. */
+/** A handoff line's label and removal, on the company map: no share or tag: a hand-off takes every won client. */
 function HandoffEditor({ editor, edgeId, label }: { editor: ProcessEditor; edgeId: string; label: string | null }) {
   const [text, setText] = useState(label ?? "");
   // Take the stored value when it changes (a save, an undo), without remounting under the cursor.
@@ -807,7 +967,7 @@ function BranchEditor({ editor, edgeId, probability, tag }: { editor: ProcessEdi
   );
 }
 
-const nodeTypes = { step: StepNode, terminal: TerminalNode, group: GroupNode };
+const nodeTypes = { step: StepNode, terminal: TerminalNode, group: GroupNode, goback: GoBackNode };
 const edgeTypes = { branch: BranchEdge };
 
 /** Room around the steps when framing them: the toolbar sits top left, playback along the foot, lane names on the left. */
@@ -875,6 +1035,19 @@ interface CanvasProps {
   /** The Editor has its own palette (issue #104): leave "Add step" out of the toolbar. */
   hideAdd?: boolean;
   /**
+   * The Editor's red marks (editor brainstorm, item 4): what stops each step or line simulating, shown on it and explained on hover and focus.
+   * Left out, a step with nothing leaving it or shares that don't add up shows the same kind of mark, from `stepWarnings`.
+   */
+  problems?: NodeProblems | null;
+  /**
+   * The simpler Editor's node types (editor brainstorm, items 2, 5 and 6): Step, Wait, Decision, Start and End each look their own way, a decision
+   * lists its branches on the card, and a branch that goes back to an earlier step ends in a "Go back to X" node. A click on a branch's row or
+   * on a go back node selects that branch's line. Needs `editor`.
+   */
+  branchNodes?: boolean;
+  /** "Turn into steps" on the card of a step that holds a linked process (the Editor, branchNodes only). */
+  onTurnIntoSteps?: ((stepId: string) => void) | null;
+  /**
    * Filled in with a function that says what the map is showing (its centre and edges in map coordinates, and the measured
    * size of each card; null before it is drawn), so the Editor's palette can put a new step where the person is looking.
    */
@@ -920,6 +1093,18 @@ interface CanvasProps {
   playbackRollUp?: boolean;
   /** Offer the swimlane view (when the map has no groups). Default true. */
   showLanes?: boolean;
+  /** Start in the swimlane view (a read-only process map shows its lanes at once). Default false: the toggle turns them on. */
+  defaultLanes?: boolean;
+  /**
+   * The company map's department lanes (Q4): its top-level cards sit in labelled bands at their stored positions. `always`: the
+   * Overview, where they are always on; otherwise a toggle (on to start with) switches them. Dragging a card never moves it to
+   * another lane: the department is set on the process page.
+   */
+  departmentLanes?: { spec: BandSpec; always?: boolean };
+  /** A small pill of text on a process card, by the card's step id: the process's category on the company map (Q4). */
+  cardTags?: ReadonlyMap<string, string>;
+  /** The Sandbox (Q16): "New version: <name>" on the cards of processes that run another map version, by the card's step id; they get an accent outline. */
+  cardBadges?: ReadonlyMap<string, string>;
   /**
    * `fill`: as tall as the space it is given (the editor). `auto`: as tall as the map needs, from 16 to 40 rem,
    * so a small map doesn't sit in a tall empty panel. Default `auto` when read-only, `fill` when editable.
@@ -933,10 +1118,25 @@ interface CanvasProps {
   stepExtras?: (stepId: string) => StepExtras | null;
   /** Titles of the workspace's sources by id, for the sources a step's detail lists. */
   sourceTitles?: Readonly<Record<string, string>>;
+  /** A step whose detail is open when the map first shows (`?step=<id>` on the process page). Read-only maps only. */
+  initialStepId?: string | null;
+  /** The step's base values for capacity, shown in its detail (read only on the process page). */
+  stepBaseValues?: (step: StepRow) => ReactNode;
   /** The first run is still computing: shows FirstRunStatus over the map. */
   computing?: boolean;
+  /**
+   * Frame the map again, animated, when this changes after it was first framed (the Overview passes its open cards: opening one changes
+   * the map's size). Unlike a `key` on the canvas it keeps the map mounted, so playback goes on.
+   */
+  refitOn?: string;
   /** What to do about a read-only map with no steps (the process page offers the Editor); shown under the sentence. */
   emptyAction?: ReactNode;
+  /**
+   * The map as the body of a card that is not its own (Q8, the process page): no border or rounding of its own, the bar above it
+   * becomes the card's header (the title, the lane and zoom controls, a "Key" button that opens the colour legend, then `action`),
+   * and the playback bar docks along the card's bottom edge instead of floating over the map.
+   */
+  card?: { title: string; action?: ReactNode; /** The (i) beside the title. */ help?: { label: string; description: string; example: string }; /** Under the header, above the map: the process page's "Missing for simulation" alert. */ below?: ReactNode };
 }
 
 export function ProcessCanvas(props: CanvasProps) {
@@ -945,6 +1145,14 @@ export function ProcessCanvas(props: CanvasProps) {
       <Canvas {...props} />
     </ReactFlowProvider>
   );
+}
+
+/** The groups a step sits inside, nearest first. */
+function ancestorGroups(steps: readonly StepRow[], id: string | null): string[] {
+  const byId = new Map(steps.map((s) => [s.id, s]));
+  const out: string[] = [];
+  for (let at = id ? byId.get(id)?.parent_step_id : null; at && !out.includes(at); at = byId.get(at)?.parent_step_id) out.push(at);
+  return out;
 }
 
 function Canvas({
@@ -961,6 +1169,9 @@ function Canvas({
   openIssues,
   rating,
   hideAdd = false,
+  problems: problemsProp = null,
+  branchNodes = false,
+  onTurnIntoSteps = null,
   viewRef,
   handoffs = false,
   expanded: expandedProp,
@@ -974,19 +1185,28 @@ function Canvas({
   playbackAbove = false,
   playbackRollUp = false,
   showLanes = true,
+  defaultLanes = false,
+  departmentLanes,
+  cardTags,
+  cardBadges,
   height: heightProp,
   onStepClick,
   stepDetail = true,
   stepExtras,
   sourceTitles,
+  initialStepId = null,
+  stepBaseValues,
   computing = false,
+  refitOn,
   emptyAction,
+  card,
 }: CanvasProps) {
   const editable = editor !== null;
   // A read-only map with nothing between start and end has nothing to draw. (The Editor keeps its empty canvas: a new block starts there.)
   const nothingToDraw = !editable && !bundle.steps.some((s) => s.kind !== "start" && s.kind !== "end");
   // Groups open in place (issue #102): to edit inside one, open it; to read the map, close it for the roll-up.
-  const [ownExpanded, setOwnExpanded] = useState<ReadonlySet<string>>(() => (editor ? new Set(groupIds(bundle.steps)) : new Set()));
+  // A linked step (`?step=`) inside closed groups opens them, so the map shows where it is.
+  const [ownExpanded, setOwnExpanded] = useState<ReadonlySet<string>>(() => (editor ? new Set(groupIds(bundle.steps)) : new Set(ancestorGroups(bundle.steps, initialStepId))));
   const expanded = expandedProp ?? ownExpanded;
   const expandedNow = useRef(expanded);
   useEffect(() => {
@@ -1038,7 +1258,12 @@ function Canvas({
       }),
     [setExpanded],
   );
-  const canvasContext = useMemo(() => ({ editor, restore: editor ? onRestore : null, toggleGroup, handoffs }), [editor, onRestore, toggleGroup, handoffs]);
+  const typed = branchNodes && editable && !handoffs;
+  const selectBranch = useCallback((edgeId: string) => onSelectionChange({ steps: [], edges: [edgeId] }), [onSelectionChange]);
+  const canvasContext = useMemo(
+    () => ({ editor, restore: editor ? onRestore : null, toggleGroup, handoffs, selectBranch, turnInto: typed ? onTurnIntoSteps : null }),
+    [editor, onRestore, toggleGroup, handoffs, selectBranch, typed, onTurnIntoSteps],
+  );
   const flow = useReactFlow();
   // Expand all / Collapse all; the map re-frames itself unless it was zoomed by hand.
   const toggleAllGroups = () => {
@@ -1065,13 +1290,24 @@ function Canvas({
           const size = measured.get(ghostId(c.live!.id)) ?? (c.live!.kind === "start" || c.live!.kind === "end" ? TERMINAL_SIZE : CARD_SIZE);
           return { x: Number(c.live!.x), y: Number(c.live!.y), width: size.width, height: size.height };
         });
-      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, visible: { left: from.x, top: from.y, right: to.x, bottom: to.y }, sizes: measured, occupied };
+      // Pan to a step that was just added if it is not wholly on screen (it is drawn a moment after the edit).
+      const reveal = (id: string) =>
+        setTimeout(() => {
+          const node = flow.getNodes().find((n) => n.id === id);
+          const panel = wrapper.current?.querySelector(".react-flow")?.getBoundingClientRect();
+          if (!node || !panel) return;
+          const b = flow.getNodesBounds([node]);
+          const view = flow.getViewport();
+          const inView = b.x * view.zoom + view.x >= 0 && (b.x + b.width) * view.zoom + view.x <= panel.width && b.y * view.zoom + view.y >= 0 && (b.y + b.height) * view.zoom + view.y <= panel.height;
+          if (!inView) void flow.setCenter(b.x + b.width / 2, b.y + b.height / 2, { zoom: view.zoom, duration: 200 });
+        }, 60);
+      return { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2, visible: { left: from.x, top: from.y, right: to.x, bottom: to.y }, sizes: measured, occupied, reveal };
     };
     return () => {
       viewRef.current = null;
     };
   }, [viewRef, flow, measured, diff]);
-  const [lanes, setLanes] = useState(false);
+  const [lanes, setLanes] = useState(defaultLanes && showLanes);
   const [editing, setEditing] = useState<{ id: string; field: InlineField } | null>(null);
   const [menu, setMenu] = useState<(MenuState & { bounds: { width: number; height: number } }) | null>(null);
   // Which step's menu is open, synchronously, so the context-menu event that follows Shift+F10 doesn't reopen it.
@@ -1079,16 +1315,41 @@ function Canvas({
   const playbackGroups = useMemo(() => (playbackRollUp ? { open: drawn } : null), [playbackRollUp, drawn]);
   const playback = usePlayback(bundle, result, playbackGroups);
 
-  const warnings = useMemo(() => (editable && !handoffs ? stepWarnings(bundle) : new Map<string, string>()), [bundle, editable, handoffs]);
+  // What is wrong, by step and by line. The Editor says it all with `problems`; a map without them marks only the steps `stepWarnings` finds.
+  const problemsOf = useMemo(() => {
+    if (handoffs || !editable) return { steps: new Map<string, string[]>(), edges: new Map<string, string[]>() };
+    if (problemsProp) return problemsProp;
+    return { steps: new Map([...stepWarnings(bundle)].map(([id, text]) => [id, [text]] as const)), edges: new Map<string, string[]>() };
+  }, [bundle, editable, handoffs, problemsProp]);
+  const NONE: readonly string[] = useMemo(() => [], []);
+  const goBacks = useMemo(() => {
+    if (!typed) return [];
+    const top = new Set(bundle.steps.filter((st) => !st.parent_step_id).map((st) => st.id));
+    const seen = new Map(visibleEdges(bundle.steps, bundle.edges, drawn).map((me) => [me.id, me] as const));
+    // Only a decision at the top of the map, and a line drawn as itself (not rolled up into a closed group), gets a node.
+    return goBackNodes(bundle).filter((g) => top.has(g.decisionId) && seen.get(g.edgeId) && !seen.get(g.edgeId)!.rolled);
+  }, [typed, bundle, drawn]);
   const order = useMemo(() => flowOrder(bundle), [bundle]);
   const editingId = editing && bundle.steps.some((s) => s.id === editing.id) ? editing.id : null;
-  const layout = useMemo(() => {
+  const [bandsOn, setBandsOn] = useState(true);
+  const bandsActive = !!departmentLanes && (departmentLanes.always === true || bandsOn);
+  const layout = useMemo((): (LaneLayout & { bands: boolean }) | null => {
+    // Department bands (the company map): top-level cards in lanes, at their stored positions within each.
+    if (departmentLanes && bandsActive) {
+      const sizeOf = (st: StepRow) =>
+        measured.get(st.id) ?? (isGroup(st) ? (drawn.has(st.id) ? openGroupSize(bundle.steps, st.id, drawn, measured) : GROUP_CARD) : st.child_process_id ? GROUP_CARD : CARD_SIZE);
+      return { ...bandLayout(bundle.steps, departmentLanes.spec, sizeOf), bands: true };
+    }
     // Lanes place every step by its role; a group's steps sit inside its box instead.
     if (!lanes || hasGroups) return null;
     // The card being edited grows; its lane keeps its size meanwhile.
     const sizes = new Map([...measured].filter(([id]) => id !== editingId));
-    return laneLayout(bundle, sizes);
-  }, [lanes, hasGroups, bundle, measured, editingId]);
+    return { ...laneLayout(bundle, sizes), bands: false };
+  }, [departmentLanes, bandsActive, lanes, hasGroups, bundle, measured, editingId, drawn]);
+  const layoutRef = useRef(layout);
+  useEffect(() => {
+    layoutRef.current = layout;
+  });
 
   // The last node object made for each step (see sameNode).
   const [nodeCache] = useState(() => new Map<string, StepFlowNode | TerminalFlowNode>());
@@ -1134,18 +1395,20 @@ function Canvas({
             open,
             expandable: isGroup(step),
             roll,
-            warning: warnings.get(step.id) ?? null,
+            problems: problemsOf.steps.get(step.id) ?? NONE,
             editable,
             change: change && (change.kind !== "changed" || change.fields.length) ? change.kind : null,
             rating: worst ? ratingOfRank(worst.rank) : null,
             rated: rating !== undefined,
             // An open group is a box around its steps: it can be outlined but never fades.
             lit: lit ? (open ? lit.has(step.id) || null : lit.has(step.id)) : null,
+            tag: cardTags?.get(step.id) ?? null,
+            badge: cardBadges?.get(step.id) ?? null,
           };
           return {
             id: step.id,
             type: "group",
-            position: dragging.get(step.id) ?? { x: Number(step.x), y: Number(step.y) },
+            position: dragging.get(step.id) ?? layout?.positions.get(step.id) ?? { x: Number(step.x), y: Number(step.y) },
             selected: selected.has(step.id),
             ariaLabel: `${step.name}, ${isGroup(step) ? "group" : handoffs ? "process" : "child process"} of ${roll.steps} ${roll.steps === 1 ? "step" : "steps"}${isGroup(step) ? (open ? ", open" : ", closed") : ""}${gdata.rated && gdata.rating ? `, worst inside: ${RATING_LABELS[gdata.rating]}` : ""}${roll.openIssues > 0 ? `, ${roll.openIssues} confirmed ${roll.openIssues === 1 ? "issue" : "issues"}` : ""}`,
             ...(step.parent_step_id ? { parentId: step.parent_step_id } : {}),
@@ -1162,7 +1425,10 @@ function Canvas({
           avgQueue: result?.steps[step.id]?.avgQueue ?? null,
           avgWait: result?.steps[step.id]?.avgWait ?? null,
           bottleneck: result?.bnStep === step.id,
-          warning: warnings.get(step.id) ?? null,
+          problems: problemsOf.steps.get(step.id) ?? NONE,
+          branches: typed && step.kind === "decision" ? branchRows(bundle, step.id) : null,
+          branchSelected: typed && step.kind === "decision" ? (selection.edges.find((id) => bundle.edges.some((e) => e.id === id && e.from_step_id === step.id)) ?? null) : null,
+          typed,
           editable,
           reworkTo: step.rework_to_step_id ? (names.get(step.rework_to_step_id) ?? null) : null,
           editing: editing && editingId === step.id ? editing.field : null,
@@ -1213,7 +1479,10 @@ function Canvas({
           avgQueue: null,
           avgWait: null,
           bottleneck: false,
-          warning: null,
+          problems: NONE,
+          branches: null,
+          branchSelected: null,
+          typed: false,
           editable: false,
           reworkTo: null,
           editing: null,
@@ -1247,8 +1516,44 @@ function Canvas({
           data,
         };
       });
-    return [...ghosts, ...drafted];
-  }, [bundle, result, selection.steps, dragging, measured, warnings, editable, order, layout, editing, editingId, nodeCache, playback.pulsing, diff, drawn, lit, openIssues, rating, handoffs]);
+    // The "Go back to X" node of each branch that loops to an earlier step, below its decision (nodes of the Editor only, never dragged).
+    const placed = new Map<string, number>();
+    const goNodes = goBacks.map((g): GoBackFlowNode => {
+      const decision = bundle.steps.find((st) => st.id === g.decisionId)!;
+      const at = dragging.get(decision.id) ?? layout?.positions.get(decision.id) ?? { x: Number(decision.x), y: Number(decision.y) };
+      const k = placed.get(g.decisionId) ?? 0;
+      placed.set(g.decisionId, k + 1);
+      const edge = bundle.edges.find((e) => e.id === g.edgeId)!;
+      const height = measured.get(decision.id)?.height ?? CARD_SIZE.height + 30;
+      // Below the decision, moved down until it lands on no other card.
+      const w = 190;
+      const h = 34;
+      const x = at.x + 8 + k * 24;
+      let y = at.y + height + 36 + k * 44;
+      const hits = (yy: number) =>
+        bundle.steps.some((st) => {
+          if (st.id === decision.id || st.parent_step_id || st.kind === "group") return false;
+          const size = measured.get(st.id) ?? (st.kind === "start" || st.kind === "end" ? TERMINAL_SIZE : CARD_SIZE);
+          const sx = Number(st.x);
+          const sy = Number(st.y);
+          return x < sx + size.width + 12 && x + w + 12 > sx && yy < sy + size.height + 12 && yy + h + 12 > sy;
+        });
+      for (let i = 0; i < 12 && hits(y); i++) y += 40;
+      return {
+        id: g.id,
+        type: "goback",
+        position: { x, y },
+        selected: selection.edges.includes(g.edgeId),
+        draggable: false,
+        connectable: false,
+        deletable: false,
+        ariaLabel: `Go back to ${g.targetName}, ${Math.round(Number(edge.probability) * 100)}% of ${decision.name}`,
+        ...(measured.has(g.id) ? { measured: measured.get(g.id) } : {}),
+        data: { edgeId: g.edgeId, targetName: g.targetName, branchName: edge.label?.trim() ?? "", problems: problemsOf.edges.get(g.edgeId) ?? NONE, editable },
+      };
+    });
+    return [...ghosts, ...drafted, ...goNodes];
+  }, [bundle, result, selection.steps, selection.edges, typed, goBacks, problemsOf, NONE, dragging, measured, editable, order, layout, editing, editingId, nodeCache, playback.pulsing, diff, drawn, lit, openIssues, rating, handoffs, cardTags, cardBadges]);
 
   const edges = useMemo(() => {
     const selected = new Set(selection.edges);
@@ -1265,17 +1570,23 @@ function Canvas({
       to_step_id: me.to,
       rolled: me.rolled,
     }));
+    const goBackOf = new Map(goBacks.map((g) => [g.edgeId, g] as const));
+    const decisions = new Set(bundle.steps.filter((st) => st.kind === "decision").map((st) => st.id));
     const drafted = shown
       .sort((a, b) => rank(a) - rank(b))
       .map((e): BranchFlowEdge => {
         const change = e.rolled ? undefined : diff?.edges.get(e.id);
+        const goBack = goBackOf.get(e.id);
+        const problems = problemsOf.edges.get(e.id) ?? NONE;
         const relabelled = change?.kind === "changed" && change.fields.some((f) => (handoffs ? f.field === "label" : f.field === "probability" || f.field === "condition_tag"));
         const was = relabelled ? (handoffs ? (change.live!.label ?? "no label") : labelOf(Number(change.live!.probability), change.live!.condition_tag)) : null;
-        const tone = selected.has(e.id) || change ? "var(--edit)" : "var(--line-2)";
+        const tone = selected.has(e.id) || change ? "var(--edit)" : problems.length ? "var(--crit)" : "var(--line-2)";
         return {
           id: e.id,
           source: e.from_step_id,
-          target: e.to_step_id,
+          // A branch that goes back ends at its "Go back to X" node, below the decision.
+          target: goBack ? goBack.id : e.to_step_id,
+          ...(goBack ? { sourceHandle: "back", targetHandle: "in" } : {}),
           type: "branch",
           selected: selected.has(e.id),
           ...(e.rolled ? { selectable: false, focusable: false, deletable: false, reconnectable: false } : {}),
@@ -1289,6 +1600,8 @@ function Canvas({
             restorable: false,
             rolled: e.rolled,
             label: e.label,
+            problems,
+            branch: typed && !e.rolled && decisions.has(e.from_step_id) ? { name: e.label?.trim() || names.get(e.to_step_id) || "Branch" } : null,
           },
           style: {
             stroke: tone,
@@ -1303,6 +1616,21 @@ function Canvas({
           }`,
         };
       });
+    // From each "Go back to X" node, a dotted line to the step it goes back to.
+    const links = goBacks.map((g): BranchFlowEdge => ({
+      id: `${GO_BACK_LINK_PREFIX}${g.edgeId}`,
+      source: g.id,
+      sourceHandle: "out",
+      target: g.targetId,
+      type: "branch",
+      selectable: false,
+      focusable: false,
+      deletable: false,
+      reconnectable: false,
+      data: { probability: 1, tag: null, alone: false, change: null, was: null, ghost: false, restorable: false, rolled: true },
+      style: { stroke: "var(--line-2)", strokeWidth: 1.5, strokeDasharray: "2 4" },
+      markerEnd: { type: MarkerType.ArrowClosed, color: "var(--line-2)" },
+    }));
     const ghosts = [...(diff?.edges.values() ?? [])]
       .filter((c) => c.kind === "removed")
       .map((c): BranchFlowEdge => {
@@ -1332,8 +1660,8 @@ function Canvas({
           ariaLabel: "Connection removed in this draft",
         };
       });
-    return [...ghosts, ...drafted];
-  }, [bundle, selection.edges, selection.steps.length, order, diff, editable, drawn, handoffs]);
+    return [...ghosts, ...drafted, ...links];
+  }, [bundle, selection.edges, selection.steps.length, order, diff, editable, drawn, handoffs, typed, goBacks, problemsOf, NONE]);
 
   const onNodesChange = (changes: NodeChange<FlowNode>[]) => {
     const moves: { id: string; x: number; y: number }[] = [];
@@ -1342,6 +1670,8 @@ function Canvas({
     let moved = false;
     let sized = false;
     const picks: { id: string; selected: boolean }[] = [];
+    // A "Go back to X" node stands for its branch's line: picking the node picks the line.
+    const edgePicks: { id: string; selected: boolean }[] = [];
     for (const c of changes) {
       if (c.type === "dimensions" && c.dimensions) {
         sizes.set(c.id, c.dimensions);
@@ -1352,17 +1682,24 @@ function Canvas({
         else {
           // Lanes place steps top to bottom by role, so in the lane view only left and right are saved.
           const stored = bundle.steps.find((s) => s.id === c.id);
-          moves.push({ id: c.id, x: c.position.x, y: layout && stored ? Number(stored.y) : c.position.y });
+          const shown = layout?.positions.get(c.id);
+          // In a department band a card moves up and down within its lane (the band's offset is taken off again); in role lanes only sideways.
+          const y = !layout || !stored ? c.position.y : layout.bands && shown ? c.position.y - (shown.y - Number(stored.y)) : Number(stored.y);
+          moves.push({ id: c.id, x: c.position.x, y });
           drags.delete(c.id);
         }
         moved = true;
-      } else if (c.type === "select") picks.push({ id: c.id, selected: c.selected });
+      } else if (c.type === "select") {
+        if (isGoBackNodeId(c.id)) edgePicks.push({ id: edgeOfGoBackNode(c.id), selected: c.selected });
+        else picks.push({ id: c.id, selected: c.selected });
+      }
     }
     if (sized) setMeasured(sizes);
     // Everything dragged together arrives in one change list: one edit, one undo step.
     if (moves.length) editor?.run((b) => moveSteps(b, moves));
     if (moved) setDragging(drags);
     if (picks.length) onSelectionChange((s) => ({ ...s, steps: applyPicks(s.steps, picks) }));
+    if (edgePicks.length) onSelectionChange((s) => ({ ...s, edges: applyPicks(s.edges, edgePicks) }));
   };
 
   const onEdgesChange = (changes: EdgeChange<BranchFlowEdge>[]) => {
@@ -1518,6 +1855,10 @@ function Canvas({
     setLanes(!lanes);
     requestFit();
   };
+  const toggleBands = () => {
+    setBandsOn(!bandsOn);
+    requestFit();
+  };
 
   // Zoom (issue #99): the map is framed once when it first appears, never below 70%; a bigger map is dragged around
   // instead. After that it moves only when asked: Fit, Expand or Collapse all, the swimlane toggle, or (read-only
@@ -1546,26 +1887,37 @@ function Canvas({
     setOverflow((o) => (o.left === left && o.right === right ? o : { left, right }));
   }, [flow]);
   const fit = useCallback(
-    (animate: boolean) => {
+    (animate: boolean, everything = false) => {
       const all = flow.getNodes();
       const panel = sizeRef.current;
       if (!all.length || !panel.width) return;
-      const wanted = focus?.length ? all.filter((n) => focus.includes(n.id)) : [];
+      // The Fit button frames every node, however small that makes them; the first framing keeps the focus and the 70% floor.
+      const wanted = !everything && focus?.length ? all.filter((n) => focus.includes(n.id)) : [];
+      const minZoom = everything ? MIN_ZOOM : undefined;
       let bounds = flow.getNodesBounds(wanted.length ? wanted : all);
       // Room around what is framed, so a step or two is seen in its surroundings and not blown up to fill the panel.
       if (wanted.length) bounds = { x: bounds.x - 260, y: bounds.y - 140, width: bounds.width + 520, height: bounds.height + 280 };
+      // Department lanes are part of the picture: frame them too (their names sit inside them, so no extra room on the left).
+      const bands = layoutRef.current?.bands ? layoutRef.current.lanes : [];
+      if (bands.length && !wanted.length) {
+        const left = Math.min(bounds.x, ...bands.map((l) => l.x));
+        const top = Math.min(bounds.y, ...bands.map((l) => l.y));
+        const right = Math.max(bounds.x + bounds.width, ...bands.map((l) => l.x + l.width));
+        const bottom = Math.max(bounds.y + bounds.height, ...bands.map((l) => l.y + l.height));
+        bounds = { x: left, y: top, width: right - left, height: bottom - top };
+      }
       // A bar in its own strip above takes no room off the map.
-      const pad = fitPadding(lanes, editable, showPlayback && !playbackAbove);
+      const pad = fitPadding(lanes && !bands.length, editable, showPlayback && !playbackAbove && !card);
       let panelHeight = panel.height;
       if (heightMode === "auto") {
-        panelHeight = autoPanelHeight(bounds, panel.width, pad);
+        panelHeight = autoPanelHeight(bounds, panel.width, pad, minZoom);
         setAutoHeight(panelHeight);
       }
       if (!panelHeight) return;
-      void flow.setViewport(fitViewport(bounds, { width: panel.width, height: panelHeight }, pad), animate ? { duration: 200 } : undefined);
+      void flow.setViewport(fitViewport(bounds, { width: panel.width, height: panelHeight }, pad, minZoom), animate ? { duration: 200 } : undefined);
       setTimeout(measureOverflow, animate ? 260 : 20);
     },
-    [flow, lanes, editable, showPlayback, playbackAbove, heightMode, measureOverflow, focus],
+    [flow, lanes, editable, showPlayback, playbackAbove, card, heightMode, measureOverflow, focus],
   );
   const fitRef = useRef(fit);
   useEffect(() => {
@@ -1592,6 +1944,12 @@ function Canvas({
     const timer = setTimeout(() => fitRef.current(true), 60);
     return () => clearTimeout(timer);
   }, [fitTick]);
+  const refitSeen = useRef(refitOn);
+  useEffect(() => {
+    if (refitOn === refitSeen.current) return;
+    refitSeen.current = refitOn;
+    if (framed.current) requestFit();
+  }, [refitOn]);
   // A read-only map follows its panel's width (and height, when that is fixed), unless it was moved by hand.
   const refitKey = editable ? "" : heightMode === "auto" ? `${width}` : `${width}x${height}`;
   useEffect(() => {
@@ -1605,7 +1963,7 @@ function Canvas({
   };
   const fitByHand = () => {
     handZoomed.current = false;
-    fit(true);
+    fit(true, true);
   };
 
   // Highlighted steps scroll into view when they are off screen.
@@ -1628,7 +1986,7 @@ function Canvas({
   }, [lit, flow]);
 
   // A step's detail, on a read-only map.
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(initialStepId ?? null);
   const detailStep = useMemo(() => {
     const st = !editable && detailId ? bundle.steps.find((x) => x.id === detailId) : undefined;
     return st && !isGroup(st) && !st.child_process_id && st.kind !== "start" && st.kind !== "end" ? st : null;
@@ -1652,31 +2010,49 @@ function Canvas({
           tabIndex={-1}
           onDoubleClick={onDoubleClick}
           onKeyDownCapture={onKeyDownCapture}
-          className={`relative isolate flex min-w-0 flex-col rounded-lg border bg-card ${heightMode === "fill" ? "min-h-[24rem] flex-1" : "h-fit"}`}
+          className={`relative isolate flex min-w-0 flex-col ${card ? "" : "rounded-lg border bg-card"} ${heightMode === "fill" ? "min-h-[24rem] flex-1" : "h-fit"}`}
           role="region"
           aria-label={`${bundle.process.name} process map`}
         >
           {/* Above the map in the page, so Tab reaches these first: open or close every group, zoom, and what the colours mean. */}
-          {(zoomControls || legend || allGroups.length > 0 || (showLanes && !hasGroups)) && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2">
-              {((showLanes && !hasGroups) || allGroups.length > 0) && (
+          {(card || zoomControls || legend || allGroups.length > 0 || (showLanes && !hasGroups) || (departmentLanes && !departmentLanes.always)) && (
+            <div className={card ? "flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" : "flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2"}>
+              {card && (
+                <div className="mr-auto flex items-center">
+                  <h2 id="map-heading" className="font-display text-base leading-snug font-bold">
+                    {card.title}
+                  </h2>
+                  {card.help && <Help {...card.help} />}
+                </div>
+              )}
+              {((showLanes && !hasGroups) || allGroups.length > 0 || (departmentLanes && !departmentLanes.always)) && (
                 <div className="flex items-center gap-1.5">
-                  {showLanes && !hasGroups && <LaneToggle lanes={lanes} onToggle={toggleLanes} />}
+                  {departmentLanes && !departmentLanes.always && (
+                    <LaneToggle
+                      lanes={bandsOn}
+                      onToggle={toggleBands}
+                      label="Department lanes"
+                      title="Lay the process cards in a lane for each department. Dragging a card does not change its department: set that on the process page."
+                    />
+                  )}
+                  {showLanes && !hasGroups && !departmentLanes && <LaneToggle lanes={lanes} onToggle={toggleLanes} />}
                   {allGroups.length > 0 && <GroupControls allOpen={allGroups.every((id) => expanded.has(id))} onToggle={toggleAllGroups} />}
                 </div>
               )}
               {zoomControls && (
                 <ZoomControls zoom={zoom} onOut={() => zoomBy("out")} onFit={fitByHand} onIn={() => zoomBy("in")} canOut={zoom > MIN_ZOOM + 0.001} canIn={zoom < MAX_ZOOM - 0.001} />
               )}
-              {legend && <MapLegend badge={!!openIssues} />}
+              {legend && (card ? <MapKey badge={!!openIssues} /> : <MapLegend badge={!!openIssues} />)}
+              {card?.action}
               {(overflow.left || overflow.right) && (
-                <p className="ml-auto text-[11.5px] text-fg-2" data-map-overflow>
+                <p className={`${card ? "w-full" : "ml-auto"} text-[11.5px] text-fg-2`} data-map-overflow>
                   {overflow.right && !overflow.left ? "Drag the map to see the rest →" : overflow.left && !overflow.right ? "← Drag the map to see the rest" : "Drag the map to see the rest"}
                 </p>
               )}
             </div>
           )}
-          {showPlayback && playbackAbove && (
+          {card?.below && <div className="flex flex-col gap-2 px-4 pb-3">{card.below}</div>}
+          {showPlayback && playbackAbove && !card && (
             <div className="border-b border-line px-2.5 py-2" data-playback-strip>
               <PlaybackBar
                 clock={playback.clock}
@@ -1687,11 +2063,11 @@ function Canvas({
               />
             </div>
           )}
-          <div className={`relative min-h-0 ${heightMode === "fill" ? "flex-1" : ""}`} style={heightMode === "auto" ? { height: autoHeight ?? 360 } : undefined}>
+          <div className={`relative min-h-0 ${heightMode === "fill" ? "flex-1" : ""} ${card ? "bg-muted/30" : ""}`} style={heightMode === "auto" ? { height: autoHeight ?? 360 } : undefined}>
           {/* Before the map in the page, so Tab reaches the toolbar first. */}
           {editable && editorState && (
             <div className="absolute top-2.5 left-2.5 z-10 max-w-[calc(100%-1.25rem)]">
-              <Toolbar bundle={bundle} editor={editor} state={editorState} onAdd={addFromToolbar} hideAdd={hideAdd} savedLabel={savedLabel} />
+              <Toolbar bundle={bundle} state={editorState} onAdd={addFromToolbar} hideAdd={hideAdd} savedLabel={savedLabel} />
             </div>
           )}
           {/* Nothing to draw means nothing for a run to change on the map: the empty state says enough. */}
@@ -1713,7 +2089,7 @@ function Canvas({
             </p>
           )}
           {/* Playback of the run (issue #14), over the foot of the map; before it in the page, for Tab. */}
-          {showPlayback && !playbackAbove && (
+          {showPlayback && !playbackAbove && !card && (
             <div className="absolute right-2.5 bottom-2.5 left-2.5 z-10">
               <PlaybackBar
                 clock={playback.clock}
@@ -1743,7 +2119,7 @@ function Canvas({
             onNodeContextMenu={(e, node) => {
               if (!editable) return;
               e.preventDefault();
-              if (menuFor.current === node.id) return;
+              if (isGoBackNodeId(node.id) || menuFor.current === node.id) return;
               const rect = wrapper.current!.getBoundingClientRect();
               // A context-menu key press arrives without a pointer position.
               if (e.clientX === 0 && e.clientY === 0 && e.currentTarget instanceof Element) openMenuBelow(e.currentTarget, node.id);
@@ -1815,6 +2191,7 @@ function Canvas({
               reworkTo={reworkToOf(bundle.steps, detailStep)}
               extras={stepExtras?.(detailStep.id) ?? NO_EXTRAS}
               sources={sourcesOf(detailStep, sourceTitles)}
+              baseValues={stepBaseValues?.(detailStep)}
               onClose={closeDetail}
             />
           )}
@@ -1831,6 +2208,19 @@ function Canvas({
             />
           )}
           </div>
+          {/* Docked along the card's bottom edge (Q8), so it never covers a step. */}
+          {showPlayback && card && (
+            <div className="bg-muted/40 px-3 py-2" data-playback-strip>
+              <PlaybackBar
+                docked
+                clock={playback.clock}
+                H={playback.index?.H ?? null}
+                hoursPerWeek={playback.hoursPerWeek}
+                reps={result?.reps ?? null}
+                describe={playback.describe}
+              />
+            </div>
+          )}
         </div>
       </InlineEditContext.Provider>
     </CanvasContext.Provider>
@@ -1846,6 +2236,7 @@ function LaneLayer({ lanes }: { lanes: Lane[] }) {
         {lanes.map((lane, i) => (
           <div
             key={lane.key}
+            data-lane={lane.label}
             className={`absolute border-b border-line ${i % 2 ? "bg-panel" : "bg-panel-2/60"} ${i === 0 ? "border-t" : ""}`}
             style={{ left: lane.x, top: lane.y, width: lane.width, height: lane.height }}
           >
@@ -1857,7 +2248,7 @@ function LaneLayer({ lanes }: { lanes: Lane[] }) {
       {lanes.map((lane) => (
         <p
           key={lane.key}
-          className="absolute max-w-32 truncate text-xs font-semibold text-fg-2"
+          className="absolute line-clamp-2 max-w-32 text-xs leading-tight font-semibold text-fg-2"
           style={{ left: Math.max(8, tx + lane.x * zoom + 10), top: ty + lane.y * zoom + 6 }}
         >
           {lane.label}
@@ -1893,31 +2284,39 @@ function GroupControls({ allOpen, onToggle }: { allOpen: boolean; onToggle: () =
   );
 }
 
-function LaneToggle({ lanes, onToggle }: { lanes: boolean; onToggle: () => void }) {
+function LaneToggle({
+  lanes,
+  onToggle,
+  label = "Swimlanes",
+  title = "Group steps in lanes by role. A step's lane follows its role; dragging moves steps left or right.",
+}: {
+  lanes: boolean;
+  onToggle: () => void;
+  label?: string;
+  title?: string;
+}) {
   return (
     <button
       type="button"
       aria-pressed={lanes}
       onClick={onToggle}
-      title="Group steps in lanes by role. A step's lane follows its role; dragging moves steps left or right."
+      title={title}
       className={`${toolButton} text-xs ${lanes ? "!border-accent !bg-accent-soft" : ""}`}
     >
-      Swimlanes
+      {label}
     </button>
   );
 }
 
-/** Add a step, undo, redo, the swimlane view, and whether edits are saved. */
+/** Add a step, the swimlane view, and whether edits are saved (undo and redo are in the editor bar). */
 function Toolbar({
   bundle,
-  editor,
   state,
   onAdd,
   hideAdd,
   savedLabel,
 }: {
   bundle: ProcessBundle;
-  editor: ProcessEditor;
   state: EditorState;
   onAdd: (kind: NewStepKind, outcome: StepOutcome | null) => void;
   hideAdd: boolean;
@@ -1980,25 +2379,7 @@ function Toolbar({
       <span aria-hidden className="mx-0.5 h-5 w-px bg-line" />
 </>
 )}
-      <button
-        type="button"
-        onClick={() => editor.undo()}
-        disabled={!state.undoLabel}
-        title={state.undoLabel ? `Undo: ${state.undoLabel} (${mod}Z)` : "Nothing to undo"}
-        className={toolButton}
-      >
-        Undo
-      </button>
-      <button
-        type="button"
-        onClick={() => editor.redo()}
-        disabled={!state.redoLabel}
-        title={state.redoLabel ? `Redo: ${state.redoLabel} (${mac ? "⇧⌘Z" : "Ctrl+Y"})` : "Nothing to redo"}
-        className={toolButton}
-      >
-        Redo
-      </button>
-      <span aria-hidden className="mx-0.5 h-5 w-px bg-line" />
+      {/* Undo and redo are buttons in the editor bar (editor quick fixes); the keys still work here. */}
       <KeysHelp mod={mod} />
       <span className="px-1 text-fg-3" aria-live="polite">
         {state.saving ? "Saving…" : savedLabel}

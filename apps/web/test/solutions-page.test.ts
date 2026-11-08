@@ -39,9 +39,11 @@ const solution = (id: string, extra: Partial<SolutionRow> = {}): SolutionRow => 
   base_revision_id: live.revision.id,
   name: `Solution ${id}`,
   notes: "",
+  status: "testing",
   steps: solutionCopy(live),
   changed_step_ids: [ids.audit],
   lever_changes: [],
+  step_changes: [],
   created_at: stamp,
   updated_at: stamp,
   created_by: "u1",
@@ -97,8 +99,8 @@ describe("the cards", () => {
       ["s1", "pass", 0.92, null, "/w/s/solutions/s1"],
     ]);
     expect(solutionSummaries(data)).toEqual({
-      [issueA!.id]: { tested: 2, passed: true, ideas: 0 },
-      [issueB!.id]: { tested: 1, passed: true, ideas: 0 },
+      [issueA!.id]: { tested: 2, passed: true },
+      [issueB!.id]: { tested: 1, passed: true },
     });
     expect(solutionSummaries(NO_SOLUTIONS_DATA)).toEqual({});
     expect(solutionHref("/demo", "s1")).toBe("/demo/solutions/s1");
@@ -172,6 +174,7 @@ describe("the demo's solutions, in this tab", () => {
       copy: solutionCopy(live),
       changedStepIds: [ids.audit],
       levers: [],
+      stepChanges: [],
       links: [{ issueId: issueA!.id, autoVerdict: "pass", holdsPct: 90, autoNote: "ok" }],
     });
     expect(setDemoVerdict(s.id, issueA!.id, { verdict: "fail", notes: "Too slow in a downturn" })).toMatchObject({ user_verdict: "fail", user_notes: "Too slow in a downturn" });
@@ -191,7 +194,7 @@ describe("the demo's solutions, in this tab", () => {
 
 describe("the sidebar", () => {
   it("has Solutions built, so nothing is marked soon", () => {
-    const item = workspaceNav({ slug: "s", pathname: "/w/s/solutions", canManage: false, counts: {} })
+    const item = workspaceNav({ slug: "s", pathname: "/w/s/solutions", counts: {} })
       .flatMap((g) => g.items)
       .find((i) => i.key === "solutions");
     expect(item).toMatchObject({ href: "/w/s/solutions", active: true });
@@ -213,7 +216,7 @@ describe("(i) help on every control", () => {
   });
 
   it("shows an (i) beside each, in the screens that use it", () => {
-    const src = [read("components/solutions/solution-cards.tsx"), read("components/solutions/solutions-list.tsx"), read("components/solutions/solution-page.tsx"), read("components/solutions/solution-compare.tsx")].join("\n");
+    const src = [read("components/solutions/solution-cards.tsx"), read("components/solutions/solutions-list.tsx"), read("components/solutions/new-solution.tsx"), read("components/solutions/solution-page.tsx")].join("\n");
     for (const [name, set] of Object.entries(sets)) {
       for (const key of Object.keys(set)) {
         // Spread into an (i), or handed to the placeholder sections, which draw one.
@@ -242,35 +245,30 @@ describe("(i) help on every control", () => {
     expect(RESOLVE_HELP.solution.description).toMatch(/which solution/);
   });
 
-  it("the pages use the prototype's words", () => {
+  it("the Solution page has only the header, what it changes, the two maps and the notes (Q12, D44)", () => {
     const page = read("components/solutions/solution-page.tsx");
-    for (const t of ["Solves", "+ Link an issue", "✎ New solution on", "Built by", "Automatic", "Holds in", "Yours", "Notes", "Solutions never change the live map"]) expect(page).toContain(t);
-    const compare = read("components/solutions/solution-compare.tsx");
-    for (const t of ["Live vs this solution", "Measures", "MRR over time", "Market stress test", "Result", "Key number", "Projection"]) expect(compare).toContain(t);
+    for (const t of ["Open in editor", "Try it in the Sandbox", "What it changes", "Notes", "Solutions never change the live map", "<SolutionMaps", "<EditableText", "<SolutionStatusMenu"]) expect(page).toContain(t);
+    expect(page).not.toContain("AdoptSolution");
+    // The measures, the revenue chart, the stress test and the per-issue verdict cards were taken off.
+    for (const t of ["Measures", "MRR over time", "Market stress test", "SolutionCompare", "SolvesCard", "VerdictWord", "saveSolutionVerdict"]) expect(page).not.toContain(t);
     const cards = read("components/solutions/solution-cards.tsx");
     for (const t of ["Solves", "Open", "✎ New solution on", "Not linked to an issue yet", "Changes"]) expect(cards).toContain(t);
-    expect(read("components/solutions/solutions-list.tsx")).toContain("✎ New solution");
+    expect(read("components/solutions/new-solution.tsx")).toContain("✎ New solution");
   });
 
-  it("builds the four places slice 1 marked, off the main thread", () => {
-    const page = read("components/solutions/solution-page.tsx");
-    expect(page).not.toMatch(/data-slice="2"|Coming next/);
-    expect(page).toContain("<SolutionCompare");
-    const compare = read("components/solutions/solution-compare.tsx");
-    for (const id of ["compare", "measures", "mrr", "stress"]) expect(compare).toContain(`data-section="${id}"`);
-    // Shared open state between the two maps, and the simulations in workers rather than in a Server Action.
-    expect(compare).toMatch(/expanded=\{expanded\}/);
-    expect(compare).toMatch(/onExpandedChange=\{setExpanded\}/);
-    expect(read("lib/solutions/use-stress.ts")).toContain("stress.worker.ts");
-    expect(read("workers/stress.worker.ts")).toContain("runStress");
-    expect(read("lib/solutions/stress.ts")).toMatch(/checkTarget/);
-    expect(read("lib/solutions/stress.ts")).toMatch(/withMarketCondition/);
+  it("the page's removed code is gone: no stress test, no comparison component, no stress worker", () => {
+    for (const gone of ["components/solutions/solution-compare.tsx", "lib/solutions/stress.ts", "lib/solutions/use-stress.ts", "workers/stress.worker.ts"]) {
+      expect(() => read(gone), gone).toThrow();
+    }
   });
 
-  it("puts no first-run chip on the compare maps: they draw no run's numbers (issue #44)", () => {
-    const compare = read("components/solutions/solution-compare.tsx");
-    expect(compare).toContain("<ProcessCanvas");
-    expect(compare).not.toMatch(/\bcomputing[=:{]/);
-    expect(compare).not.toMatch(/\bresult=\{/);
+  it("puts no first-run chip on the two maps: they draw no run's numbers (issue #44)", () => {
+    const maps = read("components/solutions/solution-maps.tsx");
+    expect(maps).toContain("<ProcessCanvas");
+    expect(maps).not.toMatch(/\bcomputing[=:{]/);
+    expect(maps).not.toMatch(/\bresult=\{/);
+    // Shared open state between the two maps.
+    expect(maps).toMatch(/expanded=\{expanded\}/);
+    expect(maps).toMatch(/onExpandedChange=\{setExpanded\}/);
   });
 });

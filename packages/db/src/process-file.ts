@@ -8,9 +8,6 @@
 // goes ahead (something is odd, or was filled in for you). Every message names the step or link it is about.
 
 import {
-  checkCompany,
-  checkFirstPrinciples,
-  checkProposals,
   checkSources,
   PROCESS_FILE_FORMAT_2,
   readAssumed,
@@ -19,13 +16,12 @@ import {
   STEP_FIELDS_2,
   type EvidenceField,
   type FileCitation,
-  type FileCompany,
-  type FileFirstPrinciples,
-  type FileProposal,
   type FileRange,
   type FileSource,
+  type FileSourceLabel,
   type Env,
 } from "@transpera-flow/db/process-file-2";
+import { isProcessCategory, PROCESS_CATEGORIES, type ProcessCategory } from "@transpera-flow/db/process-category";
 import { isObject, MAX_ID, MAX_SUGGESTIONS, norm, plural, q, round, suggest } from "@transpera-flow/db/process-file-util";
 
 export const PROCESS_FILE_FORMAT = "transpera-process/1";
@@ -73,6 +69,16 @@ export interface ProcessFileStep {
   evidence?: Partial<Record<EvidenceField, FileCitation[]>>;
   /** Why a value is an assumption, by field. */
   assumed?: Partial<Record<EvidenceField, string>>;
+  /** Capacity base values (P4): the shares of the step's time that can be automated, augmented or only done by hand (add up to 1). */
+  split?: { automatable: number; augmentable: number; manual: number };
+  /** One line of words for each part of the split. */
+  split_notes?: { automatable?: string; augmentable?: string; manual?: string };
+  /** × on the step's time by tier key. */
+  tier_multiplier?: Record<string, number>;
+  /** The step goes to the client's manager. */
+  to_client_manager?: boolean;
+  /** Where each base value came from: interview, calculator, measured or estimate. */
+  sources?: { work?: FileSourceLabel; split?: FileSourceLabel; tier_multiplier?: FileSourceLabel };
 }
 
 export interface ProcessFileLink {
@@ -99,14 +105,13 @@ export interface ProcessFile {
   kind: "pipeline" | "servicing";
   description?: string;
   entity_name?: string;
+  /** What the process is for (/2 only; Q3). Absent: the importer gives one from the kind. */
+  category?: ProcessCategory;
   steps: ProcessFileStep[];
   links: ProcessFileLink[];
   groups: ProcessFileGroup[];
   // What /2 adds (a /1 file never has these).
   sources?: FileSource[];
-  company?: FileCompany;
-  proposals?: FileProposal[];
-  first_principles?: FileFirstPrinciples;
 }
 
 export interface ProcessFileCheck {
@@ -221,7 +226,7 @@ export const PROCESS_FILE_EXAMPLE = {
 // ---------------------------------------------------------------------------
 
 const TOP_FIELDS = ["$schema", "format", "name", "kind", "description", "entity_name", "steps", "links", "groups"];
-const TOP_FIELDS_2 = [...TOP_FIELDS, "sources", "company", "proposals", "first_principles"];
+const TOP_FIELDS_2 = [...TOP_FIELDS, "sources", "category"];
 const STEP_FIELDS = ["id", "name", "type", "role", "person", "hands_on_hours", "wait_hours", "rework_rate", "notes", "x", "y"];
 const STEP_FIELDS_V2 = [...STEP_FIELDS, ...STEP_FIELDS_2];
 const LINK_FIELDS = ["from", "to", "probability", "label"];
@@ -295,6 +300,11 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
   };
   const description = text("description", 4000);
   const entity_name = text("entity_name", 100);
+  let category: ProcessCategory | undefined;
+  if (v2 && input.category !== undefined && input.category !== null) {
+    if (isProcessCategory(input.category)) category = input.category;
+    else errors.push(`The process category ${typeof input.category === "string" ? q(input.category) : "given"} isn't one Transpera knows. Use ${PROCESS_CATEGORIES.map((c) => `"${c}"`).join(", ")}, or leave it out.`);
+  }
 
   // Steps.
   const rawSteps = input.steps;
@@ -529,9 +539,6 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
   }
 
   // What /2 adds: where rework goes, then the sections that refer to the steps.
-  let company: FileCompany | undefined;
-  let proposals: FileProposal[] = [];
-  let firstPrinciples: FileFirstPrinciples | undefined;
   if (v2) {
     for (const s of steps) {
       if (s.rework_to === undefined) continue;
@@ -543,10 +550,6 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
         warnings.push(`Step ${q(s.name)} sends rework back to ${q(byId.get(s.rework_to)!.name)} but has no rework_rate, so nothing is sent back yet.`);
       }
     }
-    const view = { ids, has: (id: string) => byId.has(id), name: stepName };
-    company = checkCompany(input.company, env);
-    proposals = checkProposals(input.proposals, view, env);
-    firstPrinciples = checkFirstPrinciples(input.first_principles, view, env);
   }
 
   if (errors.length) return fail();
@@ -666,10 +669,11 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
       kind,
       ...(description ? { description } : {}),
       ...(entity_name ? { entity_name } : {}),
+      ...(category ? { category } : {}),
       steps: normalised,
       links,
       groups,
-      ...(v2 ? { sources: env.sources, ...(company ? { company } : {}), proposals, ...(firstPrinciples ? { first_principles: firstPrinciples } : {}) } : {}),
+      ...(v2 ? { sources: env.sources, } : {}),
     },
     errors,
     warnings,

@@ -2,8 +2,8 @@
 // tests agree. Never echoes SQL: the database's own words are shown only for a failure inside a section, and only when they
 // read as a sentence about the data (the rules the triggers state in plain words), never as a statement, a relation or a column.
 
-export const ROLE_MESSAGE = "Only owners, editors and agency admins can restore a backup.";
-export const NOT_EMPTY_MESSAGE = "Backups restore only into an empty workspace. Ask an agency admin to create a new workspace, then restore it there.";
+export const ROLE_MESSAGE = "Only Agency admins and the Owner can restore a backup.";
+export const NOT_EMPTY_MESSAGE = "Backups restore only into an empty workspace. Ask an Owner to create a new workspace, then restore it there.";
 export const TOO_BIG_MESSAGE = "This backup is too big to restore in one go (the database ran out of time). Nothing was restored.";
 export const REFUSED_PLAN_MESSAGE = "This backup can't be restored as it is.";
 export const FAILED_MESSAGE = "The restore failed. Nothing was restored. Try again.";
@@ -21,11 +21,11 @@ export const LOST_CONNECTION_MESSAGE =
 const SECTION_WORDS: Record<string, string> = {
   settings: "the workspace settings", roles: "the roles", people: "the people", person_roles: "the role assignments", person_leave: "the leave entries",
   lead_sources: "the lead sources", seasonality: "the seasonality", demand_settings: "the demand settings", churn_drivers: "the churn drivers",
-  market_conditions: "the market conditions", market_schedule: "the market schedule", lever_settings: "the lever settings", analysis_rules: "the analysis rules",
-  clients: "the clients", sources: "the sources", processes: "the processes", scenarios: "the scenarios", blocks: "the blocks", issues: "the issues",
+  market_conditions: "the market conditions", market_schedule: "the market schedule", analysis_rules: "the analysis rules",
+  clients: "the clients", sources: "the sources", processes: "the processes", scenarios: "the scenarios", sandbox_scenarios: "the scenarios", blocks: "the blocks", issues: "the issues",
   steps: "the steps and edges", services: "the services", service_servicing: "the servicing rules", client_groups: "the client groups",
   client_services: "the client services", client_assignments: "the client assignments", person_skills: "the skills", person_capacity_factors: "the per-person times", source_links: "the source links",
-  suggestions: "the pending suggestions", proposals: "the pending proposals", archive: "the archived processes", log: "the import log",
+  archive: "the archived processes", log: "the import log",
 };
 
 export function sectionInWords(section: string): string {

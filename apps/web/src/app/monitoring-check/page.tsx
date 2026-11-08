@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/shell/page";
 import { Card, CardContent } from "@/components/ui/card";
 import { isAgencyAdmin } from "@/lib/access-data";
 import { sentryDsn, sentryEnvironment } from "@/lib/monitoring/env";
-import { supabaseEnv } from "@/lib/supabase/env";
+import { authEnv } from "@/lib/auth/env";
 import { MonitoringCheckButtons } from "./buttons";
 
 export const metadata = { title: "Error reporting check · Transpera Flow", robots: { index: false, follow: false } };
@@ -13,7 +13,7 @@ export const metadata = { title: "Error reporting check · Transpera Flow", robo
 /** For agency admins only (issue #44): proves error reporting works after the Sentry variables are set. Not linked from the app. */
 export default async function MonitoringCheckPage() {
   await connection();
-  if (!supabaseEnv() || !(await isAgencyAdmin())) notFound();
+  if (!authEnv() || !(await isAgencyAdmin())) notFound();
   const configured = sentryDsn() !== null;
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pb-12 sm:px-6">

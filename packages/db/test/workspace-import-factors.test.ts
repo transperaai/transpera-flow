@@ -74,7 +74,7 @@ async function newWorkspace(name = "Restored Co"): Promise<string> {
 
 async function member(ws: string, role: string): Promise<User> {
   const user = await createUser(db, `u${++seq}.${role}@import-factors.example.com`);
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, user.id, role]);
   return user;
 }
 
@@ -84,7 +84,7 @@ async function exportOf(workspaceId: string): Promise<WorkspaceBundle> {
   const bundle = await db.as(editor.claims, async (c) => {
     const read: TableReader = async (table, wsId) => {
       const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table)!;
-      return (await c.query(`select to_jsonb(t) as j from (select ${spec.columns ?? "*"} from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}) t`, [wsId])).rows.map((r) => r.j) as Row[];
+      return (await c.query(`select to_jsonb(t) as j from (select * from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}) t`, [wsId])).rows.map((r) => r.j) as Row[];
     };
     const readWorkspace = async (id: string) => (await c.query("select id, name, slug, plan, settings, provenance from workspaces where id = $1", [id])).rows[0] ?? null;
     return exportWorkspaceBundle(workspaceId, readWorkspace, read, { canEdit: true, now: new Date("2026-10-05T12:00:00Z") });
@@ -121,9 +121,9 @@ async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; mes
 /** Counts of every table a restore writes to, for a workspace, so "nothing was written" can be compared. */
 const TABLES = [
   "roles", "people", "person_roles", "person_leave", "person_skills", "person_capacity_factors", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions",
-  "market_schedule", "lever_settings", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links",
-  "processes", "process_revisions", "steps", "edges", "first_principles", "scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events", "suggestions",
-  "suggestion_proposals", "solutions", "audit_log",
+  "market_schedule", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links",
+  "processes", "process_revisions", "steps", "edges", "sandbox_scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
+  "solutions", "audit_log",
 ];
 async function snapshot(ws: string): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -344,26 +344,6 @@ describe("a restore brings per-person times back (round trip)", () => {
     expect(modelAfter).not.toEqual(JSON.parse(JSON.stringify(modelBefore)));
   }, 120_000);
 
-  it("as an editor: the times are restored, and the switch arrives with the settings as one pending suggestion for an owner", async () => {
-    const bundle = await sourceBundle();
-    const planned = planWorkspaceImport(bundle, { canManage: false });
-    const ws = await newWorkspace();
-    const editor = await member(ws, "editor");
-    const result = await restoreAs(editor, ws, planned.plan, "northbeam.json");
-    expect(result.settings).toBe("suggested");
-    expect(result.counts.person_capacity_factors).toBe(sourceFactorCount);
-    expect(await count("person_capacity_factors", ws)).toBe(sourceFactorCount);
-    // The factors are stored; the switch is still off until an owner accepts the suggestion.
-    const [row] = await q("select settings from workspaces where id = $1", [ws]);
-    expect(row!.settings).not.toHaveProperty("capacity_factor_enabled");
-    const pending = await q("select patch, status from suggestions where workspace_id = $1 and note = 'Workspace settings from a backup.'", [ws]);
-    expect(pending).toHaveLength(1);
-    expect(pending[0]).toMatchObject({ status: "pending" });
-    expect((pending[0]!.patch as { set: Record<string, unknown> }).set.capacity_factor_enabled).toBe(true);
-    // Who entered each time is the editor of the source workspace; the restoring editor is the creator of the row (`created_by`).
-    expect(Number((await q("select count(*) from person_capacity_factors where workspace_id = $1 and created_by = $2", [ws, editor.id]))[0]!.count)).toBe(sourceFactorCount);
-  }, 120_000);
-
   it("a numeric string and a number for a factor both restore, to the same stored value", async () => {
     const bundle = await sourceBundle();
     const rows = bundle.company_model.person_capacity_factors as Row[];
@@ -460,7 +440,7 @@ describe("import_workspace_bundle and per-person times", () => {
 
 // ---------------------------------------------------------------------------------------------------------------------------
 
-const sqlOf = (name: string) => readFileSync(new URL(`../supabase/migrations/${name}`, import.meta.url), "utf8");
+const sqlOf = (name: string) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), "utf8");
 const md5 = (s: string) => createHash("md5").update(s).digest("hex");
 /** The text between the first `$$` and the last `$$` of a function (what `pg_proc.prosrc` holds). */
 const bodyOf = (sql: string) => {
@@ -468,6 +448,12 @@ const bodyOf = (sql: string) => {
   return fn.slice(fn.indexOf("$$") + 2, fn.lastIndexOf("$$"));
 };
 const FN = "public.import_workspace_bundle(uuid, jsonb, text)";
+/** The migration that defines the function now (it applies the settings for every restorer: 20270104000000), and its body. */
+const LATEST_FILE = "20270130000000_tier_client_totals.sql";
+const bodyOfFunction = (sql: string, name: string) => {
+  const fn = sql.slice(sql.search(new RegExp(`^create (?:or replace )?function ${name.replace(".", "\\.")}\\(`, "mi")));
+  return fn.slice(fn.indexOf("$$") + 2, fn.indexOf("$$", fn.indexOf("$$") + 2));
+};
 
 describe("the function and the migration", () => {
   it("is SECURITY INVOKER with its 40 s timeout, only authenticated may execute it, and the live body is this migration's", async () => {
@@ -476,10 +462,9 @@ describe("the function and the migration", () => {
     expect(fn!.proconfig).toEqual(['search_path=""', "statement_timeout=40s"]);
     const grants = await q("select grantee, privilege_type from information_schema.routine_privileges where routine_schema = 'public' and routine_name = 'import_workspace_bundle' and grantee in ('anon', 'authenticated', 'PUBLIC') order by 1");
     expect(grants).toEqual([{ grantee: "authenticated", privilege_type: "EXECUTE" }]);
+    expect(fn!.md5).toBe(md5(bodyOfFunction(sqlOf(LATEST_FILE), "public.import_workspace_bundle")));
+    // The header of #228's migration says the md5 it replaces (the preflight).
     const sql = sqlOf(FILE);
-    expect(fn!.md5).toBe(md5(bodyOf(sql)));
-    // The header says the body's md5 (the post-apply check), and the md5 it replaces (the preflight).
-    expect(sql).toContain(`${fn!.md5}:`);
     expect(sql).toContain(B21_MD5);
     expect(md5(bodyOf(sqlOf(B21_FILE)))).toBe(B21_MD5);
   });
@@ -537,12 +522,25 @@ describe("the function and the migration", () => {
 
     const live = String((await q(`select md5(prosrc) as md5 from pg_proc where oid = '${FN}'::regprocedure`))[0]!.md5);
     const copy = await plan();
+    // B21's function reads the two sections Suggestions had (removed 28 Oct 2026), so the plan for it carries them, empty, and it
+    // checks their tables are empty: stand-ins for the length of this transaction.
+    Object.assign(copy, { suggestions: [], proposals: [], scenarios: [] });
+    // Its issues can't point at a scenario: B21's function writes the stand-in table below, which no foreign key reaches.
+    for (const issue of (copy as unknown as { issues: { scenario_id?: unknown }[] }).issues) issue.scenario_id = null;
     // In a transaction that is rolled back: the operator's `begin;` and `commit;` are left out, everything between them runs.
     await db.client.query("begin");
     try {
       await db.client.query("create schema if not exists supabase_migrations");
       await db.client.query("create table if not exists supabase_migrations.schema_migrations (version text primary key, name text, statements text[])");
       await db.client.query("insert into supabase_migrations.schema_migrations (version, name) values ('20261226000000', 'restore_capacity_factors') on conflict do nothing");
+      await db.client.query("create table public.suggestions (workspace_id uuid)");
+      await db.client.query("create table public.suggestion_proposals (workspace_id uuid)");
+      await db.client.query("grant select on public.suggestions, public.suggestion_proposals to authenticated");
+      // And the scenarios table and library that the Sandbox migration (20270109000000) replaced: B21's function still reads them.
+      await db.client.query("create table public.scenarios (workspace_id uuid, id uuid, name text, patch jsonb, parent_scenario_id uuid, description text, created_at timestamptz)");
+      await db.client.query("grant select, insert on public.scenarios to authenticated");
+      await db.client.query("create function private.scenario_library() returns table (name text, description text, patch jsonb) language sql as $$ select null::text, null::text, null::jsonb where false $$");
+      await db.client.query("grant execute on function private.scenario_library() to authenticated");
       await db.client.query(rollback.replace(/^begin;/, "").replace(/commit;$/, ""));
       const [fn] = await q(`select prosecdef, proconfig, md5(prosrc) as md5 from pg_proc where oid = '${FN}'::regprocedure`);
       expect(fn!.md5).toBe(B21_MD5);
@@ -578,7 +576,8 @@ describe("the function and the migration", () => {
     const to = lines.indexOf("--        $smoke$;");
     expect(from).toBeGreaterThan(0);
     expect(to).toBeGreaterThan(from);
-    const block = lines.slice(from, to + 1).map((l) => l.slice("--        ".length)).join("\n");
+    // The block restores through the live function, which since the Sandbox migration takes `sandbox_scenarios` where it took `scenarios`.
+    const block = lines.slice(from, to + 1).map((l) => l.slice("--        ".length)).join("\n").replace('"scenarios":[]', '"sandbox_scenarios":[]');
     expect(block).toContain("<agency admin user id>");
     const workspaces = async () => Number((await q("select count(*) from public.workspaces"))[0]!.count);
     const before = await workspaces();
@@ -601,7 +600,7 @@ describe("the function and the migration", () => {
 
   it("has an apply file that is the migration plus its schema_migrations row, in one transaction", () => {
     const dir = new URL("../", import.meta.url);
-    const mig = readFileSync(new URL(`supabase/migrations/${FILE}`, dir), "utf8").trimEnd();
+    const mig = readFileSync(new URL(`migrations/${FILE}`, dir), "utf8").trimEnd();
     const apply = readFileSync(new URL(`scripts/apply/${FILE}`, dir), "utf8");
     expect(apply).toContain("\nbegin;\nset local lock_timeout = '5s';");
     expect(apply.split(mig).length - 1).toBe(2);

@@ -5,12 +5,13 @@
 
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
 import type { BlockRow, ProcessBundle } from "@transpera-flow/db";
-import { createBlock } from "@/app/w/[slug]/block-actions";
+import { createBlock, updateBlock } from "@/app/w/[slug]/block-actions";
 import type { Selection } from "@/components/process-canvas";
 import { blockFromGroup, insertBlock, readBlock, replaceProblem, replaceWithBlock } from "@/lib/blocks/blocks";
-import { addDemoBlock, useDemoBlocks } from "@/lib/blocks/demo";
+import { addDemoBlock, updateDemoBlock, useDemoBlocks } from "@/lib/blocks/demo";
 import type { BlockInput, SaveBlockResult } from "@/lib/blocks/save";
 import type { ProcessEditor } from "@/lib/editor/editor";
+import type { ViewRef } from "@/lib/editor/groups";
 
 export interface BlockTools {
   /** The library, as the Editor lists it. */
@@ -19,6 +20,8 @@ export interface BlockTools {
   note: { kind: "save" | "place"; tone: "ok" | "problem"; text: string } | null;
   /** Save a block to the library. */
   save: (input: BlockInput) => Promise<SaveBlockResult>;
+  /** Write an edited block back to the library (Q15). */
+  update: (id: string, input: BlockInput) => Promise<SaveBlockResult>;
   /** Save a group of the map as a block, named after the group. */
   saveGroup: (groupId: string) => Promise<void>;
   /** Put a block in after the selection. */
@@ -38,6 +41,7 @@ export function useBlockTools({
   selected,
   setSelection,
   processName,
+  viewRef,
 }: {
   mode: "live" | "demo";
   workspaceId: string;
@@ -48,6 +52,8 @@ export function useBlockTools({
   selected: Selection;
   setSelection: Dispatch<SetStateAction<Selection>>;
   processName: string;
+  /** Where the map is looking: an inserted block goes there with nothing selected, and the map pans to it if it lands off screen. */
+  viewRef?: ViewRef;
 }): BlockTools {
   const demo = useDemoBlocks();
   const [added, setAdded] = useState<BlockRow[]>([]);
@@ -61,6 +67,17 @@ export function useBlockTools({
       const result = await createBlock(workspaceId, input);
       if (result.status === "ok") setAdded((a) => [...a, result.block]);
       return result;
+    },
+    [mode, workspaceId],
+  );
+
+  const update = useCallback(
+    async (id: string, input: BlockInput): Promise<SaveBlockResult> => {
+      if (mode === "demo") {
+        const block = updateDemoBlock(id, input);
+        return block ? { status: "ok", block } : { status: "error", message: "That block no longer exists." };
+      }
+      return updateBlock(workspaceId, id, input);
     },
     [mode, workspaceId],
   );
@@ -80,8 +97,9 @@ export function useBlockTools({
   const insert = (block: BlockRow) => {
     let id: string | null = null;
     let said: string | undefined;
+    const view = viewRef?.current?.() ?? null;
     const ran = editor.run((b) => {
-      const made = insertBlock(b, only, readBlock(block.steps), block.name);
+      const made = insertBlock(b, only, readBlock(block.steps), block.name, block.id, view);
       id = made?.id ?? null;
       said = made?.note;
       return made?.edit ?? null;
@@ -89,6 +107,7 @@ export function useBlockTools({
     if (!ran || !id) return setNote({ kind: "place", tone: "problem", text: `${block.name} has no steps to insert.` });
     setNote({ kind: "place", tone: said ? "problem" : "ok", text: said ?? `Inserted ${block.name}.` });
     setSelection({ steps: [id], edges: [] });
+    view?.reveal?.(id);
   };
 
   const replaceWhy = replaceProblem(bundle, only);
@@ -97,7 +116,7 @@ export function useBlockTools({
     let id: string | null = null;
     let said: string | undefined;
     const ran = editor.run((b) => {
-      const made = replaceWithBlock(b, only, readBlock(block.steps), block.name);
+      const made = replaceWithBlock(b, only, readBlock(block.steps), block.name, block.id);
       id = made?.id ?? null;
       said = made?.note;
       return made?.edit ?? null;
@@ -107,5 +126,5 @@ export function useBlockTools({
     setSelection({ steps: [id], edges: [] });
   };
 
-  return { library, note, save, saveGroup, insert, replace, replaceWhy };
+  return { library, note, save, update, saveGroup, insert, replace, replaceWhy };
 }

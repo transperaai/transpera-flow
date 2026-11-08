@@ -1,21 +1,18 @@
 import type { ReactNode } from "react";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { SectionCard } from "@/components/page-kit";
 
-/** One block of the settings page: a card with a heading (the sidebar's People item links to `#people-heading`) and a plain sentence. */
-export function SettingsSection({ id, title, description, children }: { id: string; title: string; description?: ReactNode; children: ReactNode }) {
+/**
+ * One block of a Settings or Set up page: a kit `SectionCard` with a heading (the sidebar's People item links to `#people-heading`) and a
+ * plain sentence. `action` puts buttons at the right of the title. The region wrapper keeps the block a landmark named by its heading.
+ */
+export function SettingsSection({ id, title, description, action, phoneWrap = true, children }: { id: string; title: ReactNode; description?: ReactNode; action?: ReactNode; /** False: the section handles read-only-on-a-phone itself (a list with view controls, and a panel). */ phoneWrap?: boolean; children: ReactNode }) {
   return (
-    <Card role="region" aria-labelledby={`${id}-heading`}>
-      <CardHeader>
-        <h2 id={`${id}-heading`} className="scroll-mt-20 font-heading text-base font-medium">
-          {title}
-        </h2>
-        {description && <CardDescription>{description}</CardDescription>}
-      </CardHeader>
-      <CardContent className="flex flex-col gap-4">
+    <div role="region" aria-labelledby={`${id}-heading`}>
+      <SectionCard id={id} title={title} description={description} action={action}>
         {/* A phone is read only (issue #44); the page shows one notice, so the sections show none. */}
-        <PhoneReadOnly notice={false}>{children}</PhoneReadOnly>
-      </CardContent>
-    </Card>
+        {phoneWrap ? <PhoneReadOnly notice={false}>{children}</PhoneReadOnly> : children}
+      </SectionCard>
+    </div>
   );
 }

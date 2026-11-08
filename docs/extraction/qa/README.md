@@ -1,10 +1,12 @@
 # QA guide: transcript to draft, timed (issue #27)
 
+> **Out of date, 28 Oct 2026.** This guide ran the MCP extraction flow, which is removed (MCP is read-only; docs/plans/cut-list.md item 5). To rerun it now, use the `process-file` skill on the two transcripts, upload the files in the app, and enter the company facts by hand. Steps that mention `/extract-process`, API tokens, `list_workspaces` or the Suggestions page no longer apply.
+
 Copperleaf Marketing is an invented paid media agency (37.5 hour week, so a working day is 7.5 hours: a deliberate trap). The process is **Enquiry to signed client** (a pipeline). The two transcripts are messy on purpose. `ANSWER-KEY.md` lists what each planted item should become. **Do not open it until after the timed run.**
 
 ## Once, untimed
 
-1. Already done on production (30 Sep 2026); skip unless you have reset it. Run `setup-workspace.sql` (Supabase SQL editor, or ask Claude to run it with `packages/db/scripts/prod-sql.sh`). It adds the workspace "Copperleaf Marketing (QA)" with slug `copperleaf-qa` and stops with an error if that slug exists. Every agency admin gets a membership.
+1. Already done on production (30 Sep 2026); skip unless you have reset it. Run `setup-workspace.sql` with `bash packages/db/scripts/db-sql.sh -f docs/extraction/qa/setup-workspace.sql` (`DATABASE_URL` set to the owner's connection string). It adds the workspace "Copperleaf Marketing (QA)" with slug `copperleaf-qa` and stops with an error if that slug exists. Every agency admin gets a membership.
 2. Create an API token at `/settings/tokens` and connect Claude (see `docs/extraction/README.md`).
 3. Run Claude **outside the repo**, so the answer key and the dry-run examples are out of its reach: Claude desktop with the skill body as Project instructions, or Claude Code in an empty folder with the `~/.claude/skills/extract-process` symlink.
 4. Check that `list_workspaces` shows "Copperleaf Marketing (QA)".

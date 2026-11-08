@@ -1,6 +1,7 @@
 /* Design tokens (docs/PRD.md §8.1), starting from the prototype. Components use
    these via Tailwind theme names; no raw hex in components. */
 :root {
+  --paper: #ffffff;
   --bg: oklch(0.985 0 0);
   --panel: oklch(1 0 0);
   --panel-2: oklch(0.97 0 0);
@@ -12,8 +13,6 @@
   --accent: oklch(0.52 0.105 223.128);
   --accent-soft: oklch(0.95 0.025 215);
   --accent-fg: oklch(0.984 0.019 200.873);
-  /* A client's logo always sits on white, in both themes (issue #34), so a dark logo stays visible. */
-  --logo-tile: #ffffff;
   --good: #1baf7a;
   --warn: #eda100;
   --serious: #eb6834;
@@ -21,6 +20,10 @@
   --crit-soft: #fbe1e0;
   --warn-soft: #fdf0d1;
   --good-soft: #d8f3e8;
+  /* The work split's three parts (capacity P4, from the prototype): the share that can be automated, augmented, or stays manual. */
+  --auto: #1f5f8b;
+  --aug: #6a9fc6;
+  --man: #c9cfd8;
   /* The Editor's colour (issue #104): a screen in this purple is always an editing screen. */
   --edit: #6d3fc4;
   --edit-soft: #ece4fa;
@@ -41,6 +44,20 @@
   --rate-bad-soft: var(--warn-soft);
   --rate-risk: var(--crit);
   --rate-risk-soft: var(--crit-soft);
+  /* "Where the time goes" (sandbox phase 4): one colour per purpose category, mid-lightness so a bar reads on both themes. The default categories
+     have their own; categories a workspace adds take the spare ones. The client's job is --accent and Fixing is --rate-bad. */
+  --purpose-upkeep: oklch(0.75 0.08 205);
+  --purpose-winning: oklch(0.68 0.15 305);
+  --purpose-required: oklch(0.62 0.05 250);
+  --purpose-coordination: oklch(0.72 0.13 345);
+  --purpose-removable: oklch(0.55 0.02 250);
+  --purpose-unset: oklch(0.78 0.02 250);
+  --purpose-spare-1: oklch(0.7 0.13 40);
+  --purpose-spare-2: oklch(0.68 0.12 170);
+  --purpose-spare-3: oklch(0.62 0.12 270);
+  --purpose-spare-4: oklch(0.74 0.1 110);
+  --purpose-spare-5: oklch(0.66 0.13 15);
+  --purpose-spare-6: oklch(0.7 0.1 235);
   /* Work items in playback, and those heading to a lost end. */
   --token: oklch(0.609 0.126 221.723);
   --token-lost: oklch(0.7 0 0);
@@ -103,6 +120,9 @@
     --crit-soft: #4a2424;
     --warn-soft: #45360f;
     --good-soft: #153f30;
+    --auto: #6fb0de;
+    --aug: #3f6f93;
+    --man: #3a4554;
     --edit: #a37ef0;
     --edit-soft: #2e2248;
     --edit-fg: #140a26;
@@ -143,6 +163,9 @@
   --crit-soft: #4a2424;
   --warn-soft: #45360f;
   --good-soft: #153f30;
+  --auto: #6fb0de;
+  --aug: #3f6f93;
+  --man: #3a4554;
   --edit: #a37ef0;
   --edit-soft: #2e2248;
   --edit-fg: #140a26;
@@ -159,4 +182,25 @@
   --destructive: #e66767;
   --shadow-overlay: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
   color-scheme: dark;
+}
+
+/* The printed Sandbox summary is always light, on white paper, whatever theme the screen is in (components/sandbox/print-summary.tsx). */
+@media print {
+  [data-print-root] {
+    color-scheme: light;
+    color: oklch(0.145 0 0);
+    --panel: #ffffff;
+    --panel-2: oklch(0.97 0 0);
+    --line: oklch(0.922 0 0);
+    --line-2: oklch(0.87 0 0);
+    --fg: oklch(0.145 0 0);
+    --fg-2: oklch(0.36 0 0);
+    --fg-3: oklch(0.44 0 0);
+    --accent: oklch(0.52 0.105 223.128);
+    --edit: #6d3fc4;
+    --chart-3: oklch(0.609 0.126 221.723);
+    --chart-4: oklch(0.52 0.105 223.128);
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
 }

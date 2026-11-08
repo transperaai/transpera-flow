@@ -1,5 +1,6 @@
 import { parseAnalysisSettings, type AnalysisSettings } from "@transpera-flow/engine";
 import type { Db } from "./queries";
+import { pgCode } from "./pg-error";
 
 // A workspace's analysis rules (issue #109, docs/analysis-rules.md): one row
 // per workspace holding the sparse settings document that
@@ -15,8 +16,7 @@ export interface AnalysisRules {
 
 /** The workspace's rules, tolerant of anything in the stored document (invalid parts fall back to the defaults). */
 export async function loadAnalysisRules(db: Db, workspaceId: string): Promise<AnalysisRules> {
-  const { data, error } = await db.from("analysis_rules").select("settings, updated_at").eq("workspace_id", workspaceId).maybeSingle();
-  if (error) throw error;
+  const data = await db.selectFrom("analysis_rules").select(["settings", "updated_at"]).where("workspace_id", "=", workspaceId).executeTakeFirst();
   if (!data) return { settings: {}, version: null };
   return { settings: parseAnalysisSettings(data.settings).value, version: data.updated_at };
 }
@@ -48,8 +48,12 @@ export async function saveAnalysisRules(
   const stored = JSON.parse(JSON.stringify(doc)) as never;
 
   const conflict = async (): Promise<SaveAnalysisRulesOutcome> => {
-    const { data, error } = await db.from("analysis_rules").select("settings, updated_at").eq("workspace_id", workspaceId).maybeSingle();
-    if (error) return { status: "error", message: "Couldn't save. Try again." };
+    let data;
+    try {
+      data = await db.selectFrom("analysis_rules").select(["settings", "updated_at"]).where("workspace_id", "=", workspaceId).executeTakeFirst();
+    } catch {
+      return { status: "error", message: "Couldn't save. Try again." };
+    }
     // No row to compare against and the write didn't go through: the user can't write here.
     if (!data) return { status: "forbidden" };
     if (data.updated_at === version) return { status: "forbidden" };
@@ -57,24 +61,33 @@ export async function saveAnalysisRules(
   };
 
   if (version === null) {
-    const { data, error } = await db
-      .from("analysis_rules")
-      .insert({ workspace_id: workspaceId, settings: stored })
-      .select("settings, updated_at")
-      .single();
-    if (!error) return { status: "saved", rules: { settings: parseAnalysisSettings(data.settings).value, version: data.updated_at } };
-    if (error.code === "23505") return conflict();
-    if (error.code === "42501") return { status: "forbidden" };
-    return { status: "error", message: "Couldn't save. Try again." };
+    try {
+      const data = await db
+        .insertInto("analysis_rules")
+        .values({ workspace_id: workspaceId, settings: stored })
+        .returning(["settings", "updated_at"])
+        .executeTakeFirstOrThrow();
+      return { status: "saved", rules: { settings: parseAnalysisSettings(data.settings).value, version: data.updated_at } };
+    } catch (e) {
+      const code = pgCode(e);
+      if (code === "23505") return conflict();
+      if (code === "42501") return { status: "forbidden" };
+      return { status: "error", message: "Couldn't save. Try again." };
+    }
   }
 
-  const { data, error } = await db
-    .from("analysis_rules")
-    .update({ settings: stored })
-    .eq("workspace_id", workspaceId)
-    .eq("updated_at", version)
-    .select("settings, updated_at");
-  if (error) return error.code === "42501" ? { status: "forbidden" } : { status: "error", message: "Couldn't save. Try again." };
+  let data;
+  try {
+    data = await db
+      .updateTable("analysis_rules")
+      .set({ settings: stored })
+      .where("workspace_id", "=", workspaceId)
+      .where("updated_at", "=", version)
+      .returning(["settings", "updated_at"])
+      .execute();
+  } catch (e) {
+    return pgCode(e) === "42501" ? { status: "forbidden" } : { status: "error", message: "Couldn't save. Try again." };
+  }
   const row = data[0];
   if (!row) return conflict();
   return { status: "saved", rules: { settings: parseAnalysisSettings(row.settings).value, version: row.updated_at } };

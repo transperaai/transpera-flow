@@ -191,11 +191,17 @@ describe("revenue KPIs match the §13 definitions (hand-checked)", () => {
       hours: { arrivals: 0, won: hours, lost: 0 },
     });
     // New MRR counts retainers only; a one-off bills and adds its price once;
-    // hourly work is billed through servicing, which isn't simulated yet.
+    // hourly work bills the hands-on hours worked for the client after the sale (engine 1.11.0; none here:
+    // this model has no post-sale steps), and `billed` leaves it out.
     expect(r.newMrr).toBe(retainer * 1000);
     expect(r.billed).toBeCloseTo((retainer * 1000 * 3) / WEEKS_PER_MONTH + project * 5000, 6);
     expect(r.ltvAdded).toBe(retainer * 12_000 + project * 5000);
     expect(r.lostRevenue).toBe(audit * 2000);
+    // Revenue by kind (engine 1.11.0): the pooled retainers' fees (the model has no roster) and the one-offs; the hourly service had no work.
+    expect(r.revenue.oneOff).toBe(project * 5000);
+    expect(r.revenue.hourly).toBe(0);
+    expect(r.hourly.hours).toEqual({ hours: 0, revenue: 0 });
+    expect(r.revenue.fromNew).toBeCloseTo(r.revenue.oneOff + r.revenue.recurring, 6);
     // One-off jobs don't become ongoing clients.
     expect(r.activeEnd).toBe(retainer + hours);
   });

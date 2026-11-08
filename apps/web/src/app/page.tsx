@@ -1,36 +1,32 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { AgencyWorkspaceTable } from "@/components/agency-workspace-table";
 import { AppHeader } from "@/components/app-header";
 import { PageHeader } from "@/components/shell/page";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { isAgencyAdmin, resolveMyAccess } from "@/lib/access-data";
+import { isAgencyAdmin } from "@/lib/access-data";
 import { listAgencyWorkspaces, listWorkspaces } from "@/lib/data";
-import { createClient } from "@/lib/supabase/server";
-import { supabaseEnv } from "@/lib/supabase/env";
+import { authEnv } from "@/lib/auth/env";
+import { getSessionUser } from "@/lib/auth/session";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { NewWorkspaceForm } from "./new-workspace-form";
 
 export default async function HomePage() {
-  // Render per request: Supabase settings are read at runtime, not build time.
+  // Render per request: Auth and database settings are read at runtime, not build time.
   await connection();
-  if (!supabaseEnv()) redirect("/demo");
-  const [firstLook, admin] = await Promise.all([listWorkspaces(), isAgencyAdmin()]);
-  let workspaces = firstLook;
-  if (workspaces.length === 0) {
-    // Sessions from before access resolution existed never ran it at sign-in.
-    if ((await resolveMyAccess()) > 0) workspaces = await listWorkspaces();
-  }
-  // An agency admin with no workspaces creates the first one here.
+  // No sign-in settings: this deployment is not set up, so there is nothing to show.
+  if (!authEnv()) notFound();
+  // Memberships are made at sign-in from the "Who can sign in" list (and for a new workspace by the database), so there is nothing
+  // to resolve here.
+  const [workspaces, admin] = await Promise.all([listWorkspaces(), isAgencyAdmin()]);
+  // The Owner with no workspaces creates the first one here.
   if (workspaces.length === 0 && !admin) {
-    const {
-      data: { user },
-    } = await (await createClient()).auth.getUser();
+    const user = await getSessionUser();
     return <HoldingPage email={user?.email ?? "an unknown account"} />;
   }
-  // Agency admins see each company's headline numbers; everyone else keeps the cards.
+  // The Owner sees each company's headline numbers; everyone else keeps the cards.
   const agencyRows = admin && workspaces.length > 0 ? await listAgencyWorkspaces() : null;
   return (
     <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pb-12 sm:px-6">

@@ -1,7 +1,8 @@
 // Shared, memoised fixture data for the stories: Northbeam (the demo company) and one run of it. Everything is fixed: the seed,
 // the number of runs and the start date, so a story renders the same pixels every time. Never `new Date()` here.
 
-import { simulate, toRatingConfig, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
+import { larkspurWithPurposes, simulate, toRatingConfig, type EngineModel, type MonthlyResult, type SimulationResult } from "@transpera-flow/engine";
+import { prepareScenario, spliceMonthly } from "@transpera-flow/db/sandbox";
 import {
   defaultCompanyPart,
   northbeamBundle,
@@ -9,17 +10,19 @@ import {
   northbeamStepIds,
   NORTHBEAM_PROCESS_ID,
   NORTHBEAM_WORKSPACE_ID,
+  northbeamRoleIds,
   partOf,
   toEngineModel,
   type ProcessBundle,
   type ProcessPart,
+  type SandboxChange,
   type SolutionIssueRow,
   type SolutionRow,
 } from "@transpera-flow/db";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { DEMO_FORECAST_START, demoForecastBundle } from "@/lib/forecast/demo";
 import { forecastModel } from "@/lib/forecast/forecast";
-import { timelineData, type TimelineData } from "@/lib/forecast/timeline";
+import { timelineData, timelineMonths, type TimelineData } from "@/lib/forecast/timeline";
 import { solutionCopy } from "@/lib/solutions/bundle";
 import type { SolutionsData } from "@/lib/solutions/cards";
 import { demoBundle } from "@/lib/sources/demo";
@@ -85,9 +88,11 @@ const solution = (id: string, extra: Partial<SolutionRow> = {}): SolutionRow => 
     base_revision_id: live.revision.id,
     name: `Solution ${id}`,
     notes: "",
+    status: "testing",
     steps: solutionCopy(live),
     changed_step_ids: [northbeamStepIds.audit],
     lever_changes: [],
+    step_changes: [],
     created_at: STAMP,
     updated_at: STAMP,
     created_by: "u1",
@@ -118,7 +123,32 @@ export function solutionsFixture(): { data: SolutionsData; issues: ReturnType<ty
     data: {
       solutions: [solution("s1", { name: "AI lead qualifier" }), solution("s2", { name: "Faster proposals", created_at: "2026-10-03T10:00:00.000Z" })],
       links: [link("s1", a!.id), link("s1", b!.id, { auto_verdict: "fail", holds_pct: 40, user_verdict: "fail" })],
-      aiIds: ["s1"],
     },
   };
+}
+
+let timeRun: { monthly: NonNullable<SimulationResult["monthly"]>; months: ReturnType<typeof timelineMonths>; hoursPerWeek: number } | undefined;
+/** Larkspur with a purpose on every step, six months, 10 runs (seed 1): what "Where the time goes" draws. */
+export function larkspurTime() {
+  if (!timeRun) {
+    const model = { ...larkspurWithPurposes(), horizonWeeks: 26 };
+    const result = simulate(model, 10, 1, { monthly: true });
+    const monthly = result.monthly!;
+    timeRun = { monthly, months: timelineMonths(DEMO_FORECAST_START, monthly.months, model.hoursPerWeek), hoursPerWeek: model.hoursPerWeek };
+  }
+  return timeRun;
+}
+
+let sandboxPair: { bundle: ProcessBundle; model: EngineModel; live: MonthlyResult; hire: MonthlyResult; hireChange: SandboxChange } | undefined;
+/** The demo forecast with and without a PPC hire from January: the two columns of a Sandbox export or printed summary (12 months, seed 1). */
+export function northbeamSandboxPair() {
+  if (!sandboxPair) {
+    const { bundle, model, result } = northbeamForecast();
+    const hireChange: SandboxChange = { id: "5b000000-0000-4000-8000-0000000000f1", lever: "D1", target: northbeamRoleIds.ppc, op: "set", value: 1, from: "2027-01", note: "Assumes a PPC specialist can start on the 1st." };
+    const prepared = prepareScenario(bundle, [{ change: hireChange, scenarioId: "s", scenarioName: "Hire in January", inherited: false }], [], 12, DEMO_FORECAST_START);
+    if (prepared.error !== null) throw new Error(prepared.error);
+    const runs = prepared.segments.map((s) => ({ from: s.from, monthly: simulate(s.model, 30, 1, { monthly: true, monthStarts: prepared.monthStarts, ...(prepared.start ? { initialState: prepared.start } : {}) }).monthly! }));
+    sandboxPair = { bundle, model, live: result.monthly!, hire: spliceMonthly(runs), hireChange };
+  }
+  return sandboxPair;
 }

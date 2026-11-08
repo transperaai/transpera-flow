@@ -24,7 +24,7 @@ const JESS = larkspurPersonIds.jess!;
 const jessRoles = new Set(live.personRoles.filter((r) => r.person_id === JESS).map((r) => r.role_id));
 const own = live.steps.find((s) => s.role_id && jessRoles.has(s.role_id))!;
 const foreign = live.steps.find((s) => s.role_id && !jessRoles.has(s.role_id))!;
-const row = (person: string, step: string | null, factor: number): PersonCapacityFactorRow => ({ person_id: person, workspace_id: WS, step_id: step, factor, source: "entered" });
+const row = (person: string, step: string | null, factor: number): PersonCapacityFactorRow => ({ person_id: person, workspace_id: WS, step_id: step, factor });
 const GONE = "00000000-0000-4000-8000-00000000dead";
 
 async function mount(options: Parameters<Window["mountSettings"]>[0], width = 1440): Promise<{ page: Page; errors: string[] }> {
@@ -77,7 +77,7 @@ describe("Settings: Per-person times switch", { timeout: 120_000 }, () => {
   it("a member can't change it, and is told who can; the (i) is there", async () => {
     const { page, errors } = await mount({ who: "member" });
     expect(await field(page, "Per-person times").isDisabled()).toBe(true);
-    expect(await page.locator("#simulation-heading").locator("xpath=ancestor::*[@role='region']").innerText()).toContain("Only owners and editors can change this.");
+    expect(await page.locator("#simulation-heading").locator("xpath=ancestor::*[@role='region']").innerText()).toContain("Only Agency admins can change this.");
     expect(await page.getByRole("button", { name: "About Per-person times" }).count()).toBe(1);
     expect(errors).toEqual([]);
     await page.close();

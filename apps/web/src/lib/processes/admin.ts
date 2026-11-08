@@ -2,6 +2,8 @@
 // changing the kind does to the simulation, and the results the server actions give back. Pure, so the page, its tests and the
 // server actions say the same thing.
 
+import type { ProcessCategory } from "@transpera-flow/db";
+
 export type ProcessKind = "pipeline" | "servicing";
 
 export const PROCESS_KIND_LABELS: Record<ProcessKind, string> = { pipeline: "Sales pipeline", servicing: "Client work" };
@@ -31,12 +33,20 @@ export function kindChangeWarning(name: string, to: ProcessKind): string[] {
 export const ARCHIVE_EXPLAINED =
   "It leaves the company map, the lists and the simulation. Nothing is deleted: its versions, history, issues and sources are kept, and you can restore it from Processes, Archived.";
 
+/** How the simulation treats each kind, in the "How it's simulated" part of "Change type". */
+export const PROCESS_KIND_SIMULATED: Record<ProcessKind, string> = {
+  pipeline: "Simulated as a sales pipeline (leads come in and are won or lost)",
+  servicing: "Simulated as client work (it repeats for every client)",
+};
+
 export type ProcessAdminResult = { status: "ok" } | { status: "error"; message: string };
 
 /** The Processes page's admin actions (server actions bound to the workspace; stand-ins in tests). */
 export interface ProcessAdminOps {
   rename(processId: string, name: string): Promise<ProcessAdminResult>;
   changeKind(processId: string, kind: ProcessKind): Promise<ProcessAdminResult>;
+  /** What the process is for (Sales, Onboarding, ...); the same write as the process page's Type select. */
+  changeCategory(processId: string, category: ProcessCategory): Promise<ProcessAdminResult>;
   archive(processId: string): Promise<ProcessAdminResult>;
   restore(processId: string): Promise<ProcessAdminResult>;
 }

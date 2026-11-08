@@ -66,7 +66,7 @@ async function newWorkspace(name = "Restored Co"): Promise<string> {
 
 async function member(ws: string, role: string): Promise<User> {
   const user = await createUser(db, `u${++seq}.${role}@import-workspace.example.com`);
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, user.id, role]);
   return user;
 }
 
@@ -77,7 +77,7 @@ async function exportOf(workspaceId: string): Promise<WorkspaceBundle> {
     const read: TableReader = async (table, wsId) => {
       const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table)!;
       // As JSON, the way PostgREST answers (dates as text, numbers as numbers), not as pg's Date objects.
-      return (await c.query(`select to_jsonb(t) as j from (select ${spec.columns ?? "*"} from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}) t`, [wsId])).rows.map((r) => r.j) as Row[];
+      return (await c.query(`select to_jsonb(t) as j from (select * from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}) t`, [wsId])).rows.map((r) => r.j) as Row[];
     };
     const readWorkspace = async (id: string) => (await c.query("select id, name, slug, plan, settings, provenance from workspaces where id = $1", [id])).rows[0] ?? null;
     return exportWorkspaceBundle(workspaceId, readWorkspace, read, { canEdit: true, now: new Date("2026-10-05T12:00:00Z") });
@@ -115,9 +115,9 @@ async function failure(fn: () => Promise<unknown>): Promise<{ code?: string; mes
 /** Counts of every table a restore writes to, for a workspace, so "nothing was written" can be compared. */
 const TABLES = [
   "roles", "people", "person_roles", "person_leave", "person_skills", "lead_sources", "seasonality", "demand_settings", "churn_drivers", "market_conditions", "market_schedule",
-  "lever_settings", "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links", "processes",
-  "process_revisions", "steps", "edges", "first_principles", "scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events", "suggestions",
-  "suggestion_proposals", "solutions", "audit_log",
+  "analysis_rules", "clients", "client_services", "client_assignments", "services", "service_servicing", "client_groups", "sources", "source_links", "processes",
+  "process_revisions", "steps", "edges", "sandbox_scenarios", "blocks", "issues", "issue_links", "issue_owners", "issue_sources", "issue_events",
+  "solutions", "audit_log",
 ];
 async function snapshot(ws: string): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
@@ -174,7 +174,7 @@ async function loadPipeline(claims: Record<string, unknown>, wsId: string): Prom
       clientAssignments: await many("select * from client_assignments where workspace_id = $1", [wsId]),
       clientGroups: await many("select id, workspace_id, service_id, client_count, fee, churn_monthly, stay_months, starting_health, provenance from client_groups where workspace_id = $1 order by created_at, id", [wsId]),
       servicingLinks: await many("select * from service_servicing where workspace_id = $1", [wsId]),
-      churnDrivers: await many("select id, workspace_id, driver, name, description, example, weight, enabled, value, month, provenance from churn_drivers where workspace_id = $1 order by created_at, id", [wsId]),
+      churnDrivers: await many("select id, workspace_id, driver, name, description, example, weight, enabled, value, month, chance, effect, effect_months, provenance from churn_drivers where workspace_id = $1 order by created_at, id", [wsId]),
       marketConditions: await many("select id, workspace_id, name, preset, leads, conv, cycle, price, churn, hire, pay from market_conditions where workspace_id = $1 order by created_at, id", [wsId]),
       marketSchedule: await many("select id, workspace_id, from_month, to_month, condition_id from market_schedule where workspace_id = $1 order by from_month, id", [wsId]),
       otherProcesses,
@@ -361,17 +361,15 @@ async function mini(): Promise<Mini> {
     await c.query("update processes set archived_at = now() where id = $1", [ids.archived]);
   });
   // Scenarios: the seeded library, a custom one that descends from "More leads", and an issue that uses "Downturn".
-  const lib = await q("select id, name from scenarios where workspace_id = $1", [ws]);
+  const lib = await q("select id, name from sandbox_scenarios where workspace_id = $1", [ws]);
   const moreLeads = lib.find((s) => s.name === "More leads")!.id;
   const downturn = lib.find((s) => s.name === "Downturn")!.id as string;
   const [custom] = await q(
-    "insert into scenarios (workspace_id, name, patch, parent_scenario_id) values ($1, 'More leads and a hire', '[{\"path\": \"demand.leads_per_week\", \"op\": \"multiply\", \"value\": 1.5}]', $2) returning id",
+    "insert into sandbox_scenarios (workspace_id, name, changes, parent_id) values ($1, 'More leads and a hire', '[{\"id\": \"6a0d1b00-0000-4000-8000-000000000001\", \"lever\": \"A1\", \"target\": null, \"op\": \"multiply\", \"value\": 1.5}]', $2) returning id",
     [ws, moreLeads],
   );
   await q("insert into issues (workspace_id, type, title, scenario_id, owner_person_id, status) values ($1, 'idea', 'Try the downturn', $2, $3, 'in_progress')", [ws, downturn, person!.id]);
   await q("insert into issues (workspace_id, type, title, source, status, resolution) values ($1, 'delay', 'Quotes are slow', 'manual', 'done', 'wont_fix')", [ws]);
-  await q("insert into suggestions (workspace_id, target_table, target_id, patch) values ($1, 'workspaces', $1, '{\"set\": {\"hours_per_week\": 35}}')", [ws]);
-  await q("insert into suggestion_proposals (workspace_id, kind, title, detail) values ($1, 'issue', 'Proposed issue', 'Looks slow')", [ws]);
   miniCache = { ws, ...ids, library: { downturn }, custom: custom!.id as string };
   return miniCache;
 }
@@ -461,25 +459,22 @@ describe("the awkward cases", () => {
   it("doesn't duplicate the scenario library, and re-points children and issues at the existing rows", async () => {
     const m = await mini();
     const { ws, result } = await restoreInto(await bundleOf(m.ws));
-    expect(Number((await q("select count(*) from scenarios where workspace_id = $1", [ws]))[0]!.count)).toBe(5);
+    expect(Number((await q("select count(*) from sandbox_scenarios where workspace_id = $1", [ws]))[0]!.count)).toBe(5);
     expect(result.skipped.scenarios).toBe(4);
-    const moreLeads = await byName(ws, "scenarios", "More leads");
-    const custom = await byName(ws, "scenarios", "More leads and a hire");
-    expect(custom.parent_scenario_id).toBe(moreLeads.id);
-    const downturn = await byName(ws, "scenarios", "Downturn");
+    const moreLeads = await byName(ws, "sandbox_scenarios", "More leads");
+    const custom = await byName(ws, "sandbox_scenarios", "More leads and a hire");
+    expect(custom.parent_id).toBe(moreLeads.id);
+    const downturn = await byName(ws, "sandbox_scenarios", "Downturn");
     const [issue] = await q("select scenario_id from issues where workspace_id = $1 and title = 'Try the downturn'", [ws]);
     expect(issue!.scenario_id).toBe(downturn.id);
   });
 
-  it("points a suggestion that targets the workspace at the new workspace (rank 0), and applies the settings for an owner", async () => {
+  it("applies the settings for an Agency admin (an owner membership)", async () => {
     const m = await mini();
     const { ws, result } = await restoreInto(await bundleOf(m.ws));
     expect(result.settings).toBe("applied");
     const [row] = await q("select settings from workspaces where id = $1", [ws]);
     expect(row!.settings).toMatchObject({ hours_per_week: 37, currency: "USD" });
-    const s = await q("select target_id, status, created_via, import_source from suggestions where workspace_id = $1 and target_table = 'workspaces'", [ws]);
-    expect(s).toEqual([{ target_id: ws, status: "pending", created_via: "upload", import_source: "backup.json" }]);
-    expect(await q("select title, status, created_via, import_source from suggestion_proposals where workspace_id = $1", [ws])).toEqual([{ title: "Proposed issue", status: "pending", created_via: "upload", import_source: "backup.json" }]);
   });
 
   it("keeps the order of market conditions: restored custom ones keep their old date, so they list before the new presets", async () => {
@@ -501,7 +496,7 @@ describe("the awkward cases", () => {
 });
 
 describe("what is left out stays out", () => {
-  it("writes drafts, no solutions or history, no files, only pending suggestions, and the counts of the source minus the left-outs", async () => {
+  it("writes drafts, no solutions or history, no files, and the counts of the source minus the left-outs", async () => {
     const source = NORTHBEAM_WORKSPACE_ID;
     const bundle = await bundleOf(source);
     const { ws, result } = await restoreInto(bundle, "owner", { label: "northbeam.json" });
@@ -511,15 +506,12 @@ describe("what is left out stays out", () => {
     for (const t of ["roles", "people", "person_roles", "person_leave", "person_skills", "services", "service_servicing", "client_groups", "clients", "client_services", "client_assignments", "lead_sources", "seasonality", "churn_drivers", "market_schedule", "blocks", "sources"]) {
       expect(await n(t, ws), t).toBe(await n(t, source));
     }
-    expect(await n("scenarios", ws)).toBe((await n("scenarios", source)) - result.skipped.scenarios! + 4);
+    expect(await n("sandbox_scenarios", ws)).toBe((await n("sandbox_scenarios", source)) - result.skipped.scenarios! + 4);
     expect(await n("market_conditions", ws)).toBe(await n("market_conditions", source));
     expect(await n("issues", ws)).toBe(await n("issues", source, "source <> 'detected'"));
     expect(await n("issue_links", ws)).toBeGreaterThanOrEqual(0);
-    expect(await n("suggestions", ws)).toBe(await n("suggestions", source, "status = 'pending'"));
-    expect(await n("suggestion_proposals", ws)).toBe(await n("suggestion_proposals", source, "status = 'pending'"));
-    expect(await n("suggestions", ws, "created_via <> 'upload' or import_source is distinct from 'northbeam.json'")).toBe(0);
-    expect(await n("suggestion_proposals", ws, "created_via <> 'upload' or import_source is distinct from 'northbeam.json'")).toBe(0);
-    expect(await n("sources", ws, "file_path is not null or file_name is not null or file_type is not null or file_size is not null")).toBe(0);
+    // A source keeps its link to the original (the uploaded files and their columns are gone: step 4).
+    expect(await n("sources", ws, "file_url is not null")).toBe(await n("sources", source, "file_url is not null"));
     // Steps and edges: those of the live versions of the source's processes.
     const live = "revision_id in (select live_revision_id from processes where workspace_id = $1 and not is_company and live_revision_id is not null)";
     const drafts = "revision_id in (select draft_revision_id from processes where workspace_id = $1 and not is_company and draft_revision_id is not null)";
@@ -543,28 +535,9 @@ describe("what is left out stays out", () => {
 });
 
 describe("who may restore", () => {
-  it("lets an editor restore, with the workspace settings as one pending suggestion an owner accepts", async () => {
-    const m = await mini();
-    const bundle = await bundleOf(m.ws);
-    const { ws, result } = await restoreInto(bundle, "editor", { canManage: false, label: "mini.json" });
-    expect(result.settings).toBe("suggested");
-    const [row] = await q("select settings from workspaces where id = $1", [ws]);
-    expect(row!.settings).not.toMatchObject({ hours_per_week: 37 });
-    const pending = await q("select id, patch, created_via, import_source, status from suggestions where workspace_id = $1 and note = 'Workspace settings from a backup.'", [ws]);
-    expect(pending.length).toBe(1);
-    expect(pending[0]).toMatchObject({ created_via: "upload", import_source: "mini.json", status: "pending" });
-    const owner = await member(ws, "owner");
-    const reply = await as(owner.claims, async (c) => (await c.query("select public.review_suggestions($1::uuid[], 'accept') as r", [[pending[0]!.id]])).rows[0].r);
-    expect(JSON.stringify(reply)).not.toContain("error");
-    const [after] = await q("select settings from workspaces where id = $1", [ws]);
-    expect(after!.settings).toMatchObject({ hours_per_week: 37, currency: "USD" });
-  });
-
   const ok: [string, (ws: string) => Promise<User>][] = [
-    ["an agency admin (JWT flag)", async () => admin],
-    ["an agency_admin membership", async (ws) => member(ws, "agency_admin")],
-    ["an owner", async (ws) => member(ws, "owner")],
-    ["an editor", async (ws) => member(ws, "editor")],
+    ["the Owner (JWT flag)", async () => admin],
+    ["an Agency admin (an owner membership)", async (ws) => member(ws, "owner")],
   ];
   it.each(ok)("lets %s restore", async (_who, make) => {
     const ws = await newWorkspace();
@@ -575,7 +548,6 @@ describe("who may restore", () => {
   });
 
   const refused: [string, (ws: string) => Promise<User>][] = [
-    ["a member", async (ws) => member(ws, "member")],
     ["a viewer", async (ws) => member(ws, "viewer")],
     ["a signed-in non-member", async () => createUser(db, `stranger${++seq}@elsewhere.example.com`)],
   ];
@@ -586,7 +558,7 @@ describe("who may restore", () => {
     const before = await snapshot(ws);
     const e = await failure(() => restoreAs(user, ws, plan));
     expect(e.code).toBe("42501");
-    expect(e.message).toMatch(/Only owners, editors and agency admins/);
+    expect(e.message).toBe("Only Agency admins and the Owner can restore a backup.");
     expect(await snapshot(ws)).toEqual(before);
   });
 
@@ -638,7 +610,7 @@ describe("only into an empty workspace", () => {
   it("refuses a workspace with a scenario of its own, and with an archived process", async () => {
     const { plan } = await miniPlan();
     const a = await newWorkspace();
-    await q("insert into scenarios (workspace_id, name, patch) values ($1, 'Mine', '[]')", [a]);
+    await q("insert into sandbox_scenarios (workspace_id, name, changes) values ($1, 'Mine', '[]')", [a]);
     expect(await failure(() => restoreAs(admin, a, plan))).toMatchObject({ hint: "not_empty" });
     // An archived process counts: it is a process, and restoring would give its name to a second one.
     const b = await newWorkspace();
@@ -654,12 +626,12 @@ describe("all or nothing", () => {
   it("leaves nothing behind when the last section fails (processes, map versions and the audit log included)", async () => {
     const { plan } = await miniPlan();
     const bad: ImportPlan = structuredClone(plan);
-    bad.suggestions.push({ id: `${PLACEHOLDER_PREFIX}ffffffffff01`, target_table: "not_a_table", target_id: null, patch: { set: {} }, evidence: [], note: null } as Row);
+    bad.source_links.push({ source_id: bad.sources[0]!.id, kind: "not_a_kind" } as Row);
     const ws = await newWorkspace();
     const before = await snapshot(ws);
     const e = await failure(() => restoreAs(admin, ws, bad));
-    expect(e.hint).toBe("section:suggestions");
-    expect(e.message).toMatch(/suggestions could not be restored/);
+    expect(e.hint).toBe("section:source_links");
+    expect(e.message).toMatch(/source_links could not be restored/);
     expect(await snapshot(ws)).toEqual(before);
   });
 });
@@ -692,7 +664,6 @@ describe("ids", () => {
     attempts.push({ where: "issues.owner_ids", mutate: (p) => { const i = p.issues.find((r) => Array.isArray(r.owner_ids) && r.owner_ids.length > 0); if (!i) return false; (i.owner_ids as string[])[0] = real; return true; } });
     attempts.push({ where: "issues.links", mutate: (p) => { const i = p.issues.find((r) => Array.isArray(r.links) && r.links.length > 0); if (!i) return false; (i.links as Row[])[0]!.process_id = real; return true; } });
     attempts.push({ where: "market_schedule.condition_id", mutate: (p) => { const r = p.market_schedule.find((x) => x.condition_id != null); if (!r) return false; r.condition_id = real; return true; } });
-    attempts.push({ where: "suggestions.target_id", mutate: (p) => { const r = p.suggestions.find((x) => x.target_id != null); if (!r) return false; r.target_id = real; return true; } });
     void flat;
     let tried = 0;
     for (const a of attempts) {
@@ -702,17 +673,9 @@ describe("ids", () => {
       const e = await failure(() => restoreAs(admin, ws, copy));
       expect(e.code, a.where).toBe("22023");
     }
-    // Northbeam has rows for most columns; the few without (no suggestions, say) are covered by the Mini plan below.
+    // Northbeam has rows for most columns; the few without are covered by the Mini plan below.
     expect(tried).toBeGreaterThan(25);
     expect(Number((await q("select count(*) from roles where workspace_id = $1", [ws]))[0]!.count)).toBe(0);
-  });
-
-  it("refuses a real uuid in the Mini plan's suggestion target and issue links", async () => {
-    const { plan } = await miniPlan();
-    const ws = await newWorkspace();
-    const copy: ImportPlan = structuredClone(plan);
-    copy.suggestions[0]!.target_id = "11111111-2222-4333-8444-555555555555";
-    expect((await failure(() => restoreAs(admin, ws, copy))).code).toBe("22023");
   });
 
   it("leaves a uuid typed into free text alone", async () => {
@@ -749,13 +712,13 @@ describe("SQL and TS agree", () => {
     expect(allow).toEqual(JSON.parse(JSON.stringify(IMPORT_COLUMNS)));
     const list = (name: string) => [...(new RegExp(`${name} constant text\\[\\] := array\\[(.*?)\\];`, "s").exec(src)![1]!.matchAll(/'([^']+)'/g))].map((m) => m[1]!);
     const tsRefs = Object.entries(IMPORT_REFS).flatMap(([s, refs]) => refs.map((r) => `${s}.${r.col}`));
-    expect(list("ref_cols").sort()).toEqual([...tsRefs, "market_schedule.condition_id", "suggestions.target_id"].sort());
+    expect(list("ref_cols").sort()).toEqual([...tsRefs, "market_schedule.condition_id"].sort());
     expect(list("step_ref_cols").sort()).toEqual(IMPORT_STEP_REFS.map((r) => r.col).sort());
   });
 
   it("has an apply file that is the migration plus its schema_migrations row, in one transaction", () => {
     const dir = new URL("../", import.meta.url);
-    const mig = readFileSync(new URL("supabase/migrations/20261207000000_import_workspace_bundle.sql", dir), "utf8").trimEnd();
+    const mig = readFileSync(new URL("migrations/20261207000000_import_workspace_bundle.sql", dir), "utf8").trimEnd();
     const apply = readFileSync(new URL("scripts/apply/20261207000000_import_workspace_bundle.sql", dir), "utf8");
     expect(apply).toContain("\nbegin;\nset local lock_timeout");
     expect(apply.split(mig).length - 1).toBe(2);
@@ -765,9 +728,8 @@ describe("SQL and TS agree", () => {
 
   it("restores a plan that carries every allowed column of the tables that take them (the columns exist)", async () => {
     // Each allowed column of each flat table exists in that table (so the dynamic insert can name it).
-    const tables: Record<string, string> = { proposals: "suggestion_proposals" };
     for (const [section, columns] of Object.entries(IMPORT_COLUMNS)) {
-      const table = tables[section] ?? section;
+      const table = section;
       const have = (await q("select column_name from information_schema.columns where table_schema = 'public' and table_name = $1", [table])).map((r) => r.column_name);
       for (const c of columns) expect(have, `${table}.${c}`).toContain(c);
     }
@@ -786,7 +748,7 @@ describe("limits", () => {
   const L = WORKSPACE_IMPORT_LIMITS;
   const rows = (n: number): Row[] => Array.from({ length: n }, () => ({}));
   it.each([
-    ["processes", (p: ImportPlan) => { p.processes = rows(L.processes + 1).map(() => ({ id: "", parent_process_id: null, name: "", kind: "", entity_name: "", description: "", archived: false, layout: {}, steps: [], edges: [], first_principles: null })); }],
+    ["processes", (p: ImportPlan) => { p.processes = rows(L.processes + 1).map(() => ({ id: "", parent_process_id: null, name: "", kind: "", entity_name: "", description: "", archived: false, layout: {}, steps: [], edges: [] })); }],
     ["steps", (p: ImportPlan) => { p.processes[0]!.steps = rows(L.steps + 1); }],
     ["edges", (p: ImportPlan) => { p.processes[0]!.edges = rows(L.edges + 1); }],
     ["sources", (p: ImportPlan) => { p.sources = rows(L.sources + 1); }],
@@ -794,10 +756,8 @@ describe("limits", () => {
     ["issues", (p: ImportPlan) => { p.issues = rows(L.issues + 1); }],
     ["people", (p: ImportPlan) => { p.people = rows(L.people + 1); }],
     ["clients", (p: ImportPlan) => { p.clients = rows(L.clients + 1); }],
-    ["scenarios", (p: ImportPlan) => { p.scenarios = rows(L.scenarios + 1); }],
+    ["scenarios", (p: ImportPlan) => { p.sandbox_scenarios = rows(L.scenarios + 1); }],
     ["blocks", (p: ImportPlan) => { p.blocks = rows(L.blocks + 1); }],
-    ["suggestions", (p: ImportPlan) => { p.suggestions = rows(L.suggestions + 1); }],
-    ["proposals", (p: ImportPlan) => { p.proposals = rows(L.proposals + 1); }],
     ["role assignments", (p: ImportPlan) => { p.person_roles = rows(L.personRoles + 1); }],
     ["skills", (p: ImportPlan) => { p.person_skills = rows(L.personSkills + 1); }],
     ["per-person times", (p: ImportPlan) => { p.person_capacity_factors = rows(L.capacityFactors + 1); }],
@@ -814,7 +774,7 @@ describe("limits", () => {
     for (const mutate of [(sc: Row) => { sc.id = null; }, (sc: Row) => { delete sc.id; }]) {
       const copy: ImportPlan = structuredClone(plan);
       // One that equals a library scenario: the case where the replacement of a skipped one would have returned null.
-      const library = copy.scenarios.find((sc) => sc.name === "Downturn")!;
+      const library = copy.sandbox_scenarios.find((sc) => sc.name === "Downturn")!;
       mutate(library);
       const ws = await newWorkspace();
       const before = await snapshot(ws);
@@ -829,5 +789,58 @@ describe("limits", () => {
     const ws = await newWorkspace();
     expect((await failure(() => restoreAs(admin, ws, { format: "transpera-workspace-import/2" }))).code).toBe("22023");
     expect((await failure(() => restoreAs(admin, ws, { format: "transpera-workspace-import/1" }))).code).toBe("22023");
+  });
+});
+
+describe("the columns phase 3 added (chance, effect, effect_months; price_low, price_high)", () => {
+  const driverRows = (ws: string) => q("select driver, chance, effect, effect_months from churn_drivers where workspace_id = $1 order by driver", [ws]);
+  const rangeOf = (ws: string) => q("select name, price_low, price_high from services where workspace_id = $1 order by name", [ws]);
+
+  it("a backup that carries them restores them, and one from before them restores null", async () => {
+    await q("insert into churn_drivers (workspace_id, driver, chance, effect, effect_months) values ($1, 'late', 12.5, 60, 3), ($1, 'load', null, 40, null)", [NORTHBEAM_WORKSPACE_ID]);
+    await q("update services set price_low = 3000, price_high = 6000 where workspace_id = $1 and name = 'PPC management'", [NORTHBEAM_WORKSPACE_ID]);
+    try {
+      const bundle = await exportOf(NORTHBEAM_WORKSPACE_ID);
+      const withIt = await restoreInto(bundle);
+      expect((await driverRows(withIt.ws)).map((r) => [r.driver, r.chance === null ? null : Number(r.chance), r.effect === null ? null : Number(r.effect), r.effect_months])).toEqual([
+        ["late", 12.5, 60, 3],
+        ["load", null, 40, null],
+      ]);
+      expect((await rangeOf(withIt.ws)).map((r) => [r.name, r.price_low === null ? null : Number(r.price_low), r.price_high === null ? null : Number(r.price_high)])).toEqual([
+        ["PPC management", 3000, 6000],
+        ["SEO retainer", null, null],
+      ]);
+      // A backup taken before these columns existed has none of the keys.
+      const old = structuredClone(bundle);
+      for (const d of old.company_model.churn_drivers ?? []) for (const k of ["chance", "effect", "effect_months"]) delete d[k];
+      for (const sv of old.company_model.services ?? []) for (const k of ["price_low", "price_high"]) delete sv[k];
+      const without = await restoreInto(old);
+      for (const r of await driverRows(without.ws)) expect([r.chance, r.effect, r.effect_months], String(r.driver)).toEqual([null, null, null]);
+      for (const r of await rangeOf(without.ws)) expect([r.price_low, r.price_high], String(r.name)).toEqual([null, null]);
+    } finally {
+      await q("delete from churn_drivers where workspace_id = $1", [NORTHBEAM_WORKSPACE_ID]);
+      await q("update services set price_low = null, price_high = null where workspace_id = $1", [NORTHBEAM_WORKSPACE_ID]);
+    }
+  });
+});
+
+describe("process categories (Q3, migration 20270126000000)", () => {
+  const categories = async (ws: string) => (await q("select name, category from processes where workspace_id = $1 and not is_company order by name", [ws])).map((r) => [r.name, r.category]);
+
+  it("a backup carries each process's category and restores it; one from before categories (or with an unknown one) gets one by kind", async () => {
+    const original = await categories(LARKSPUR_WORKSPACE_ID);
+    expect(original.map((r) => r[1])).toContain("ad_hoc");
+    const bundle = await exportOf(LARKSPUR_WORKSPACE_ID);
+    expect(bundle.processes.every((p) => typeof p.category === "string")).toBe(true);
+    const restored = await restoreInto(bundle);
+    expect(await categories(restored.ws)).toEqual(original);
+
+    const old = structuredClone(bundle);
+    for (const p of old.processes) delete p.category;
+    // An unknown value is left out too, not refused.
+    old.processes[0]!.category = "nonsense";
+    const without = await restoreInto(old);
+    const kinds = new Map((await q("select name, kind from processes where workspace_id = $1 and not is_company", [without.ws])).map((r) => [r.name as string, r.kind as string]));
+    for (const [name, category] of await categories(without.ws)) expect(category, String(name)).toBe(kinds.get(String(name)) === "servicing" ? "routine_client_work" : "sales");
   });
 });

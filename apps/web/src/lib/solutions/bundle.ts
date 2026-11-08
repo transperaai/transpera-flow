@@ -3,7 +3,7 @@
 // and process) but keeps everything a map needs: the start and end steps, where each step sits, and anything resting at it.
 // Pure.
 
-import { isGroup, type BlockBundle, type BlockEdge, type BlockStep, type EdgeRow, type ProcessBundle, type SolutionRow, type StepRow } from "@transpera-flow/db";
+import { isGroup, type BlockBundle, type BlockEdge, type BlockStep, type ProcessBundle } from "@transpera-flow/db";
 import type { DraftDiff } from "@/lib/drafts/diff";
 
 /** The copy a solution stores: the map's steps and connections, as they are in the Editor now. */
@@ -23,17 +23,6 @@ export function solutionCopy(bundle: Pick<ProcessBundle, "steps" | "edges">): Bl
     return rest;
   });
   return { steps, edges, entry_step_id: null };
-}
-
-/**
- * The map a stored solution describes, as a process bundle: `base` (the process as it is now, for its roles, people and
- * workspace) with the solution's steps and connections in place of the revision's. Nothing is written back to `base`.
- */
-export function bundleFromSolution(base: ProcessBundle, solution: Pick<SolutionRow, "steps">): ProcessBundle {
-  const at = { revision_id: base.revision.id, workspace_id: base.workspace.id, process_id: base.process.id };
-  const steps = solution.steps.steps.map((s) => ({ ...structuredClone(s), ...at }) as StepRow);
-  const edges = solution.steps.edges.map((e) => ({ ...structuredClone(e), ...at }) as EdgeRow);
-  return { ...base, steps, edges };
 }
 
 /** The steps a solution added or changed against live, by id: what the map shows as new. */

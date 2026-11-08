@@ -84,7 +84,7 @@ window.mountPeople = ({ viewer, own, capacityFactorEnabled, ownRecord, factors, 
         { ...asMember({ ...base, people }, ownId), personCapacityFactors: unfiltered ? stored : ownId ? stored.filter((f) => f.person_id === ownId) : [] };
   createRoot(document.getElementById("root")!).render(
     <div className="p-4">
-      <PeoplePage bundle={bundle} settingsHref="/w/larkspur/settings" />
+      <PeoplePage bundle={bundle} setupHref="/w/larkspur/setup" />
     </div>,
   );
 };

@@ -3,6 +3,10 @@
 Agreed with Austin, 1 Oct 2026, in the analysis rules session. This replaces the detector thresholds in
 `packages/engine/src/issues.ts` (`DEFAULT_ISSUE_THRESHOLDS`) and the four engine severities. It is the spec for the tickets that follow.
 
+**28 Oct 2026 (docs/plans/cut-list.md items 1, 3 and 6):** in-app AI and findings are removed. The facts stay as read-only
+evidence on the process pages and the Overview; an issue is logged by hand. The sections below on AI and findings, and on
+acknowledging and dismissing them, are history.
+
 **Since B17 (issue #175, decision D40):** the rules give **facts**, not findings. Each page shows what they find under "Facts
 from the run", as evidence; AI reads those facts and proposes findings, and people add their own. The rules editor below
 is gone: every workspace is rated with the **documented defaults on this page** (the cut-offs in the table, both
@@ -210,6 +214,8 @@ Notes:
 
 ## What AI does
 
+*Removed 28 Oct 2026 (cut-list items 1 and 6): kept as history.*
+
 AI analysis runs when someone presses **Analyse** on a process page, or on the Overview for the whole company (B17). It reads:
 
 - the facts (what the rules find, each with an id it cites);
@@ -225,6 +231,8 @@ How it is built, what it is given and how every number it writes is checked agai
 how findings, the cache and the review work: [ADR 0015](adr/0015-analysis-findings.md).
 
 ## Acknowledge and dismiss
+
+*Findings were removed 28 Oct 2026 (cut-list item 3); the Forecast's alerts are still acknowledged this way. Kept as history.*
 
 An insight is what a run found. It becomes an **issue** only when someone acknowledges it (the Acknowledge dialog:
 title, how bad it is, what it touches, owners, target, sources). Until then it is not on the map and not in the issues

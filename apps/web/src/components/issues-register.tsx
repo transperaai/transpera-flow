@@ -29,7 +29,6 @@ import { ISSUE_STATUSES, type IssueField } from "@/lib/issues/validate";
 import { draftFromIssue, emptyDraft, toSaveInput, type IssueDraft, type IssueFormOptions } from "@/lib/issues/draft";
 import { buttonVariants } from "@/components/ui/button";
 import { IssueCostText, visibleCostMethod } from "@/components/money-hidden";
-import { useShareFinancialsHidden } from "@/components/share/share-context";
 import { NativeSelect } from "@/components/ui/native-select";
 import { AcknowledgeDialog } from "./acknowledge-dialog";
 import { SelectField, TextField, type SelectOption } from "./fields";
@@ -99,7 +98,13 @@ export function IssuesRegister({
   onHighlight,
   issueExtra,
   includeClosed = false,
+  cardView,
 }: {
+  /**
+   * The process page's Issues card (Q8) draws the list itself: it is given the issues to show (open first), their names and a way to
+   * open the "New issue" dialog, and replaces the summary line, the filters and the rows. The dialog and the saving stay here.
+   */
+  cardView?: (p: { entries: RegisterEntry[]; names: { step: Map<string, string>; person: Map<string, string>; process: Map<string, string> }; openNew: () => void; canEdit: boolean; loading: boolean; error: ReactNode }) => ReactNode;
   /** With `issues`: also list resolved and won't-fix issues (open ones first), so the status track can show them through to Verified. */
   includeClosed?: boolean;
   /** Drawn under a confirmed issue's row (the process page's status track and linked solutions). */
@@ -166,6 +171,42 @@ export function IssuesRegister({
       </NativeSelect>
     </label>
   );
+
+  const dialogEl = (
+    <AcknowledgeDialog
+      open={dialog !== null}
+      mode={dialog?.mode ?? "new"}
+      draft={dialog?.draft ?? emptyDraft(processId)}
+      issueNumber={dialog?.number}
+      options={formOptions}
+      busy={state.busy}
+      error={state.error}
+      onClose={() => setDialog(null)}
+      onSubmit={(draft) => state.save(toSaveInput(draft, formOptions))}
+    />
+  );
+  if (cardView) {
+    return (
+      <>
+        {cardView({
+          entries: shown,
+          names,
+          openNew: () => setDialog({ mode: "new", draft: emptyDraft(processId, stepFilter) }),
+          canEdit,
+          loading: detected === null || running,
+          error: state.error ? (
+            <p role="alert" className="rounded-lg border border-crit bg-crit-soft p-2 text-xs">
+              {state.error}{" "}
+              <button type="button" className="underline" onClick={state.dismissError}>
+                Dismiss
+              </button>
+            </p>
+          ) : null,
+        })}
+        {dialogEl}
+      </>
+    );
+  }
 
   return (
     <section aria-label="Issues register" className="flex min-w-0 flex-col gap-2" data-issues-register>
@@ -269,17 +310,7 @@ export function IssuesRegister({
         </ul>
       )}
 
-      <AcknowledgeDialog
-        open={dialog !== null}
-        mode={dialog?.mode ?? "new"}
-        draft={dialog?.draft ?? emptyDraft(processId)}
-        issueNumber={dialog?.number}
-        options={formOptions}
-        busy={state.busy}
-        error={state.error}
-        onClose={() => setDialog(null)}
-        onSubmit={(draft) => state.save(toSaveInput(draft, formOptions))}
-      />
+      {dialogEl}
     </section>
   );
 }
@@ -314,7 +345,6 @@ function IssueItem({
 }) {
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const hideMoney = useShareFinancialsHidden();
   const v = entryView(entry);
   const fix = fixFor(entry, scenarios);
   // A fix that needs attention must be re-pointed (issue #16).
@@ -373,11 +403,11 @@ function IssueItem({
       <p className="text-sm font-semibold">{v.title}</p>
       {v.evidence && <p className="mt-0.5 text-xs text-fg-2">{v.evidence}</p>}
       {entry.kind === "detected" || entry.detection ? (
-        <p className="mt-0.5 text-xs text-fg-2" data-cost title={visibleCostMethod(v.cost, hideMoney)}>
+        <p className="mt-0.5 text-xs text-fg-2" data-cost title={visibleCostMethod(v.cost)}>
           <span className="font-medium">
             <IssueCostText cost={v.cost ?? null} currency={currency} />
           </span>
-          {visibleCostMethod(v.cost, hideMoney) ? <span className="text-fg-3"> · {visibleCostMethod(v.cost, hideMoney)}</span> : null}
+          {visibleCostMethod(v.cost) ? <span className="text-fg-3"> · {visibleCostMethod(v.cost)}</span> : null}
         </p>
       ) : null}
       {where.length > 0 && <p className="mt-0.5 text-xs text-fg-3">{where.join(" · ")}</p>}

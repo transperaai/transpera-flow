@@ -2,7 +2,7 @@
 // far with named people, services, end-step outcomes, seasonal demand, a client
 // roster, overtime, and client servicing with health and churn (docs/PRD.md §6).
 
-import type { ChurnCauses, ChurnReplication, EngineChurnDriver } from "./churn-drivers";
+import type { ChurnCauses, ChurnReplication, DriverEvents, EngineChurnDriver } from "./churn-drivers";
 import type { EngineMarket } from "./market";
 import type { Loop } from "./loops";
 
@@ -15,6 +15,12 @@ export interface EngineRole {
   cost: number;
   /** Ongoing (retainer) hours per active client per week. */
   ongoing: number;
+  /**
+   * What a shared team's work is counted in, for display (D27): "words", "links", "ticket hours", "tasks", "set-ups and incidents".
+   * `perHour` is how many of the unit one person does in an hour; blank until the client keys it (D35). Reporting only: the
+   * engine's own unit is working hours, and the label is turned into hours outside it (capacity-inputs.ts). Omitted: none.
+   */
+  unit?: { label: string; perHour?: number };
 }
 
 /**
@@ -53,6 +59,30 @@ export interface EnginePerson {
    * Omitted: 1 everywhere. Only for steps they can do (a factor on any other step is never used).
    */
   capacityFactor?: { default?: number; steps?: Record<string, number> };
+  /**
+   * Team time (0-1): the share of their hours kept for leading, mentoring and reviews. Their hours for client work are
+   * the hours they have × (1 − share) (`availableShare`, capacity-inputs.ts). Omitted: 0, all their hours, as before this
+   * field existed. Read by the simulation from engine 1.15.0 (availability.ts): it lowers their hours for work, not their pay.
+   */
+  reservedShare?: number;
+  /**
+   * New-starter ramp: the share of full capacity in each month from `from` (the first entry is the month `from` falls in),
+   * e.g. `[0.4, 0.6, 0.8]`, then 1 (`rampShare`). Omitted: full from the start, as before this field existed. Read by
+   * the simulation from engine 1.15.0, with team time (availability.ts).
+   */
+  ramp?: number[];
+  /**
+   * Tier keys (`EngineService.tier`) they can serve, used to place won clients. Omitted: every tier, as before this field
+   * existed. Read by the simulation from engine 1.15.0, for `placeNewClients: "least-busy"`.
+   */
+  tiers?: string[];
+  /**
+   * Counted clients assigned to them, by service id: that many of the service's counted clients (`clientGroups`), in each of
+   * the person's roles that the service's servicing steps use. The group's remainder (count minus the sum over people) stays
+   * unassigned and shared, as today; a sum above the count is an input error (`checkCapacityInputs`). Omitted: none
+   * assigned, as before this field existed. Read by the simulation from engine 1.15.0 (`withClientGroups` deals them out in people order).
+   */
+  portfolio?: Record<string, number>;
 }
 
 export interface EngineEdge {
@@ -84,9 +114,11 @@ export interface EngineEnd {
 }
 
 /**
- * How a service is priced. Only retainers add MRR; hourly services bill
- * through servicing work, which the engine does not simulate yet, so for now
- * they add nothing to the revenue KPIs.
+ * How a service is priced. Only retainers add MRR. An hourly service bills
+ * its rate for the hands-on hours worked for clients won during the run
+ * (engine 1.11.0, docs/engine-versioning.md "Profit"); a client already
+ * there at the start bills the fee entered for it, whatever its service's
+ * pricing.
  */
 export type PricingModel = "retainer" | "one_off" | "hourly";
 
@@ -96,7 +128,13 @@ export interface EngineService {
   pricingModel: PricingModel;
   /** Monthly fee for a retainer; the whole fee for a one-off; the rate for hourly. */
   price: number;
-  /** Gross margin as a share of price (0–1); carried for reporting, not used by the KPIs yet. */
+  /**
+   * Fee range of a client won on this service (sandbox phase 3, A5): its fee is drawn from a triangular low – price – high, from
+   * its own random stream. Omitted, or low = high = price: the price, and no draw. The engine uses min(low, price) and max(high, price).
+   * Existing clients (a named client's `mrr`, a client group's `fee`) keep their entered fee.
+   */
+  priceRange?: { low: number; high: number };
+  /** Gross margin as a share of price (0–1); recorded for reference, not used: profit comes from the hours people are paid for (see `labourCost`). */
   margin: number;
   /** Expected tenure of a retainer client, in months (LTV and lost revenue). */
   tenureMonths: number;
@@ -129,7 +167,64 @@ export interface EngineService {
    * (docs/PRD.md §5 `service_servicing`, §6.3.5). Only with a client roster.
    */
   servicing?: EngineServicingLink[];
+  /**
+   * The department this tier belongs to (Organic, Performance): a service is one tier of one department, so "Organic Tier 1"
+   * and "Performance Tier 2" are two services. Reporting and assignment only. Omitted: none, as before this field existed.
+   */
+  department?: string;
+  /**
+   * The tier key shared by both departments (`"T1"`). Step tier multipliers, change filters and `EnginePerson.tiers` key on
+   * it. Each department's tier has its own values. Omitted: none, so tier multipliers and filters don't apply to this
+   * service's clients, as before this field existed.
+   */
+  tier?: string;
+  /**
+   * What one client on this tier gets each month (`TierDeliverables`). A servicing link whose recurrence has a `driver`
+   * reads it (a named client's `overrides` replace single values). Omitted: all 0, so a driver recurrence makes no tasks.
+   */
+  deliverables?: TierDeliverables;
+  /**
+   * Ad-hoc requests (D26): the share of this tier's clients who ask in a month (0-1), and the requests from a client who
+   * asks. The expected requests a client makes a month are `chance × requests`. Omitted: none, as before this field existed.
+   */
+  adhoc?: ServiceAdhoc;
 }
+
+/** The ad-hoc rule of a tier: who asks, and how many requests they make (D26). */
+export interface ServiceAdhoc {
+  /** Share of clients who ask in a month, 0-1. */
+  chance: number;
+  /** Requests from a client who asks. */
+  requests: number;
+}
+
+/**
+ * What one client of a tier gets in a month, each a number a month (decision D5; requirements section 4). Every key is
+ * optional: unset means 0. These are labels and rates for the plan, not hours: a servicing step's own time turns them into
+ * hours, and the engine's unit stays working hours.
+ */
+export interface TierDeliverables {
+  /** Words of content. A recurrence reads it per `per: 1000`. */
+  words?: number;
+  /** Links built. */
+  links?: number;
+  /** Technical SEO ticket hours. */
+  techHours?: number;
+  /** Client meetings. */
+  meetings?: number;
+  /** Campaign builds and changes. */
+  builds?: number;
+  /** Creative sets. */
+  creativeSets?: number;
+  /** Ad channels run (Performance); "per channel" steps read it. */
+  channels?: number;
+}
+
+/** A key of `TierDeliverables`. */
+export type DeliverableKey = keyof TierDeliverables;
+
+/** Where a base value came from; reporting only (requirements section 7). */
+export type SourceLabel = "interview" | "calculator" | "measured" | "estimate";
 
 /**
  * How often a client generates a servicing task (docs/PRD.md §5
@@ -137,7 +232,21 @@ export interface EngineService {
  * or month (a fortnightly check-in is `{every: "week", times: 0.5}`), or
  * ad-hoc requests at random, `poissonPerMonth` a month on average.
  */
-export type Recurrence = { every: "week" | "month"; times: number } | { poissonPerMonth: number };
+export type Recurrence =
+  | { every: "week" | "month"; times: number }
+  | { poissonPerMonth: number }
+  | {
+      /**
+       * Tasks a month driven by what the client's tier gets: `perMonth × value ÷ (per ?? 1)`, where `value` is the client's
+       * effective deliverable (its override, else its tier's; `effectiveDeliverables`). `driver: "adhoc"` reads `chance × requests`
+       * (arrivals are Bernoulli(chance) a month, then that many requests). Words use `per: 1000`. Spaced evenly in the month
+       * like `{ every: "month", times }`. A driver of 0 means no tasks. Read by the simulation from engine 1.15.0. Ad-hoc tasks are placed
+       * uniformly in the month.
+       */
+      perMonth: number;
+      driver: DeliverableKey | "adhoc";
+      per?: number;
+    };
 
 /** One servicing process a service's clients run (a monthly report, a fortnightly check-in). */
 export interface EngineServicingLink {
@@ -202,6 +311,39 @@ export interface EngineClient {
    * members by capacity, as the pooled `ongoing` load is.
    */
   assignments: Record<string, string>;
+  /**
+   * This client's own values, each replacing its tier's (`effectiveDeliverables`). Omitted: the tier's values, as before this
+   * field existed.
+   */
+  overrides?: ClientOverrides;
+  /**
+   * Unplanned hours a month for this client, per role id, done by the client's assignee in that role. Load like
+   * `fallbackOngoing`, on top of the servicing tasks. Omitted: none, as before this field existed.
+   */
+  handHoldingHours?: Record<string, number>;
+  /**
+   * Person id of the client's manager: the person a step with `toClientManager` goes to. Counted clients get theirs from
+   * `EnginePerson.portfolio`. Omitted: the manager is whoever `assignments` names for the step's role, or the role's pool.
+   */
+  manager?: string;
+  /**
+   * The 1-based month of the run this client leaves in (the Sandbox's "a named client leaves in a month"): at the first weekly
+   * churn tick on or after that month's start it is removed, as if it had churned (it counts as lost, with its fee). Its churn
+   * draw is still made, so no other client's draws move. Omitted: it stays until it churns, as before this field existed.
+   */
+  leavesMonth?: number;
+}
+
+/** A named client's own values (requirements section 4). Each replaces the tier's; unset keeps it. */
+export interface ClientOverrides extends TierDeliverables {
+  /** Replaces `ServiceAdhoc.chance` for this client. */
+  adhocChance?: number;
+  /** Replaces `ServiceAdhoc.requests` for this client. */
+  adhocRequests?: number;
+  /** Hands-on hours per ad-hoc request, replacing the ad-hoc process's step time. */
+  adhocHours?: number;
+  /** × on every step's time for this client, or × per step id (a step not listed is 1). */
+  stepFactor?: number | Record<string, number>;
 }
 
 /**
@@ -233,6 +375,8 @@ export interface EngineStep {
   person?: string | null;
   /** Mean hands-on hours. */
   work: number;
+  /** What the step achieves (sandbox G): an opaque key the app maps to a category. Omitted: "". Reporting only: never changes the run. */
+  purpose?: string;
   /** Mean external wait after service, in hours. */
   wait: number;
   /** Probability of repeating the step. */
@@ -277,7 +421,65 @@ export interface EngineStep {
    * simulation.
    */
   dropoffBenchmark?: number;
+  /**
+   * The step goes to the client's manager (D32): the person who holds the client in their portfolio or assignments, whatever
+   * their role (a director or a manager). Falls back to `role`'s pool if the client has none. A step for a shared team keeps
+   * `role` and leaves this off; a pinned step keeps `person`. Needs a `role`. Omitted: false, as before this field existed.
+   * Read by the simulation from engine 1.15.0.
+   */
+  toClientManager?: boolean;
+  /**
+   * Shares of the step's hands-on time (D6) that can be automated, augmented or only done by hand; they sum to 1. Changes
+   * act on the first two (`stepParts`). Omitted: the whole time is manual and no change touches it, as before this field
+   * existed. Read by the simulation from engine 1.16.0.
+   */
+  split?: { automatable: number; augmentable: number; manual: number };
+  /**
+   * × on the step's time for a client of that tier key (D7), e.g. `{ T1: 1.5, T3: 0.7 }`. A tier not listed is 1. Omitted: 1
+   * for every tier, as before this field existed. Read by the simulation from engine 1.16.0.
+   */
+  tierMultiplier?: Record<string, number>;
+  /** Where each base value came from (requirements section 7). Reporting only: never changes the run. */
+  sources?: Partial<Record<"work" | "split" | "tierMultiplier", SourceLabel>>;
   next: EngineEdge[];
+}
+
+/** One effect of a change: what it does to one part of one step. */
+export type StepChangeEffect =
+  /** Takes `remove` (0-1) of the automatable part away, leaving `residualHours` of checking per visit. */
+  | { step: string; part: "automatable"; remove: number; residualHours?: number }
+  /** Speeds the augmentable part up by `factor` (at least 1). */
+  | { step: string; part: "augmentable"; factor: number };
+
+/** Clients won in one month beyond the lead flow (`EngineModel.wonClients`). */
+export interface WonClientsEntry {
+  /** A service id. */
+  service: string;
+  /** 1-based month of the run. */
+  month: number;
+  /** Whole clients (rounded; capped at 500 an entry). */
+  count: number;
+}
+
+/**
+ * An automation or augmentation that acts on parts of steps (D8; requirements section 7): never a new time. The future time
+ * is worked out from the step's base time and split (`stepParts`). Read by the simulation from engine 1.16.0.
+ */
+export interface EngineStepChange {
+  id: string;
+  name: string;
+  kind: "automation" | "augmentation";
+  effects: StepChangeEffect[];
+  /** Share of people or time actually using it, 0-1 (D8). */
+  adoption: number;
+  /** The 1-based month of the run it starts in. */
+  startMonth: number;
+  /** Months to full effect; 0 = at once. */
+  rampMonths: number;
+  /** Only clients of these tier keys; omitted = all. */
+  tiers?: string[];
+  /** The issue it fixes (P8). Reporting only. */
+  issueId?: string;
 }
 
 /**
@@ -324,6 +526,44 @@ export interface EngineDemand {
   startMonth?: number;
 }
 
+/**
+ * Monthly channels (sandbox phase 3, channels.ts): per-month values the engine reads while it runs, so a change from a month
+ * is one run and the months before it are exactly the run without it. Month 0 starts at t = 0 and also covers the warm-up;
+ * an array shorter than `starts.length + 1` holds its last value. Multipliers are 0 or more.
+ */
+export interface EngineChannels {
+  /** Hours inside the run where months 1, 2, … start (the run's `monthStarts`); ascending, in (0, H). */
+  starts: number[];
+  /** × arrival rate, on top of seasonality, growth and the market's leads. */
+  leads?: number[];
+  /** × the market's conv (the share of enquiries that sign). */
+  conv?: number[];
+  /** Service id → its mix weight that month (absolute; replaces `mixShare`). */
+  mix?: Record<string, number[]>;
+  /** Service id or "*" → × the price a client won that month pays (retainer fee, one-off price, hourly rate). */
+  newFee?: Record<string, number[]>;
+  /** Service id or "*" → × what every active client pays that month (existing and won). A rise carries churn through the price driver. */
+  fee?: Record<string, number[]>;
+  /** Service id → the fee range in force that month; null is the service's own. */
+  priceRange?: Record<string, ({ low: number; high: number } | null)[]>;
+  /** Service id or "*" → × base churn (a pooled model: "*" only). */
+  churn?: Record<string, number[]>;
+  /** Driver id → its chance-and-effect settings that month; null is as the model's `churnDrivers` say. */
+  drivers?: Record<string, (DriverEvents | null)[]>;
+  /** Step id → × hands-on time. */
+  work?: Record<string, number[]>;
+  /** Step id → mean external wait that month, in hours (absolute). */
+  wait?: Record<string, number[]>;
+  /** Step id → probability the step is repeated that month (absolute, at most 0.95). */
+  rework?: Record<string, number[]>;
+  /** Role id → × the role's cost an hour. */
+  roleCost?: Record<string, number[]>;
+  /** × `overheadMonthly`. */
+  overheads?: number[];
+  /** Person id or "*" → × contracted capacity. */
+  capacity?: Record<string, number[]>;
+}
+
 export interface EngineModel {
   /**
    * True when the caller may not see people's pay (members and viewers; B1 slice 2a): no person has a `cost`, and the
@@ -331,6 +571,8 @@ export interface EngineModel {
    * rate are marked `payHidden`). Omitted or false: simulated exactly as before this field existed.
    */
   payHidden?: boolean;
+  /** Fixed costs a month (rent, tools), per 52/12-week month. Omitted or 0: none. Not pay, so kept when `payHidden`. */
+  overheadMonthly?: number;
   horizonWeeks: number;
   hoursPerWeek: number;
   /**
@@ -400,6 +642,11 @@ export interface EngineModel {
    */
   churnDrivers?: EngineChurnDriver[];
   /**
+   * Per-month values the engine reads while it runs (sandbox phase 3, channels.ts). Omitted, or every array neutral: the run
+   * is exactly as before this field existed.
+   */
+  channels?: EngineChannels;
+  /**
    * Servicing processes by id (see `EngineService.servicing`). Omitted or
    * empty: no servicing, and the model runs exactly as before it existed.
    */
@@ -424,6 +671,30 @@ export interface EngineModel {
    * processes. Omitted: a flat model, simulated exactly as before groups existed.
    */
   groups?: Record<string, EngineGroup>;
+  /**
+   * How counted clients (`clientGroups`) and named clients (`clients`) combine. "groups-replace" (the default) is today's rule:
+   * groups replace the named roster. "groups-add": the groups are unnamed clients in addition to the named ones. Omitted:
+   * "groups-replace", as before this field existed. Read by the simulation from engine 1.15.0 (`withClientGroups`).
+   */
+  clientMix?: "groups-replace" | "groups-add";
+  /**
+   * How won clients are assigned. "round-robin" (the default) is today's rule. "least-busy": the least-busy person who serves
+   * the tier (`EnginePerson.tiers`), in each needed role. Omitted: "round-robin", as before this field existed. Read by
+   * the simulation from engine 1.15.0.
+   */
+  placeNewClients?: "round-robin" | "least-busy";
+  /**
+   * Automations and augmentations acting on steps' parts (`EngineStepChange`). Omitted or empty: no step's time is changed,
+   * as before this field existed. Read by the simulation from engine 1.16.0.
+   */
+  changes?: EngineStepChange[];
+  /**
+   * Extra clients won during the run, beyond what the lead flow brings (the Sandbox's "Win new clients"): each `count` of `service`
+   * (a service id) is won in the 1-based `month`, spread evenly through it. They skip the sales steps up to the sale: each goes straight
+   * to the steps after the sale (onboarding) if the pipeline has any, else straight to a won client, and is placed like any won client
+   * (`placeNewClients`). They draw nothing from the lead flow's streams. Omitted or empty: none, as before this field existed.
+   */
+  wonClients?: WonClientsEntry[];
   entry: string;
   /** The terminal `won` and `lost` end steps' ids. */
   sinks: { won: string; lost: string };
@@ -616,12 +887,23 @@ export interface MonthlyReplication {
    */
   roleUncovered: Record<string, number[]>;
   /**
+   * Client hours of someone on leave that nobody else of the role was there that month to take (the role's `roleWork` counts
+   * them, no person's `personWork` does). Reporting only: `MonthlyResult.time` shows them as uncovered, not as the role's work.
+   */
+  roleAwayUnshared: Record<string, number[]>;
+  /**
    * Work per person id. Client hours that fall in someone's leave go to the others of the same role who are there
    * that month (not to them), by the hours each has, so a person's month is the work they actually face.
    */
   personWork: Record<string, number[]>;
   personCapacity: Record<string, number[]>;
   personOvertime: Record<string, number[]>;
+  /** First-pass hands-on hours by purpose key, then role id / person id (the hours `roleWork` / `personWork` count for steps). Repeat passes are in `rework…`, never here. */
+  purposeRoleWork: Record<string, Record<string, number[]>>;
+  purposePersonWork: Record<string, Record<string, number[]>>;
+  /** Hands-on hours on repeat passes (the redo loops' second and later passes), whatever the step's purpose. */
+  reworkRoleWork: Record<string, number[]>;
+  reworkPersonWork: Record<string, number[]>;
   /** Hours waited for a person, and the waits, per step id (by when the work was picked up). */
   waitSum: Record<string, number[]>;
   waitN: Record<string, number[]>;
@@ -632,14 +914,106 @@ export interface MonthlyReplication {
   /**
    * Monthly recurring revenue of the active clients at each weekly tick, averaged over the month's ticks: with a client
    * roster (named clients or client groups), each retainer client's monthly fee as it bills (`weeklyBill × 4.33`); without
-   * one, what the interim clients pay (their count × `pooledMonthlyFee`) plus each retainer won since at its price at the market's, less churn. One-off and hourly services add nothing.
+   * one, what the interim clients pay (their count × `pooledMonthlyFee`) plus each retainer won since at its price at the market's, less churn. One-off and hourly services add nothing
+   * here (hourly work bills in `revenueHourly`).
    */
   mrr: number[];
+  /** Qualified arrivals, wins and losses (at an end reached from t = 0), by month. */
+  opportunities: number[];
+  won: number[];
+  lost: number[];
+  /** Wins that become clients (not one-offs), and clients that leave (pooled: the fractional fall in the count at the tick). */
+  clientsWon: number[];
+  clientsLost: number[];
+  /** Revenue billed in the month (totals): recurring fees, one-off prices and hourly work, and of those what came from clients won in the run. */
+  revenueRecurring: number[];
+  revenueOneOff: number[];
+  revenueHourly: number[];
+  revenueFromNew: number[];
+  /** Of the revenue above, the part a fee channel added to what clients pay (the `fee` channel's (factor - 1) share): "gained from clients who stay". */
+  revenueRise: number[];
+  /** Monthly fees of the clients that left in the month (`weeklyBill` × 4.33; pooled: the fall in the pool's fees). */
+  mrrLost: number[];
+  /** Paid hours × rate in the month, overtime excluded (see `ReplicationResult.labourCost`); null when `model.payHidden`. */
+  labour: number[] | null;
+  labourByRole: Record<string, number[]> | null;
+  labourByPerson: Record<string, number[]> | null;
+  /** Overtime hours × rate in the month; null when `model.payHidden`. */
+  overtimeCost: number[] | null;
+  /** `overheadMonthly` × the month's weeks ÷ (52/12). */
+  overheads: number[];
   /**
    * With a client roster only: active clients whose health is below 50 (`AT_RISK_HEALTH`), per service key (the same keys
    * as `clients`, each present even when 0), averaged over the month's ticks. Empty without a roster.
    */
   atRisk: Record<string, number[]>;
+}
+
+/**
+ * Where working time goes in a month (sandbox G), hours in the month (not a week), each a `Stat` over replications.
+ * purpose + rework + ongoing + idle = max(hours, work) in every replication.
+ */
+export interface TimeSplit {
+  /** First-pass hands-on hours per purpose key. */
+  purpose: Record<string, Stat[]>;
+  /** Repeat-pass hands-on hours. */
+  rework: Stat[];
+  /**
+   * Per purpose key, its first-pass hours plus all the repeat-pass hours, as one series per replication: the range of the sum (a
+   * category that also takes the rework, as the app's Fixing does), which adding the two ranges would not give.
+   */
+  withRework: Record<string, Stat[]>;
+  /** Client hours not drawn as steps: max(0, work - sum of purpose - rework). For a role, work leaves out `roleAwayUnshared`. */
+  ongoing: Stat[];
+  /** max(0, hours - work). */
+  idle: Stat[];
+  /** Hours available plus overtime worked: the 100%. */
+  hours: Stat[];
+  /**
+   * Work nobody was there to do (roles and the team; null for people): `roleUncovered`, plus the client hours of someone on leave that
+   * no colleague of the role was there to take (`roleAwayUnshared`), which are not the role's work in this split.
+   */
+  uncovered: Stat[] | null;
+}
+
+/**
+ * Where each person's time goes, by step (the Capacity page links each item to its step, D32). Asked for with
+ * `simulate(…, { personTime: true })`; not asked for, nothing is allocated and no other output changes. Only the non-zero
+ * entries are listed.
+ */
+export interface PersonTime {
+  /** Mean hands-on hours a month per person id per step id, over the measured window (pipeline and servicing work both). */
+  stepHours: Record<string, Record<string, number>>;
+  /**
+   * Mean clients per person id per service id over the window: the clients who have them assigned in any role, or as their
+   * manager, counted under each service the client takes.
+   */
+  clients: Record<string, Record<string, number>>;
+  /**
+   * Hands-on hours by part of the step (engine 1.16.0, P3): what the steps with a work split took, per person and step, a month on
+   * average. `actual` is after the changes; `before` is the same draws without any change (the tier multiplier stays), so the
+   * hours freed are `before − actual`. A step with no split is all `manual` in both. Present only when a step has a split.
+   */
+  partHours?: { actual: Record<string, Record<string, PartHours>>; before: Record<string, Record<string, PartHours>> };
+  /**
+   * Hours the changes freed, a month on average (P3; present with `partHours`). `byChange` lists every change of the model (0 when it
+   * freed nothing), `byPerson` the people it freed time for, each by change, and `total` is their sum. When two changes act on one
+   * part the earlier one in the model's `changes` list is credited first (`stepPartsDetail`). A change can free a negative number
+   * of hours (a checking time above what it removes).
+   */
+  freed?: { total: number; byChange: Record<string, number>; byPerson: Record<string, Record<string, number>> };
+  /**
+   * The same by month, everyone together, in hours in that month (not a monthly average), on the months of a monthly run: parts
+   * after and before the changes, and the hours freed per change. Present only when the run is monthly (`simulate(…, { monthly: true })`).
+   */
+  monthly?: { actual: PartHours[]; before: PartHours[]; freed: Record<string, number[]> };
+}
+
+/** Hours of hands-on time in the three parts of a step's split (`EngineStep.split`). */
+export interface PartHours {
+  automatable: number;
+  augmentable: number;
+  manual: number;
 }
 
 /** One month of a role's or person's busy share across replications. */
@@ -666,12 +1040,42 @@ export interface MonthlyResult {
   people: Record<string, (MonthBusy | null)[]>;
   /** Mean hours waited for a person per step id and month (all replications together); null with no waits that month. */
   waits: Record<string, (number | null)[]>;
+  /** Where working time goes by what the steps achieve (sandbox G, engine 1.14.0). */
+  time: {
+    /** Purpose keys on the model's steps, in first-seen step order; "" when a step has none. */
+    purposes: string[];
+    roles: Record<string, TimeSplit>;
+    people: Record<string, TimeSplit>;
+    /** Everyone together: the sum over people (so nobody in two roles is counted twice), uncovered summed over roles. */
+    team: TimeSplit;
+  };
   /** Servicing tasks done late or missed, per month. */
   lateTasks: Stat[];
   /** Active clients per service id per month ("" for none, and for the pooled count). */
   clients: Record<string, Stat[]>;
   /** Monthly recurring revenue per month (see `MonthlyReplication.mrr`). */
   mrr: Stat[];
+  /** Sales: qualified opportunities, wins and losses per month, and wins ÷ (wins + losses) (`ratioStat`). */
+  sales: { opportunities: Stat[]; won: Stat[]; lost: Stat[]; conversion: Stat[] };
+  clientsWon: Stat[];
+  clientsLost: Stat[];
+  /** Billed revenue per month, split three ways, with what came from clients won in the run and the fees lost to churn. */
+  revenue: { total: Stat[]; recurring: Stat[]; oneOff: Stat[]; hourly: Stat[]; fromNew: Stat[]; lostToChurn: Stat[]; rise: Stat[] };
+  /** Overtime hours per month, everyone together. */
+  overtimeHours: Stat[];
+  /**
+   * Costs and profit per month; null when `model.payHidden`. `labour` (and its splits) is the same in every replication
+   * (paid hours × rate, no overtime). Profit per month is the spread of each replication's own profit, so the months'
+   * profits can differ a little from the run's `kpi.profit` (overtime is worked out month by month here).
+   */
+  money: {
+    labour: number[];
+    labourByRole: Record<string, number[]>;
+    labourByPerson: Record<string, number[]>;
+    overtimeCost: Stat[];
+    overheads: number[];
+    profit: Stat[];
+  } | null;
   /** Clients at risk (health below 50) per service key and month; empty without a client roster. */
   atRisk: Record<string, Stat[]>;
 }
@@ -694,6 +1098,20 @@ export interface ReplicationResult {
   overtimeHours: number;
   /** Their cost: each person's overtime hours × their cost rate. Null when `model.payHidden`. */
   overtimeCost: number | null;
+  /**
+   * Revenue billed in the window (engine 1.11.0): recurring fees (every active client, pro rata; a pooled model's include
+   * the interim clients, which `billed` leaves out), one-off prices, and hourly work for clients won in the run. `fromNew`
+   * is the part from clients won in the run. Total = recurring + oneOff + hourly.
+   */
+  revenue: { recurring: number; oneOff: number; hourly: number; fromNew: number; rise: number };
+  /** Per hourly service id: hands-on hours billed and what they bill (present, 0, when none). */
+  hourly: Record<string, { hours: number; revenue: number }>;
+  /** Paid hours × rate (capacity × weeks on the team × `rateOf`), overtime excluded; leave is paid. Null when `model.payHidden`. */
+  labourCost: number | null;
+  /** `overheadMonthly` × weeks ÷ (52/12). */
+  overheads: number;
+  /** Revenue total − labourCost − overtimeCost − overheads. Null when `model.payHidden`. */
+  profit: number | null;
   /** With a client roster: clients that churned in the measured window. */
   clientsChurned?: number;
   /** With a client roster: active clients (roster and won) with health below 50 at the horizon. */
@@ -722,6 +1140,8 @@ export interface ReplicationResult {
   weekly?: WeeklySamples;
   /** Present only when the run was asked for month-by-month numbers (see `MonthlyReplication`). */
   monthly?: MonthlyReplication;
+  /** Present only when the run was asked for where each person's time goes (see `PersonTime`). */
+  personTime?: PersonTime;
   H: number;
   /** Warm-up simulated before t = 0 and discarded. */
   warmupHours: number;
@@ -831,6 +1251,20 @@ export interface Kpis {
   overtimeHours: Stat;
   /** Overtime cost over the horizon: overtime hours × cost rate. Null when `model.payHidden`: it depends on each person's pay. */
   overtimeCost: Stat | null;
+  /**
+   * Total billed revenue (engine 1.11.0): recurring + one-off + hourly. Not `billed`, which is kept as it was (a
+   * pooled model's `billed` leaves out the interim clients; this includes them).
+   */
+  revenue: Stat;
+  revenueHourly: Stat;
+  /** By hourly service id: hands-on hours billed and their revenue. */
+  hourly: Record<string, { hours: Stat; revenue: Stat }>;
+  /** Paid hours × rate, overtime excluded. Null when `model.payHidden`. */
+  labourCost: Stat | null;
+  /** Fixed costs over the horizon (`overheadMonthly` × weeks ÷ (52/12)); never hidden. */
+  overheads: number;
+  /** Revenue − labour cost − overtime cost − overheads. Null when `model.payHidden`. */
+  profit: Stat | null;
   /** Over every completed item in every replication. */
   cycle: { mean: number; p50: number; p90: number };
   roles: Record<string, { util: Stat; pipeline: Stat; ongoing: Stat; servicing: Stat; overtime: Stat }>;
@@ -876,6 +1310,11 @@ export interface ReplicationSamples {
   wipEnd: number[];
   /** Mean cycle time of the replication's completed items (0 when none completed). */
   cycleMean: number[];
+  /** Total billed revenue and profit (null when `model.payHidden`) per replication. */
+  revenue: number[];
+  profit: number[] | null;
+  /** Revenue a fee channel added (the part of `revenue` above the fees without it), per replication. */
+  revenueRise: number[];
 }
 
 export interface SimulationResult {
@@ -925,4 +1364,11 @@ export interface SimulationResult {
   churnCauses?: ChurnCauses;
   /** Month by month, only when the run was asked for it (`simulate(…, { monthly: true })`). */
   monthly?: MonthlyResult;
+  /** Where each person's time goes, by step, and their clients by service: only when asked for (`simulate(…, { personTime: true })`). Means over the replications. */
+  personTime?: PersonTime;
+  /**
+   * With `monthly`: each replication's own months (replication × month), for paired comparisons such as the price-rise
+   * trade-off (the same seed and warm-up give the same random numbers, so two runs' replications pair up).
+   */
+  monthlySamples?: { revenue: number[][]; rise: number[][]; clientsLost: number[][] };
 }

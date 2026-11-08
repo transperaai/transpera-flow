@@ -1,16 +1,10 @@
--- Make an existing user an agency admin (sees every workspace) and give them an
--- agency_admin membership on the Northbeam workspace.
+-- Make an existing user the Owner (sees and edits every workspace, manages the whole "Who can sign in" list). Normally the Owner is
+-- named on the sign-in list (a rule with role 'owner') or in ACCESS_ADMIN_EMAILS and the flag is set at sign-in; use this only to
+-- set it by hand. An Owner needs no membership: the flag passes every policy.
 --
--- The user must have signed in once so they exist in auth.users. Run in the
--- Supabase SQL editor (or `psql`) after replacing the email, then have the user
--- sign out and back in so their session picks up the new app_metadata.
+-- The user must have signed in once so they exist in auth.users. Replace the email, run it with psql, then have the user sign out
+-- and back in so their session picks up the new app_metadata.
 
 update auth.users
 set raw_app_meta_data = coalesce(raw_app_meta_data, '{}'::jsonb) || '{"agency_admin": true}'::jsonb
 where email = 'you@example.com';
-
-insert into public.memberships (workspace_id, user_id, role)
-select 'a0000000-0000-4000-8000-000000000001', id, 'agency_admin'
-from auth.users
-where email = 'you@example.com'
-on conflict (workspace_id, user_id) do nothing;

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { northbeamStepIds as ids, type ProcessBundle } from "@transpera-flow/db";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
-import { blockFromGroup, insertBlock, replaceWithBlock } from "@/lib/blocks/blocks";
+import { blockFromGroup, insertBlock, readBlock, replaceWithBlock } from "@/lib/blocks/blocks";
 import { groupSteps } from "@/lib/editor/groups";
 import { applyEdit, invertEdit, saveUnits, type Edit } from "@/lib/editor/ops";
 import { demoBundle } from "@/lib/sources/demo";
@@ -122,5 +122,23 @@ describe("block inserts and replacements against the database", () => {
     await checks(nested, (cur) => replaceWithBlock(cur, DEMO_GROUP_IDS.setup, block, "Sales conversation")!.edit);
     const first = await seedDraft(withDemoGroups(demoBundle()));
     await checks(first, (cur) => replaceWithBlock(cur, ids.qualify, block, "Sales conversation")!.edit);
+  });
+  it("a block saved with base values stores them, and the steps it puts in are written with them (capacity P8)", async () => {
+    const split = { automatable: 0.4, augmentable: 0.35, manual: 0.25 };
+    const source = withDemoGroups(demoBundle());
+    const withBase = { ...source, steps: source.steps.map((s) => (s.id === ids.qualify ? { ...s, split, tier_multiplier: { T1: 1.5 }, to_client_manager: true } : s)) };
+    const bundle = blockFromGroup(withBase, DEMO_GROUP_IDS.conversation)!;
+    const row = (
+      await db.client.query("insert into blocks (workspace_id, name, description, type, steps) values ($1, 'Base values', '', 'manual', $2::jsonb) returning id, steps", [source.workspace.id, JSON.stringify(bundle)])
+    ).rows[0];
+    const block = readBlock(row.steps);
+    expect(block.steps.find((s) => s.id === ids.qualify)!.split).toEqual(split);
+    const draft = await seedDraft(demoBundle());
+    const made = insertBlock(draft, ids.audit, block, "Base values", row.id)!;
+    await save(draft, made.edit);
+    const stored = (await db.client.query("select split, tier_multiplier, to_client_manager from steps where revision_id = $1 and name = 'Qualify lead' and id <> $2", [draft.revision.id, ids.qualify])).rows;
+    expect(stored).toEqual([{ split, tier_multiplier: { T1: 1.5 }, to_client_manager: true }]);
+    const group = (await db.client.query("select provenance from steps where revision_id = $1 and id = $2", [draft.revision.id, made.id])).rows[0];
+    expect(group.provenance).toEqual({ block: row.id });
   });
 });

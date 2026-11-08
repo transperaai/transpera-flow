@@ -67,6 +67,7 @@ describe("every (i) on the Editor screen", () => {
   const files = [
     "components/editor/palette.tsx",
     "components/editor/inspector.tsx",
+    "components/editor/decision-panel.tsx",
     "components/editor/simulate-footer.tsx",
     "components/editor/editor-bar.tsx",
     "components/editor/issue-area.tsx",
@@ -90,12 +91,14 @@ describe("every (i) on the Editor screen", () => {
 
   it("keeps each named (i), so deleting one is caught", () => {
     const expected: Record<string, string[]> = {
-      "components/editor/inspector.tsx": ["Loose ends", "First principles", "First step", "Save this group as a block"],
+      "components/editor/inspector.tsx": ["What they achieve", "First step", "Save this group as a block"],
+      "components/editor/decision-panel.tsx": ["Branches", "Goes to"],
       "components/editor/palette.tsx": ["The company map", "Add", "Groups", "Blocks", "Insert", "Replace selected"],
       "components/editor/editor-bar.tsx": ["Simulate", "Save to library", "Save solution", "Block name", "Description", "Solution name"],
       "components/editor/simulate-footer.tsx": ["Compared with live", "Automatic verdict"],
       "components/editor/issue-area.tsx": ["Issue area"],
-      "components/solutions/process-solutions.tsx": ["New solution", "Build solution"],
+      // "New solution" moved to the shared button (Q12), which draws its (i) from SOLUTIONS_LIST_HELP.
+      "components/solutions/process-solutions.tsx": ["Build solution"],
     };
     for (const [file, labels] of Object.entries(expected)) {
       const tags = helpTags(read(file));
@@ -116,9 +119,14 @@ describe("every (i) on the Editor screen", () => {
 });
 
 describe("every control of the block library (issue #116)", () => {
-  it("names its (i)s: the library's New block, type and usage count", () => {
+  it("names its (i)s: the library's New block and its column headings", () => {
     const tags = helpTags(read("components/blocks/block-library.tsx"));
-    expect(tags.map((t) => /label="([^"]+)"/.exec(t)?.[1])).toEqual(["New block", "Block type", "Used in"]);
+    expect(tags.map((t) => /label="([^"]+)"/.exec(t)?.[1])).toEqual(["New block", "Steps", "Who does it", "Time per run", "Automatable", "Used in"]);
+  });
+
+  it("marks no block as made by AI: in-app AI and its solution ideas are gone (cut list items 1 and 2)", () => {
+    expect(read("components/blocks/block-library.tsx")).not.toMatch(/\bAI\b/);
+    expect(read("components/editor/palette.tsx")).not.toMatch(/"AI"|=== "ai"/);
   });
 
   it("has a button for each thing the block (i)s describe", () => {
@@ -141,13 +149,15 @@ describe("every control of solution mode (issue #114)", () => {
     expect(labels("components/editor/editor-bar.tsx")).toEqual(expect.arrayContaining(["Solution name", "Save solution"]));
     expect(labels("components/editor/issue-area.tsx")).toEqual(["Issue area"]);
     expect(labels("components/editor/simulate-footer.tsx")).toContain("Automatic verdict");
-    expect(labels("components/solutions/process-solutions.tsx")).toEqual(["New solution", "Build solution"]);
+    expect(labels("components/solutions/process-solutions.tsx")).toEqual(["Build solution"]);
+    expect(read("components/solutions/new-solution.tsx")).toContain("{...SOLUTIONS_LIST_HELP.newSolution}");
     // The (i) on the process page's Solutions heading was removed on purpose (QA wave 1); its two buttons above keep theirs.
   });
 
   it("has a button for each thing those (i)s describe", () => {
     expect(read("components/editor/editor-bar.tsx")).toContain("Save solution");
-    expect(read("components/solutions/process-solutions.tsx")).toContain("✎ New solution");
+    expect(read("components/solutions/process-solutions.tsx")).toContain("<NewSolutionButton");
+    expect(read("components/solutions/new-solution.tsx")).toContain("✎ New solution");
     expect(read("components/solutions/process-solutions.tsx")).toContain("✎ Build solution");
   });
 

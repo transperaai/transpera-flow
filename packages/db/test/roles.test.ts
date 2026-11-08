@@ -18,7 +18,7 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const role of ["owner", "editor", "member", "viewer"] as const) {
     users[role] = await createUser(db, `${role}@roles.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
   }
   users.agency = await createUser(db, "agency@roles.example.com", { agency_admin: true });
 });
@@ -197,7 +197,7 @@ describe("API tokens", () => {
       ];
       for (const [sql, params] of writes) {
         await useClaims(c, token());
-        await fails(c, sql, params, "42501", /only by review/);
+        await fails(c, sql, params, "42501", /can't be changed through an API token/);
         await useClaims(c, users.editor!.claims);
         await c.query("savepoint ok");
         expect((await c.query(sql, params)).rowCount, sql).toBe(1);

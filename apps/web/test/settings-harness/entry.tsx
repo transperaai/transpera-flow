@@ -4,7 +4,7 @@
 
 import { createRoot } from "react-dom/client";
 import { larkspurBundle, larkspurPersonIds, type PersonCapacityFactorRow } from "@transpera-flow/db";
-import { PeopleSettings, SimulationSettings } from "@/app/w/[slug]/settings/people-settings";
+import { PersonMore, SimulationSettings } from "@/app/w/[slug]/settings/people-settings";
 import type { WorkspaceSettingsData } from "@/lib/data";
 
 declare global {
@@ -46,14 +46,21 @@ window.mountSettings = ({ who, switch: on = false, factors = [], factorSaves, un
   createRoot(document.getElementById("root")!).render(
     <div className="flex flex-col gap-6 p-4">
       <SimulationSettings data={data} />
-      <PeopleSettings
-        data={data}
-        saveFactor={
-          factorSaves === undefined
-            ? undefined
-            : async (_person, _step, _base, value) => (factorSaves === "saved" ? { status: "saved", value } : { status: "conflict", theirs: factorSaves.conflict })
-        }
-      />
+      {/* What Set up, People & roles shows under "More" on a person: one row each, opening to their fields. */}
+      {people.map((p) => (
+        <details key={p.id}>
+          <summary>{p.name}</summary>
+          <PersonMore
+            person={p as never}
+            data={data}
+            saveFactor={
+              factorSaves === undefined
+                ? undefined
+                : async (_person, _step, _base, value) => (factorSaves === "saved" ? { status: "saved", value } : { status: "conflict", theirs: factorSaves.conflict })
+            }
+          />
+        </details>
+      ))}
     </div>,
   );
 };

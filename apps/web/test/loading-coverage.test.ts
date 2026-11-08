@@ -12,10 +12,9 @@ const ROOT = join(WEB, "src/app/w/[slug]");
 /** Folders that show their parent's `loading.tsx` (the nearest one wins), and why. */
 const INHERITS: Record<string, string> = {
   "settings/access": "inherit settings/loading.tsx",
-  "settings/ai": "inherit settings/loading.tsx",
-  "settings/branding": "inherit settings/loading.tsx",
-  "settings/calibration": "inherit settings/loading.tsx",
-  "settings/levers": "inherit settings/loading.tsx",
+  "settings/clients": "inherit settings/loading.tsx",
+  "settings/people": "inherit settings/loading.tsx",
+  people: "only redirects to capacity; inherit w/[slug]/loading.tsx",
 };
 
 /** Every folder under `dir` (and `dir` itself) that has a `page.tsx`, as a path under the workspace root ("" is the root). */
@@ -69,7 +68,8 @@ describe("a loading state loads nothing", () => {
     });
     it(`${name} imports no data and no server actions`, () => {
       expect(src).not.toMatch(/from "@\/lib\/data"/);
-      expect(src).not.toMatch(/from "@\/lib\/supabase/);
+      expect(src).not.toMatch(/from "@\/lib\/(supabase|auth\/session|db\/)/);
+      expect(src).not.toMatch(/from "@transpera-flow\/db\/client"/);
       expect(src).not.toContain('"use server"');
       expect(src).not.toMatch(/\bawait\b|\basync\b/);
     });
@@ -83,7 +83,8 @@ describe("the skeletons load nothing either", () => {
     it(`${file} is a server module that imports no data`, () => {
       expect(src).not.toMatch(/^["']use client["']/m);
       expect(src).not.toContain('"use server"');
-      expect(src).not.toMatch(/from "@\/lib\/(data|supabase)/);
+      expect(src).not.toMatch(/from "@\/lib\/(data|supabase|auth\/session|db\/)/);
+      expect(src).not.toMatch(/from "@transpera-flow\/db\/client"/);
       expect(src).not.toMatch(/\bawait\b|\basync\b/);
     });
   }

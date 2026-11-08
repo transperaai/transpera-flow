@@ -5,6 +5,15 @@ import { parseFieldUpdate, parseIds, parseNewEdge, parseNewStep } from "@/lib/ed
 
 // Input checks behind the process editor's Server Actions (app/w/[slug]/actions.ts).
 
+describe("parseFieldUpdate: what a step achieves (sandbox phase 4)", () => {
+  it("takes null (Automatic), a default key and a c + 8 hex key, and refuses words, client upkeep and short keys", () => {
+    for (const ok of [null, "winning", "client_job", "fixing", "c0a1b2c3d"]) expect(parseFieldUpdate("steps", { purpose: null }, { purpose: ok }), String(ok)).not.toBeNull();
+    for (const bad of ["Sales", "client_upkeep", "c123", "C0A1B2C3D", 5, true]) expect(parseFieldUpdate("steps", { purpose: null }, { purpose: bad as never }), String(bad)).toBeNull();
+    // A blank is Automatic, as a blank tool is nothing.
+    expect(parseFieldUpdate("steps", { purpose: "winning" }, { purpose: "" })?.changes).toEqual({ purpose: null });
+  });
+});
+
 describe("parseFieldUpdate", () => {
   it("accepts known fields with a base each, trimming text and blanking empty optional text", () => {
     expect(parseFieldUpdate("steps", { name: "Audit", tool: "Docs" }, { name: "  Audit v2 ", tool: "  " })).toEqual({

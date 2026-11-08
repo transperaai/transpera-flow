@@ -189,9 +189,12 @@ begin
     end if;
   end loop;
 
-  -- 2. New tables made by postgres (the app's migrations).
-  execute format('alter default privileges for role postgres in schema public revoke %s on tables from anon, authenticated',
-                 privs);
+  -- 2. New tables made by postgres (the app's migrations). Only a member of `postgres` may change its default privileges;
+  -- Neon has no `postgres` role (nor Supabase's default grants), and elsewhere a non-member owner has nothing to take back.
+  if exists (select 1 from pg_roles where rolname = 'postgres') and pg_has_role(current_user, 'postgres', 'member') then
+    execute format('alter default privileges for role postgres in schema public revoke %s on tables from anon, authenticated',
+                   privs);
+  end if;
 
   -- 3. New tables made by supabase_admin, only where allowed (a member of supabase_admin; not `postgres` on Supabase).
   if exists (select 1 from pg_roles where rolname = 'supabase_admin') then
@@ -386,9 +389,12 @@ begin
     end if;
   end loop;
 
-  -- 2. New tables made by postgres (the app's migrations).
-  execute format('alter default privileges for role postgres in schema public revoke %s on tables from anon, authenticated',
-                 privs);
+  -- 2. New tables made by postgres (the app's migrations). Only a member of `postgres` may change its default privileges;
+  -- Neon has no `postgres` role (nor Supabase's default grants), and elsewhere a non-member owner has nothing to take back.
+  if exists (select 1 from pg_roles where rolname = 'postgres') and pg_has_role(current_user, 'postgres', 'member') then
+    execute format('alter default privileges for role postgres in schema public revoke %s on tables from anon, authenticated',
+                   privs);
+  end if;
 
   -- 3. New tables made by supabase_admin, only where allowed (a member of supabase_admin; not `postgres` on Supabase).
   if exists (select 1 from pg_roles where rolname = 'supabase_admin') then

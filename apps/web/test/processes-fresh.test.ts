@@ -13,8 +13,8 @@ vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NOT_FOUND
 vi.mock("@/components/shell/shell-header", () => ({ ShellHeader: ({ title }: { title: string }) => createElement("header", null, title) }));
 vi.mock("@/lib/access-data", () => ({ canEditWorkspace: async () => state.canEdit }));
 vi.mock("@/lib/data", () => ({ loadWorkspaceHead: async () => freshHead, loadCompanyId: async () => COMPANY_ID }));
-vi.mock("@/lib/processes/data", () => ({ loadProcessesAndArchived: async () => ({ rows: state.rows, archived: [] }) }));
-vi.mock("@/app/w/[slug]/process-admin-actions", () => ({ archiveProcess: vi.fn(), changeProcessKind: vi.fn(), renameProcess: vi.fn(), restoreProcess: vi.fn() }));
+vi.mock("@/lib/processes/data", () => ({ loadProcessesAndArchived: async () => ({ rows: state.rows, archived: [] }), loadCompanyRowFacts: async () => null }));
+vi.mock("@/app/w/[slug]/process-admin-actions", () => ({ archiveProcess: vi.fn(), changeProcessCategory: vi.fn(), changeProcessKind: vi.fn(), renameProcess: vi.fn(), restoreProcess: vi.fn() }));
 vi.mock("@/app/w/[slug]/process-actions", () => ({ createProcess: vi.fn() }));
 vi.mock("@/app/w/[slug]/processes/upload-actions", () => ({ createUpload: vi.fn(), previewUpload: vi.fn() }));
 
@@ -70,7 +70,7 @@ describe("the Processes page with nothing published", () => {
   it("gives a reader the sentence and no button", async () => {
     state.canEdit = false;
     const out = await render();
-    expect(out).toContain("No processes yet. An owner or editor adds them.");
+    expect(out).toContain("No processes yet. An Agency admin adds them.");
     expect(out).not.toContain("New process");
     expect(out).not.toContain("Upload process");
     expect(out).not.toContain("data-edit-entry");
@@ -84,8 +84,22 @@ describe("the Processes page once something is published", () => {
       state.rows = [published];
       const out = await render();
       expect(out).toContain("Company map");
-      expect(out).not.toContain("Edit company map");
       expect(out).toContain(`href="/w/${FRESH_SLUG}"`);
     }
+  });
+
+  it("also offers an editor Edit company map beside it, to make a new version, and a reader neither the Editor nor its link", async () => {
+    state.canEdit = true;
+    state.rows = [published];
+    const editor = await render();
+    expect(editor).toContain("Edit company map");
+    expect(editor).toContain(`href="/w/${FRESH_SLUG}/p/${COMPANY_ID}/edit?from=%2Fw%2F${FRESH_SLUG}%2Fprocesses"`);
+    const tag = editor.match(/<a [^>]*data-edit-company-map[^>]*>/)?.[0] ?? "";
+    expect(tag).toContain("max-sm:hidden");
+    state.canEdit = false;
+    const reader = await render();
+    expect(reader).not.toContain("Edit company map");
+    // A reader still gets the company map's History link (/p/<id>/history), but never the Editor.
+    expect(reader).not.toContain(`/p/${COMPANY_ID}/edit`);
   });
 });

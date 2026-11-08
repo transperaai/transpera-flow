@@ -1,4 +1,4 @@
-import { build } from "esbuild";
+import { bundleHarness } from "./build-harness";
 import { chromium, type Browser, type Page } from "playwright-core";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -25,18 +25,7 @@ const LAYOUT_CSS = `
 `;
 
 beforeAll(async () => {
-  const out = await build({
-    entryPoints: [fileURLToPath(new URL("./map-harness/entry.tsx", import.meta.url))],
-    bundle: true,
-    format: "iife",
-    platform: "browser",
-    write: false,
-    jsx: "automatic",
-    define: { "process.env.NODE_ENV": '"production"' },
-    alias: { "@": fileURLToPath(new URL("../src", import.meta.url)) },
-    logLevel: "silent",
-  });
-  script = out.outputFiles[0]!.text;
+  script = await bundleHarness(new URL("./map-harness/entry.tsx", import.meta.url));
   css = readFileSync(createRequire(import.meta.url).resolve("@xyflow/react/dist/style.css"), "utf8");
   css += readFileSync(fileURLToPath(new URL("../src/styles/react-flow.css", import.meta.url)), "utf8");
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
@@ -171,6 +160,50 @@ describe("group tiles (issue #242)", () => {
   }, 60_000);
 });
 
+/** Every node's box lies inside the map's panel (the pane React Flow draws in), within a pixel. */
+const outsidePanel = (page: Page) =>
+  page.evaluate(() => {
+    const pane = document.querySelector(".react-flow")!.getBoundingClientRect();
+    return [...document.querySelectorAll(".react-flow__node")].flatMap((e) => {
+      const r = e.getBoundingClientRect();
+      const inside = r.left >= pane.left - 1 && r.right <= pane.right + 1 && r.top >= pane.top - 1 && r.bottom <= pane.bottom + 1;
+      return inside ? [] : [`${e.getAttribute("data-id")}`];
+    });
+  });
+
+describe("Fit (Q1 item 11)", () => {
+  it("brings every node into view with all the groups open and nested, in a narrow panel", async () => {
+    const page = await mount({ nested: true, controlled: true, card: true }, 480);
+    await page.getByRole("button", { name: "Expand all" }).click();
+    await page.waitForFunction(() => window.mapApi.getOpen().length === 2);
+    await settled(page);
+    // Move the view away by hand, then Fit.
+    await page.getByRole("button", { name: /^Zoom in|^\+$/ }).first().click().catch(() => undefined);
+    await page.getByRole("button", { name: "Fit", exact: true }).click();
+    await page.waitForTimeout(700);
+    await settled(page);
+    expect(await page.locator(".react-flow__node").count()).toBeGreaterThan(5);
+    expect(await outsidePanel(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
+
+  it("brings every card into view on the company map with every process opened (child processes)", async () => {
+    const page = await mount({ company: true, card: true }, 480);
+    for (let i = 0; i < 6; i++) {
+      const open = page.getByRole("button", { name: /^Expand / });
+      if (!(await open.count())) break;
+      await open.first().click();
+      await page.waitForTimeout(150);
+    }
+    await settled(page);
+    await page.getByRole("button", { name: "Fit", exact: true }).click();
+    await page.waitForTimeout(700);
+    await settled(page);
+    expect(await outsidePanel(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
+});
+
 describe("open groups and highlight", () => {
   it("keeps open groups in the state it is given, and follows that state", async () => {
     const page = await mount({ nested: true, controlled: true });
@@ -230,6 +263,53 @@ describe("a step's detail", () => {
   }, 60_000);
 });
 
+describe("swimlanes on a read-only process map", () => {
+  it("shows the role lanes at once when the map opens in lane view, as the process page does", async () => {
+    const page = await mount({ lanes: true });
+    await page.waitForSelector("[data-lane]");
+    expect(await page.locator("[data-lane]").evaluateAll((els) => els.map((e) => e.getAttribute("data-lane")))).toEqual(["Sales", "Strategist", "Account manager", "SEO specialist", "PPC specialist", "No role"]);
+    expect(await page.getByRole("button", { name: "Swimlanes" }).getAttribute("aria-pressed")).toBe("true");
+    await page.close();
+  }, 60_000);
+
+  it("stays in the free layout when not asked for lanes", async () => {
+    const page = await mount();
+    await page.waitForSelector(".react-flow__node");
+    expect(await page.locator("[data-lane]").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+});
+
+describe("a step linked from another page (?step=<id>)", () => {
+  it("opens that step's detail at once, with its base values read only for a viewer", async () => {
+    const audit = (await (await mount()).evaluate(() => window.mapIds.audit)) as string;
+    const page = await mount({ openStep: audit, baseValues: true });
+    await page.waitForSelector("[data-step-detail]");
+    expect(await page.locator("[data-step-detail]").getAttribute("data-step-detail")).toBe(audit);
+    const values = page.locator("[data-step-detail] [data-step-base-values]");
+    expect(await values.locator("[data-base-values]").count()).toBe(1);
+    // Read only: the split sliders and the source pickers are all off.
+    const controls = values.locator("input, select, textarea");
+    expect(await controls.count()).toBeGreaterThan(3);
+    for (const c of await controls.all()) expect(await c.isDisabled()).toBe(true);
+    await page.close();
+  }, 60_000);
+
+  it("shows no detail for a step the map doesn't have", async () => {
+    const page = await mount({ openStep: "00000000-0000-4000-8000-00000000dead", baseValues: true });
+    await page.waitForTimeout(300);
+    expect(await page.locator("[data-step-detail]").count()).toBe(0);
+    await page.close();
+  }, 60_000);
+
+  it("opens the groups it sits inside", async () => {
+    const page = await mount({ nested: true, openStep: (await (await mount()).evaluate(() => window.mapIds.qualify)) as string });
+    await page.waitForSelector("[data-step-detail]");
+    await page.waitForFunction(() => document.querySelectorAll("[data-group='open']").length === 1);
+    await page.close();
+  }, 60_000);
+});
+
 type Box = { id: string; l: number; t: number; r: number; b: number };
 const cards = (page: Page): Promise<Box[]> =>
   page.locator(".react-flow__node").evaluateAll((els) =>
@@ -246,7 +326,7 @@ const covers = (a: Box, b: Box) => centre(a).x > b.l && centre(a).x < b.r && cen
 
 
 describe("adding from the Editor's palette", () => {
-  for (const label of ["+ Step", "+ Decision", "+ Wait", "+ Group"]) {
+  for (const label of ["+ Step", "+ Decision", "+ Wait"]) {
     it(`${label} adds a card in view that does not sit on another`, async () => {
       const page = await mount({ editable: true, palette: true });
       const before = new Set((await cards(page)).map((c) => c.id));
@@ -257,12 +337,9 @@ describe("adding from the Editor's palette", () => {
       const added = after.filter((c) => !before.has(c.id));
       expect(added.length).toBeGreaterThanOrEqual(1);
       const p = await panel(page);
-      // A new group arrives with its first step inside it: the box is the one placed. (The harness draws cards taller than
-      // the app does, so for a group the box's top-left corner and title are what must be in view.)
-      const card = [...added].sort((a, b) => (b.r - b.l) * (b.b - b.t) - (a.r - a.l) * (a.b - a.t))[0]!;
-      if (label === "+ Group") expect(card.l >= p.x && card.r <= p.x + p.width && card.t >= p.y && card.t + 40 <= p.y + p.height).toBe(true);
-      else expect(within(card, p)).toBe(true);
-      // Nothing it was not joined to is under it (the first of a new group sits inside the group's own box).
+      const card = added[0]!;
+      expect(within(card, p)).toBe(true);
+      // Nothing it was not joined to is under it.
       for (const o of after.filter((c) => before.has(c.id))) expect(covers(card, o) || covers(o, card)).toBe(false);
       await page.close();
     }, 60_000);
@@ -294,6 +371,40 @@ describe("adding from the Editor's palette", () => {
     const mid = { x: p.x + p.width / 2, y: p.y + p.height / 2 };
     const first = added[0]!;
     expect(Math.hypot((first.l + first.r) / 2 - mid.x, (first.t + first.b) / 2 - mid.y)).toBeLessThan(160);
+    await page.close();
+  }, 60_000);
+});
+
+describe("department lanes on the company map in the Editor (Q4)", () => {
+  const laneOf = (page: Page, name: string) =>
+    page.evaluate((n) => {
+      const node = [...document.querySelectorAll<HTMLElement>(".react-flow__node")].find((e) => e.textContent?.includes(n))!.getBoundingClientRect();
+      const mid = node.top + node.height / 2;
+      return [...document.querySelectorAll<HTMLElement>("[data-lane]")].find((l) => mid >= l.getBoundingClientRect().top && mid <= l.getBoundingClientRect().bottom)?.dataset.lane ?? null;
+    }, name);
+
+  it("shows the lanes by default, a toggle hides them, and dragging a card to another lane leaves it in its own", async () => {
+    const page = await mount({ editable: true, company: true, bands: true });
+    await page.waitForSelector("[data-lane]");
+    expect(await page.locator("[data-lane]").evaluateAll((els) => els.map((e) => e.getAttribute("data-lane")))).toEqual(["Sales and whole business", "Organic (SEO)", "Performance"]);
+    const toggle = page.getByRole("button", { name: "Department lanes" });
+    expect(await toggle.getAttribute("aria-pressed")).toBe("true");
+
+    // Drag the second lane's card down into the third lane's band: it is still in its own lane afterwards.
+    const names = await page.evaluate(() => window.mapApi.getSteps());
+    const second = names[1]!;
+    expect(await laneOf(page, second)).toBe("Organic (SEO)");
+    const box = (await page.locator(".react-flow__node", { hasText: second }).first().boundingBox())!;
+    const lanes = await page.locator("[data-lane]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2));
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 20, lanes[2]!, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+    expect(await laneOf(page, second)).toBe("Organic (SEO)");
+
+    await toggle.click();
+    expect(await page.locator("[data-lane]").count()).toBe(0);
     await page.close();
   }, 60_000);
 });
@@ -468,89 +579,25 @@ describe("the process library on the company map (B12)", () => {
   }, 60_000);
 });
 
-describe("the process library in an ordinary process's editor (B12 part 2)", () => {
-  const free = (page: Page) => page.locator("[data-process-library] [data-library-item][data-state='free']");
-  const holders = (page: Page) => page.evaluate(() => window.mapApi.getSteps());
-  const openLibrary = async (page: Page) => {
-    await page.locator("[data-palette-process]").click();
-    await page.locator("[data-process-library]").waitFor();
-  };
-
-  it("+ Process opens the library: what sits nowhere, and what sits on the company map (it gives way), can be ticked", async () => {
-    const page = await mount({ editable: true, palette: true, library: true });
-    expect(await page.locator("[data-process-library]").count()).toBe(0);
-    await openLibrary(page);
-    const freeNames = await free(page).locator("> span > span:first-child").allTextContents();
-    expect(freeNames).toContain("Renewals");
-    expect(freeNames).toEqual([...freeNames].sort((a, b) => a.localeCompare(b)));
-    // One on the company map is offered too (the map gives way when this is published), and says so.
-    const onMap = page.locator("[data-library-item][data-state='map']");
-    expect(await onMap.count()).toBe(1);
-    expect(await onMap.locator("input").isEnabled()).toBe(true);
-    expect(await onMap.innerText()).toContain("Referrals");
-    expect(await onMap.innerText()).toContain("On the company map — moves here when you publish.");
-    expect(await page.locator("[data-process-library] [role=group]").evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")))).toContain("On the company map");
-    await onMap.locator("input").check();
-    await page.waitForFunction(() => document.querySelector("[data-library-add]")?.textContent === "Add 1 to the map");
-    // The process being edited is never offered.
-    expect(await page.locator("[data-library-item]").allTextContents()).not.toContain(expect.stringContaining("Lead to live"));
-    await page.close();
-  }, 60_000);
-
-  it("adds several processes in one go as links in view, none on another; undo takes them out and redo puts them back", async () => {
-    const page = await mount({ editable: true, palette: true, library: true });
-    const before = await holders(page);
-    const nodesBefore = await page.locator(".react-flow__node").count();
-    await openLibrary(page);
-    const n = await free(page).count();
-    expect(n).toBeGreaterThanOrEqual(2);
-    for (const item of await free(page).all()) await item.locator("input").check();
-    await page.waitForFunction((k) => document.querySelector("[data-library-add]")?.textContent === `Add ${k} to the map`, n);
-    await page.locator("[data-library-add]").click();
-    await page.waitForFunction((k) => document.querySelectorAll(".react-flow__node").length === k, nodesBefore + n);
-    await settled(page);
-    expect((await holders(page)).length).toBe(before.length + n);
-    // Every added link is in view, and none covers another.
-    const added = await page.evaluate((names) => {
-      return [...document.querySelectorAll<HTMLElement>(".react-flow__node")]
-        .filter((e) => !names.includes(e.querySelector("[data-field='name']")?.textContent ?? ""))
-        .map((e) => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom }; });
-    }, before);
-    const p = await panel(page);
-    expect(added.length).toBeGreaterThanOrEqual(n);
-    const placed = (await cards(page)).slice(-n);
-    for (const c of placed) expect(within(c, p)).toBe(true);
-    for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) expect(covers(placed[i]!, placed[j]!) || covers(placed[j]!, placed[i]!)).toBe(false);
-    // Now listed as here, and not addable again.
-    await page.waitForFunction((k) => document.querySelectorAll("[data-library-item][data-state='placed'] input:disabled").length === k, n);
-    expect(await free(page).count()).toBe(0);
-    // Undo, then redo (the Editor's shortcuts).
-    await page.locator(".react-flow__pane").click({ position: { x: 5, y: 5 } });
-    await page.keyboard.press("Control+z");
-    await page.waitForFunction((k) => document.querySelectorAll(".react-flow__node").length === k, nodesBefore);
-    await page.waitForFunction((k) => document.querySelectorAll("[data-process-library] [data-library-item][data-state='free']").length === k, n);
-    await page.keyboard.press("Control+Shift+z");
-    await page.waitForFunction((k) => document.querySelectorAll(".react-flow__node").length === k, nodesBefore + n);
-    await page.close();
-  }, 60_000);
-
-  it("New process makes one and adds it here as a link; a template does the same", async () => {
-    const page = await mount({ editable: true, palette: true, library: true });
-    const nodesBefore = await page.locator(".react-flow__node").count();
-    await openLibrary(page);
+describe("the company map's New process is made by category (D52)", () => {
+  it("offers the five categories with their help, makes the process with the category chosen, and labels templates by category", async () => {
+    const page = await mount({ editable: true, company: true, palette: true, library: true });
+    const select = page.locator("[data-library-new-category]");
+    expect(await select.locator("option").allInnerTexts()).toEqual(["Sales", "Onboarding", "Routine client work", "Ad hoc", "Internal"]);
+    expect(await page.locator("[data-process-library] [data-library-new-kind]").count()).toBe(0);
+    expect(await page.locator("[data-library-category-help]").innerText()).toBe("How new work comes in and is won.");
+    // The existing processes in the list say their category too, not an engine kind.
+    const rows = (await page.locator("[data-library-item]").allInnerTexts()).join(" | ");
+    expect(rows).not.toMatch(/\b(Pipeline|Servicing)\b/);
+    expect(rows).toMatch(/Sales|Routine client work|Ad hoc|Internal|Onboarding/);
+    await select.selectOption("onboarding");
+    expect(await page.locator("[data-library-category-help]").innerText()).toBe("Getting a new client set up, once per client.");
+    expect((await page.locator("[data-library-template='client-onboarding']").innerText()).replace(/\s+/g, " ")).toContain("Client onboarding Onboarding");
+    expect((await page.locator("[data-library-template='agency-delivery']").innerText()).replace(/\s+/g, " ")).toContain("Routine client work");
     await page.locator("[data-library-new-name]").fill("Client offboarding");
-    await page.locator("[data-library-new-kind='servicing']").click();
     await page.locator("[data-library-new-make]").click();
-    await page.waitForFunction((k) => document.querySelectorAll(".react-flow__node").length === k, nodesBefore + 1);
     await page.locator("[data-library-note]").waitFor();
-    expect(await page.locator("[data-library-note]").innerText()).toContain("Made Client offboarding and added it here.");
-    expect(await holders(page)).toContain("Client offboarding");
-    await page.locator("[data-library-template='agency-delivery'] button").click();
-    await page.waitForFunction((k) => document.querySelectorAll(".react-flow__node").length === k, nodesBefore + 2);
-    expect(await page.evaluate(() => window.mapApi.created())).toEqual([
-      { kind: "new", name: "Client offboarding", processKind: "servicing" },
-      { kind: "template", templateId: "agency-delivery" },
-    ]);
+    expect(await page.evaluate(() => window.mapApi.created())).toEqual([{ kind: "new", name: "Client offboarding", category: "onboarding" }]);
     await page.close();
   }, 60_000);
 });

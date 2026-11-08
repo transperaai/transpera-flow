@@ -11,9 +11,9 @@ import { createTestDb, createUser, type TestDb } from "./harness";
 
 let db: TestDb;
 let editor: { id: string; claims: Record<string, unknown> };
-const migration = readFileSync(new URL("../supabase/migrations/20261126000000_company_map.sql", import.meta.url), "utf8");
-const editing = readFileSync(new URL("../supabase/migrations/20261127500000_company_map_editing.sql", import.meta.url), "utf8");
-const everywhere = readFileSync(new URL("../supabase/migrations/20261130000000_process_library_everywhere.sql", import.meta.url), "utf8");
+const migration = readFileSync(new URL("../migrations/20261126000000_company_map.sql", import.meta.url), "utf8");
+const editing = readFileSync(new URL("../migrations/20261127500000_company_map_editing.sql", import.meta.url), "utf8");
+const everywhere = readFileSync(new URL("../migrations/20261130000000_process_library_everywhere.sql", import.meta.url), "utf8");
 
 const q = async (sql: string, params: unknown[] = []) => (await db.client.query(sql, params)).rows;
 
@@ -180,7 +180,7 @@ describe("who may touch the company map", () => {
   const ws = northbeamBundle().workspace.id;
 
   async function asEditor<T>(fn: (c: pg.Client) => Promise<T>): Promise<T> {
-    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor') on conflict do nothing", [ws, editor.id]);
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner') on conflict do nothing", [ws, editor.id]);
     return db.as(editor.claims, fn);
   }
   const rejects = async (fn: (c: pg.Client) => Promise<unknown>, message: RegExp) => {
@@ -299,9 +299,9 @@ describe("the backfill", () => {
         .join("\n")
         .replace(`delete from supabase_migrations.schema_migrations where version = '${version}';`, "");
     const defn = (sql: string, name: string) => sql.match(new RegExp(`^create (?:or replace )?function ${name}\\([\\s\\S]*?\\n\\$\\$;`, "m"))![0].replace(/^create function/, "create or replace function");
-    const nested = readFileSync(new URL("../supabase/migrations/20261108000000_nested_processes.sql", import.meta.url), "utf8");
+    const nested = readFileSync(new URL("../migrations/20261108000000_nested_processes.sql", import.meta.url), "utf8");
     const restored = defn(nested, "private\\.check_step_nesting");
-    const history = readFileSync(new URL("../supabase/migrations/20261118000000_process_history.sql", import.meta.url), "utf8");
+    const history = readFileSync(new URL("../migrations/20261118000000_process_history.sql", import.meta.url), "utf8");
     const duplicate = defn(history, "public\\.duplicate_version");
     // Slice 2's rollback: what its header says to re-create, from the files it names.
     const rollBackEditing = [
@@ -316,6 +316,10 @@ describe("the backfill", () => {
       ...["check_step_nesting", "company_add_holder", "company_map_apply", "company_map_membership"].map((n) => defn(editing, `private\\.${n}`)),
       defn(editing, "public\\.restore_version"),
     ].join("\n");
+    // 20270137000000 replaced create_library_process with a seven-argument one; this rollback (older) drops the six-argument one it made, so put that back first.
+    await db.client.query("drop function public.create_library_process(uuid, text, text, text, text, text, text)");
+    await db.client.query(defn(readFileSync(new URL("../migrations/20261204000000_process_admin_source_files.sql", import.meta.url), "utf8"), "public\\.create_library_process"));
+    await db.client.query("grant execute on function public.create_library_process(uuid, text, text, text, text, text) to authenticated");
     await db.client.query(
       rollback(everywhere, "-- ---------------------------------------------------------------------------\n-- Where a process sits", "20261130000000", "-- ROLLBACK").replace(
         "drop function private.live_holder",

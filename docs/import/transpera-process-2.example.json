@@ -86,6 +86,20 @@
       "hands_on_hours": 3,
       "wait_hours": 24,
       "waiting_now": 2,
+      "split": {
+        "automatable": 0.2,
+        "augmentable": 0.5,
+        "manual": 0.3
+      },
+      "split_notes": {
+        "automatable": "Pull the scope and prices from the template",
+        "augmentable": "Draft the approach",
+        "manual": "Check it fits what the client asked for"
+      },
+      "sources": {
+        "work": "interview",
+        "split": "estimate"
+      },
       "evidence": {
         "hands_on_hours": [
           {
@@ -175,141 +189,5 @@
       "probability": 0.4,
       "label": "Declines"
     }
-  ],
-  "company": {
-    "people": [
-      {
-        "name": "Maya Chen",
-        "roles": [
-          "Managing director"
-        ],
-        "fte": 1,
-        "evidence": [
-          {
-            "source": "interview-maya",
-            "speaker": "Maya Chen",
-            "time": "00:00:30",
-            "quote": "About fifteen minutes an enquiry, and I do it the same day."
-          }
-        ],
-        "leave": [
-          {
-            "start_date": "2026-12-21",
-            "end_date": "2026-12-31",
-            "note": "Christmas"
-          }
-        ]
-      }
-    ],
-    "clients": [
-      {
-        "name": "Northgate Foods",
-        "assignments": {
-          "Managing director": "Maya Chen"
-        },
-        "evidence": [
-          {
-            "source": "sales-sop",
-            "time": "page 4",
-            "quote": "Maya looks after Northgate Foods herself."
-          }
-        ]
-      }
-    ],
-    "roles": [
-      {
-        "name": "Account manager",
-        "assumed": "The SOP names the role but nobody holds it yet."
-      }
-    ],
-    "services": [
-      {
-        "name": "Monthly retainer",
-        "pricing_model": "retainer",
-        "price": 1500,
-        "evidence": [
-          {
-            "source": "sales-sop",
-            "time": "page 2",
-            "quote": "The standard retainer is £1,500 a month."
-          }
-        ]
-      }
-    ],
-    "demand": {
-      "lead_sources": [
-        {
-          "name": "Website form",
-          "volume_per_week": 8,
-          "evidence": [
-            {
-              "source": "lead-export",
-              "time": "Sheet 1",
-              "quote": "Website form: 104 enquiries in 13 weeks",
-              "value": 8
-            }
-          ]
-        }
-      ]
-    }
-  },
-  "proposals": [
-    {
-      "type": "issue",
-      "title": "Proposals sit for a day before review",
-      "detail": "Written proposals wait a full day for the managing director to review them.",
-      "rating": "good",
-      "issue_type": "delay",
-      "steps": [
-        "proposal"
-      ],
-      "evidence": [
-        {
-          "source": "interview-maya",
-          "speaker": "Maya Chen",
-          "time": "00:06:40",
-          "quote": "they sit for a day before I review them"
-        }
-      ]
-    }
-  ],
-  "first_principles": {
-    "job": {
-      "who": "A founder who needs marketing help",
-      "done": "A signed engagement letter they trust",
-      "evidence": [
-        {
-          "source": "sales-sop",
-          "time": "page 1",
-          "quote": "Every enquiry gets a reply the same day."
-        }
-      ]
-    },
-    "requirements": [
-      {
-        "text": "Every enquiry gets a reply the same day",
-        "owner": "Maya Chen",
-        "why": "It is how the firm wins on trust.",
-        "verdict": "keep",
-        "step": "review",
-        "evidence": [
-          {
-            "source": "sales-sop",
-            "time": "page 1",
-            "quote": "Every enquiry gets a reply the same day."
-          }
-        ]
-      }
-    ],
-    "measures": [
-      {
-        "text": "Win rate of at least 30%",
-        "kpi": "winRate",
-        "comparator": "atLeast",
-        "target": 30,
-        "horizon": "6 months",
-        "assumed": "Austin's goal for the year; no history to check it against."
-      }
-    ]
-  }
+  ]
 }

@@ -1,8 +1,9 @@
 "use client";
 
-// The Editor's left column (issue #104): the step palette (adds after the selected step, inside its group if it is in
-// one), grouping, and the block library (issue #116): each saved block with its step count, to insert after the selection
-// or to put in place of the selected step or group.
+// The Editor's left column (issue #104): the palette ("+ Step", "+ Wait", "+ Decision": adds after the selected step, inside its group
+// if it is in one), grouping, and the block library (issue #116): each saved block with its step count, to insert after the selection
+// or to put in place of the selected step or group. End and Go back are not added from here: they come from a decision's branch menu.
+// There is no "+ Process": processes join only on the company map, whose palette is the process library (editor brainstorm, item 3).
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { isGroup, type ProcessBundle } from "@transpera-flow/db";
@@ -15,14 +16,12 @@ import { ProcessLibrary } from "./process-library";
 import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
 import { addAfter, groupProblem, groupSteps, ungroup, type PaletteKind, type ViewRef } from "@/lib/editor/groups";
-import { Badge } from "@/components/ui/badge";
 import type { BlockTools } from "./use-blocks";
 
 const PALETTE: { kind: PaletteKind; label: string }[] = [
   { kind: "task", label: "+ Step" },
-  { kind: "decision", label: "+ Decision" },
   { kind: "wait", label: "+ Wait" },
-  { kind: "group", label: "+ Group" },
+  { kind: "decision", label: "+ Decision" },
 ];
 
 export function Palette({
@@ -51,8 +50,6 @@ export function Palette({
   const only = selected.steps.length === 1 ? bundle.steps.find((s) => s.id === selected.steps[0]) : undefined;
   // What the last add left for the person to do ("connect the new step yourself").
   const [note, setNote] = useState<string | null>(null);
-  // "+ Process" opens the process library (always open on the company map, where processes are all there is to add).
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const add = (kind: PaletteKind) => {
     let id: string | null = null;
     let said: string | null = null;
@@ -91,7 +88,7 @@ export function Palette({
             The company map
             <Help
               label="The company map"
-              description="Each card is a process, placed here as a link: moving it or joining it to another changes only this map, never the process. Draw a line from one card's right edge to another's left edge to show a handoff, then click the line to give it a label."
+              description="Each card is a process, placed here as a link: the process itself is never edited here. Which processes are on the map is what the Sandbox simulates, and joining one pipeline to another sends each won client on into it. Draw a line from one card's right edge to another's left edge, then click the line to give it a label."
               example="Draw a line from “Sales” to “Onboarding” and label it “Signed contract”."
             />
           </h2>
@@ -105,27 +102,16 @@ export function Palette({
           Add
           <Help
             label="Add"
-            description="Adds a new step, decision, wait or group in the middle of what you are looking at, joined in after the step you have selected. Nothing selected adds it unconnected. + Process opens the process library, to add whole processes as links."
+            description="Adds a new step, wait or decision in the middle of what you are looking at, joined in after the step you have selected. A decision comes with two branches, Yes and No. Nothing selected adds it unconnected. To end the process or loop back, use a decision's branch menu."
             example="Select “Discovery call”, press + Wait, and a waiting step appears in view, joined in after it."
           />
         </h2>
-        <div className="grid grid-cols-2 gap-1.5">
+        <div className="grid grid-cols-3 gap-1.5">
           {PALETTE.map(({ kind, label }) => (
             <Button key={kind} type="button" variant="outline" size="sm" onClick={() => add(kind)} className="border-dashed hover:border-edit">
               {label}
             </Button>
           ))}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setLibraryOpen((o) => !o)}
-            aria-expanded={libraryOpen}
-            data-palette-process
-            className="col-span-2 border-dashed hover:border-edit"
-          >
-            + Process
-          </Button>
         </div>
         <p className="text-xs text-muted-foreground">
           {only
@@ -141,7 +127,6 @@ export function Palette({
         )}
       </section>
       )}
-      {!company && libraryOpen && <ProcessLibrary bundle={bundle} editor={editor} setSelection={setSelection} viewRef={viewRef} {...library} />}
 
       <section aria-label="Groups" className="flex flex-col gap-2">
         <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
@@ -198,7 +183,6 @@ export function Palette({
                 <li key={b.id} data-block={b.id} className="flex flex-col gap-1.5 rounded-token border border-line bg-bg px-2.5 py-2">
                   <div className="flex items-center justify-between gap-2">
                     <b className="min-w-0 truncate text-xs">{b.name}</b>
-                    <Badge variant={b.type === "ai" ? "default" : "outline"}>{b.type === "ai" ? "AI" : "By hand"}</Badge>
                   </div>
                   <span className="text-xs text-muted-foreground">
                     {steps} {steps === 1 ? "step" : "steps"}

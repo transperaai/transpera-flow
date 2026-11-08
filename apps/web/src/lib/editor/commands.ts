@@ -69,6 +69,11 @@ export function newStepRow(bundle: ProcessBundle, kind: NewStepKind, outcome: St
     rework_rate: 0,
     rework_to_step_id: null,
     tool: null,
+    purpose: null,
+    split: null,
+    split_notes: null,
+    tier_multiplier: null,
+    to_client_manager: false,
     notes: null,
     sla_hours: null,
     expected_wait_hours: null,
@@ -156,6 +161,24 @@ export function moveSteps(bundle: ProcessBundle, positions: readonly { id: strin
   if (!changes.length) return null;
   const label = changes.length === 1 ? `Moved ${stepName(bundle, changes[0]!.id)}` : `Moved ${changes.length} steps`;
   return { label, ops: [{ kind: "update", changes }] };
+}
+
+/** Whether a step has hands-on time to say the purpose of: a task or wait that is not a group or a holder of a child process. */
+export const hasPurpose = (step: StepRow): boolean => step.kind !== "start" && step.kind !== "end" && step.kind !== "group" && !step.child_process_id;
+
+/**
+ * Set what several steps achieve (sandbox phase 4), as one edit with one undo: one change per working step whose value differs
+ * (as `moveSteps` batches). Holders, starts and ends have no hands-on time and are skipped. Null when nothing changes.
+ */
+export function setStepPurposes(bundle: ProcessBundle, ids: readonly string[], purpose: string | null): Edit | null {
+  const changes: RowChange[] = [];
+  for (const id of ids) {
+    const step = bundle.steps.find((s) => s.id === id);
+    if (!step || !hasPurpose(step) || (step.purpose ?? null) === purpose) continue;
+    changes.push({ table: "steps", id, before: { purpose: step.purpose ?? null }, after: { purpose } });
+  }
+  if (!changes.length) return null;
+  return { label: changes.length === 1 ? `Changed what ${stepName(bundle, changes[0]!.id)} achieves` : `Changed what ${changes.length} steps achieve`, ops: [{ kind: "update", changes }] };
 }
 
 function updateRow(bundle: ProcessBundle, table: "steps" | "edges", id: string, patch: Patch, label: string): Edit | null {
@@ -452,7 +475,7 @@ export function outgoingTotal(bundle: ProcessBundle, stepId: string): number {
 export function addEdge(bundle: ProcessBundle, from: string, to: string): { edit: Edit; id: string } | null {
   if (connectionProblem(bundle, from, to)) return null;
   const { revision } = bundle;
-  // A handoff line on the company map is a picture, not a branch: it has no share to divide.
+  // A handoff line on the company map is not a branch: it has no share to divide (a hand-off takes every won client).
   const handoff = bundle.process.is_company === true;
   const edge: EdgeRow = {
     id: newId(),
@@ -494,9 +517,13 @@ export function deleteEdges(bundle: ProcessBundle, ids: readonly string[]): Edit
   return { label, ops: [{ kind: "remove", steps: [], edges }] };
 }
 
-/** Delete what is selected: steps (with their edges) and edges, as one edit. */
+/**
+ * Delete what is selected: steps (with their edges) and edges, as one edit. The start step is never deleted (editor brainstorm, item 2):
+ * it is left out of a selection that includes it.
+ */
 export function deleteSelection(bundle: ProcessBundle, stepIds: readonly string[], edgeIds: readonly string[]): Edit | null {
-  const steps = deleteSteps(bundle, stepIds);
+  const keep = new Set(bundle.steps.filter((s) => s.kind === "start").map((s) => s.id));
+  const steps = deleteSteps(bundle, stepIds.filter((id) => !keep.has(id)));
   const covered = new Set(steps?.ops.flatMap((op) => (op.kind === "remove" ? op.edges.map((e) => e.id) : [])) ?? []);
   const edges = deleteEdges(bundle, edgeIds.filter((id) => !covered.has(id)));
   if (!steps || !edges) return steps ?? edges;

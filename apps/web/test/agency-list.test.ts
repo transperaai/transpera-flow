@@ -76,7 +76,7 @@ describe("pickHeadline and sameHeadline", () => {
   it("recordHeadline writes when the numbers changed, even with the same revisions inside the hour, and sends only the five fields", () => {
     const source = read("app/w/[slug]/headline-actions.ts");
     expect(source).toMatch(/fresh && sameHeadline\(/);
-    expect(source).toContain("numbers: { ...pickHeadline(numbers) }");
+    expect(source).toContain("numbers: jsonb({ ...pickHeadline(numbers) })");
     expect(source).not.toContain("...numbers,");
     // The database stamps who and when; the browser doesn't get to say.
     expect(source).not.toMatch(/computed_at:|computed_by:/);
@@ -150,8 +150,8 @@ describe("Client health rules for editors", () => {
   it("HealthSettings gates on canEdit, not canManage, and says who can change them", () => {
     expect(health).toContain("canEdit");
     expect(health).not.toContain("canManage");
-    expect(health).toContain("You can view these; owners and editors can change them.");
-    expect(health).not.toContain("Only workspace owners can change this.");
+    expect(health).toContain("You can view these; Agency admins can change them.");
+    expect(health).not.toContain("Only Agency admins can change this.");
   });
 
   it("saveHealthSetting saves through saveHealthRule (save_health_rules), not the owner-only saveField", () => {
@@ -159,7 +159,7 @@ describe("Client health rules for editors", () => {
     const fn = actions.slice(actions.indexOf("export async function saveHealthSetting"));
     expect(fn).toContain("saveHealthRule(workspaceId, key, base, value)");
     expect(fn).not.toContain("saveField(");
-    expect(read("lib/fields/server.ts")).toContain('supabase.rpc("save_health_rules"');
+    expect(read("lib/fields/server.ts")).toContain('rpc(db, "save_health_rules"');
   });
 
   it("the Overview records the headline numbers only for editors, at the workspace's own horizon", () => {

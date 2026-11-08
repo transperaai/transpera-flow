@@ -1,20 +1,24 @@
 "use server";
 
-import { SOLUTION_ISSUE_COLUMNS, type SolutionIssueRow } from "@transpera-flow/db";
+import { isSolutionStatus, type SolutionIssueRow, type SolutionStatus } from "@transpera-flow/db";
+import { saveField } from "@/lib/fields/server";
 import { MAX_NOTES } from "@/lib/solutions/cards";
 import { isId } from "@/lib/sources/validate";
-import { createClient } from "@/lib/supabase/server";
+import { pgCode } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
+
+const SOLUTION_ISSUE_COLS = ["solution_id", "issue_id", "workspace_id", "auto_verdict", "holds_pct", "auto_note", "user_verdict", "user_notes", "created_at", "updated_at", "created_by"] as const;
 
 // What the Solution page writes (issue #115, A50): your verdict and note on each issue a solution solves, and the notes on
-// the solution. As the signed-in user through row-level security: owners and editors write, everyone in the workspace reads.
+// the solution. As the signed-in user through row-level security: Agency admins write, everyone in the workspace reads.
 // The database logs a changed verdict or note on the issue's history (`solution_verdict_logged`), so nothing is logged here.
 
 const signedOut = { status: "error", message: "Your session has ended. Sign in again." } as const;
 const forbidden = { status: "error", message: "You don't have permission to change solutions here." } as const;
 const invalid = { status: "error", message: "That isn't valid." } as const;
 
-const failure = (error: { code?: string }) =>
-  error.code === "42501" ? forbidden : ({ status: "error", message: "Couldn't save. Try again." } as const);
+const failure = (e: unknown) =>
+  pgCode(e) === "42501" ? forbidden : ({ status: "error", message: "Couldn't save. Try again." } as const);
 
 export type VerdictResult = { status: "ok"; link: SolutionIssueRow } | { status: "error"; message: string };
 
@@ -31,17 +35,21 @@ export async function saveSolutionVerdict(workspaceId: unknown, solutionId: unkn
   if (!hasVerdict && !hasNotes) return invalid;
   if (hasVerdict && p.verdict !== null && p.verdict !== "pass" && p.verdict !== "fail") return invalid;
   if (hasNotes && (typeof p.notes !== "string" || p.notes.length > MAX_NOTES)) return { status: "error", message: "Keep the note to 4,000 characters." };
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return signedOut;
-  const { data, error } = await supabase
-    .from("solution_issues")
-    .update({ ...(hasVerdict ? { user_verdict: p.verdict as "pass" | "fail" | null } : {}), ...(hasNotes ? { user_notes: p.notes as string } : {}) })
-    .eq("solution_id", solutionId)
-    .eq("issue_id", issueId)
-    .eq("workspace_id", workspaceId)
-    .select(SOLUTION_ISSUE_COLUMNS);
-  if (error) return failure(error);
+  if (!(await getSessionUser())) return signedOut;
+  const db = await getDb();
+  let data;
+  try {
+    data = await db
+      .updateTable("solution_issues")
+      .set({ ...(hasVerdict ? { user_verdict: p.verdict as "pass" | "fail" | null } : {}), ...(hasNotes ? { user_notes: p.notes as string } : {}) })
+      .where("solution_id", "=", solutionId)
+      .where("issue_id", "=", issueId)
+      .where("workspace_id", "=", workspaceId)
+      .returning(SOLUTION_ISSUE_COLS)
+      .execute();
+  } catch (e) {
+    return failure(e);
+  }
   if (!data.length) return forbidden;
   return { status: "ok", link: data[0] as unknown as SolutionIssueRow };
 }
@@ -55,26 +63,48 @@ export type DeleteSolutionResult = { status: "ok" } | { status: "error"; message
  */
 export async function deleteSolution(workspaceId: unknown, solutionId: unknown): Promise<DeleteSolutionResult> {
   if (!isId(workspaceId) || !isId(solutionId)) return invalid;
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return signedOut;
-  const { data, error } = await supabase.from("solutions").delete().eq("id", solutionId).eq("workspace_id", workspaceId).select("id");
-  if (error) return error.code === "42501" ? forbidden : { status: "error", message: "Couldn't delete. Try again." };
+  if (!(await getSessionUser())) return signedOut;
+  const db = await getDb();
+  let data;
+  try {
+    data = await db.deleteFrom("solutions").where("id", "=", solutionId).where("workspace_id", "=", workspaceId).returning("id").execute();
+  } catch (e) {
+    return pgCode(e) === "42501" ? forbidden : { status: "error", message: "Couldn't delete. Try again." };
+  }
   if (!data.length) return forbidden;
   return { status: "ok" };
 }
 
-export type NotesResult = { status: "ok"; notes: string } | { status: "error"; message: string };
+export type StatusResult = { status: "ok"; value: SolutionStatus } | { status: "conflict"; theirs: SolutionStatus } | { status: "error"; message: string };
+
+/**
+ * A solution's status (Q10, D43), saved at once if it is still `base` (the per-field save). The database logs the change on the history of
+ * each issue the solution is linked to (`solution_status_logged`). Anyone who can't edit the workspace changes nothing, and is told so.
+ */
+export async function saveSolutionStatus(solutionId: unknown, base: unknown, next: unknown): Promise<StatusResult> {
+  if (!isId(solutionId) || !isSolutionStatus(base) || !isSolutionStatus(next)) return invalid;
+  if (!(await getSessionUser())) return signedOut;
+  const r = await saveField<string>("solutions", { id: solutionId }, "status", base, next);
+  if (r.status === "saved" && isSolutionStatus(r.value)) return { status: "ok", value: r.value };
+  if (r.status === "conflict" && isSolutionStatus(r.theirs)) return { status: "conflict", theirs: r.theirs };
+  if (r.status === "error") return { status: "error", message: r.message };
+  return forbidden;
+}
+
+export type NotesResult ={ status: "ok"; notes: string } | { status: "error"; message: string };
 
 /** The notes on a solution as a whole (not on one issue). */
 export async function saveSolutionNotes(workspaceId: unknown, solutionId: unknown, notes: unknown): Promise<NotesResult> {
   if (!isId(workspaceId) || !isId(solutionId)) return invalid;
   if (typeof notes !== "string" || notes.length > MAX_NOTES) return { status: "error", message: "Keep the notes to 4,000 characters." };
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return signedOut;
-  const { data, error } = await supabase.from("solutions").update({ notes }).eq("id", solutionId).eq("workspace_id", workspaceId).select("notes");
-  if (error) return failure(error);
+  if (!(await getSessionUser())) return signedOut;
+  const db = await getDb();
+  let data;
+  try {
+    data = await db.updateTable("solutions").set({ notes }).where("id", "=", solutionId).where("workspace_id", "=", workspaceId).returning("notes").execute();
+  } catch (e) {
+    return failure(e);
+  }
   if (!data.length) return forbidden;
   return { status: "ok", notes: data[0]!.notes };
 }

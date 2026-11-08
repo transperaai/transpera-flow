@@ -1,26 +1,23 @@
 "use client";
 
-// Issues on the process page (issue #17): the Issues tab in the map's Insights panel, badges on the steps, Kept out of process-view.tsx so that file only wires it in.
+// Issues on the process page (issue #17): the Issues tab in the map's Insights panel, badges on the steps.
 
 import { isReadOnly } from "@/lib/mode";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { FindingRow, IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
-import { detectBrokenScenarios, resolveMoney, type DetectedIssue, type EngineModel, type RetiredSteps, type SimulationResult, type SuccessMeasureSource } from "@transpera-flow/engine";
-import type { FindingDialogOptions } from "@/components/findings/finding-dialog";
-import type { FindingsState } from "@/lib/findings/use-findings";
-import { pageDetections } from "@/lib/findings/view";
+import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import type { IssueRow, ProcessBundle, ScenarioRow, SourceRow } from "@transpera-flow/db";
+import { detectBrokenScenarios, resolveMoney, type DetectedIssue, type EngineModel, type RetiredSteps, type SimulationResult } from "@transpera-flow/engine";
 import { processStepIds, processSteps } from "@/lib/process-steps";
 import { perceptionGapDetections } from "@/lib/issues/perception";
 import { visibleFindings } from "@/lib/rules/edit";
 import { useDetectedIssues } from "@/lib/issues/use-detected";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
-import { entryView, mapFeed, promoteInput, registerEntries, stepRatingOf } from "@/lib/issues/register";
+import { factsForProcess } from "@/lib/insights/process-facts";
+import { entryView, factsCostingIssues, mapFeed, promoteInput, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { useIssues } from "@/lib/issues/use-issues";
 import { issueFormOptions } from "@/lib/issues/draft";
 import { useAbsenceTest } from "@/lib/sim/absence";
 import { IssuesRegister } from "./issues-register";
-import { InsightsSection } from "./insights";
-import type { EditMode } from "./process-view";
+import type { EditMode } from "@/lib/sim/use-engine-model";
 import { StepIssueBadges } from "./step-issue-badges";
 import type { StepExtras } from "./map/step-detail";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
@@ -30,9 +27,7 @@ export interface ProcessIssues {
   badges: ReactNode;
   /** The Insights panel: `utilisation` in one tab, the issues in another. */
   rail: (utilisation: ReactNode) => ReactNode;
-  /** The process page's Findings list: the accepted findings, each with Acknowledge as issue. */
-  insightsList: ReactNode;
-  /** The run's facts (the evidence the findings rest on), worst first; null until the run is in. */
+  /** The run's facts (read-only evidence), worst first; null until the run is in. */
   facts: DetectedIssue[] | null;
   /** The process page's Issues section: confirmed issues linked to this process or its steps, with "+ New issue". */
   issuesList: ReactNode;
@@ -46,6 +41,8 @@ export interface ProcessIssues {
   stepExtras: (stepId: string) => StepExtras | null;
   /** The steps to highlight on the map: those of the issue the pointer or focus is on. */
   highlight: string[] | null;
+  /** Light these steps on the map (the facts list calls it on hover and focus); null clears it. */
+  light: (stepIds: string[] | null) => void;
   /** The scenario panel reports its saved scenarios here, so issues can link and run them. */
   onScenariosChange: (scenarios: ScenarioRow[]) => void;
   /** The saved scenarios as the scenario panel last reported them. */
@@ -65,22 +62,16 @@ export function useProcessIssues({
   initialScenarios,
   registerHref,
   retired = NO_RETIRED,
-  successMeasures,
-  findings,
-  findingsState,
-  findingOptions,
   onShowIssues,
   sources = NO_SOURCES,
   liveRevisions,
   issueExtra,
+  cardView,
 }: {
+  /** Draws the page's Issues card from the register's issues (Q8); see IssuesRegister. */
+  cardView?: ComponentProps<typeof IssuesRegister>["cardView"];
   /** Drawn under each confirmed issue in the page's Issues section (the status track). */
   issueExtra?: (issue: IssueRow) => ReactNode;
-  /** This process's findings (B17): the accepted ones are listed, and can be acknowledged as issues. */
-  findings?: readonly FindingRow[];
-  /** Where a finding is dismissed and edited. */
-  findingsState?: FindingsState;
-  findingOptions?: FindingDialogOptions;
   bundle: ProcessBundle;
   model: EngineModel | null;
   result: SimulationResult | null;
@@ -92,8 +83,6 @@ export function useProcessIssues({
   registerHref?: string;
   /** Steps the model no longer has and what replaced them, for broken-scenario issues (issue #16). */
   retired?: RetiredSteps;
-  /** The process's success measures (its first principles), which rule 11 rates; none rates nothing. */
-  successMeasures?: SuccessMeasureSource;
   /** A step's issue badge was clicked: the caller opens the panel the Issues tab is in. */
   onShowIssues?: () => void;
   /** The workspace's sources, which the Acknowledge dialog can link to an issue. */
@@ -115,11 +104,12 @@ export function useProcessIssues({
   const gaps = useMemo(() => visibleFindings(rules, perceptionGapDetections(bundle.steps)), [bundle.steps, rules]);
   // The absence test (rule 8) runs in its own worker once the baseline is done; until it returns, that rule raises nothing.
   const absence = useAbsenceTest(model && result && !running ? model : null, result?.seed ?? 1, resolveMoney(rules).absenceWeeks);
-  const found = useDetectedIssues(model, result, rules, bundle.process.id, bundle.workspace.settings.currency, absence, successMeasures);
-  // The run's facts (D40): evidence, never listed as findings. The list is the accepted findings, and the issues
-  // acknowledged before (each costed by its live fact).
+  const found = useDetectedIssues(model, result, rules, bundle.process.id, bundle.workspace.settings.currency, absence);
+  // The run's facts (D40): read-only evidence. The issues acknowledged from one before are costed by it while the run still finds it.
   const facts = useMemo(() => (found ? visibleFindings(rules, [...broken, ...found, ...gaps]) : null), [found, broken, gaps, rules]);
-  const detected = useMemo(() => (facts ? pageDetections({ findings: findings ?? [], issues: state.issues, facts }) : null), [facts, findings, state.issues]);
+  const detected = useMemo(() => (facts ? factsCostingIssues(state.issues, facts) : null), [facts, state.issues]);
+  // What the page lists: only the facts about this process (its steps, the people and roles who work them, the process itself).
+  const shownFacts = useMemo(() => (facts ? factsForProcess(facts, bundle, result) : null), [facts, bundle, result]);
   const brokenScenarios = useMemo(() => new Set(broken.flatMap((d) => (d.scenarioId ? [d.scenarioId] : []))), [broken]);
 
   // A tracked broken-scenario issue resolves itself once its scenario is fixed (re-pointed or deleted).
@@ -166,8 +156,8 @@ export function useProcessIssues({
       const v = entryView(e);
       if (!v.open) continue;
       for (const stepId of v.stepIds) {
-        const x = out.get(stepId) ?? { insights: [], issues: [] };
-        (e.kind === "tracked" ? x.issues : x.insights).push(v.title);
+        const x = out.get(stepId) ?? { issues: [] };
+        if (e.kind === "tracked") x.issues.push(v.title);
         out.set(stepId, x);
       }
     }
@@ -194,12 +184,11 @@ export function useProcessIssues({
     [bundle, sources],
   );
 
-  const stepNames = useMemo(() => new Map(processSteps(bundle).map((s) => [s.id, s.name])), [bundle]);
-
   const section = (view: "issues") => (
     <IssuesRegister
       issueExtra={issueExtra}
-      includeClosed={Boolean(issueExtra)}
+      cardView={cardView}
+      includeClosed={Boolean(issueExtra) || Boolean(cardView)}
       layout="page"
       view={view}
       stepIds={stepIds}
@@ -218,25 +207,6 @@ export function useProcessIssues({
       stepFilter={stepFilter}
       onStepFilterChange={setStepFilter}
       onHighlight={(id) => setLit(id ? [id] : null)}
-    />
-  );
-
-  const insights = (
-    <InsightsSection
-      state={state}
-      detected={detected}
-      running={running}
-      processId={bundle.process.id}
-      stepIds={stepIds}
-      scenarios={scenarios}
-      formOptions={formOptions}
-      currency={bundle.workspace.settings.currency}
-      stepName={(id) => stepNames.get(id) ?? null}
-      onLight={setLit}
-      registerHref={registerHref}
-      canEdit={!isReadOnly(mode)}
-      findings={findingsState}
-      findingOptions={findingOptions}
     />
   );
 
@@ -312,9 +282,9 @@ export function useProcessIssues({
     rating: stepRatingOf(ratings),
     stepExtras: (id) => extras.get(id) ?? null,
     highlight,
+    light: setLit,
     rail,
-    insightsList: insights,
-    facts,
+    facts: shownFacts,
     issuesList: section("issues"),
     showIssues: () => setTab("issues"),
     onScenariosChange: setScenarios,

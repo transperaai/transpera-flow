@@ -255,7 +255,11 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  // Outside a SidebarProvider (the full-screen Editor has none) there is no sidebar to toggle: draw nothing instead of throwing.
+  // A loading state or an error screen on that route reaches this, and a throw there is the "Try again" screen (Q12).
+  const context = React.useContext(SidebarContext)
+  if (!context) return null
+  const { toggleSidebar } = context
 
   return (
     <Button

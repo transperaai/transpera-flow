@@ -75,7 +75,7 @@ export function DraftBar({
   const status =
     unpublished
       ? hasDraft
-        ? `This process has never been published: it exists only as this draft${changes ? ` (${plural(changes, "change")})` : ""}. ${canEdit ? "Publish it to make it live." : "It goes live when an editor publishes it."}`
+        ? `This process has never been published: it exists only as this draft${changes ? ` (${plural(changes, "change")})` : ""}. ${canEdit ? "Publish it to make it live." : "It goes live when an Agency admin publishes it."}`
         : canEdit
           ? "This process has never been published. Add steps to start its draft."
           : "This process has never been published."

@@ -7,6 +7,7 @@ import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
+import { EmptyState, Toolbar } from "@/components/page-kit";
 import { SettingsSection } from "./section";
 import type { WorkspaceSettingsData } from "@/lib/data";
 import { mapOutcome, type SaveOutcome, type Saver } from "@/lib/fields/field-controller";
@@ -33,26 +34,41 @@ const tagsSaver =
 
 const pricingOptions = PRICING_MODELS.map((m) => ({ value: m, label: PRICING_LABELS[m] }));
 
+/** A warning (not a refusal) when the fee range doesn't hold the fee: the engine uses the fee as the end of the range. */
+const rangeWarning = (sv: { price: number; price_low?: number | null; price_high?: number | null }): string | undefined =>
+  (sv.price_low != null && Number(sv.price_low) > Number(sv.price)) || (sv.price_high != null && Number(sv.price_high) < Number(sv.price))
+    ? "The range doesn't hold the fee above. The engine uses the fee as the end of the range."
+    : undefined;
+
 /** "per month", "one-off" or "per hour", for a price. */
 const priceUnit = (model: PricingModel) => (model === "retainer" ? "/month" : model === "hourly" ? "/hour" : " one-off");
 
-export function ServicesSettings({ data }: { data: WorkspaceSettingsData }) {
-  const { services, canEdit } = data;
-  const mix = mixPercentages(services);
+/**
+ * `tierServiceIds`: the services that are a tier of a department. They are edited on Tiers & clients, so this lists the others
+ * ("a service with neither keeps working as today"), with the same mix check over all of them.
+ */
+export function ServicesSettings({ data, tierServiceIds = new Set<string>() }: { data: WorkspaceSettingsData; tierServiceIds?: ReadonlySet<string> }) {
+  const { canEdit } = data;
+  const services = data.services.filter((s) => !tierServiceIds.has(s.id));
+  const mix = mixPercentages(data.services);
   const currency = data.workspace.settings.currency;
   return (
-    <SettingsSection id="services" title="Services" description={<>What you sell. Each new lead is given a service from the mix, follows its path tags, and is priced by it
+    <SettingsSection id="other-services" title={tierServiceIds.size ? "Other services" : "Services"} description={<>{tierServiceIds.size ? "Services that aren't a tier of a department. " : ""}What you sell. Each new lead is given a service from the mix, follows its path tags, and is priced by it
           when won.</>}>
       {canEdit ? (
-        <AddService workspaceId={data.workspace.id} />
+        <Toolbar label="Add a service">
+          <AddService workspaceId={data.workspace.id} />
+        </Toolbar>
       ) : (
-        <p className="mb-3 text-fg-2">You can view services here; owners and editors can change them.</p>
+        <p className="text-sm text-fg-2">You can view services here; Agency admins can change them.</p>
       )}
-      {services.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-line p-4 text-fg-2">
+      {services.length === 0 && tierServiceIds.size > 0 ? (
+        <EmptyState>Every service is a tier of a department: edit them on the tier tables above.</EmptyState>
+      ) : services.length === 0 ? (
+        <EmptyState>
           No services yet. Until you add one, every win is priced at the workspace&apos;s retainer of{" "}
           {formatCurrency(data.workspace.settings.retainer, currency)} a month.
-        </p>
+        </EmptyState>
       ) : (
         <>
           {!mix && (
@@ -118,14 +134,7 @@ function AddService({ workspaceId }: { workspaceId: string }) {
 }
 
 function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share: number | undefined; data: WorkspaceSettingsData }) {
-  const disabled = !data.canEdit;
   const currency = data.workspace.settings.currency;
-  const pipelines = data.processes.filter((p) => p.kind === "pipeline");
-  const tagHint = data.conditionTags.length
-    ? `Comma-separated. Tags on your connections: ${data.conditionTags.join(", ")}.`
-    : "Comma-separated. No connections are tagged yet; tag a branch on the map to route by service.";
-  const retainer = sv.pricing_model === "retainer";
-
   return (
     <details className="group py-2">
       <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg px-1 py-1 hover:bg-panel-2">
@@ -143,7 +152,22 @@ function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share:
         </span>
         {!sv.active && <span className="rounded-lg bg-panel-2 px-1.5 text-xs text-fg-2">Inactive</span>}
       </summary>
+      <ServiceMore service={sv} share={share} data={data} />
+    </details>
+  );
+}
 
+/** Everything about one service that can be edited (the part of a row that opens): Set up shows it under "More" for a tier's service. */
+export function ServiceMore({ service: sv, share, data, removable = true }: { service: ServiceRow; share?: number | undefined; data: WorkspaceSettingsData; /** A tier's service goes with its tier (Remove tier), not on its own. */ removable?: boolean }) {
+  const disabled = !data.canEdit;
+  const currency = data.workspace.settings.currency;
+  const pipelines = data.processes.filter((p) => p.kind === "pipeline");
+  const tagHint = data.conditionTags.length
+    ? `Comma-separated. Tags on your connections: ${data.conditionTags.join(", ")}.`
+    : "Comma-separated. No connections are tagged yet; tag a branch on the map to route by service.";
+  const retainer = sv.pricing_model === "retainer";
+
+  return (
       <div className="grid gap-4 px-1 pt-3 pb-2 sm:grid-cols-2 lg:grid-cols-3">
         <TextField label="Name" value={sv.name} save={serviceSaver(sv.id, "name")} disabled={disabled} help={{ description: "The service as you'd say it to a client.", example: "SEO retainer" }} />
         <SelectField
@@ -162,6 +186,26 @@ function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share:
           step={50}
           disabled={disabled} help={{ description: "What a client pays: per month for a retainer, per hour for hourly work.", example: "2,500 a month." }} />
         <NumberField
+          label="Fee range: lowest"
+          value={sv.price_low === null || sv.price_low === undefined ? null : Number(sv.price_low)}
+          save={serviceSaver(sv.id, "price_low")}
+          unit={`${currency}${priceUnit(sv.pricing_model)}`}
+          min={0}
+          step={50}
+          disabled={disabled}
+          hint={rangeWarning(sv)}
+          help={{ description: "Each new client's fee is drawn between the lowest and highest, most often near the fee above. Clients you already have keep theirs. A blank end is the fee itself; leave both blank for one fee.", example: "3,000 to 6,000 around a 4,200 fee." }} />
+        <NumberField
+          label="Fee range: highest"
+          value={sv.price_high === null || sv.price_high === undefined ? null : Number(sv.price_high)}
+          save={serviceSaver(sv.id, "price_high")}
+          unit={`${currency}${priceUnit(sv.pricing_model)}`}
+          min={0}
+          step={50}
+          disabled={disabled}
+          hint={rangeWarning(sv)}
+          help={{ description: "Each new client's fee is drawn between the lowest and highest, most often near the fee above. Clients you already have keep theirs. A blank end is the fee itself.", example: "6,000 for the occasional large client." }} />
+        <NumberField
           label="Margin"
           value={Number(sv.margin)}
           save={serviceSaver(sv.id, "margin")}
@@ -171,7 +215,7 @@ function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share:
           max={100}
           step={1}
           disabled={disabled}
-          hint="Gross margin as a share of price. Recorded for reporting; not in the revenue figures yet." help={{ description: "Profit as a share of the price, before overhead. It is recorded, but not yet used in the revenue figures.", example: "At 40%, a 2,500 retainer leaves 1,000 after the cost of delivering it." }} />
+          hint="Recorded for reference. Profit is worked out from the hours people are paid for, not from this." help={{ description: "Recorded for reference. Profit is worked out from the hours people are paid for, not from this.", example: "Profit comes from the team's pay and the overheads, so a 40% margin here doesn't change it." }} />
         <NumberField
           label="Expected tenure"
           value={Number(sv.tenure_months)}
@@ -245,13 +289,12 @@ function ServiceItem({ service: sv, share, data }: { service: ServiceRow; share:
         </div>
         <ServicingLinks service={sv} data={data} />
         <FallbackLoad service={sv} data={data} />
-        {!disabled && (
+        {!disabled && removable && (
           <div className="sm:col-span-2 lg:col-span-3">
             <RemoveService serviceId={sv.id} name={sv.name} />
           </div>
         )}
       </div>
-    </details>
   );
 }
 

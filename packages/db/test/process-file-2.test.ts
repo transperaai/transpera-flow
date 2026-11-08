@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020.js";
-import { FP_COMPARATORS, FP_KINDS, FP_VERDICTS, ISSUE_TYPES, RATINGS, SUCCESS_KPIS } from "@transpera-flow/engine";
 import { describe, expect, it } from "vitest";
 import { checkProcessFile, checkProcessFileText, PROCESS_FILE_EXAMPLE } from "../src/process-file";
 import * as v2 from "../src/process-file-2";
@@ -50,9 +49,6 @@ describe("the published schema and example", () => {
     const f = checkProcessFile(example()).file!;
     expect(f.format).toBe("transpera-process/2");
     expect(f.sources).toHaveLength(3);
-    expect(f.company).toMatchObject({ people: [{ name: "Maya Chen" }], roles: [{ name: "Account manager" }], services: [{ name: "Monthly retainer" }], demand: { lead_sources: [{ name: "Website form" }] } });
-    expect(f.proposals).toHaveLength(1);
-    expect(f.first_principles).toMatchObject({ job: { who: expect.any(String) }, requirements: [{ owner: "Maya Chen", step: "review" }], measures: [{ kpi: "winRate" }] });
     const proposal = f.steps.find((s) => s.id === "proposal")!;
     expect(proposal.evidence?.hands_on_hours?.[0]).toMatchObject({ source: "interview-maya", speaker: "Maya Chen", time: "00:06:40", value: 3 });
     expect(f.links.find((l) => l.to === "call")?.evidence?.[0]?.value).toBe(0.67);
@@ -82,16 +78,7 @@ describe("the published schema and example", () => {
     expect(prompt).toMatch(/assumed/);
     expect(prompt).toMatch(/Never invent/);
     expect(prompt).toMatch(/at most five/);
-    expect(prompt).toMatch(/proposals/);
-  });
-
-  it("the lists written out here match the engine's", () => {
-    expect([...v2.RATINGS]).toEqual([...RATINGS]);
-    expect([...v2.ISSUE_TYPES]).toEqual([...ISSUE_TYPES]);
-    expect([...v2.FP_KINDS]).toEqual([...FP_KINDS]);
-    expect([...v2.FP_VERDICTS]).toEqual([...FP_VERDICTS]);
-    expect([...v2.FP_COMPARATORS]).toEqual([...FP_COMPARATORS]);
-    expect([...v2.SUCCESS_KPI_KEYS]).toEqual(Object.keys(SUCCESS_KPIS));
+    expect(prompt).not.toMatch(/"company"|"proposals"/);
   });
 });
 
@@ -125,11 +112,41 @@ describe("/1 files are read as before", () => {
     const checked = checkProcessFile(f);
     expect(checked.errors).toEqual([]);
     expect(checked.warnings).toEqual([]);
-    expect(checked.file).toMatchObject({ format: "transpera-process/2", sources: [], proposals: [] });
+    expect(checked.file).toMatchObject({ format: "transpera-process/2", sources: [] });
   });
 
   it("says plainly that a newer format isn't read", () => {
     expect(checkProcessFile({ ...base(), format: "transpera-process/3" }).errors[0]).toMatch(/reads 'transpera-process\/1' and 'transpera-process\/2'. Ask Claude to redo it in 'transpera-process\/2'/);
+  });
+});
+
+describe("category (Q3)", () => {
+  it("is optional, kept when it is one of the five, and named in the schema", () => {
+    expect(checkProcessFile(base()).file!.category).toBeUndefined();
+    for (const c of ["sales", "onboarding", "routine_client_work", "ad_hoc", "internal"]) {
+      const f = base();
+      f.category = c;
+      const checked = checkProcessFile(f);
+      expect(checked.errors).toEqual([]);
+      expect(checked.file!.category).toBe(c);
+    }
+    expect(PROCESS_FILE_SCHEMA_2.properties.category.enum).toEqual(["sales", "onboarding", "routine_client_work", "ad_hoc", "internal"]);
+  });
+
+  it("says which values it takes when it is not one of the five", () => {
+    const f = base();
+    f.category = "retainer";
+    expect(errorsOf(f)).toEqual(['The process category \'retainer\' isn\'t one Transpera knows. Use "sales", "onboarding", "routine_client_work", "ad_hoc", "internal", or leave it out.']);
+  });
+
+  it("is not a /1 field: a /1 file's category is ignored with a warning", () => {
+    const f = clone(PROCESS_FILE_EXAMPLE);
+    f.format = "transpera-process/1";
+    f.category = "sales";
+    const checked = checkProcessFile(f);
+    expect(checked.errors).toEqual([]);
+    expect(checked.warnings).toEqual(["The file has a field 'category' that Transpera doesn't use. It was ignored."]);
+    expect(checked.file!.category).toBeUndefined();
   });
 });
 
@@ -345,177 +362,42 @@ describe("what /2 adds to a step", () => {
   });
 });
 
-describe("company", () => {
-  const company = () => ({
-    people: [{ name: "Sam Rivera", roles: ["Doer"], fte: 0.8, hours_per_week: 30, cost_rate: 40, email: "sam@example.com", start_date: "2024-01-01", evidence: [cite()] }],
-    roles: [{ name: "Doer", assumed: "Named in the SOP." }],
-    clients: [{ name: "Acme", services: ["Retainer"], mrr: 1500, start_date: "2025-03-01", health: 70, notes: "Likes calls.", evidence: [cite()] }],
-    services: [{ name: "Retainer", pricing_model: "retainer", price: 1500, margin: 0.4, tenure_months: 14, monthly_churn: 0.02, mix_share: 3, evidence: [cite()] }],
-    demand: { lead_sources: [{ name: "Website", volume_per_week: 8, conversion_to_qualified: 0.5, evidence: [cite()] }], growth_monthly: 0.02, seasonality: [1, 1, 1, 1, 1, 1, 0.8, 0.8, 1, 1, 1, 1], assumed: "Guess." },
-  });
-
-  it("keeps people, roles, clients, services and demand, each with its evidence", () => {
+describe("company facts and proposals (no longer read)", () => {
+  it("a file that still has them is read: they are ignored with a warning, as any unknown field is, and the rest stands", () => {
     const f = base();
-    f.company = company();
-    const out = checkProcessFile(f);
-    expect(out.errors).toEqual([]);
-    expect(out.warnings).toEqual([]);
-    expect(out.file!.company!.people[0]).toMatchObject({ name: "Sam Rivera", roles: ["Doer"], fte: 0.8, hours_per_week: 30, cost_rate: 40, evidence: [{ source: "talk" }] });
-    expect(out.file!.company!.roles[0]).toEqual({ name: "Doer", evidence: [], assumed: "Named in the SOP." });
-    expect(out.file!.company!.services[0]).toMatchObject({ pricing_model: "retainer", monthly_churn: 0.02 });
-    expect(out.file!.company!.demand).toMatchObject({ growth_monthly: 0.02, assumed: "Guess.", lead_sources: [{ name: "Website", volume_per_week: 8 }] });
-  });
-
-  it("warns for a company item with neither evidence nor an assumed reason", () => {
-    const f = base();
-    f.company = { roles: [{ name: "Doer" }], people: [{ name: "Sam" }] };
-    expect(warningsOf(f)).toEqual([
-      "company.people 'Sam' has neither evidence nor an assumed reason, so whoever reviews it won't see where it came from.",
-      "company.roles 'Doer' has neither evidence nor an assumed reason, so whoever reviews it won't see where it came from.",
+    f.company = { people: [{ name: "Sam Rivera", assumed: "x" }] };
+    f.proposals = [{ type: "issue", title: "Work is slow", assumed: "x" }];
+    const checked = checkProcessFile(f);
+    expect(checked.errors).toEqual([]);
+    expect(checked.warnings).toEqual([
+      "The file has a field 'company' that Transpera doesn't use. It was ignored.",
+      "The file has a field 'proposals' that Transpera doesn't use. It was ignored.",
     ]);
+    expect(checked.file).not.toHaveProperty("company");
+    expect(checked.file).not.toHaveProperty("proposals");
+    expect(checked.file!.steps).toHaveLength(3);
   });
 
-  it("names each way it can be wrong", () => {
-    const cases: [(c: ReturnType<typeof company>) => void, RegExp][] = [
-      [(c) => ((c as unknown as { people: unknown }).people = {}), /company\.people should be a list/],
-      [(c) => delete (c.people[0] as { name?: string }).name, /company\.people item 1 has no name/],
-      [(c) => ((c.people[0] as { fte: unknown }).fte = 5), /company\.people 'Sam Rivera': fte is 5, but it has to be between 0\.01 and 1\.5 \(1 is full time\)/],
-      [(c) => ((c.clients[0] as { health: unknown }).health = 101), /company\.clients 'Acme': health is 101/],
-      [(c) => ((c.clients[0] as { start_date: unknown }).start_date = "March"), /start_date should be a day like 2026-09-30/],
-      [(c) => ((c.services[0] as { pricing_model: unknown }).pricing_model = "free"), /pricing_model should be retainer, one_off or hourly/],
-      [(c) => ((c.services[0] as { margin: unknown }).margin = 40), /margin is 40, but it has to be between 0 and 1/],
-      [(c) => ((c.demand as { seasonality: unknown }).seasonality = [1, 2]), /seasonality should be twelve multipliers/],
-      [(c) => ((c.demand.lead_sources[0] as { conversion_to_qualified: unknown }).conversion_to_qualified = 2), /conversion_to_qualified is 2/],
-      [(c) => ((c as unknown as { demand: unknown }).demand = []), /company\.demand should be an object/],
-    ];
-    for (const [change, message] of cases) {
-      const f = base();
-      const c = company();
-      change(c);
-      f.company = c;
-      expect(errorsOf(f).join("\n"), String(message)).toMatch(message);
-    }
-  });
-
-  it("says when evidence in the company section cites an unknown source", () => {
-    const f = base();
-    const c = company();
-    c.people[0]!.evidence = [cite({ source: "nobody" })];
-    f.company = c;
-    expect(errorsOf(f)[0]).toMatch(/company\.people 'Sam Rivera' cites the source 'nobody', which isn't in the file's sources/);
-  });
-
-  it("refuses a company section that would make more than 300 suggestions", () => {
-    const f = base();
-    f.company = { roles: Array.from({ length: 100 }, (_, i) => ({ name: `R${i}`, assumed: "x" })), people: Array.from({ length: 100 }, (_, i) => ({ name: `P${i}`, assumed: "x" })), clients: Array.from({ length: 100 }, (_, i) => ({ name: `C${i}`, assumed: "x" })), services: [{ name: "S", assumed: "x" }] };
-    expect(errorsOf(f)).toContain("The company section would make 301 suggestions; the most in one file is 300.");
-  });
-
-  it("ignores unknown fields with a warning", () => {
-    const f = base();
-    f.company = { vibes: [], people: [{ name: "Sam", shoe_size: 9, assumed: "x" }] };
-    expect(warningsOf(f)).toEqual([
-      "The company section has a field 'vibes' that Transpera doesn't use. It was ignored.",
-      "company.people 'Sam' has a field 'shoe_size' that Transpera doesn't use. It was ignored.",
-    ]);
+  it("the schema has neither section", () => {
+    expect(Object.keys(PROCESS_FILE_SCHEMA_2.properties)).not.toContain("company");
+    expect(Object.keys(PROCESS_FILE_SCHEMA_2.properties)).not.toContain("proposals");
   });
 });
 
-describe("proposals", () => {
-  it("keeps a proposed issue with its steps, rating and evidence", () => {
+describe("first principles (no longer read)", () => {
+  it("a file that still has them is read: the section is ignored with a warning, as any unknown field is, and the rest stands", () => {
     const f = base();
-    f.proposals = [{ type: "issue", title: "Work is slow", detail: "Said so.", rating: "bad", issue_type: "delay", steps: ["b"], target_measure: "Wait", target_now: "4 h", target_goal: "1 h", evidence: [cite()] }];
-    const out = checkProcessFile(f);
-    expect(out.errors).toEqual([]);
-    expect(out.file!.proposals![0]).toMatchObject({ type: "issue", rating: "bad", issue_type: "delay", steps: ["b"], target_goal: "1 h", evidence: [{ source: "talk" }] });
+    f.first_principles = { job: { who: "A founder" }, truths: [{ text: "Leads go cold" }] };
+    const checked = checkProcessFile(f);
+    expect(checked.errors).toEqual([]);
+    expect(checked.warnings).toEqual(["The file has a field 'first_principles' that Transpera doesn't use. It was ignored."]);
+    expect(checked.file).not.toHaveProperty("first_principles");
+    expect(checked.file!.steps).toHaveLength(3);
   });
 
-  it("keeps a solution idea with the issue it is for and its steps", () => {
-    const f = base();
-    f.proposals = [{ type: "solution_idea", title: "Automate it", for_issue: 12, proposed_steps: [{ name: "Bot", kind: "task", role: "Doer" }, { name: "Check" }], expect: "Faster.", assumed: "A guess." }];
-    const out = checkProcessFile(f);
-    expect(out.errors).toEqual([]);
-    expect(out.file!.proposals![0]).toMatchObject({ type: "solution_idea", for_issue: "12", proposed_steps: [{ name: "Bot", kind: "task", role: "Doer" }, { name: "Check" }], expect: "Faster." });
-  });
-
-  it("names each way a proposal can be wrong", () => {
-    const issue = { type: "issue", title: "Slow", assumed: "x" };
-    const idea = { type: "solution_idea", title: "Fast", for_issue: "#3", proposed_steps: [{ name: "Bot" }], assumed: "x" };
-    const cases: [Record<string, unknown>, RegExp][] = [
-      [{ type: "idea", title: "x" }, /has the type 'idea'\. Use "issue" \(a problem worth tracking\) or "solution_idea"/],
-      [{ ...issue, title: "" }, /Proposal 1 has no title/],
-      [{ ...issue, rating: "dire" }, /rating should be great, good, bad or risk/],
-      [{ ...issue, issue_type: "mood" }, /issue_type should be one of bottleneck/],
-      [{ ...issue, steps: ["zzz"] }, /Proposal 'Slow' lists 'zzz' in steps, which isn't a step\./],
-      [{ ...idea, for_issue: undefined }, /it needs "for_issue": the number \(like 12\) or title of an issue you already track/],
-      [{ ...idea, proposed_steps: [] }, /it needs "proposed_steps": the steps it would put in place, in order/],
-      [{ ...idea, proposed_steps: [{ kind: "task" }] }, /proposed step 1 needs a name/],
-    ];
-    for (const [p, message] of cases) {
-      const f = base();
-      f.proposals = [p];
-      expect(errorsOf(f).join("\n"), String(message)).toMatch(message);
-    }
-  });
-
-  it("warns about fields that belong to the other type", () => {
-    const f = base();
-    f.proposals = [{ type: "issue", title: "Slow", for_issue: "3", assumed: "x" }];
-    expect(warningsOf(f)).toEqual(["Proposal 'Slow' is an issue, so its 'for_issue' was ignored."]);
-  });
-});
-
-describe("first principles", () => {
-  const fp = () => ({
-    job: { who: "A founder", done: "Signed", evidence: [cite()] },
-    truths: [{ text: "Leads go cold after a week", kind: "truth", evidence: [cite()] }, { text: "Clients prefer calls", kind: "assumption", test: "Ask five clients", assumed: "A hunch." }],
-    requirements: [{ text: "Reply the same day", owner: "Sam", why: "Trust", verdict: "keep", step: "b", evidence: [cite()] }],
-    measures: [{ text: "Win rate", kpi: "winRate", comparator: "atLeast", target: 30, horizon: "6 months", assumed: "A goal." }],
-    why: { problem: "Slow", chain: ["Busy", "No time"], root: "No process", evidence: [cite()] },
-  });
-
-  it("keeps every part", () => {
-    const f = base();
-    f.first_principles = fp();
-    const out = checkProcessFile(f);
-    expect(out.errors).toEqual([]);
-    expect(out.warnings).toEqual([]);
-    expect(out.file!.first_principles).toMatchObject({
-      job: { who: "A founder", done: "Signed" },
-      truths: [{ kind: "truth" }, { kind: "assumption", test: "Ask five clients", assumed: "A hunch." }],
-      requirements: [{ owner: "Sam", step: "b", verdict: "keep" }],
-      measures: [{ kpi: "winRate", target: 30 }],
-      why: { chain: ["Busy", "No time"], root: "No process" },
-    });
-  });
-
-  it("names each way it can be wrong", () => {
-    const cases: [(f: ReturnType<typeof fp>) => void, RegExp][] = [
-      [(f) => ((f.requirements[0] as { step: unknown }).step = "zzz"), /names 'zzz' as its step, which isn't a step\./],
-      [(f) => ((f.requirements[0] as { verdict: unknown }).verdict = "maybe"), /verdict should be keep, change, drop or challenge/],
-      [(f) => ((f.truths[0] as { kind: unknown }).kind = "myth"), /kind should be truth or assumption/],
-      [(f) => ((f.measures[0] as { kpi: unknown }).kpi = "happiness"), /kpi should be one of won, winsPerWeek/],
-      [(f) => ((f.measures[0] as { comparator: unknown }).comparator = "equals"), /comparator should be atLeast or atMost/],
-      [(f) => delete (f.truths[0] as { text?: string }).text, /first_principles\.truths item 1 has no text/],
-      [(f) => ((f as unknown as { job: unknown }).job = "x"), /first_principles\.job should be an object/],
-      [(f) => ((f as unknown as { truths: unknown }).truths = {}), /first_principles\.truths should be a list/],
-    ];
-    for (const [change, message] of cases) {
-      const f = base();
-      const p = fp();
-      change(p);
-      f.first_principles = p;
-      expect(errorsOf(f).join("\n"), String(message)).toMatch(message);
-    }
-  });
-
-  it("warns for items with neither evidence nor an assumed reason, so nothing is filled in without a say-so", () => {
-    const f = base();
-    f.first_principles = { truths: [{ text: "Leads go cold" }], job: { who: "A founder" } };
-    expect(warningsOf(f)).toEqual([
-      "first_principles.job has neither evidence nor an assumed reason, so whoever reviews it won't see where it came from.",
-      "first_principles.truths item 1 'Leads go cold' has neither evidence nor an assumed reason, so whoever reviews it won't see where it came from.",
-    ]);
+  it("the schema and the worked example do not have the section", () => {
+    expect(Object.keys(PROCESS_FILE_SCHEMA_2.properties)).not.toContain("first_principles");
+    expect(example()).not.toHaveProperty("first_principles");
   });
 });
 
@@ -528,34 +410,6 @@ describe("text and structure", () => {
 
   it("sectionCounts counts what each section will make", () => {
     const file = checkProcessFile(example()).file!;
-    expect(v2.sectionCounts(file)).toEqual({ sources: 3, company: 5, proposals: 1, firstPrinciples: 3 });
-  });
-});
-
-describe("company: leave, whether a client is still a client, and who looks after them", () => {
-  const withCompany = (company: unknown) => ({ ...base(), company });
-
-  it("reads a person's booked leave, a client's active flag and its assignments", () => {
-    const checked = checkProcessFile(
-      withCompany({
-        people: [{ name: "Kofi", leave: [{ start_date: "2026-12-07", end_date: "2026-12-24", note: "Family" }], evidence: [cite()] }],
-        clients: [{ name: "Brambleway", active: false, assignments: { "Account director": "Tom" }, evidence: [cite()] }],
-      }),
-    );
-    expect(checked.errors).toEqual([]);
-    expect(checked.warnings).toEqual([]);
-    expect(checked.file!.company!.people[0]!.leave).toEqual([{ start_date: "2026-12-07", end_date: "2026-12-24", note: "Family" }]);
-    expect(checked.file!.company!.clients[0]).toMatchObject({ active: false, assignments: { "Account director": "Tom" } });
-    const validate = new Ajv2020({ strict: false }).compile(JSON.parse(published("transpera-process-2.schema.json")));
-    expect(validate(withCompany({ people: [{ name: "Kofi", leave: [{ start_date: "2026-12-07", end_date: "2026-12-24" }] }], clients: [{ name: "B", active: false, assignments: { Role: "Person" } }] }))).toBe(true);
-  });
-
-  it("says plainly what is wrong with each", () => {
-    const err = (company: unknown) => errorsOf(withCompany(company)).join("\n");
-    expect(err({ people: [{ name: "K", leave: [{ start_date: "2026-12-24", end_date: "2026-12-07" }] }] })).toMatch(/leave 1 ends \(2026-12-07\) before it starts \(2026-12-24\)/);
-    expect(err({ people: [{ name: "K", leave: [{ start_date: "2026-12-24" }] }] })).toMatch(/leave 1 needs a start_date and an end_date/);
-    expect(err({ people: [{ name: "K", leave: "December" }] })).toMatch(/leave should be a list/);
-    expect(err({ clients: [{ name: "B", active: "no" }] })).toMatch(/active should be true or false/);
-    expect(err({ clients: [{ name: "B", assignments: ["Tom"] }] })).toMatch(/assignments should be a role and a person/);
+    expect(v2.sectionCounts(file)).toEqual({ sources: 3 });
   });
 });

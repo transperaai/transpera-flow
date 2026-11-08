@@ -8,11 +8,11 @@
 import { EVIDENCE_COLUMNS, isOpenAssumption, openConflict, type ProcessBundle, type StepRow } from "@transpera-flow/db";
 import { readField, type Edit, type Patch, type RowChange } from "./ops";
 
-export type ProvenanceSource = "estimated" | "entered" | "measured";
+export type ProvenanceSource = "estimated" | "entered";
 
 /** One value's provenance (the §5 shape). A type alias so it stays a plain JSON object. */
 export type Provenance = {
-  source: ProvenanceSource;
+  source: ProvenanceSource | "interview" | "calculator" | "measured" | "estimate";
   /** When it was set (ISO timestamp). */
   at?: string;
   /** User who set it. */
@@ -57,7 +57,7 @@ export function stepProvenance(step: StepRow, column: string): Provenance | null
 /** Where a step's value came from; a value with none recorded is an estimate. */
 export function provenanceSource(step: StepRow, column: string): ProvenanceSource {
   const source = stepProvenance(step, column)?.source;
-  return source === "entered" || source === "measured" ? source : "estimated";
+  return source === "entered" ? source : "estimated";
 }
 
 /**

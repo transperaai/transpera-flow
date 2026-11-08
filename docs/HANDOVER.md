@@ -7,11 +7,110 @@ new session with:
 
 > Read `CLAUDE.md` and `docs/HANDOVER.md`, then carry on from "Next steps".
 
+**31 Oct 2026: the capacity app as it now is** (work packages P0 to P9, `docs/plans/capacity/`). The screens are Overview, Set up
+(Tiers & clients, People & roles), Processes, Capacity and the free-play Sandbox; Settings keeps the workspace, simulation limits,
+churn drivers, client health, demand and market. See the README's "The app" for what each shows. How to stand it up for a client:
+`docs/new-client.md` (section 12 has the starter and example loaders, section 13 the Preview migration script). P9 (follow-ups):
+servicing links can follow the tier ("From the tier": a deliverable, x n, per m); roles have a leadership flag (Set up, People & roles,
+under More) that leaves them out of clients and revenue per employee; hiring advice stretches its 2-month base by the market's time to
+hire; each Set up field is edited in one place (the old full Clients, People and Roles lists in Settings are gone); `/p/<id>?step=<id>`
+opens a step, and viewers read its base values; the `lever_settings` table, the guest sign-in plumbing and the Overview health cards
+are gone. Still to sweep: the `mode: "demo"` paths of the shared screens (listed in the P9 report).
+
+**31 Oct 2026 (P0, `docs/plans/capacity/p0-cuts-brief.md`): cut, for the client app.** First principles (pages, card, MCP `get_first_principles`,
+engine and db modules, `first_principles` table), every share link (`/s/<token>`, the Share links page, the buttons, `share_links`
+and its functions), the older process-level lever system (`scenario-panel`, `lever-panel`, `compare-view`, `robustness-check`,
+`process-view`, `bottleneck-panel`, Settings, Levers) and the `/demo` pages are gone. Sources is off the menu but opens by its
+address. Goal seek and "What matters most" are off the Sandbox screen (`SANDBOX_ANALYSIS_SHOWN` in `lib/sandbox/analysis-shown.ts`).
+Migration `20270118000000_capacity_cuts.sql` drops the tables and functions. The notes below that mention these features are history.
+
+**31 Oct 2026: the direction changed again. Read `docs/plans/client-refocus-handover.md` first.** The app is being
+refocused, not rebuilt, on the client's real question: are they at capacity, and how many more clients per employee
+would automation or augmentation allow? The next chat writes the requirements from the client's interview transcripts.
+
 **26 Oct 2026: the direction changed. Read `docs/plans/rework-direction.md` first.** Each client gets its own
 deployment (not multi-tenant). The app moves off Supabase to Neon with Better Auth: Google now, Microsoft later, with
 company-domain and named-email roles. Uploads are dropped for reference links, live editing is dropped, and hosting stays
 on Vercel. The next session starts the move off Supabase (no feature cutting yet; Austin's manual QA and strip list come later). Supabase was restored on 26 Oct
 after a free-plan pause. PR #248 is open; issue #249 is parked.
+
+## The move off Supabase (26–27 Oct 2026; branch `claude/supabase-migration-plan-mzchlf`)
+
+The plan is `docs/plans/supabase-exit-brief.md`. Steps 1–6 and 8 are built, reviewed and merged on the integration branch,
+along with the step 7 copy tooling. `main` and production are untouched: still Supabase at row 72. Each step was built
+by Sonnet from an Opus brief and reviewed adversarially by Opus.
+
+- **Built:**
+  - **Step 1:** Neon compat layer, migration runner, and `createDb` (Kysely + ClaimsDriver: every query runs as
+    `authenticated`/`anon` with Supabase-shaped claims, so RLS and the SECURITY DEFINER functions are unchanged).
+  - **Step 2:** Better Auth (Google now, Microsoft wired), the deployment access list (Admin/Editor/Viewer by domain or
+    email), and share-link guests.
+  - **Step 3:** about 470 supabase-js calls ported, and MCP tokens checked in app code (ADR 0018).
+  - **Step 4:** References (`file_url`) replace uploads, and the logo lives in `workspace_logos`.
+  - **Step 5:** Realtime and presence removed.
+  - **Step 6:** `@supabase` removed, generated function types, statement time limits, the `authenticator` app login,
+    docs and the privacy page.
+  - **Step 7a:** `packages/db/scripts/copy-from-supabase/` (export, import, verify).
+  - **Step 8:** `docs/new-client.md` and `scripts/new-client.sh`.
+- **Checks:** lint and typecheck are clean. All test suites pass except `apps/web/test/format.test.ts` (an ICU difference
+  in this container; it fails on `main` too). A local end-to-end run of the production build, with a real Better Auth
+  session, passed for owner, viewer, guest, MCP, share links and export.
+- **Neon:** `transpera-flow-db` (`purple-wind-75278769`, Sydney, PG 18) holds all 76 migrations and no data. It has an
+  `authenticator` login. Vercel Preview has `DATABASE_URL`, `APP_DATABASE_URL`, `BETTER_AUTH_*`, `OAUTH_PROXY_SECRET`,
+  `PREVIEW_ALIAS_URL`, `GOOGLE_*` and `ACCESS_ADMIN_EMAILS`. The preview of the branch is at
+  `https://transpera-flow-next.vercel.app` (behind Vercel login). From the cloud container, Neon is reached over WebSockets
+  (`docs/supabase-notes.md`, "Checked on Neon"). Neon refuses `session_replication_role`, so the import takes its
+  fallback path.
+- **7b, rehearsal: done 27 Oct.** It ran on a throwaway Neon branch through the WebSocket route and printed VERIFIED:
+  406 rows in 61 tables, 179 foreign keys and 1 user. That user signs in with Google, has an Admin rule, and reads the
+  3 workspaces under RLS. The branch was deleted afterwards. The same export was then loaded into Neon `main` (the
+  Preview database) and verified, so QA runs on real data. Austin allowed `copy:export` with a project-local permission
+  rule. The rehearsal found that migrations failed when `authenticator` already exists; that is fixed in 171bba53.
+- **The strip: built 28 Oct** (Austin: "make the changes then I'll QA"; `docs/plans/cut-list.md`, `docs/plans/strip-briefs.md`).
+  - What changed:
+    - in-app AI and findings removed;
+    - Suggestions removed;
+    - MCP read-only (a test proves no tool writes);
+    - play links without "send an idea";
+    - three roles: Owner, Agency admin, Viewer.
+  - Migrations `20270101000000` to `20270105000000`.
+  - Reviewed adversarially, and clicked through locally as Owner, Agency admin, Viewer, guest and unlisted.
+  - The copy tooling now imports at `COPY_BASE_VERSION` (`20261231000000`) and then runs `migrate`, so the strip runs on
+    the real data. Neon `main` (Preview) was rebuilt that way from a fresh export on 28 Oct, and verified.
+  - Not built yet: Viewers running saved scenarios. That comes with the sandbox (`docs/plans/sandbox-design.md`).
+- **The Sandbox: phases 1–3 built 28–29 Oct, plus polish** (`docs/plans/sandbox-design.md`, `sandbox-p1-brief.md`,
+  `sandbox-p2-brief.md`, `sandbox-p3-brief.md`). Each phase was reviewed adversarially.
+  - **Phase 1:** one scenario model (`sandbox_scenarios`, migration `20270109000000`), the Sandbox page replacing Forecast,
+    and save, run and compare.
+  - **Phase 2:** profit, overheads, hourly billing, and the sales and money series.
+  - **Phase 3:** churn drivers as chances, client value ranges, the price rise and its trade-off, clients and churn on
+    rosters and groups, role cost, the hiring delay, monthly channels and a pinned warm-up. ENGINE is 1.13.0.
+  - **Migrations:** up to `20270112000000`, all applied on Neon `main` (Preview).
+  - **Phase 4 (time by purpose):** built and reviewed, ENGINE 1.14.0. Austin's defaults: sale-side steps count as
+    "Moves the client's job forward"; Client upkeep is its own row; Viewers see "You" plus "Everyone else".
+  - **Phases 5a and 5b:** built and reviewed.
+    - **5a:** the runner moved to `packages/db/src/sandbox`; MCP `list_scenarios` and saved-mode `run_scenario`;
+      change notes; CSV and print exports; the "When" timing; and the silent-sliders fix.
+    - **5b:** goal seek and the tornado chart (Viewers read-only, as Opus's default; Austin can say no), plus the
+      scenario share link, and the 5a review's leftovers. 5b's review fixed an overheads leak into Financials-off
+      links; production never had overheads.
+  - **Migrations:** up to `20270117000000`, all applied on Neon `main` (Preview).
+  - **The whole sandbox design is built.** Open for Austin:
+    - whether Viewers may run goal seek and the tornado;
+    - whether "Client decision" counts as winning work;
+    - the "Everyone else" row in two-person teams;
+    - his QA findings.
+- **Next:**
+  - **Austin's QA** on the preview.
+  - **7c, cutover:** a freeze, emptying Neon `main` (it now holds the QA copy), a fresh copy into it, Austin adds Production to the Neon connection, then merge to
+    `main` by PR.
+  - **The strip list** comes after.
+- **Decisions Opus made, for Austin to confirm:**
+  - Admin = agency admin; Editor/Viewer are a floor on every workspace at sign-in.
+  - Restricted-link outsiders sign in as guests.
+  - The logo limit stays 512 KB; logo changes are audited.
+  - Copied users get access rules: agency admins become admin; owners and editors become editor; everyone else viewer.
+  - Logo URLs carrying the current hash are cached for good.
 
 ## Where things stand
 
@@ -146,42 +245,42 @@ as in the app).
 
 ## Operations
 
-**Production SQL** (Supabase project `vgsjkpwvxkpqvyazwcyq`, via the Management API; allowed in
-`.claude/settings.json`):
+**Database SQL** (psql on `DATABASE_URL`, the owner's connection string, stopping at the first error):
 
 ```sh
-bash packages/db/scripts/prod-sql.sh -c "select 1"
-bash packages/db/scripts/prod-sql.sh -f apply.sql
+bash packages/db/scripts/db-sql.sh -c "select 1"
+bash packages/db/scripts/db-sql.sh -f checks.sql
 ```
 
+`db-sql.sh` replaces `prod-sql.sh` (Supabase's Management API). Use it for preflight and post-apply checks, not to apply
+migrations. The app's queries connect as `authenticator` (`APP_DATABASE_URL`), made by
+`packages/db/scripts/create-app-login.sql`; see `docs/production-migrations.md`.
+
 **Applying a migration:**
-1. Before merging the PR, write an apply file:
-   - `begin;`
-   - the migration's SQL
-   - `insert into supabase_migrations.schema_migrations (version, name, statements) values ('<version>', '<name>', array[$mig$<the migration SQL>$mig$]);`
-   - `commit;`
-2. Run preflight queries for anything that could fail on real data.
-3. Apply the file.
-4. Verify: tables, row-level security, policies, and the `schema_migrations` row.
-5. Merge the PR, then update the log.
+1. Run preflight queries for anything that could fail on real data (`db-sql.sh -c` or `-f`).
+2. `pnpm --filter @transpera-flow/db migrate --dry-run` lists what is pending; `pnpm --filter @transpera-flow/db migrate`
+   applies it. Each file runs in its own transaction and is recorded in `public.schema_migrations`; two runs at once wait
+   for each other. There is no apply file and no `supabase_migrations` row any more. The runner sets no `lock_timeout`
+   (`prod-sql.sh` did), so a migration that takes a strong lock on a busy table sets its own (`set local lock_timeout = '5s';`).
+3. Verify: tables, row-level security, policies, and the `schema_migrations` row.
+4. Merge the PR, then update the log in `docs/production-migrations.md`.
 
 - **Migration order:** migrations apply in file-name order. A migration landing after a later-numbered one
   must be renumbered.
 - **`save_fields`:** each migration that redefines `save_fields` must copy the **latest** definition and
   append to its allow-list, because the last definition wins.
+- After changing a function or table, regenerate `db-types.ts`, `json-columns.ts` and `function-types.ts` with
+  `pnpm --filter @transpera-flow/db gen:types`; a test fails if `function-types.ts` is stale.
 
 **CI:**
-- The GitHub `check` job runs lint, typecheck, tests, the build, and the PostgREST end-to-end tests. Each PR
+- The GitHub `check` job runs lint, typecheck, tests, the build, and the end-to-end tests. Each PR
   also gets a Vercel preview.
 - In the cloud container there is no `gh`; use the GitHub MCP tools. Squash-merge with the full head SHA as
   `expectedHeadSha`. Branch protection requires the `check` status: merging while it runs returns 405.
-- Per ticket: build, Opus review, fixes, merge `origin/main` (regenerate `bootstrap.sql` with
-  `pnpm --filter @transpera-flow/db gen:bootstrap`, never by hand), CI green, production preflight, apply
-  (`prod-sql.sh -f <apply file>`, which sets `lock_timeout`), post-apply checks, mark the row applied and push, CI, merge,
-  comment on the issue.
-- `prod-sql.sh` gotchas: errors come back as curl exit 22 with a 400; `[]` means success. Write SQL to a file first. Function
-  bodies store `can''t`, so a `like` against them needs `can''''t`; cast `"char"` columns (`tgenabled::text`); compare
-  `proconfig` with `array['search_path=""']`.
+- Per ticket: build, Opus review, fixes, merge `origin/main` (regenerate generated files with their `gen:*` script, never by
+  hand), CI green, production preflight (`db-sql.sh`), apply (`migrate`), post-apply checks, mark the row applied and push,
+  CI, merge, comment on the issue.
+- Catalog gotchas: cast `"char"` columns (`tgenabled::text`); compare `proconfig` with `array['search_path=""']`.
 - `apps/web/test/format.test.ts` (£27.4K) fails only in the cloud container (ICU); it passes in CI.
 - **Container restarts** stop background agents mid-task (it happened once this session). Agents that pushed after every
   step lost nothing; re-launch a fresh agent with what's pushed and what's left. Postgres stops too: restart it with the
@@ -205,6 +304,7 @@ password to `postgres`.
 
 **Secrets:**
 - `SUPABASE_ACCESS_TOKEN` is set in the cloud environment.
+- `APP_DATABASE_URL` (the `authenticator` login) is set for Vercel Preview; never print it or `DATABASE_URL`.
 - `ANTHROPIC_API_KEY` is set in Vercel (Production and Preview) for narration (#29). Without it, "explain this run" prints
   the templated text.
 
@@ -261,7 +361,6 @@ deterministic. Production has only one account (the agency admin), so smoke test
 - An editor changes a client health rule; the owner's change log names them (B1 3/3).
 - Upload a logo (B5); restore a large workspace on a preview (B21: the 40 s function timeout is verified only on plain
   PostgREST), with per-person times on, and check they come back (#228).
-- Create a share link and a play link and open them signed out (B3, B4).
 - Switch per-person times on (Settings → Simulation), set one, check the change log names the step (C6, #230).
 - Import a step log with a Person column and apply the proposed per-person times (#227).
 - Open the app on a phone: pages read, nothing edits; check dark mode.
@@ -287,7 +386,7 @@ deterministic. Production has only one account (the agency admin), so smoke test
 ## Open items for Austin's QA
 
 - The lost-revenue definition, and the starter scenarios (see the decision above).
-- Larkspur (the second sample workspace) is not seeded in production; it's only at `/demo/larkspur`.
+- Larkspur (the second sample workspace) is not seeded in production; it is a fixture for the engine's golden tests (the `/demo/larkspur` page is gone).
 - The /privacy wording added with #29 (narration sends model numbers to Anthropic).
 - A live narration check on production (the API key is set).
 - The two-browser Realtime test: presence plus live changes.
@@ -341,7 +440,7 @@ simulation, waits for Austin's end-of-build review.
 
 - **Next.js 16:** `proxy.ts` replaces middleware, and request APIs are async. Read `apps/web/AGENTS.md` and the
   bundled docs before writing Next code.
-- **Demo mode:** without Supabase env vars, the app redirects to `/demo`, which runs Northbeam from the fixtures.
+- **No demo mode:** the `/demo` pages are gone (P0); without the database and auth settings the home and sign-in pages answer 404.
 - **Engine determinism:** never use `Math.log`/`Math.exp` in the engine; use `det-math.ts`. Any change that moves
   golden-model numbers needs an `ENGINE_VERSION` bump and `golden:approve` (see `docs/engine-versioning.md`).
 - **Fixtures are the source of truth for sample data:** after changing them or a migration, run

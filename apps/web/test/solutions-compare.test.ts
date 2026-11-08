@@ -1,28 +1,17 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { NORTHBEAM_PROCESS_ID, NORTHBEAM_WORKSPACE_ID, northbeamIssues, northbeamStepIds as ids, toEngineModel, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
-import { STABLE_MARKET, withMarketCondition } from "@transpera-flow/engine";
+import { NORTHBEAM_PROCESS_ID, NORTHBEAM_WORKSPACE_ID, northbeamStepIds as ids, type SolutionRow } from "@transpera-flow/db";
 import { MrrChart } from "@/components/overview/charts";
-import { demoMarket } from "@/lib/market-demo";
 import { solutionCopy } from "@/lib/solutions/bundle";
-import { SCHEDULE_KEY, compareMaps, overallResult, pinProblems, stressConditions, stressTargets, toneWord } from "@/lib/solutions/compare";
-import { solutionType } from "@/lib/solutions/cards";
-import { runStress, stressKey, type StressRow } from "@/lib/solutions/stress";
-import { demoSolutionsNow, markDemoSolutionAi } from "@/lib/solutions/demo";
-import { markDemoIdeaBuilt } from "@/lib/demo/company-store";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { checkTarget } from "@/lib/solutions/verdict";
-import { simulate } from "@transpera-flow/engine";
+import { changeLines } from "@/lib/solutions/changes";
+import { compareMaps } from "@/lib/solutions/compare";
 import { demoBundle } from "@/lib/sources/demo";
 
-// The Solution page's comparison (issue #115, A50 slice 2): the two maps, the market conditions to stress under, the targets checked,
-// and the stress runner itself, which the worker calls.
+// The Solution page's two maps and its "What it changes" lines (issue #115, A50; Q12, D44). The measures, the stress test and their
+// runner were taken off the page, and their tests with them.
 
 const base = demoBundle();
-const issues = northbeamIssues();
-const [issue] = issues;
 const edited = { ...base, steps: base.steps.map((s) => (s.id === ids.audit ? { ...s, work_hours: 2, work_dist: "constant" as const } : s)) };
 const stamp = "2026-10-05T10:00:00.000Z";
 const solution: SolutionRow = {
@@ -32,26 +21,16 @@ const solution: SolutionRow = {
   base_revision_id: base.revision.id,
   name: "Faster audit",
   notes: "",
+  status: "testing",
   steps: solutionCopy(edited),
   changed_step_ids: [ids.audit],
   lever_changes: [],
+  step_changes: [],
   created_at: stamp,
   updated_at: stamp,
   created_by: null,
 };
-const link: SolutionIssueRow = {
-  solution_id: solution.id,
-  issue_id: issue!.id,
-  workspace_id: NORTHBEAM_WORKSPACE_ID,
-  auto_verdict: null,
-  holds_pct: null,
-  auto_note: "",
-  user_verdict: null,
-  user_notes: "",
-  created_at: stamp,
-  updated_at: stamp,
-  created_by: null,
-};
+const linesOf = (copy: { steps: typeof base.steps; edges: typeof base.edges }) => changeLines(compareMaps(base, { steps: solutionCopy(copy) }));
 
 describe("the two maps", () => {
   it("sets the solution's copy against the version it was copied from and finds what changed", () => {
@@ -70,137 +49,60 @@ describe("the two maps", () => {
   });
 });
 
-describe("the markets", () => {
-  it("runs the workspace's conditions, presets first and then its own", () => {
-    const conditions = stressConditions(demoMarket().marketConditions);
-    expect(conditions.map((c) => c.name)).toEqual(["Boom", "Stable", "Soft", "Downturn", "Cautious 2027"]);
-    expect(conditions.at(-1)).toMatchObject({ preset: null, factors: { leads: 0.92, churn: 1.08 } });
-    expect(conditions[1]!.factors).toEqual(STABLE_MARKET);
+describe("what it changes", () => {
+  const audit = base.steps.find((s) => s.id === ids.audit)!;
+
+  it("says nothing differs for a copy that is the live map", () => {
+    expect(linesOf({ steps: base.steps, edges: base.edges })).toEqual([]);
   });
 
-  it("falls back to the four presets when the workspace has none", () => {
-    expect(stressConditions(undefined).map((c) => c.name).sort()).toEqual(["Boom", "Downturn", "Soft", "Stable"]);
-    expect(stressConditions([]).length).toBe(4);
-  });
-});
-
-describe("your schedule", () => {
-  it("is a row of its own, first, only when the workspace has a schedule", () => {
-    const rows = demoMarket().marketConditions;
-    expect(stressConditions(rows, false).some((c) => c.key === SCHEDULE_KEY)).toBe(false);
-    const withIt = stressConditions(rows, true);
-    expect(withIt[0]).toMatchObject({ key: SCHEDULE_KEY, name: "Your schedule", factors: null });
-    expect(withIt).toHaveLength(6);
-  });
-});
-
-describe("steps nobody can do", () => {
-  it("says so when a step is given to someone no longer active, or to a role that isn't there", () => {
-    expect(pinProblems(base)).toEqual([]);
-    const gone = { ...base, people: base.people.map((p) => ({ ...p, active: false })), steps: base.steps.map((s) => (s.id === ids.audit ? { ...s, person_id: base.people[0]!.id } : s)) };
-    const [note] = pinProblems(gone);
-    expect(note).toMatch(/no longer active \(Audit & proposal\)/);
-    const noRole = { ...base, roles: [], steps: base.steps.map((s) => (s.id === ids.audit ? { ...s, role_id: "nope" } : s)) };
-    expect(pinProblems(noRole).join(" ")).toMatch(/use a role that isn't in the workspace any more \(.*Audit & proposal.*\)/);
-  });
-});
-
-describe("the targets and the result", () => {
-  it("checks each issue the solution solves, over the steps the solution's map has in its area", () => {
-    const c = compareMaps(base, solution);
-    const targets = stressTargets(c, [link, { ...link, issue_id: "gone" }], issues, NORTHBEAM_PROCESS_ID);
-    expect(targets).toHaveLength(1);
-    expect(targets[0]).toMatchObject({ issueId: issue!.id, number: issue!.number, target: { goal: issue!.target_goal } });
-    expect(targets[0]!.area).toContain(ids.audit);
+  it("says what a changed step changed, in plain words", () => {
+    const lines = changeLines(compareMaps(base, solution));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ kind: "changed" });
+    expect(lines[0]!.text).toContain(`“${audit.name}”`);
+    expect(lines[0]!.text).toMatch(/→/);
   });
 
-  it("is a pass only if every issue that could be checked passes", () => {
-    expect(overallResult([{ status: "pass" }, { status: "pass" }])).toBe("pass");
-    expect(overallResult([{ status: "pass" }, { status: "fail" }])).toBe("fail");
-    expect(overallResult([{ status: "pass" }, { status: "unchecked" }])).toBe("pass");
-    expect(overallResult([{ status: "unchecked" }])).toBe("unchecked");
-    expect(overallResult([])).toBe("unchecked");
+  it("says a step was added, and a step was removed", () => {
+    const extra = { ...audit, id: "00000000-0000-4000-8000-0000000000e1", name: "Second look" };
+    const added = linesOf({ steps: [...base.steps, extra], edges: base.edges });
+    expect(added).toEqual([{ kind: "added", text: "Added step “Second look”" }]);
+    const removed = linesOf({ steps: base.steps.filter((s) => s.id !== ids.audit), edges: base.edges.filter((e) => e.from_step_id !== ids.audit && e.to_step_id !== ids.audit) });
+    expect(removed.filter((l) => l.kind === "removed")).toEqual([{ kind: "removed", text: `Removed step “${audit.name}”` }]);
   });
 
-  it("words the engine's tone as better, worse or about the same", () => {
-    expect([toneWord("good"), toneWord("bad"), toneWord(null)]).toEqual(["Better", "Worse", "About the same"]);
-  });
-});
-
-describe("the stress runner", () => {
-  const c = compareMaps(base, solution);
-  const baseModel = toEngineModel(c.base);
-  const solved = toEngineModel(c.solved);
-  const targets = stressTargets(c, [link], issues, NORTHBEAM_PROCESS_ID);
-  const conditions = stressConditions(demoMarket().marketConditions).filter((x) => ["stable", "downturn"].includes(x.preset ?? ""));
-  const run = (): StressRow[] => {
-    const rows: StressRow[] = [];
-    runStress({ base: baseModel, solved, conditions, targets, reps: 6, seed: 1 }, (r) => rows.push(r));
-    return rows;
-  };
-
-  it("hands back a row per condition, in order, as each is done", () => {
-    const rows = run();
-    expect(rows.map((r) => r.name)).toEqual(["Stable", "Downturn"]);
-    for (const r of rows) {
-      expect(r.verdicts).toHaveLength(1);
-      expect(["pass", "fail", "unchecked"]).toContain(r.verdicts[0]!.status);
-      expect(r.mrr.live).toBeGreaterThan(0);
-      expect(r.mrr.solution).toBeGreaterThan(0);
-    }
-    // The market changes the numbers: a downturn bills less than a stable market.
-    expect(rows[1]!.mrr.solution).toBeLessThan(rows[0]!.mrr.solution);
+  it("calls two steps taken out and one put in a merge", () => {
+    const work = base.steps.filter((s) => s.kind !== "start" && s.kind !== "end");
+    const [a, b] = work as [typeof audit, typeof audit];
+    const merged = { ...a, id: "00000000-0000-4000-8000-0000000000e2", name: "One step instead of two" };
+    const steps = [...base.steps.filter((s) => s.id !== a.id && s.id !== b.id), merged];
+    const lines = linesOf({ steps, edges: base.edges.filter((e) => ![a.id, b.id].some((id) => e.from_step_id === id || e.to_step_id === id)) });
+    expect(lines.filter((l) => l.kind === "merged")).toEqual([{ kind: "merged", text: `Merged “${a.name}” and “${b.name}” into “One step instead of two”` }]);
+    expect(lines.filter((l) => l.kind === "added" || l.kind === "removed")).toEqual([]);
   });
 
-  it("uses the same goal reading and verdict as the Editor and the server", () => {
-    const stable = run()[0]!;
-    const model = withMarketCondition(solved, STABLE_MARKET);
-    const direct = checkTarget({ target: targets[0]!.target, model, result: simulate(model, 6, 1), area: targets[0]!.area });
-    expect(stable.verdicts[0]).toMatchObject({ status: direct.status, holdsPct: direct.holdsPct, note: direct.note });
+  it("says a step turned into a group, and which steps now do its work, in one line", () => {
+    const groupId = "00000000-0000-4000-8000-0000000000f0";
+    const kid = (n: number) => ({ ...audit, id: `00000000-0000-4000-8000-0000000000f${n}`, name: `Part ${n}`, parent_step_id: groupId });
+    const swap = (id: string) => (id === ids.audit ? groupId : id);
+    const live = { ...base, steps: base.steps.map((s) => (s.id === ids.audit ? { ...s, id: groupId } : s)), edges: base.edges.map((e) => ({ ...e, from_step_id: swap(e.from_step_id), to_step_id: swap(e.to_step_id) })) };
+    const steps = [...live.steps.map((s) => (s.id === groupId ? { ...s, kind: "group" as const, name: "Approval block", role_id: null, person_id: null, work_hours: 0 } : s)), kid(1), kid(2)];
+    expect(changeLines(compareMaps(live, { steps: solutionCopy({ steps, edges: live.edges }) }))).toEqual([
+      { kind: "replaced", text: `Replaced “${audit.name}” with the group “Approval block”: Part 1, Part 2` },
+    ]);
   });
 
-  it("gives the same answer every time", () => {
-    expect(run()).toEqual(run());
-  });
-
-  it("runs the models as they are for the schedule row, not a flat market", () => {
-    const rows: StressRow[] = [];
-    runStress({ base: baseModel, solved, conditions: [{ key: SCHEDULE_KEY, name: "Your schedule", preset: null, factors: null }], targets, reps: 6, seed: 1 }, (r) => rows.push(r));
-    const direct = simulate(solved, 6, 1);
-    const v = checkTarget({ target: targets[0]!.target, model: solved, result: direct, area: targets[0]!.area });
-    expect(rows[0]!.verdicts[0]).toMatchObject({ status: v.status, holdsPct: v.holdsPct, note: v.note });
-  });
-
-  it("is keyed by content: the same targets and conditions in new arrays are the same request, so a re-render doesn't restart it", () => {
-    expect(stressKey(targets, conditions)).toBe(stressKey(structuredClone(targets), structuredClone(conditions)));
-    expect(stressKey(targets, conditions)).not.toBe(stressKey(targets, conditions.slice(1)));
-    const hook = readFileSync(join(__dirname, "..", "src", "lib", "solutions", "use-stress.ts"), "utf8");
-    // The run starts on the key, not on the arrays; the old rows are cleared when a new request starts; the worker is stopped on an error.
-    expect(hook).toContain("stressKey(targets, conditions)");
-    expect(hook).toMatch(/\[base, solved, key, reps, seed\]/);
-    expect(hook).toMatch(/onerror[\s\S]*stop\(\)/);
-    expect(hook).toMatch(/\? held\.value : WAITING/);
-  });
-});
-
-describe("the demo marks a solution built from an idea as an AI block", () => {
-  it("records the solution when Build it marks the idea built", () => {
-    expect(demoSolutionsNow().aiIds).not.toContain("sol-direct");
-    markDemoSolutionAi("sol-direct");
-    expect(demoSolutionsNow().aiIds).toContain("sol-direct");
-    markDemoSolutionAi("sol-direct");
-    expect(demoSolutionsNow().aiIds.filter((i) => i === "sol-direct")).toHaveLength(1);
-    markDemoIdeaBuilt("any-idea", "sol-from-idea");
-    expect(demoSolutionsNow().aiIds).toContain("sol-from-idea");
-    expect(solutionType({ id: "sol-from-idea" }, demoSolutionsNow().aiIds)).toBe("AI block");
-  });
-});
-
-describe("the solution's type", () => {
-  it("reads AI block for a solution built from an AI idea, and By hand otherwise or when nothing is known", () => {
-    expect(solutionType({ id: "s1" }, ["s1"])).toBe("AI block");
-    expect(solutionType({ id: "s2" }, ["s1"])).toBe("By hand");
-    expect(solutionType({ id: "s1" })).toBe("By hand");
+  it("says when the odds on a route between two steps were changed, and when a route was added or taken out", () => {
+    const [edge] = base.edges.filter((e) => base.steps.find((s) => s.id === e.from_step_id)?.kind !== "start" && base.steps.find((s) => s.id === e.to_step_id)?.kind !== "end");
+    const odds = linesOf({ steps: base.steps, edges: base.edges.map((e) => (e.id === edge!.id ? { ...e, probability: 0.25 } : e)) });
+    expect(odds).toHaveLength(1);
+    expect(odds[0]).toMatchObject({ kind: "rerouted" });
+    expect(odds[0]!.text).toMatch(/share of the work goes from \d+% to 25%/);
+    const gone = linesOf({ steps: base.steps, edges: base.edges.filter((e) => e.id !== edge!.id) });
+    expect(gone[0]!.text).toMatch(/^Removed the route from/);
+    const added = linesOf({ steps: base.steps, edges: [...base.edges, { ...edge!, id: "00000000-0000-4000-8000-0000000000e3", probability: 0.4 }] });
+    expect(added[0]!.text).toMatch(/^New route from .* taking 40% of the work$/);
   });
 });
 

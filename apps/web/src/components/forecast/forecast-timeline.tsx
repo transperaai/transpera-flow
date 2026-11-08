@@ -9,13 +9,14 @@
 // It takes `TimelineData` (lib/forecast/timeline.ts), so any month-by-month run can draw it: the Overview's team load
 // chart (B15) included.
 
+import { FloatingTip } from "@/components/ui/floating-tip";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { RATING_RULES, bandOf, isTooBusy, type MonthBusy, type Stat } from "@transpera-flow/engine";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { labelIndexes } from "@/lib/overview/axis";
 import type { TimelineData, TimelineMarker, TimelineRow } from "@/lib/forecast/timeline";
-import { longDate, shortDate, type PlanLaneMarker } from "@/lib/forecast/lane";
-import { addDays, dateAtPosition, monthIndexOfDate, positionOfDate, stepDate } from "@/lib/forecast/positions";
+import { longDate, shortDate, type PlanLaneMarker } from "@/lib/sandbox/lane";
+import { addDays, dateAtPosition, monthIndexOfDate, positionOfDate, stepDate } from "@transpera-flow/db/sandbox";
 
 function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
   const ref = useRef<T>(null);
@@ -91,9 +92,10 @@ export function TimelineLegend({
       )}
       {hasPlan && (
         <>
-          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">▲</span>}>Hire in your plan</TimelineLegendItem>
-          <TimelineLegendItem swatch={<i aria-hidden className="h-2 w-4 rounded-sm bg-edit" />}>Leave in your plan</TimelineLegendItem>
+          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">▲</span>}>Hire in your scenario</TimelineLegendItem>
+          <TimelineLegendItem swatch={<i aria-hidden className="h-2 w-4 rounded-sm bg-edit" />}>Leave in your scenario</TimelineLegendItem>
           <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">◆</span>}>Solution goes live</TimelineLegendItem>
+          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">●</span>}>Other change from a month</TimelineLegendItem>
         </>
       )}
       {hasMarket && <TimelineLegendItem swatch={<i aria-hidden className="h-2.5 w-4 rounded-sm border border-line-2 bg-[repeating-linear-gradient(135deg,var(--line-2)_0_2px,transparent_2px_5px)]" />}>Market condition</TimelineLegendItem>}
@@ -110,7 +112,7 @@ function peakOf(row: TimelineRow, months: TimelineData["months"]): string {
   return best < 0 ? "Not there" : `Peaks at ${formatPercent(row.series[best]!.mean)} in ${months[best]!.short}`;
 }
 
-/** The "Your plan" lane (B7, issue #36): a plan's markers, which can be dragged along the months or moved by keyboard. */
+/** The scenario lane (Sandbox): a scenario's timed changes, which can be dragged along the months or moved by keyboard. */
 export interface PlanLane {
   /** The markers to draw (those inside the span), in the plan's order. */
   markers: PlanLaneMarker[];
@@ -130,8 +132,8 @@ export interface PlanLane {
 
 /** What each marker kind snaps to when it is dragged or stepped: hires and solutions by month, leave by week. */
 const snapOf = (kind: PlanLaneMarker["kind"]): "month" | "week" => (kind === "leave" ? "week" : "month");
-const KIND_WORD = { hire: "Hire", leave: "Leave", solution: "Solution" } as const;
-const LABEL_TAIL = / (starts|on leave|goes live)( \(already started\))?$/;
+const KIND_WORD = { hire: "Hire", leave: "Leave", solution: "Solution", change: "Change" } as const;
+const LABEL_TAIL = / (starts|goes live|on leave for \d+ weeks?)( \(already started\))?$/;
 
 export function ForecastTimeline({
   data,
@@ -153,6 +155,7 @@ export function ForecastTimeline({
   const busyLine = cutoffs[1];
   const [ref, measured] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
+  const [tipAt, setTipAt] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   /** A marker being dragged: where its anchor is in the chart (px), and whether the pointer has moved far enough to be a drag. */
   const [drag, setDragState] = useState<{ id: string; x: number; moved: boolean } | null>(null);
@@ -211,7 +214,7 @@ export function ForecastTimeline({
     setAnnounce(`${mk.label.replace(" (already started)", "")} moved to ${longDate(date)}. Updating the forecast…`);
   };
   const markerKey = (e: React.KeyboardEvent, mk: PlanLaneMarker) => {
-    if (!plan || !plan.editable) return;
+    if (!plan || !plan.editable || mk.inherited) return;
     const snap = snapOf(mk.kind);
     const { first, last } = edgeDates(mk.kind);
     const steps = (dir: 1 | -1, k: number) => {
@@ -251,7 +254,7 @@ export function ForecastTimeline({
   };
   const svgLeft = () =>svgRef.current?.getBoundingClientRect().left ?? 0;
   const markerDown = (e: React.PointerEvent<SVGGElement>, mk: PlanLaneMarker) => {
-    if (!plan?.editable || e.button !== 0) return;
+    if (!plan?.editable || mk.inherited || e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const x = markerX(mk);
     grab.current = { x0: e.clientX, offset: e.clientX - svgLeft() - x };
@@ -287,6 +290,7 @@ export function ForecastTimeline({
           </text>
         </>
       );
+    if (kind === "change") return <circle cx={x} cy={laneMid} r={6} fill={fill} {...stroke} />;
     return <path d={`M${x},${laneMid - 8} L${x + 7},${laneMid} L${x},${laneMid + 8} L${x - 7},${laneMid} Z`} fill={fill} {...stroke} />;
   };
   /** A row's name and what it adds, on two lines (wide) or one (narrow). */
@@ -378,7 +382,10 @@ export function ForecastTimeline({
         role="img"
         aria-label={label}
         className="block overflow-visible"
-        onPointerMove={(e) => pointerMove(e.clientX, e.currentTarget.getBoundingClientRect().left)}
+        onPointerMove={(e) => {
+          pointerMove(e.clientX, e.currentTarget.getBoundingClientRect().left);
+          setTipAt({ x: e.clientX, y: e.clientY });
+        }}
         onPointerLeave={() => setHover(null)}
       >
         <defs>
@@ -409,6 +416,7 @@ export function ForecastTimeline({
               <line x1={x(i)} x2={x(i)} y1={TOP - 4} y2={height - AXIS} stroke="var(--line)" strokeWidth={1} />
               <text x={x(i)} y={height - 7} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} className="fill-fg-3 text-[11px]">
                 {mo.short}
+                {mo.partial ? "*" : ""}
               </text>
             </g>
           ) : null,
@@ -482,7 +490,7 @@ export function ForecastTimeline({
         {plan && (
           <g data-plan-lane>
             <text x={0} y={compact ? TOP + 13 : laneMid + 4} className="fill-fg text-[12px] font-medium">
-              Your plan
+              This scenario
             </text>
             <line x1={m.l} x2={m.l + plotW} y1={laneTop + LANE} y2={laneTop + LANE} stroke="var(--line-2)" strokeWidth={1} />
             {plan.markers.map((mk) => {
@@ -493,21 +501,28 @@ export function ForecastTimeline({
               const hitW = wide ? Math.max(28, x1 - x0 + 8) : 28;
               const active = drag?.id === mk.id && drag.moved;
               const name = mk.label.replace(LABEL_TAIL, "");
+              // Only a marker that can be moved is a slider with a grab cursor. A Viewer's, a phone's and a parent's change are just drawn.
+              const movable = plan.editable && !mk.inherited;
+              const said = `${mk.label}, ${longDate(mk.date)}${mk.problem ? `. ${mk.problem}` : ""}`;
               return (
                 <g
                   key={mk.id}
-                  role="slider"
-                  tabIndex={0}
-                  className="group cursor-grab outline-none"
+                  {...(movable
+                    ? {
+                        role: "slider",
+                        tabIndex: 0,
+                        "aria-label": `${KIND_WORD[mk.kind]}: ${name}`,
+                        "aria-valuemin": 0,
+                        "aria-valuemax": n - 1,
+                        "aria-valuenow": monthIndexOfDate(mk.date, plan.startDate, plan.bounds, plan.hoursPerWeek),
+                        "aria-valuetext": said,
+                      }
+                    : { role: "img", "aria-label": `${KIND_WORD[mk.kind]}: ${said}` })}
+                  className={movable ? "group cursor-grab outline-none" : "group outline-none"}
                   data-plan-marker={mk.id}
                   data-kind={mk.kind}
-                  aria-label={`${KIND_WORD[mk.kind]}: ${name}`}
-                  aria-valuemin={0}
-                  aria-valuemax={n - 1}
-                  aria-valuenow={monthIndexOfDate(mk.date, plan.startDate, plan.bounds, plan.hoursPerWeek)}
-                  aria-valuetext={`${mk.label}, ${longDate(mk.date)}${mk.problem ? `. ${mk.problem}` : ""}`}
                   opacity={active ? 0.4 : 1}
-                  style={{ touchAction: "none", cursor: plan.editable ? (active ? "grabbing" : "grab") : "default" }}
+                  style={{ touchAction: "none", cursor: movable ? (active ? "grabbing" : "grab") : "default" }}
                   onPointerDown={(e) => markerDown(e, mk)}
                   onPointerMove={(e) => markerMove(e, mk)}
                   onPointerUp={(e) => markerUp(e, mk)}
@@ -544,13 +559,11 @@ export function ForecastTimeline({
           <line x1={x(hover)} x2={x(hover)} y1={TOP - 4} y2={height - AXIS} stroke="var(--fg-3)" strokeDasharray="3 3" pointerEvents="none" />
         )}
       </svg>
-      {shown && hover !== null && (
-        <div
-          role="presentation"
-          className="pointer-events-none absolute top-0 z-10 w-max max-w-64 rounded-lg border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-md"
-          style={{ left: x(hover) + 12 + 240 > width ? Math.max(0, x(hover) - 252) : x(hover) + 12 }}
-        >
-          <p className="font-medium">{shown.long}</p>
+      <FloatingTip at={shown && hover !== null ? tipAt : null} placement="side">
+        {shown && hover !== null && (
+        <>
+          <p className="font-medium">{shown.label}</p>
+          {shown.partial ? <p className="text-muted-foreground">Part month</p> : null}
           {data.market.filter((b) => hover >= b.from && hover <= b.to).map((b) => (
             <p key={b.name} className="text-muted-foreground">
               Market: {b.name}
@@ -591,8 +604,9 @@ export function ForecastTimeline({
               {mk.label}, {mk.when}
             </p>
           ))}
-        </div>
-      )}
+        </>
+        )}
+      </FloatingTip>
       {plan ? (
         <div aria-live="polite" className="sr-only" data-plan-announce>
           {announce}
@@ -605,7 +619,7 @@ export function ForecastTimeline({
 
 /** The same numbers as a table, for a screen reader. */
 function TimelineTable({ data, busy, cutoffs, plan }: { data: TimelineData; busy: TimelineRow[]; cutoffs: Cutoffs; plan?: PlanLane }) {
-  // Which month each plan marker falls in, for its "Your plan" column.
+  // Which month each plan marker falls in, for its "This scenario" column.
   const planMonth = (mk: PlanLaneMarker) => monthIndexOfDate(mk.date, plan!.startDate, plan!.bounds, plan!.hoursPerWeek);
   const cell = (s: MonthBusy | null, undone: number | null) =>
     s
@@ -632,13 +646,13 @@ function TimelineTable({ data, busy, cutoffs, plan }: { data: TimelineData; busy
           ))}
           <th scope="col">Market</th>
           <th scope="col">Planned</th>
-          {plan ? <th scope="col">Your plan</th> : null}
+          {plan ? <th scope="col">This scenario</th> : null}
         </tr>
       </thead>
       <tbody>
         {data.months.map((mo, i) => (
           <tr key={mo.index}>
-            <th scope="row">{mo.long}</th>
+            <th scope="row">{mo.label}</th>
             {busy.map((r) => (
               <td key={r.id}>{cell(r.series[i] ?? null, r.uncovered?.[i] ?? null)}</td>
             ))}

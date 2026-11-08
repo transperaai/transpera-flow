@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { MARKET_PRESETS, absenceTest, detectIssues, larkspurModel, northbeamModel, northbeamWithChurnDrivers, northbeamWithClientGroups, northbeamWithServicing, simulate, withMarketCondition, type EngineModel, type SimulationResult, type Stat } from "../src";
+import { MARKET_PRESETS, absenceTest, capacityModel, detectIssues, larkspurModel, larkspurWithPurposes, northbeamModel, northbeamWithChances, northbeamWithChannels, northbeamWithChurnDrivers, northbeamWithClientGroups, northbeamWithMoney, northbeamWithServicing, simulate, withMarketCondition, type EngineModel, type SimulateOptions, type SimulationResult, type Stat, type TimeSplit } from "../src";
 
 export const GOLDEN_DIR = new URL("../golden/", import.meta.url);
 export const VERSION_FILE = new URL("../src/version.ts", import.meta.url);
@@ -18,6 +18,8 @@ export interface GoldenModel {
   model: () => EngineModel;
   seed: number;
   reps: number;
+  /** Options for `simulate` (the money model runs month by month). */
+  options?: SimulateOptions;
 }
 
 /**
@@ -61,11 +63,52 @@ export const GOLDEN_MODELS: GoldenModel[] = [
     reps: 30,
   },
   {
+    name: "northbeam-money",
+    description: "Northbeam with its clients counted per service, 18,000 a month of overheads and PPC priced hourly at 95 (clients won in the run bill the hours worked for them): billed revenue by kind, paid labour, overheads, profit, and the monthly sales, revenue and money series.",
+    model: northbeamWithMoney,
+    seed: 1,
+    reps: 30,
+    options: { monthly: true },
+  },
+  {
+    name: "northbeam-chances",
+    description: "northbeam-drivers run for six months with churn drivers as chances (late work measured, account manager changes and a competitor at a monthly chance), PPC clients won paying 3,000 to 6,000 around their price, and a +8% rise in PPC fees from the fourth month with the price driver on (engine 1.12.0): the chance, exposure and effect of each driver, the rise in revenue, and the months.",
+    model: northbeamWithChances,
+    seed: 1,
+    reps: 30,
+    options: { monthly: true },
+  },
+  {
+    name: "northbeam-channels",
+    description: "northbeam-money run for six months with a change in every monthly channel from the third month: enquiries, enquiries that sign, a step's time, a wait, rework, a role's cost, overheads, a person's hours and base churn (engine 1.12.0).",
+    model: northbeamWithChannels,
+    seed: 1,
+    reps: 30,
+    options: { monthly: true },
+  },
+  {
     name: "larkspur",
     description: "Larkspur Creative, the messier agency: overloaded designers, a copywriter on overtime, an 18-client roster with health-driven churn, starting from WIP.",
     model: larkspurModel,
     seed: 1,
     reps: 30,
+  },
+  {
+    name: "larkspur-time",
+    description: "Larkspur Creative run month by month with a purpose on every step (engine 1.14.0): where working time goes, as first-pass hands-on hours by purpose, rework, client hours, idle and hours available, for the team and each role. Every other number is larkspur's.",
+    model: larkspurWithPurposes,
+    seed: 1,
+    reps: 30,
+    options: { monthly: true },
+  },
+  {
+    name: "capacity",
+    description:
+      "The client capacity app's example agency (capacityModel, from the prototype; engine 1.16.0): two departments of three tiers, 26 people with team time and portfolios, 13 named clients beside the counted ones, servicing steps driven by what each tier gets (words, links, channels, ad hoc by chance and requests), a named client's own overrides and hand-holding, and won clients placed on the least busy person who serves the tier. Run month by month, with where each person's time goes by step (and by part of the step, before and after the changes, with the hours each change freed) and their clients by service.",
+    model: capacityModel,
+    seed: 1,
+    reps: 30,
+    options: { monthly: true, personTime: true },
   },
 ];
 
@@ -88,6 +131,14 @@ export function keyOutputs(model: EngineModel, r: SimulationResult) {
     cycleHours: { mean: k.cycle.mean, p50: k.cycle.p50, p90: k.cycle.p90 },
     revenue: { newMrr: stat(k.mrrAdded), billed: stat(k.billed), ltvAdded: stat(k.ltvAdded), lostRevenue: stat(k.lostRevenue) },
     labour: stat(k.labour),
+    // Profit (engine 1.11.0): total billed revenue, hourly work, paid labour, overheads and profit over the run.
+    money: { revenue: stat(k.revenue), revenueHourly: stat(k.revenueHourly), labourCost: stat(k.labourCost!), overheads: k.overheads, profit: stat(k.profit!) },
+    // Models run month by month: the means of the monthly sales, revenue and money series.
+    ...(r.monthly ? { monthly: monthlyMeans(r.monthly) } : {}),
+    // Where the time goes (engine 1.14.0), only for a model whose steps say what they achieve.
+    ...(r.monthly && model.steps.some((s) => s.purpose !== undefined) ? { time: timeMeans(r.monthly.time) } : {}),
+    // Where each person's time goes by step, and their clients by service (engine 1.15.0), only for a run asked for it.
+    ...(r.personTime ? { personTime: r.personTime } : {}),
     overtime: { hours: stat(k.overtimeHours), cost: stat(k.overtimeCost!) },
     clients: k.clientsAtRisk && k.clientsChurned ? { atRisk: stat(k.clientsAtRisk), churned: stat(k.clientsChurned) } : null,
     touchpoints: k.touchpoints ? { onTime: stat(k.touchpoints.onTime), late: stat(k.touchpoints.late), missed: stat(k.touchpoints.missed) } : null,
@@ -129,7 +180,7 @@ export function keyOutputs(model: EngineModel, r: SimulationResult) {
       ? {
           clients: r.churnCauses.clients,
           normalShare: r.churnCauses.normal.share,
-          causes: Object.fromEntries(r.churnCauses.causes.map((c) => [c.id, { share: c.share, mrr: c.mrr, pressure: c.pressure, value: c.value }])),
+          causes: Object.fromEntries(r.churnCauses.causes.map((c) => [c.id, { share: c.share, mrr: c.mrr, pressure: c.pressure, value: c.value, mode: c.mode, chance: c.chance, exposure: c.exposure }])),
           byService: r.churnCauses.byService,
         }
       : null,
@@ -137,6 +188,38 @@ export function keyOutputs(model: EngineModel, r: SimulationResult) {
       ? Object.fromEntries(Object.entries(r.clients).map(([id, c]) => [id, { health: c.health.mean, churned: c.churned, atRisk: c.atRisk }]))
       : null,
   };
+}
+
+const means = (stats: Stat[]) => stats.map((s) => s.mean);
+
+function monthlyMeans(m: NonNullable<SimulationResult["monthly"]>) {
+  return {
+    opportunities: means(m.sales.opportunities),
+    won: means(m.sales.won),
+    lost: means(m.sales.lost),
+    conversion: means(m.sales.conversion),
+    revenue: means(m.revenue.total),
+    recurring: means(m.revenue.recurring),
+    hourly: means(m.revenue.hourly),
+    lostToChurn: means(m.revenue.lostToChurn),
+    rise: means(m.revenue.rise),
+    overtimeHours: means(m.overtimeHours),
+    labour: m.money?.labour ?? null,
+    overtimeCost: m.money ? means(m.money.overtimeCost) : null,
+    profit: m.money ? means(m.money.profit) : null,
+  };
+}
+
+function timeMeans(t: NonNullable<SimulationResult["monthly"]>["time"]) {
+  const split = (x: TimeSplit) => ({
+    purpose: Object.fromEntries(Object.entries(x.purpose).map(([k, v]) => [k, means(v)])),
+    rework: means(x.rework),
+    ongoing: means(x.ongoing),
+    idle: means(x.idle),
+    hours: means(x.hours),
+    uncovered: x.uncovered ? means(x.uncovered) : null,
+  });
+  return { purposes: t.purposes, team: split(t.team), roles: Object.fromEntries(Object.entries(t.roles).map(([id, v]) => [id, split(v)])) };
 }
 
 export type KeyOutputs = ReturnType<typeof keyOutputs>;
@@ -166,7 +249,7 @@ export interface LedgerEntry {
 export function runGolden(g: GoldenModel): KeyOutputs {
   const model = g.model();
   // Through JSON, as the baselines are stored: drops undefined, keeps every double exactly.
-  return JSON.parse(JSON.stringify(keyOutputs(model, simulate(model, g.reps, g.seed)))) as KeyOutputs;
+  return JSON.parse(JSON.stringify(keyOutputs(model, simulate(model, g.reps, g.seed, g.options)))) as KeyOutputs;
 }
 
 const baselineUrl = (name: string) => new URL(`${name}.json`, GOLDEN_DIR);

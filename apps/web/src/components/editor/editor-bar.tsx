@@ -4,6 +4,8 @@
 // banner, the hint for the mode, and the buttons that save. Publish and Discard ask first (issue #104).
 
 import { useState } from "react";
+import Link from "next/link";
+import { Redo2, Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { StepRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
@@ -32,6 +34,8 @@ export interface BlockForm {
   saving: boolean;
   /** What went wrong with the last save, in plain English. */
   error: string | null;
+  /** Editing a block already in the library (Q15), not making a new one. */
+  editing?: boolean;
 }
 
 /** Solution mode's form: the name the solution is saved with, and the save itself. */
@@ -42,11 +46,15 @@ export interface SolutionForm {
   saving: boolean;
   /** What went wrong with the last save, in plain English. */
   error: string | null;
+  /** Set when the save was refused for want of an issue (Q12): where "Edit the process instead" and "Save as a block" go. */
+  refusedWithout: { processHref: string; blockHref: string } | null;
 }
 
+const BLOCK_EDIT_TITLE = "Edit block";
+const BLOCK_EDIT_HINT = "You're editing a block in the library. Nothing changes until you press Save changes, and solutions that already use the block keep their own copy. Cancel goes back to the library.";
 const COMPANY_TITLE = "Draft of the company map";
 const COMPANY_HINT =
-  "You're editing a draft of the company map. Move cards, draw and label handoff lines, or put cards in groups. Handoff lines are pictures: they never change a simulation. The live map doesn't change until you publish.";
+  "You're editing a draft of the company map. Move cards, draw and label handoff lines, or put cards in groups. A line from one pipeline to another (Sales to Onboarding, say) carries each won client on into it; a line to client work is drawn only, because its service runs it. The live map doesn't change until you publish.";
 
 export function EditorBar({
   mode,
@@ -70,7 +78,14 @@ export function EditorBar({
   company = false,
   onTour,
   historyHref,
+  history,
+  problems = null,
+  publishBlocked = null,
 }: {
+  /** Why Publish has to wait on what is wrong with the process (see `publishBlocker`), or null. */
+  publishBlocked?: string | null;
+  /** What stops the process simulating, as one line ("2 things to fix before this can simulate") that jumps to the first (editor brainstorm, item 4). */
+  problems?: { line: string; onJump: () => void; canJump: boolean } | null;
   mode: EditorMode;
   /** What is being edited: the process's name. */
   subject: string;
@@ -101,12 +116,14 @@ export function EditorBar({
   solutionForm?: SolutionForm;
   /** Solution mode only: the issue the solution is built for, if any. */
   issue?: SolutionIssue | null;
-  /** The company map (B11): a picture of the business, so nothing to simulate and the words say "map". */
+  /** The company map (B11): the business as a map of processes (the Sandbox simulates what is on it), so no Simulate here and the words say "map". */
   company?: boolean;
   /** Starts the written tour of the Editor (B18); without it there is no "Take the tour" link. */
   onTour?: () => void;
   /** The History page of what is edited: shows a History button that goes there (after the last edits are saved). */
   historyHref?: string;
+  /** Undo and redo: what each would step over (null when there is nothing to do), and the actions. Without it there are no buttons. */
+  history?: { undoLabel: string | null; redoLabel: string | null; onUndo: () => void; onRedo: () => void };
 }) {
   const info = MODE_INFO[mode];
   const router = useRouter();
@@ -126,7 +143,7 @@ export function EditorBar({
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 bg-edit px-4 py-2.5 text-edit-fg">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <span className="rounded border-[1.5px] border-current px-1.5 py-px font-mono text-[11px] font-semibold tracking-widest uppercase">✎ Editor</span>
-          <h1 className="min-w-0 truncate text-[17px] font-bold">{mode === "solution" && issue ? SOLUTION_FOR_ISSUE.title(issue) : company ? COMPANY_TITLE : info.title(subject)}</h1>
+          <h1 className="min-w-0 truncate text-[17px] font-bold">{mode === "solution" && issue ? SOLUTION_FOR_ISSUE.title(issue) : company ? COMPANY_TITLE : mode === "block" && blockForm?.editing ? BLOCK_EDIT_TITLE : info.title(subject)}</h1>
           {mode === "draft" && (
             <span data-tour="draft" className="rounded-full bg-edit-fg/15 px-2 py-0.5 text-xs font-semibold" aria-live="polite">
               {unpublished ? "Not published yet" : hasDraft ? `Draft version ${draftNumber} · live is version ${liveNumber}` : `New draft (version ${draftNumber}) · live is version ${liveNumber}`}
@@ -134,10 +151,40 @@ export function EditorBar({
             </span>
           )}
           <span className="text-xs opacity-90" aria-live="polite">
-            {mode === "block" ? "Nothing is saved until you press Save to library" : mode === "solution" ? "Nothing is saved until you press Save solution" : saving ? "Saving…" : hasDraft ? "All changes saved to the draft" : "Nothing changed yet"}
+            {mode === "block" ? blockForm?.editing ? "Nothing is saved until you press Save changes" : "Nothing is saved until you press Save to library" : mode === "solution" ? "Nothing is saved until you press Save solution" : saving ? "Saving…" : hasDraft ? "All changes saved to the draft" : "Nothing changed yet"}
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
+          {history && (
+            <div className="flex items-center gap-1" role="group" aria-label="Undo and redo" data-history-buttons>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className={onBar}
+                data-undo
+                aria-label={history.undoLabel ? `Undo: ${history.undoLabel}` : "Undo"}
+                title={history.undoLabel ? `Undo: ${history.undoLabel}` : "Nothing to undo"}
+                disabled={!history.undoLabel}
+                onClick={history.onUndo}
+              >
+                <Undo2 aria-hidden />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className={onBar}
+                data-redo
+                aria-label={history.redoLabel ? `Redo: ${history.redoLabel}` : "Redo"}
+                title={history.redoLabel ? `Redo: ${history.redoLabel}` : "Nothing to redo"}
+                disabled={!history.redoLabel}
+                onClick={history.onRedo}
+              >
+                <Redo2 aria-hidden />
+              </Button>
+            </div>
+          )}
           {mode !== "block" && !company && (
             <>
             <Button type="button" variant="outline" size="sm" className={onBar} data-tour="simulate" onClick={onSimulate} disabled={simulating || !!blocked} title={blocked ?? undefined}>
@@ -181,8 +228,8 @@ export function EditorBar({
                   size="sm"
                   className={cls}
                   data-tour="publish"
-                  disabled={busy || !drafts.draft || !changes}
-                  title={!changes ? "Nothing to publish yet." : undefined}
+                  disabled={busy || !drafts.draft || !changes || !!publishBlocked}
+                  title={!changes ? "Nothing to publish yet." : (publishBlocked ?? undefined)}
                   onClick={() => setConfirming("publish")}
                 >
                   {s.label}
@@ -199,7 +246,7 @@ export function EditorBar({
             if (s.id === "save-block" && blockForm) {
               return (
                 <Button key={s.id} type="button" variant="outline" size="sm" className={cls} disabled={!canSave || blockForm.saving} onClick={blockForm.onSave}>
-                  {blockForm.saving ? "Saving…" : s.label}
+                  {blockForm.saving ? "Saving…" : blockForm.editing ? "Save changes" : s.label}
                 </Button>
               );
             }
@@ -257,12 +304,27 @@ export function EditorBar({
               router.push(exitHref);
             }}
           >
-            Exit editor
+            {mode === "block" && blockForm?.editing ? "Cancel" : "Exit editor"}
           </Button>
         </div>
       </div>
       <p className="border-b border-line bg-edit-soft px-4 py-1.5 text-[12.5px]" role="note">
-        {mode === "solution" && issue ? SOLUTION_FOR_ISSUE.hint : company ? COMPANY_HINT : info.hint}
+        {mode === "solution" && issue ? SOLUTION_FOR_ISSUE.hint : company ? COMPANY_HINT : mode === "block" && blockForm?.editing ? BLOCK_EDIT_HINT : info.hint}
+        {problems && (
+          <button
+            type="button"
+            data-problems-line
+            disabled={!problems.canJump}
+            onClick={problems.onJump}
+            title={problems.canJump ? "Show the first one" : undefined}
+            className="mr-2 inline-flex items-center gap-1.5 rounded-full border border-crit bg-panel px-2 py-0.5 font-semibold text-crit enabled:hover:bg-crit-soft"
+          >
+            <span aria-hidden className="inline-flex size-4 items-center justify-center rounded-full bg-crit text-[10px] font-bold text-crit-fg">
+              !
+            </span>
+            {problems.line}
+          </button>
+        )}
         {onTour && (
           <button type="button" className="ml-2 font-semibold underline" onClick={onTour} data-take-tour>
             Take the tour
@@ -331,9 +393,23 @@ export function EditorBar({
             <Input value={solutionForm.name} maxLength={200} placeholder="Solution name" onChange={(e) => solutionForm.onName(e.target.value)} />
           </label>
           {solutionForm.error && (
-            <p role="alert" className="text-xs font-semibold text-crit">
-              {solutionForm.error}
-            </p>
+            <div role="alert" className="flex min-w-0 flex-1 flex-col gap-2 text-xs" data-solution-refused={solutionForm.refusedWithout ? "" : undefined}>
+              <p className="font-semibold text-crit">{solutionForm.error}</p>
+              {solutionForm.refusedWithout && (
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={solutionForm.refusedWithout.processHref} data-edit-process-instead>
+                      Edit the process instead
+                    </Link>
+                  </Button>
+                  <Button asChild size="sm" variant="outline">
+                    <Link href={solutionForm.refusedWithout.blockHref} data-save-as-block>
+                      Save as a block
+                    </Link>
+                  </Button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

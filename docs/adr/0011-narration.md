@@ -1,5 +1,8 @@
 # 11. Narration: Claude drafts, a number check decides, the template is the floor
 
+> **Superseded: removed 28 Oct 2026, docs/plans/cut-list.md item 1.** In-app AI and findings are gone (migration `20270101000000_drop_in_app_ai.sql` drops the narration data). Kept as history.
+
+
 Date: 30 Sep 2026 · Status: accepted (the executive-summary narration was removed with reports in A32 (#97); "explain this run" remains) · Issue: #29 · Implements PRD §7.3 "LLM", §5 `narrations`, §10 "LLM calls", D2, D15
 
 ## Context

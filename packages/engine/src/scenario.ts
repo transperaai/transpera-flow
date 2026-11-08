@@ -22,7 +22,7 @@
 
 import type { EngineModel, EnginePerson, EngineStep } from "./model";
 import { withClientGroups } from "./clients";
-import { healthRules, servicingLinks, tasksPerWeek } from "./servicing";
+import { clientTasksPerWeek, healthRules, servicingLinks } from "./servicing";
 
 /** Servicing tasks a week per servicing process from the roster's clients, in process id order. */
 export function servicingTasksPerWeek(m: EngineModel): Map<string, number> {
@@ -33,7 +33,7 @@ export function servicingTasksPerWeek(m: EngineModel): Map<string, number> {
     for (const sid of client.services) {
       const service = m.services?.[sid];
       if (!service) continue;
-      for (const link of servicingLinks(m, service)) out.set(link.process, (out.get(link.process) ?? 0) + tasksPerWeek(link.recurrence));
+      for (const link of servicingLinks(m, service)) out.set(link.process, (out.get(link.process) ?? 0) + clientTasksPerWeek(m, client, sid, link.recurrence));
     }
   }
   return new Map([...out].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
@@ -59,7 +59,7 @@ export const MAX_PATCHES = 200;
 /** Fields a patch can address, per collection. */
 export const PATCH_FIELDS = {
   demand: ["leads_per_week", "active_clients", "churn_monthly"],
-  finances: ["retainer"],
+  finances: ["retainer", "overhead_monthly"],
   services: ["price", "mix_share", "churn_health_sensitivity"],
   roles: ["headcount", "cost_rate", "ongoing_hours"],
   people: ["fte"],
@@ -224,7 +224,9 @@ export function applyPatches(model: EngineModel, patches: readonly ScenarioPatch
         else m.churnMonthly = next(m.churnMonthly, 0, 1);
         return;
       case "finances":
-        m.retainer = next(m.retainer, 0);
+        // Overheads a month (sandbox lever C2, whole run); the retainer otherwise.
+        if (target.field === "overhead_monthly") m.overheadMonthly = next(m.overheadMonthly ?? 0, 0);
+        else m.retainer = next(m.retainer, 0);
         return;
       case "health": {
         // Acts on the rules in force: the workspace's, or the estimated defaults where it has none.

@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import type { ProcessCategory } from "@transpera-flow/db";
 import { NewProcessButton } from "@/components/new-process-dialog";
 import { ArchivedBanner } from "@/components/processes/archived-banner";
 import { ProcessesList } from "@/components/processes/processes-list";
@@ -25,10 +26,10 @@ declare global {
 const id = (n: number) => `50000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 const START: ProcessFacts[] = [
-  { id: id(1), name: "Sales", kind: "pipeline", description: "Win new retainers.", parentId: null, live: true, draft: false },
-  { id: id(2), name: "Onboarding", kind: "pipeline", description: null, parentId: id(1), live: true, draft: false },
-  { id: id(3), name: "Monthly reporting", kind: "servicing", description: null, parentId: null, live: true, draft: false },
-  { id: id(4), name: "Ad-hoc requests", kind: "servicing", description: null, parentId: null, live: false, draft: true },
+  { id: id(1), name: "Sales", kind: "pipeline", category: "sales", description: "Win new retainers.", parentId: null, live: true, draft: false },
+  { id: id(2), name: "Onboarding", kind: "pipeline", category: "onboarding", description: null, parentId: id(1), live: true, draft: false },
+  { id: id(3), name: "Monthly reporting", kind: "servicing", category: "routine_client_work", description: null, parentId: null, live: true, draft: false },
+  { id: id(4), name: "Ad-hoc requests", kind: "servicing", category: "ad_hoc", description: null, parentId: null, live: false, draft: true },
 ];
 
 function Harness({ canEdit, refuseArchive }: { canEdit: boolean; refuseArchive?: string }) {
@@ -49,6 +50,11 @@ function Harness({ canEdit, refuseArchive }: { canEdit: boolean; refuseArchive?:
       setFacts((list) => list.map((p) => (p.id === pid ? { ...p, kind } : p)));
       return { status: "ok" };
     },
+    async changeCategory(pid, category: ProcessCategory) {
+      log("category", pid, category);
+      setFacts((list) => list.map((p) => (p.id === pid ? { ...p, category } : p)));
+      return { status: "ok" };
+    },
     async archive(pid) {
       log("archive", pid);
       if (refuseArchive) return { status: "error", message: refuseArchive };
@@ -61,7 +67,7 @@ function Harness({ canEdit, refuseArchive }: { canEdit: boolean; refuseArchive?:
       log("restore", pid);
       const p = archived.find((x) => x.id === pid)!;
       setArchived((list) => list.filter((x) => x.id !== pid));
-      setFacts((list) => [...list, { id: p.id, name: p.name, kind: p.kind, description: null, parentId: null, live: true, draft: false }]);
+      setFacts((list) => [...list, { id: p.id, name: p.name, kind: p.kind, category: p.kind === "pipeline" ? "sales" : "routine_client_work", description: null, parentId: null, live: true, draft: false }]);
       return { status: "ok" };
     },
   };
@@ -71,8 +77,8 @@ function Harness({ canEdit, refuseArchive }: { canEdit: boolean; refuseArchive?:
       {canEdit && (
         <NewProcessButton
           create={async (_prev, form) => {
-            log("create", form.get("name"), form.get("kind"));
-            return form.get("kind") ? {} : { error: "Choose Sales pipeline or Client work." };
+            log("create", form.get("name"), form.get("category"));
+            return form.get("category") ? {} : { error: "Choose what kind of process it is." };
           }}
         />
       )}

@@ -57,7 +57,7 @@ beforeAll(async () => {
   db = await createTestDb({ supabaseDefaultPrivileges: true });
   editor = await createUser(db, "editor@harden.example.com");
   other = await createUser(db, "other@harden.example.com");
-  await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [ws, editor.id]);
+  await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [ws, editor.id]);
   v1 = NORTHBEAM_REVISION_ID;
   v2 = (await commitAs((c) => rpc(c, "open_draft", proc))).revision_id as string;
   expect((await commitAs((c) => rpc(c, "publish_process", proc, true))).status).toBe("published");

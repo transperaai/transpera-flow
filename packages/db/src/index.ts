@@ -1,8 +1,12 @@
 export * from "./types";
 export * from "./issue-status";
 export * from "./source-links";
-export * from "./calibration";
-export type { Database, Json } from "./database.types";
+export * from "./sandbox-levers";
+export { planSandboxScenarios, type SandboxImport } from "./sandbox-import";
+export type { Json } from "./db-types";
+export type { DB } from "./db-types";
+export type { Claims } from "./client";
+export { columns, type SplitColumns } from "./columns";
 export {
   ModelError,
   engineChurnDrivers,
@@ -14,6 +18,7 @@ export {
   seasonalityCurve,
   speedsNormalisedFor,
   hidesPay,
+  resolveBundlePurposes,
   toEngineModel,
   usesCapacityFactors,
   triangularRange,
@@ -21,58 +26,16 @@ export {
   type ModelOptions,
 } from "./model";
 export { loadAnalysisRules, saveAnalysisRules, type AnalysisRules, type SaveAnalysisRulesOutcome } from "./analysis-rules";
-export {
-  AI_DAILY_RUN_LIMIT,
-  AI_RUN_COOLDOWN_SECONDS,
-  AI_SETTING_KEYS,
-  DEFAULT_AI_SETTINGS,
-  reserveAiRun,
-  type AiAnalysisWithRun,
-  type AiReservation,
-  loadAiAnalyses,
-  loadLatestAiAnalyses,
-  loadAiSettings,
-  saveAiAnalysis,
-  saveAiSetting,
-  type AiSettingKey,
-  type AiSettings,
-  type SaveAiAnalysisInput,
-  type SaveAiSettingOutcome,
-} from "./ai";
-export {
-  FINDING_COLUMNS,
-  FINDING_LIMITS,
-  createManualFinding,
-  findingDraftProblem,
-  findingIdOfKey,
-  findingKey,
-  loadFindings,
-  proposeConnectorFinding,
-  readCitations,
-  setFindingStatus,
-  storeProposedFindings,
-  updateFinding,
-  type ConnectorFindingInput,
-  type ConnectorFindingWrite,
-  type FindingDraft,
-  type FindingWrite,
-  type ProposedFinding,
-} from "./findings";
-export { loadLeverSettings, saveLeverSettings, type LeverSettings, type SaveLeverSettingsOutcome } from "./lever-settings";
-export {
-  FIRST_PRINCIPLES_COLUMNS,
-  firstPrinciplesDiffer,
-  firstPrinciplesFromRow,
-  firstPrinciplesToColumns,
-  loadFirstPrinciples,
-  loadFirstPrinciplesFor,
-  resolveFirstPrinciples,
-  saveFirstPrinciples,
-  type FirstPrinciplesOwner,
-  type ResolvedFirstPrinciples,
-  type SaveFirstPrinciplesOutcome,
-} from "./first-principles";
-export { isRetiredStep, partitionSteps } from "./retired";
+export * from "./process-category";
+export * from "./capacity-setup";
+export * from "./capacity-figures";
+export * from "./process-department";
+export * from "./capacity-changes";
+export * from "./sandbox-play";
+export * from "./sandbox-play-series";
+export * from "./sandbox-verdict";
+export { applyCapacityStarter, STARTER_NUMBERS, STARTER_ROLES, STARTER_TIERS, type Queryable as StarterQueryable, type StarterResult } from "./capacity-starter";
+export { isRetiredStep, partitionSteps, retiredSteps } from "./retired";
 export {
   absolutePositions,
   ancestorsOf,
@@ -92,6 +55,7 @@ export {
   type ProcessNode,
   type RollUp,
 } from "./nesting";
+export { NO_PIPELINE_ON_MAP, companyBundle, companyEngineModel, liveMapDifferences, type CompanyBundleResult, type CompanyRunNote, type CompanyRunNoteKind } from "./company-run";
 export { COMPANY_CARD, COMPANY_GAP, DEMO_COMPANY_PROCESS_ID, defaultCompanyPart, holderStepId } from "./company-map";
 export {
   MAX_POISSON_PER_MONTH,
@@ -121,27 +85,12 @@ export {
   type ModelSnapshot,
   type SnapshotProcess,
 } from "./company";
-export {
-  applySuggestion,
-  describeSuggestion,
-  patchProblem,
-  PLAIN_COLUMNS,
-  SUGGESTION_COLUMNS,
-  SuggestionError,
-  suggestionProvenance,
-  suggestionTarget,
-  type ApplyOptions,
-  type SuggestionChange,
-  type SuggestionView,
-} from "./suggestions";
-export { countPendingProposals, loadPlayContacts, loadProposals, PROPOSAL_ROW_COLUMNS, type PlayContact } from "./proposals";
 export { changesSinceRun, runResults, type RunResults, type RunRow } from "./runs";
 export {
   NORTHBEAM_DOMAIN,
   NORTHBEAM_PROCESS_ID,
   NORTHBEAM_REVISION_ID,
   NORTHBEAM_WORKSPACE_ID,
-  northbeamAccess,
   northbeamBundle,
   northbeamClientIds,
   northbeamLeadSourceIds,
@@ -149,6 +98,9 @@ export {
   northbeamPersonIds,
   northbeamRoleIds,
   northbeamScenarios,
+  northbeamSandboxScenarios,
+  NORTHBEAM_HIRE_JANUARY_ID,
+  NORTHBEAM_HIRE_MARCH_ID,
   northbeamServiceIds,
   northbeamServicingProcessIds,
   northbeamServicingStepIds,
@@ -173,8 +125,9 @@ export {
   CHURN_DRIVER_COLUMNS,
   CLIENT_ASSIGNMENT_COLUMNS,
   BLOCK_COLUMNS,
-  FORECAST_PLAN_COLUMNS,
-  loadForecastPlans,
+  SANDBOX_SCENARIO_COLUMNS,
+  loadSandboxScenarios,
+  wholeRunPatches,
   SOLUTION_COLUMNS,
   SOLUTION_ISSUE_COLUMNS,
   loadSolutionIssues,
@@ -196,16 +149,15 @@ export {
   LEAD_SOURCE_COLUMNS,
   listProcesses,
   loadChurnDrivers,
+  loadCapacityInputs,
   loadClientGroups,
   loadClients,
   loadTeam,
-  loadMarket,
-  MARKET_CONDITION_COLUMNS,
-  MARKET_SCHEDULE_COLUMNS,
   loadIssues,
   loadIssuesForReader,
   readerSeesPeople,
   loadLiveProcessBySlug,
+  withCompanyRun,
   loadProcessBundle,
   loadProcessBySlug,
   loadServicingContext,
@@ -222,11 +174,6 @@ export {
   searchSources,
   countSources,
   loadSourceBody,
-  loadSourceFile,
-  SOURCE_FILE_TYPES,
-  MAX_SOURCE_FILE_BYTES,
-  type SourceFile,
-  type SourceFileType,
   existingSourceIds,
   loadDismissedTours,
   dismissTour,
@@ -244,12 +191,13 @@ export {
   type SetupCounts,
   loadLiveParts,
   loadCompanyPartVersion,
+  loadCompanyPartRevision,
+  listCompanyRevisions,
+  type CompanyRevisionListing,
   loadLiveRevisions,
   loadRun,
   loadRuns,
-  loadSuggestions,
   RUN_COLUMNS,
-  SUGGESTION_ROW_COLUMNS,
   SOURCE_COLUMNS,
   SOURCE_LINK_COLUMNS,
   SCENARIO_COLUMNS,
@@ -314,26 +262,17 @@ export {
   EVIDENCE_FIELD_WORDS,
   EVIDENCE_FIELDS,
   MAX_FILE_SOURCES,
-  MAX_FILE_SUGGESTIONS,
   sectionCounts,
   SOURCE_KINDS,
   type Backing,
   type EvidenceField,
   type FileCitation,
-  type FileClient,
-  type FileCompany,
-  type FileDemand,
-  type FileFirstPrinciples,
-  type FileLeadSource,
-  type FilePerson,
-  type FileProposal,
   type FileRange,
-  type FileRole,
-  type FileService,
   type FileSource,
 } from "./process-file-2";
 export { claudePrompt2, PROCESS_FILE_EXAMPLE_2, PROCESS_FILE_SCHEMA_2 } from "./process-file-2-schema";
 export {
+  capacityBlockers,
   findGaps,
   gapInputFromBundle,
   gapInputFromFile,
@@ -344,22 +283,14 @@ export {
   type GapStep,
   type SimulationGap,
 } from "./simulation-gaps";
+export * from "./purposes";
 export * from "./workspace-bundle";
 export * from "./workspace-import";
 export {
   A_TEAM_MEMBER,
   canSeePerson,
-  labelNames,
-  labelsForPeople,
-  labelsUsed,
   hideAiIssueKey,
-  nameAnalysisRow,
-  nameFinding,
-  nameLabels,
-  readPersonLabels,
-  type NameSource,
-  type PersonLabels,
 } from "./person-labels";
 export { OVERTIME_COST_CLAUSE, payFreeIssueFields } from "./issue-pay";
-export * from "./share";
 export { MONEY_SOURCE, moneyRegex, shareMoneyRegex } from "./money";
+export { capacitySetupFromModel } from "./fixtures/capacity-setup-from-model";

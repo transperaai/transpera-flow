@@ -154,10 +154,10 @@ describe("placing processes", () => {
 describe("the library in an ordinary process's editor", () => {
   const ordinary = () => northbeamBundle();
   const lib = (b: ProcessBundle, holders: Record<string, LibraryProcess["holder"]> = {}): LibraryProcess[] => [
-    { id: b.process.id, name: b.process.name, kind: b.process.kind, live: true, holder: holders[b.process.id] ?? null },
-    ...(b.otherProcesses ?? []).map((p) => ({ id: p.process.id, name: p.process.name, kind: p.process.kind, live: true, holder: holders[p.process.id] ?? null })),
-    { id: "00000000-0000-4000-8000-0000000000a1", name: "Onboarding", kind: "servicing" as const, live: true, holder: holders["00000000-0000-4000-8000-0000000000a1"] ?? null },
-    { id: "00000000-0000-4000-8000-0000000000a2", name: "Offboarding", kind: "servicing" as const, live: false, holder: holders["00000000-0000-4000-8000-0000000000a2"] ?? null },
+    { id: b.process.id, name: b.process.name, kind: b.process.kind, category: b.process.category, live: true, holder: holders[b.process.id] ?? null },
+    ...(b.otherProcesses ?? []).map((p) => ({ id: p.process.id, name: p.process.name, kind: p.process.kind, category: p.process.category, live: true, holder: holders[p.process.id] ?? null })),
+    { id: "00000000-0000-4000-8000-0000000000a1", name: "Onboarding", kind: "servicing" as const, category: "routine_client_work" as const, live: true, holder: holders["00000000-0000-4000-8000-0000000000a1"] ?? null },
+    { id: "00000000-0000-4000-8000-0000000000a2", name: "Offboarding", kind: "servicing" as const, category: "routine_client_work" as const, live: false, holder: holders["00000000-0000-4000-8000-0000000000a2"] ?? null },
   ];
   const company = { id: "00000000-0000-4000-8000-00000000c0c0", name: "Company map", company: true };
 

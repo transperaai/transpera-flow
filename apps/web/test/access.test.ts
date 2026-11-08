@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { accessErrorMessage, emailDomain, inviteMessage, isAssignableRole, normalizeDomain, normalizeEmail, personLinkProblem, selectablePeople } from "@/lib/access";
+import { emailDomain, normalizeDomain, normalizeEmail, personLinkProblem, selectablePeople } from "@/lib/access";
+import { DEPLOYMENT_ROLES, DEPLOYMENT_ROLE_LABEL, MEMBERSHIP_ROLE_LABEL, assignableRoles, deploymentErrorMessage, isDeploymentRole } from "@/lib/deployment-rules";
 
 describe("access helpers", () => {
   it("normalises what people paste as a domain", () => {
@@ -15,46 +16,36 @@ describe("access helpers", () => {
     expect(emailDomain("jo@Acme.com")).toBe("acme.com");
   });
 
-  it("only allows roles an owner can assign", () => {
-    expect(isAssignableRole("editor")).toBe(true);
-    expect(isAssignableRole("agency_admin")).toBe(false);
-    expect(isAssignableRole(null)).toBe(false);
+  it("has three roles with the names the product uses", () => {
+    expect(DEPLOYMENT_ROLES).toEqual(["owner", "agency_admin", "viewer"]);
+    expect(DEPLOYMENT_ROLES.map((r) => DEPLOYMENT_ROLE_LABEL[r])).toEqual(["Owner", "Agency admin", "Viewer"]);
+    // On a membership the stored word `owner` is an Agency admin.
+    expect(MEMBERSHIP_ROLE_LABEL).toEqual({ owner: "Agency admin", viewer: "Viewer" });
+    for (const old of ["admin", "editor", "member", null, 3]) expect(isDeploymentRole(old)).toBe(false);
+  });
+
+  it("lets only an Owner hand out the Owner role", () => {
+    expect(assignableRoles(true)).toEqual(["owner", "agency_admin", "viewer"]);
+    expect(assignableRoles(false)).toEqual(["agency_admin", "viewer"]);
   });
 
   it("explains database rejections", () => {
-    const check = (constraint: string) => ({ code: "23514", message: `new row violates check constraint "${constraint}"` });
-    expect(accessErrorMessage(check("workspace_domains_not_free_mail"))).toMatch(/Free email providers/);
-    expect(accessErrorMessage(check("workspace_domains_domain_format"))).toMatch(/doesn't look like a domain/);
-    expect(
-      accessErrorMessage({ code: "23505", message: 'duplicate key value violates unique constraint "workspace_domains_domain_key"' }),
-    ).toMatch(/already used/);
-    expect(accessErrorMessage({ code: "42501", message: "new row violates row-level security policy" })).toMatch(/permission/);
-    expect(accessErrorMessage({ message: "boom" })).toMatch(/Something went wrong/);
+    expect(deploymentErrorMessage({ message: 'duplicate key value violates unique constraint "deployment_access_kind_value_key"' })).toMatch(/already on the list/);
+    expect(deploymentErrorMessage({ message: 'violates check constraint "deployment_access_value_format"' })).toMatch(/company domain/);
+    expect(deploymentErrorMessage({ code: "42501", message: "new row violates row-level security policy" })).toMatch(/Only an Owner can add, change or remove an Owner/);
+    expect(deploymentErrorMessage({ message: "boom" })).toMatch(/Something went wrong/);
   });
 
-  it("refuses linking a person who is already linked to another active membership or a list row", () => {
+  it("refuses linking a person who is already linked to another active membership", () => {
     const rows = [
       { id: "m1", person_id: "p1", active: true },
       { id: "m2", person_id: "p2", active: false },
     ];
-    expect(personLinkProblem("m9", "p1", rows, [])).toMatch(/already linked/);
-    expect(personLinkProblem("m9", "p3", rows, [{ person_id: "p3" }])).toMatch(/already linked/);
+    expect(personLinkProblem("m9", "p1", rows)).toMatch(/already linked/);
     // Their own row, an inactive membership and a free person are fine.
-    expect(personLinkProblem("m1", "p1", rows, [])).toBeNull();
-    expect(personLinkProblem("m9", "p2", rows, [])).toBeNull();
-    expect(personLinkProblem("m9", "p4", rows, [])).toBeNull();
-  });
-
-  it("explains the last-owner guard, whatever else the message carries", () => {
-    const guard = { code: "23514", message: "workspace_keeps_an_owner: a workspace needs at least one owner" };
-    expect(accessErrorMessage(guard)).toBe("A workspace needs at least one owner. Make someone else an owner first.");
-    expect(accessErrorMessage({ message: `ERROR: ${guard.message} (CONTEXT: trigger)` })).toMatch(/needs at least one owner/);
-  });
-
-  it("writes the invite message for the owner to send", () => {
-    expect(inviteMessage("Northbeam", "maya@northbeam.example", "https://flow.example.com/")).toBe(
-      "You've been given access to Northbeam in Transpera Flow. Sign in with Google as maya@northbeam.example at https://flow.example.com/login.",
-    );
+    expect(personLinkProblem("m1", "p1", rows)).toBeNull();
+    expect(personLinkProblem("m9", "p2", rows)).toBeNull();
+    expect(personLinkProblem("m9", "p4", rows)).toBeNull();
   });
 
   it("offers only people nobody else is linked to, keeping the row's own", () => {

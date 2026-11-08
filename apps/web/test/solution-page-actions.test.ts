@@ -1,64 +1,70 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, NORTHBEAM_WORKSPACE_ID, northbeamIssues } from "@transpera-flow/db";
+import { createTestDb, type TestDb } from "../../../packages/db/test/harness";
+import { addMember, signInAs, signOut, type TestUser } from "./action-harness";
 
 // The Server Actions the Solution page calls (issue #115, A50): your verdict and note on a link, and the notes on a solution.
 // They write as the signed-in user; row-level security decides who may (an editor changes a row, anyone else changes none and is told).
+// Runs against a real database with the seeded Northbeam workspace.
 
-const db = vi.hoisted(() => ({
-  signedIn: true,
-  calls: [] as { op: string; args: unknown[] }[],
-  result: { data: [] as unknown[], error: null as { code?: string } | null },
-}));
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => {
-    const chain = {
-      update: (...args: unknown[]) => (db.calls.push({ op: "update", args }), chain),
-      eq: (...args: unknown[]) => (db.calls.push({ op: "eq", args }), chain),
-      select: () => chain,
-      then: (resolve: (v: unknown) => void) => resolve(db.result),
-    };
-    return {
-      auth: { getClaims: async () => ({ data: db.signedIn ? { claims: { sub: "u1" } } : null }) },
-      from: (table: string) => (db.calls.push({ op: "from", args: [table] }), chain),
-    };
-  },
-}));
+vi.mock("@/lib/auth/session", async () => (await import("./action-harness")).sessionMock);
 const { saveSolutionNotes, saveSolutionVerdict } = await import("@/app/w/[slug]/solution-page-actions");
 
-const WS = "a0000000-0000-4000-8000-000000000001";
-const SOL = "5f1c2b4a-0000-4000-8000-000000000009";
-const ISSUE = "3f1c2b4a-0000-4000-8000-000000000001";
-const row = { solution_id: SOL, issue_id: ISSUE, user_verdict: "pass", user_notes: "Fine" };
-const updates = () => db.calls.filter((c) => c.op === "update").map((c) => c.args[0]);
+const WS = NORTHBEAM_WORKSPACE_ID;
+const ISSUE = northbeamIssues()[0]!.id;
+let SOL: string;
+let tdb: TestDb;
+let editor: TestUser;
+let viewer: TestUser;
 
-beforeEach(() => {
-  db.signedIn = true;
-  db.calls = [];
-  db.result = { data: [row], error: null };
+beforeAll(async () => {
+  tdb = await createTestDb();
+  editor = await addMember(tdb, WS, "editor");
+  viewer = await addMember(tdb, WS, "viewer");
+}, 120_000);
+
+afterAll(async () => {
+  await tdb?.close();
 });
+
+beforeEach(async () => {
+  await tdb.client.query("delete from solutions");
+  SOL = (
+    await tdb.client.query(
+      "insert into solutions (workspace_id, process_id, base_revision_id, name, steps) values ($1, $2, $3, 'AI lead qualifier', $4::jsonb) returning id",
+      [WS, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, JSON.stringify({ steps: [], edges: [], entry_step_id: null })],
+    )
+  ).rows[0].id;
+  await tdb.client.query("insert into solution_issues (solution_id, issue_id, workspace_id, auto_verdict, holds_pct, auto_note) values ($1, $2, $3, 'pass', 95, 'Holds')", [SOL, ISSUE, WS]);
+  signInAs({ tdb }, editor);
+});
+
+const link = async () => (await tdb.client.query("select user_verdict, user_notes, auto_verdict, holds_pct, auto_note from solution_issues where solution_id = $1 and issue_id = $2", [SOL, ISSUE])).rows[0];
 
 describe("saveSolutionVerdict", () => {
   it("saves a pass, a fail or a cleared verdict on that solution and issue only", async () => {
+    // A second link, on another issue of the same solution, must stay as it was.
+    const other = northbeamIssues()[1]!.id;
+    await tdb.client.query("insert into solution_issues (solution_id, issue_id, workspace_id, auto_verdict, holds_pct) values ($1, $2, $3, 'pass', 80)", [SOL, other, WS]);
     for (const v of ["pass", "fail", null]) {
-      db.calls = [];
-      expect((await saveSolutionVerdict(WS, SOL, ISSUE, { verdict: v })).status).toBe("ok");
-      expect(updates()).toEqual([{ user_verdict: v }]);
-      expect(db.calls.filter((c) => c.op === "eq").map((c) => c.args)).toEqual([["solution_id", SOL], ["issue_id", ISSUE], ["workspace_id", WS]]);
-      expect(db.calls.find((c) => c.op === "from")!.args[0]).toBe("solution_issues");
+      const out = await saveSolutionVerdict(WS, SOL, ISSUE, { verdict: v });
+      expect(out.status).toBe("ok");
+      if (out.status === "ok") expect(out.link).toMatchObject({ solution_id: SOL, issue_id: ISSUE, user_verdict: v });
+      expect((await link()).user_verdict).toBe(v);
+      expect((await tdb.client.query("select user_verdict from solution_issues where issue_id = $1", [other])).rows[0].user_verdict).toBeNull();
     }
   });
 
   it("saves your note with it, or on its own, and never touches the automatic verdict", async () => {
     await saveSolutionVerdict(WS, SOL, ISSUE, { verdict: "fail", notes: "Too slow" });
-    expect(updates()).toEqual([{ user_verdict: "fail", user_notes: "Too slow" }]);
+    expect(await link()).toMatchObject({ user_verdict: "fail", user_notes: "Too slow" });
     // A note on its own does not write the verdict, and a verdict on its own does not write the note.
-    db.calls = [];
     await saveSolutionVerdict(WS, SOL, ISSUE, { notes: "Only a note" });
-    expect(updates()).toEqual([{ user_notes: "Only a note" }]);
-    db.calls = [];
+    expect(await link()).toMatchObject({ user_verdict: "fail", user_notes: "Only a note" });
     await saveSolutionVerdict(WS, SOL, ISSUE, { verdict: "pass" });
-    expect(updates()).toEqual([{ user_verdict: "pass" }]);
-    expect(JSON.stringify(updates())).not.toContain("auto_");
+    expect(await link()).toMatchObject({ user_verdict: "pass", user_notes: "Only a note" });
+    expect(await link()).toMatchObject({ auto_verdict: "pass", holds_pct: 95, auto_note: "Holds" });
   });
 
   it("refuses anything that isn't a pass, a fail or nothing, an id that isn't one, and a note that is too long", async () => {
@@ -66,31 +72,31 @@ describe("saveSolutionVerdict", () => {
     expect((await saveSolutionVerdict(WS, SOL, "nope", { verdict: "pass" })).status).toBe("error");
     expect((await saveSolutionVerdict(WS, SOL, ISSUE, { notes: "x".repeat(4001) })).status).toBe("error");
     expect((await saveSolutionVerdict(WS, SOL, ISSUE, {})).status).toBe("error");
-    expect(db.calls).toEqual([]);
+    expect(await link()).toMatchObject({ user_verdict: null, user_notes: "" });
   });
 
   it("says so when no row changed (a viewer, or a solution that is gone) and when the session has ended", async () => {
-    db.result = { data: [], error: null };
+    signInAs({ tdb }, viewer);
     expect(await saveSolutionVerdict(WS, SOL, ISSUE, { verdict: "pass" })).toEqual({ status: "error", message: expect.stringMatching(/permission/) });
-    db.result = { data: [], error: { code: "42501" } };
-    expect((await saveSolutionVerdict(WS, SOL, ISSUE, { verdict: "pass" })).status).toBe("error");
-    db.signedIn = false;
+    expect((await link()).user_verdict).toBeNull();
+    signInAs({ tdb }, editor);
+    expect(await saveSolutionVerdict(WS, "5f1c2b4a-0000-4000-8000-0000000000ff", ISSUE, { verdict: "pass" })).toEqual({ status: "error", message: expect.stringMatching(/permission/) });
+    signOut({ tdb });
     expect(await saveSolutionVerdict(WS, SOL, ISSUE, { verdict: "pass" })).toEqual({ status: "error", message: expect.stringMatching(/session has ended/) });
   });
 });
 
 describe("saveSolutionNotes", () => {
   it("saves the notes on the solution", async () => {
-    db.result = { data: [{ notes: "Needs a trial" }], error: null };
     expect(await saveSolutionNotes(WS, SOL, "Needs a trial")).toEqual({ status: "ok", notes: "Needs a trial" });
-    expect(updates()).toEqual([{ notes: "Needs a trial" }]);
-    expect(db.calls.find((c) => c.op === "from")!.args[0]).toBe("solutions");
+    expect((await tdb.client.query("select notes from solutions where id = $1", [SOL])).rows[0].notes).toBe("Needs a trial");
   });
 
   it("refuses notes that are too long, and says so when no row changed", async () => {
     expect((await saveSolutionNotes(WS, SOL, "x".repeat(4001))).status).toBe("error");
     expect((await saveSolutionNotes(WS, SOL, 5)).status).toBe("error");
-    db.result = { data: [], error: null };
+    signInAs({ tdb }, viewer);
     expect((await saveSolutionNotes(WS, SOL, "ok")).status).toBe("error");
+    expect((await tdb.client.query("select notes from solutions where id = $1", [SOL])).rows[0].notes).not.toBe("ok");
   });
 });

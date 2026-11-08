@@ -10,13 +10,15 @@ import { horizonLabel, horizonWeeks, isHorizonMonths, monthsForWeeks } from "@/l
 // sliders on a process page map onto it, and the check that no lever, rule or market setting lacks an (i).
 
 const START = { startDate: "2026-10-05" };
-const models = [toEngineModel(northbeamBundle(), START), toEngineModel(larkspurBundle(), START)];
+// Both seeded workspaces count their clients per type, where the pooled client count and churn sliders are left out (the engine ignores
+// them there), so a pooled model is the third: the clients.count and clients.churn kinds still need a model that offers their sliders.
+const models = [toEngineModel(northbeamBundle(), START), toEngineModel(larkspurBundle(), START), { ...toEngineModel(northbeamBundle(), START), clients: undefined, clientGroups: {} }];
 
 describe("the lever catalogue", () => {
-  it("has the prototype's six groups, in order, each with levers", () => {
-    expect(LEVER_GROUP_ORDER.map((g) => GROUP_LABELS[g])).toEqual(["Demand", "People", "Process", "Clients and churn", "Finances", "Market"]);
+  it("has the prototype's groups but Market (its Settings schedule is gone), in order, each with levers", () => {
+    expect(LEVER_GROUP_ORDER.map((g) => GROUP_LABELS[g])).toEqual(["Demand", "People", "Process", "Clients and churn", "Finances"]);
     for (const g of LEVER_GROUP_ORDER) expect(kindsOf(g).length, g).toBeGreaterThan(0);
-    expect(LEVER_KINDS).toHaveLength(21);
+    expect(LEVER_KINDS).toHaveLength(19);
   });
 
   it("gives every lever a unique id, a name, a plain description and an example", () => {
@@ -25,7 +27,7 @@ describe("the lever catalogue", () => {
       expect(k.label.trim(), k.id).not.toBe("");
       expect(k.description.trim().length, `${k.id} description`).toBeGreaterThan(10);
       expect(k.example.trim().length, `${k.id} example`).toBeGreaterThan(5);
-      expect(k.id.startsWith(`${k.group}.`) || k.group === "clients" || k.group === "market", k.id).toBe(true);
+      expect(k.id.startsWith(`${k.group}.`) || k.group === "clients", k.id).toBe(true);
     }
   });
 
@@ -35,7 +37,6 @@ describe("the lever catalogue", () => {
       description: "How long the work itself takes.",
       example: "Writing a proposal takes 2 hours. With a template, 1 hour.",
     });
-    expect(leverKind("market.schedule")?.description).toBe("When the market is expected to change over the next 2 years.");
   });
 
   it("points a lever set on a Settings page at that page", () => {

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { northbeamBundle, northbeamScenarios, northbeamStepIds, toEngineModel, type ProcessBundle, type ScenarioRow } from "@transpera-flow/db";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { retiredSteps, northbeamBundle, northbeamScenarios, northbeamStepIds, patchOf, toEngineModel, type ProcessBundle, type SandboxChange, type ScenarioRow } from "@transpera-flow/db";
 import { brokenScenarioKey, checkScenario, detectBrokenScenarios, repointPatch } from "@transpera-flow/engine";
 import { discardChange } from "@/lib/drafts/discard";
 import { diffBundles } from "@/lib/drafts/diff";
@@ -9,27 +9,14 @@ import { applyEdit, invertEdit } from "@/lib/editor/ops";
 import { splitProblem, splitStep } from "@/lib/editor/split";
 import { parseNewEdge, parseNewStep } from "@/lib/editor/validate";
 import { promoteInput, registerEntries } from "@/lib/issues/register";
-import { stepFromRecord } from "@/lib/realtime/rows";
-import { newlyBroken, repointTargets, resolveRun, retiredSteps } from "@/lib/scenarios/broken";
+import { newlyBroken, repointTargets, resolveRun } from "@/lib/scenarios/broken";
 import { describePatch, scenarioProblems } from "@/lib/scenarios/scenarios";
 import { MemoryScenarioStore } from "@/lib/scenarios/store";
+import { createTestDb, type TestDb } from "../../../packages/db/test/harness";
+import { addMember, signInAs, signOut, type TestUser } from "./action-harness";
 
-// A stand-in for Supabase behind the scenario Server Actions.
-const db = vi.hoisted(() => ({ calls: [] as { op: string; args: unknown[] }[], signedIn: true, result: { data: null as unknown, error: null as unknown } }));
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => {
-    const chain = {
-      update: (...args: unknown[]) => (db.calls.push({ op: "update", args }), chain),
-      eq: (...args: unknown[]) => (db.calls.push({ op: "eq", args }), chain),
-      select: () => chain,
-      then: (resolve: (v: unknown) => void) => resolve(db.result),
-    };
-    return {
-      auth: { getClaims: async () => ({ data: db.signedIn ? { claims: { sub: "u1" } } : null }) },
-      from: (table: string) => (db.calls.push({ op: "from", args: [table] }), chain),
-    };
-  },
-}));
+// The scenario Server Action runs against a real database (the seeded Northbeam scenarios) as an editor.
+vi.mock("@/lib/auth/session", async () => (await import("./action-harness")).sessionMock);
 const { updateScenarioPatch } = await import("@/app/w/[slug]/scenario-actions");
 
 const ids = northbeamStepIds;
@@ -168,8 +155,8 @@ describe("broken scenarios", () => {
   });
 });
 
-describe("retired rows through the editor, drafts and Realtime", () => {
-  it("saves the retired row into the draft, keeps it off the map after a catch-up and a publish, and remembers it", async () => {
+describe("retired rows through the editor and drafts", () => {
+  it("saves the retired row into the draft, keeps it off the map and after a publish, and remembers it", async () => {
     const live = northbeamBundle();
     const backend = new MemoryDraftBackend(live);
     const session = new DraftSession(live, null, backend);
@@ -183,8 +170,7 @@ describe("retired rows through the editor, drafts and Realtime", () => {
     await editor.settled();
     const stored = backend.draftRows()!;
     expect(stored.steps.find((s) => s.id === ids.audit)?.replaced_by).toEqual(parts);
-    // A catch-up read brings the stored rows, retired one included: it stays off the map.
-    editor.resync(stored);
+    // The retired row is kept off the map.
     expect(editor.getState().bundle.steps.some((s) => s.id === ids.audit)).toBe(false);
     expect(editor.getState().bundle.retired?.map((s) => s.id)).toEqual([ids.audit]);
     await session.publish();
@@ -196,28 +182,22 @@ describe("retired rows through the editor, drafts and Realtime", () => {
     await editor.settled();
     expect(backend.draftRows()!.steps.find((s) => s.id === ids.audit)?.replaced_by).toEqual(parts);
   });
-
-  it("files someone else's retired row away instead of drawing it", () => {
-    const live = northbeamBundle();
-    const session = new DraftSession(live, null, new MemoryDraftBackend(live));
-    const old = live.steps.find((s) => s.id === ids.audit)!;
-    const record = { ...old, replaced_by: ["00000000-0000-4000-8000-0000000000b1"] } as unknown as Record<string, unknown>;
-    const row = stepFromRecord(record)!;
-    expect(row.replaced_by).toEqual(["00000000-0000-4000-8000-0000000000b1"]);
-    expect(stepFromRecord({ ...record, replaced_by: [] })!.replaced_by).toBeUndefined();
-    session.editor.applyRemote({ kind: "upsert", table: "steps", row });
-    const bundle = session.editor.getState().bundle;
-    expect(bundle.steps.some((s) => s.id === ids.audit)).toBe(false);
-    expect(bundle.retired?.map((s) => s.id)).toEqual([ids.audit]);
-  });
 });
 
 describe("re-pointing a saved scenario", () => {
-  beforeEach(() => {
-    db.calls = [];
-    db.signedIn = true;
-    db.result = { data: null, error: null };
+  let tdb: TestDb;
+  let editor: TestUser;
+  let viewer: TestUser;
+  beforeAll(async () => {
+    tdb = await createTestDb();
+    editor = await addMember(tdb, northbeamBundle().workspace.id, "editor");
+    viewer = await addMember(tdb, northbeamBundle().workspace.id, "viewer");
+    signInAs({ tdb }, editor);
+  }, 120_000);
+  afterAll(async () => {
+    await tdb?.close();
   });
+  const storedPatch = async (id: string) => ((await tdb.client.query("select changes from sandbox_scenarios where id = $1", [id])).rows[0].changes as SandboxChange[]).map((c) => patchOf(c));
 
   it("in memory (the demo)", async () => {
     const store = new MemoryScenarioStore("ws");
@@ -229,21 +209,19 @@ describe("re-pointing a saved scenario", () => {
 
   it("through the Server Action: checks the patches, then updates the one row", async () => {
     const s = automate();
+    signInAs({ tdb }, editor);
     const patch = repointPatch(s.patch, 0, "x");
-    db.result = { data: [{ ...s, patch }], error: null };
     expect(await updateScenarioPatch(s.id, patch)).toEqual({ status: "ok", scenario: { ...s, patch } });
-    expect(db.calls).toEqual([
-      { op: "from", args: ["scenarios"] },
-      { op: "update", args: [{ patch }] },
-      { op: "eq", args: ["id", s.id] },
-    ]);
-    db.calls = [];
+    expect(await storedPatch(s.id)).toEqual(patch);
+    // Bad input changes nothing.
     expect(await updateScenarioPatch(s.id, [{ path: "nope", op: "set", value: 1 }])).toMatchObject({ status: "error" });
     expect(await updateScenarioPatch("not-an-id", patch)).toMatchObject({ status: "error" });
-    expect(db.calls).toEqual([]);
-    db.result = { data: [], error: null };
-    expect(await updateScenarioPatch(s.id, patch)).toMatchObject({ status: "error", message: expect.stringMatching(/permission/) });
-    db.signedIn = false;
+    expect(await storedPatch(s.id)).toEqual(patch);
+    // A viewer's update matches no row.
+    signInAs({ tdb }, viewer);
+    expect(await updateScenarioPatch(s.id, s.patch)).toMatchObject({ status: "error", message: expect.stringMatching(/permission/) });
+    expect(await storedPatch(s.id)).toEqual(patch);
+    signOut({ tdb });
     expect(await updateScenarioPatch(s.id, patch)).toMatchObject({ status: "error", message: expect.stringMatching(/Sign in/) });
   });
 });

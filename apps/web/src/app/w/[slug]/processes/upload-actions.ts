@@ -3,15 +3,16 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { checkProcessFileText, processTextFrom, type ProcessFileCheck } from "@transpera-flow/db/process-file";
-import { fetchPublicPage, importProcessFile, LinkError, previewProcessFile, takeLinkFetch, ToolError } from "@transpera-flow/mcp";
+import { fetchPublicPage, importProcessFile, LinkError, previewProcessFile, takeLinkFetch, ImportError } from "@transpera-flow/db/process-import";
 import { isId } from "@/lib/editor/validate";
 import { sourceLabel, uploadSizeProblem, type CreateUploadInput, type CreateUploadResult, type PreviewInput, type PreviewResult, type UploadPreview } from "@/lib/processes/upload";
 import { NOTICE_COOKIE, noticeValue } from "@/lib/processes/upload-notice";
-import { createClient } from "@/lib/supabase/server";
+import { rpc } from "@transpera-flow/db/client";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Upload a process (issue #166, B13). The file is checked here, not trusted from the browser, and written by the same code
-// the MCP `import_process` tool uses (packages/mcp/src/import-file.ts), acting as the signed-in user through RLS: only
-// editors can, nothing is published, and no role, person or client is created. The result opens in the editor as a draft.
+// the MCP `import_process` tool used before MCP became read-only (now packages/db/src/process-import), acting as the
+// signed-in user through RLS: only the Owner and Agency admins can, nothing is published, and no role, person or client is created. The result opens in the editor as a draft.
 // Who is asking is settled before the file is looked at: someone who isn't a signed-in editor of the workspace costs us
 // nothing but the answer.
 
@@ -20,19 +21,18 @@ const GENERIC = "Couldn't read that. Try again.";
 
 /** The signed-in editor's context, or why there isn't one. */
 async function editorContext(workspaceId: string): Promise<{ ctx: Awaited<ReturnType<typeof context>> & object } | { error: string }> {
-  const ctx = await context(workspaceId);
+  const ctx = await context();
   if (!ctx) return { error: "Your session has ended. Sign in again." };
-  const { data: canEdit } = await ctx.db.rpc("can_edit_workspace", { ws: workspaceId });
-  if (canEdit !== true) return { error: "Only editors and owners can upload a process." };
+  const canEdit = await rpc(ctx.db, "can_edit_workspace", { ws: workspaceId }).catch(() => null);
+  if (canEdit !== true) return { error: "Only Agency admins can upload a process." };
   return { ctx };
 }
 
-async function context(workspaceId: string) {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) return null;
-  return { db: supabase, tokenHash: "", userId, activeWorkspaceId: workspaceId, today: new Date().toISOString().slice(0, 10) };
+async function context() {
+  const user = await getSessionUser();
+  if (!user) return null;
+  const userId = user.id;
+  return { db: await getDb(), userId };
 }
 
 const failure = (check: ProcessFileCheck, source: string): UploadPreview => ({
@@ -112,18 +112,15 @@ export async function previewUpload(workspaceId: string, _slug: string, input: P
           ? {
               extras: {
                 sources: p.extras.sources,
-                suggestions: p.extras.suggestions.map((s) => ({ subject: s.subject, headline: s.headline, isNew: s.isNew })),
-                proposals: p.extras.proposals,
-                firstPrinciplesParts: p.extras.firstPrinciplesParts,
                 notes: p.extras.notes,
-                conflicts: [...(check.conflicts ?? []), ...p.extras.conflicts],
+                conflicts: check.conflicts ?? [],
               },
             }
           : {}),
       },
     };
   } catch (e) {
-    return { error: e instanceof ToolError ? e.message : GENERIC };
+    return { error: e instanceof ImportError ? e.message : GENERIC };
   }
 }
 
@@ -151,7 +148,7 @@ export async function createUpload(workspaceId: string, slug: string, input: Cre
     processId = made.process.id;
     warnings = [...check.warnings, ...made.warnings];
   } catch (e) {
-    if (e instanceof ToolError) return { error: e.message };
+    if (e instanceof ImportError) return { error: e.message };
     return { error: "Couldn't create it. Try again." };
   }
   // The redirect below ends the request, so what the upload noticed rides along in a short-lived cookie for the editor to show once.

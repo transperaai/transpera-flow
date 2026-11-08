@@ -81,7 +81,7 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const role of ["editor", "other", "viewer"] as const) {
     users[role] = await createUser(db, `${role}@drafts.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [
       ws,
       users[role]!.id,
       role === "other" ? "editor" : role,

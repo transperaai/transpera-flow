@@ -5,7 +5,7 @@
 import { isActiveStatus, listProcesses, loadIssue, loadProcessBundle, ModelError, toEngineModel, type BlockBundle, type Db, type IssueRow, type ProcessBundle } from "@transpera-flow/db";
 import { simulate, type EngineModel, type ScenarioPatch, type SimulationResult } from "@transpera-flow/engine";
 import { currentArea, issueAboutProcess, leafIds, solutionIssueOf } from "./area";
-import { bundleFromSolution } from "./bundle";
+import { bundleFromSolution } from "@transpera-flow/db/sandbox";
 import { withLeverChanges } from "./levers";
 import { checkTarget, type TargetVerdict } from "./verdict";
 
@@ -20,7 +20,7 @@ export function linkProblem(issue: IssueRow | null, processId: string): string |
 
 /** The process as it was at `revisionId`, for simulating a solution against it. */
 async function baseBundle(db: Db, workspaceId: string, processId: string, revisionId: string): Promise<ProcessBundle | null> {
-  const { data: workspace } = await db.from("workspaces").select("id, name, slug, settings").eq("id", workspaceId).maybeSingle();
+  const workspace = await db.selectFrom("workspaces").select(["id", "name", "slug", "settings"]).where("id", "=", workspaceId).executeTakeFirst();
   if (!workspace) return null;
   const process = (await listProcesses(db, workspaceId)).find((p) => p.id === processId);
   if (!process) return null;

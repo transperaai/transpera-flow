@@ -1,8 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { headerRollback } from "./header-rollback";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
 // Process admin (issue #182, B19 2/2, migration 20261204000000; ADR 0014 "B19: archiving a process"): an editor makes a
@@ -51,7 +49,7 @@ async function world<N extends string>(names: [N, "pipeline" | "servicing"][]) {
   const n = ++counter;
   const [{ id: ws }] = await q("insert into workspaces (name, slug) values ($1, $2) returning id", [`Archive ${n}`, `archive-${n}`]);
   for (const [user, role] of [[editor, "editor"], [viewer, "viewer"]] as const) {
-    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, user.id, role]);
   }
   const [{ id: cid }] = await q("select id from processes where workspace_id = $1 and is_company", [ws]);
   const p = {} as Record<N, string>;
@@ -342,7 +340,7 @@ describe("deletes elsewhere still reach an archived process", () => {
   it("lets a deleted person's steps, edges, versions and archive stamp go to nobody", async () => {
     const maker = await createUser(db, `maker-${randomUUID()}@process-archive.example.com`);
     const w = await world([["Sales", "pipeline"]]);
-    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [w.ws, maker.id]);
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [w.ws, maker.id]);
     const draft = (await commitAs(maker.claims, (c) => rpc(c, "open_draft", w.p.Sales))).revision_id as string;
     const [a, b] = [randomUUID(), randomUUID()];
     await commitAs(maker.claims, async (c) => {
@@ -430,58 +428,5 @@ describe("who archived it, and what still needs it", () => {
       { name: "Old sales", archived: false },
       { name: "Old sales", archived: true },
     ]);
-  });
-});
-
-describe("the rollback in the header", () => {
-  it("undoes the migration (with the six replaced bodies re-created, as it says), passes preflight 3 again, and the migration applies again", async () => {
-    const read = (f: string) => readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), "utf8");
-    const migration = read("20261204000000_process_admin_source_files.sql");
-    const everywhere = read("20261130000000_process_library_everywhere.sql");
-    const drafts = read("20261006000000_drafts.sql");
-    const atomic = read("20261128000000_import_atomic_link_limit.sql");
-    const defn = (sql: string, name: string) =>
-      sql.match(new RegExp(`^create (?:or replace )?function ${name}\\([\\s\\S]*?\\n\\$\\$;`, "m"))![0].replace(/^create function/, "create or replace function");
-    const bodies = [
-      ...["holder_allows", "check_step_nesting", "company_add_holder"].map((n) => defn(everywhere, `private\\.${n}`)),
-      defn(everywhere, "public\\.create_library_process"),
-      defn(drafts, "public\\.open_draft"),
-      defn(atomic, "public\\.import_new_process"),
-    ].join("\n");
-    const block = (from: string, to: string) => migration.slice(migration.indexOf(from), migration.indexOf(to));
-    const rollback = block("-- ROLLBACK", "-- ---------------------------------------------------------------------------\n-- Archiving a process")
-      .split("\n")
-      .filter((l) => l.startsWith("--   ") && !l.startsWith("--   --"))
-      .map((l) => l.slice(5))
-      .join("\n")
-      .replace("delete from supabase_migrations.schema_migrations where version = '20261204000000';", "")
-      .replace("alter table public.processes drop column", () => `${bodies}\nalter table public.processes drop column`);
-    // Client branding's rollback (20261214000000, B5) comes first: its policies use private.storage_workspace, which this
-    // rollback drops (B5's header says so). It is parsed from B5's header, so it can't drift. The harness keeps no
-    // schema_migrations table, so that one delete is left out, as it is for this migration's own above.
-    await db.client.query(headerRollback("20261214000000_client_branding.sql").replace("delete from supabase_migrations.schema_migrations where version = '20261214000000';", ""));
-    await db.client.query(rollback);
-    expect(await q("select column_name from information_schema.columns where table_schema = 'public' and table_name in ('processes', 'sources') and column_name in ('archived_at', 'archived_by', 'file_path', 'file_name', 'file_type', 'file_size')")).toEqual([]);
-    expect(await q("select proname from pg_proc where proname in ('process_archive_guard', 'process_archive_map', 'refuse_archived_placements', 'refuse_archived_revision', 'refuse_archived_publish', 'storage_workspace')")).toEqual([]);
-    expect(await q("select policyname from pg_policies where schemaname = 'storage' and policyname like 'sources:%'")).toEqual([]);
-    // Preflight 3, as written in the header, passes again: the six bodies are back as they were.
-    const preflight3 = block("--   3. The replaced functions", "--   4. Storage is there")
-      .split("\n")
-      .filter((l) => l.startsWith("--        "))
-      .map((l) => l.slice(10))
-      .join("\n");
-    const checks = await q(preflight3);
-    expect(checks).toHaveLength(6);
-    for (const c of checks) expect(Object.values(c)[1], String(c.proname)).toBe(true);
-    // The bucket row stays (it may hold files); applying again keeps it and puts everything back.
-    await db.client.query(migration);
-    expect(await q("select policyname, cmd from pg_policies where schemaname = 'storage' and policyname like 'sources:%' order by 1")).toEqual([
-      { policyname: "sources: editors delete", cmd: "DELETE" },
-      { policyname: "sources: editors upload", cmd: "INSERT" },
-      { policyname: "sources: members read", cmd: "SELECT" },
-    ]);
-    const w = await world([["Sales", "pipeline"]]);
-    await archive(editor.claims, w.p.Sales);
-    expect((await cards(w.cid))[w.p.Sales]).toBeUndefined();
   });
 });

@@ -14,11 +14,11 @@ afterAll(async () => {
 
 async function exportOf(workspaceId: string, email: string): Promise<WorkspaceBundle> {
   const user = await createUser(db, email);
-  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [workspaceId, user.id]);
+  await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [workspaceId, user.id]);
   const bundle = await db.as(user.claims, async (c) => {
     const read: TableReader = async (table, wsId) => {
       const spec = Object.values(BUNDLE_TABLES).find((t) => t.table === table)!;
-      return (await c.query(`select ${spec.columns ?? "*"} from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}`, [wsId])).rows as Row[];
+      return (await c.query(`select * from public.${table} where workspace_id = $1 order by ${spec.order.join(", ")}`, [wsId])).rows as Row[];
     };
     const readWorkspace = async (id: string) => (await c.query("select id, name, slug, plan, settings, provenance from workspaces where id = $1", [id])).rows[0] ?? null;
     return exportWorkspaceBundle(workspaceId, readWorkspace, read, { canEdit: true, now: new Date("2026-10-05T12:00:00Z") });
@@ -47,9 +47,8 @@ describe.each([
     expect(line(restored, "clients")).toBe(await count("clients", ws));
     expect(line(restored, "sources")).toBe(await count("sources", ws));
     expect(line(restored, "blocks")).toBe(await count("blocks", ws));
-    expect(line(restored, "scenarios")).toBe(await count("scenarios", ws));
+    expect(line(restored, "scenarios")).toBe(await count("sandbox_scenarios", ws));
     expect(line(restored, "issues")).toBe(await count("issues", ws, "source <> 'detected'"));
-    expect(line(restored, "suggestions")).toBe(await count("suggestions", ws, "status = 'pending'"));
     expect(line(leftOut, "solutions") - (await count("solutions", ws))).toBeGreaterThanOrEqual(0);
     expect(line(leftOut, "detections")).toBe(await count("issues", ws, "source = 'detected'"));
   });
@@ -57,7 +56,9 @@ describe.each([
   it("plans with placeholders only, no account keys, and the same order as the source ids", async () => {
     const bundle = await exportOf(ws, `plan2.${name.toLowerCase()}@example.com`);
     const { plan, placeholderOf } = planWorkspaceImport(bundle, { canManage: true });
-    const found = JSON.stringify(plan).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) ?? [];
+    // The ids of a scenario's changes belong to the scenario, not to a row, so they are not placeholders; every other id is.
+    const withoutChangeIds = { ...plan, sandbox_scenarios: plan.sandbox_scenarios.map((sc) => ({ ...sc, changes: (sc.changes as { id?: unknown }[]).map(({ id: _id, ...c }) => c) })) };
+    const found = JSON.stringify(withoutChangeIds).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi) ?? [];
     expect(found.filter((u) => !u.startsWith(PLACEHOLDER_PREFIX))).toEqual([]);
     expect(JSON.stringify(plan)).not.toMatch(/"(created_by|email|workspace_id|hidden)"/);
     const old = [...placeholderOf.keys()].filter((k) => k !== bundle.workspace.id).sort();

@@ -1,16 +1,19 @@
 "use client";
 
 // Playback controls (issue #14): play/pause, speed, a scrubber over the
-// measured horizon, the simulated time, and leaving playback. The time and the
+// measured horizon, the simulated time, and Stop (back to the normal map). The time and the
 // scrubber follow the clock imperatively, so playing doesn't re-render React.
 // Keys, with focus anywhere in the bar: Space plays or pauses; on the
 // scrubber, arrows move an hour (Shift: a day), Page Up/Down a week, Home/End
 // the ends.
 
+import { Square } from "lucide-react";
 import { useEffect, useRef, useSyncExternalStore, type KeyboardEvent } from "react";
 import { SPEEDS, formatSimTime, type PlaybackClock } from "@/lib/playback/clock";
 
 interface BarProps {
+  /** Along the foot of a card (Q8): no border, fill or shadow of its own. */
+  docked?: boolean;
   clock: PlaybackClock;
   /** Measured horizon in hours; null while there is no run to play. */
   H: number | null;
@@ -25,7 +28,7 @@ const TEXT_INTERVAL_MS = 100;
 const button =
   "rounded-token border border-line bg-panel px-2 py-1 text-fg hover:bg-panel-2 disabled:cursor-not-allowed disabled:text-fg-3 disabled:hover:bg-panel";
 
-export function PlaybackBar({ clock, H, hoursPerWeek, reps, describe }: BarProps) {
+export function PlaybackBar({ docked = false, clock, H, hoursPerWeek, reps, describe }: BarProps) {
   const state = useSyncExternalStore(clock.subscribe, clock.getState, clock.getState);
   const slider = useRef<HTMLInputElement>(null);
   const time = useRef<HTMLSpanElement>(null);
@@ -101,7 +104,7 @@ export function PlaybackBar({ clock, H, hoursPerWeek, reps, describe }: BarProps
       role="group"
       aria-label="Playback"
       onKeyDown={onKeyDown}
-      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-token border border-line bg-panel/95 p-1.5 text-xs shadow-token"
+      className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-xs ${docked ? "" : "rounded-token border border-line bg-panel/95 p-1.5 shadow-token"}`}
     >
       <button
         type="button"
@@ -113,6 +116,17 @@ export function PlaybackBar({ clock, H, hoursPerWeek, reps, describe }: BarProps
         className={`${button} w-20 font-semibold ${state.playing ? "!border-accent !bg-accent-soft" : ""}`}
       >
         <span aria-hidden>{state.playing ? "❚❚" : "▶"}</span> {playLabel}
+      </button>
+      <button
+        type="button"
+        onClick={() => clock.stop()}
+        disabled={!ready || !state.active}
+        aria-label="Stop"
+        data-playback-stop
+        title="Stop playback and go back to the map"
+        className={`${button} inline-flex items-center gap-1 font-semibold`}
+      >
+        <Square aria-hidden className="size-3 fill-current" /> Stop
       </button>
       <label className="sr-only" htmlFor="playback-speed">
         Playback speed
@@ -149,11 +163,6 @@ export function PlaybackBar({ clock, H, hoursPerWeek, reps, describe }: BarProps
         className="h-6 min-w-40 flex-1 accent-accent"
       />
       <span ref={time} className="min-w-44 font-mono text-fg tabular-nums" aria-hidden />
-      {state.active && (
-        <button type="button" onClick={() => clock.stop()} className={button} title="Stop playback and clear the map">
-          Exit playback
-        </button>
-      )}
       <span
         className="text-fg-3"
         title={`Playback shows one simulated run of ${Math.round((H ?? 0) / hoursPerWeek)} weeks; the figures above average all ${reps ?? 1}.`}

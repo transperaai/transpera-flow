@@ -1,5 +1,5 @@
 // Baseline vs scenario (docs/PRD.md §4.1 compare view, §7.3 templated
-// narration, decision D15).
+// sentences, decision D15).
 //
 // Everything here is a pure function of two simulation results and the
 // names passed in: no I/O, no clock, no randomness, and no language model.

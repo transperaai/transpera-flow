@@ -1,21 +1,24 @@
 "use client";
 
 // The Editor's right column (issue #104): the inspector for the selected step (today's Step tab), what a selected
-// group adds (first step, ungroup, save as a block), the loose ends the editor can see, and a first-principles reminder.
+// group adds (first step, ungroup, save as a block), what a selected decision adds (its branches), and a linked process's card.
+// What is wrong shows as red marks on the map and a line in the editor bar, not here (editor brainstorm, item 4).
 
 import { useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
-import { isGroup, type EvidenceStamp, type ProcessBundle, type SourceRow, type StepRow } from "@transpera-flow/db";
+import { isGroup, UPKEEP_PURPOSE, workspacePurposes, type EvidenceStamp, type ProcessBundle, type PurposeCategory, type StepRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { LinkedSources } from "@/components/sources/linking-context";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NO_SELECTION, type Selection } from "@/components/process-canvas";
-import { StepInspector, type DraftInfo } from "@/components/step-inspector";
-import { deleteSelection, stepWarnings } from "@/lib/editor/commands";
+import { StepInspector, type DraftInfo, type PurposeTools } from "@/components/step-inspector";
+import { deleteSelection, hasPurpose, setStepPurposes } from "@/lib/editor/commands";
+import { LinkedProcessCard } from "./linked-process-card";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { membersOf, setGroupEntry, ungroup } from "@/lib/editor/groups";
-import type { EditorMode } from "@/lib/editor/modes";
 import type { BlockTools } from "./use-blocks";
+import type { TierSetup } from "@/lib/tier-setup";
+import type { ChangesOnSteps } from "@/components/step-base-values";
 
 export function Inspector({
   bundle,
@@ -24,34 +27,43 @@ export function Inspector({
   setSelection,
   inspectFocus,
   onFocused,
-  sources,
   stamp,
-  sourcesHref,
-  mode,
   draft,
   blocks,
   company = false,
+  tierSetup,
+  changesOnSteps,
+  settingsHref,
+  purposes,
+  branchFocus = null,
+  onFocusBranch,
+  turnInto,
 }: {
+  /** The workspace's purposes as the Editor sees them, and how to add one. Without it, the bundle's list and no adding. */
+  purposes?: PurposeTools;
+  /** A decision selected by clicking one of its branches: that branch's fields take focus. */
+  branchFocus?: string | null;
+  onFocusBranch?: (edgeId: string | null) => void;
+  /** Turning a step that holds a linked process into steps: why it can't be (null: it can), doing it, and what the last try said. */
+  turnInto?: { problem: (stepId: string) => string | null; run: (stepId: string) => void; said: string | null };
+  tierSetup?: TierSetup;
+  changesOnSteps?: ChangesOnSteps;
+  settingsHref?: string;
   bundle: ProcessBundle;
   editor: ProcessEditor;
   selected: Selection;
   setSelection: Dispatch<SetStateAction<Selection>>;
   inspectFocus: string | null;
   onFocused: () => void;
-  sources: readonly SourceRow[];
   stamp: () => EvidenceStamp;
-  sourcesHref?: string;
-  mode: EditorMode;
   /** How the draft changes a step against live, as the inspector shows it; null when there is no draft. */
   draft: ((step: StepRow) => DraftInfo) | null;
   /** The block library as the Editor uses it: a selected group can be saved as a block. */
   blocks: BlockTools;
-  /** The company map (B11): no loose ends to chase, no first principles, no blocks. */
+  /** The company map (B11): no blocks, no branches or purposes to edit. */
   company?: boolean;
 }) {
   const step = selected.steps.length === 1 && !selected.edges.length ? bundle.steps.find((s) => s.id === selected.steps[0]) : undefined;
-  const warnings = useMemo(() => (company ? new Map<string, string>() : stepWarnings(bundle)), [bundle, company]);
-  const loose = useMemo(() => bundle.steps.filter((s) => warnings.has(s.id)), [bundle.steps, warnings]);
   return (
     <>
       {step ? (
@@ -68,10 +80,19 @@ export function Inspector({
               editor.run((b) => deleteSelection(b, [step.id], []));
               setSelection(NO_SELECTION);
             }}
-            sources={sources}
             stamp={stamp}
-            sourcesHref={sourcesHref}
+            purposes={purposes}
+            branchFocus={branchFocus}
+            onFocusBranch={onFocusBranch}
+            holderCard={
+              turnInto && step.child_process_id && !company ? (
+                <LinkedProcessCard name={step.name} problem={turnInto.problem(step.id)} said={turnInto.said} onTurnInto={() => turnInto.run(step.id)} />
+              ) : undefined
+            }
             draft={draft ? draft(step) : null}
+            tierSetup={tierSetup}
+            changesOnSteps={changesOnSteps}
+            settingsHref={settingsHref}
           />
           <LinkedSources
             className="flex flex-col gap-1.5 border-t border-line pt-3"
@@ -80,7 +101,6 @@ export function Inspector({
             empty="None linked"
           />
           {isGroup(step) && <GroupPanel bundle={bundle} editor={editor} group={step} setSelection={setSelection} blocks={blocks} company={company} />}
-          {warnings.get(step.id) && <p role="note" className="rounded-token border border-warn bg-warn-soft px-2 py-1.5 text-xs">{warnings.get(step.id)}</p>}
         </>
       ) : (
         <section aria-label="Inspector" className="flex flex-col gap-2">
@@ -90,51 +110,55 @@ export function Inspector({
               ? `${selected.steps.length} steps selected. Group them from the left, or press Delete to remove them.`
               : "Select a step or group on the canvas to edit it."}
           </p>
+          {selected.steps.length > 1 && !company && <ManyPurposes bundle={bundle} editor={editor} ids={selected.steps} categories={purposes?.list ?? workspacePurposes(bundle.workspace.settings)} />}
         </section>
       )}
 
-      {loose.length > 0 && (
-        <section aria-label="Loose ends" className="flex flex-col gap-1.5">
-          <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
-            Loose ends ({loose.length})
-            <Help
-              label="Loose ends"
-              description="Steps or groups the process can't leave, or whose branches don't add up to 100%. A process with one can't be simulated properly."
-              example="A new group with nothing leaving it: drag from its right edge to the step that comes next."
-            />
-          </h2>
-          <ul className="flex flex-col gap-1">
-            {loose.map((s) => (
-              <li key={s.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelection({ steps: [s.id], edges: [] })}
-                  className="w-full rounded-token border border-line bg-panel px-2 py-1 text-left text-xs hover:bg-panel-2"
-                >
-                  <span className="font-semibold">{s.name}</span>
-                  <span className="block text-fg-2">{warnings.get(s.id)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {mode !== "block" && !company && (
-        <section aria-label="First principles" className="flex flex-col gap-1.5">
-          <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
-            First principles
-            <Help
-              label="First principles"
-              description="Before you add a step, ask whether it needs to exist. Delete what you can, then simplify, then speed it up, and only then automate it."
-              example="Before automating an approval email, check whether anyone ever says no to it. If not, delete the step."
-            />
-          </h2>
-          <p className="text-xs">Delete first. Simplify next. Speed up after that. Automate last.</p>
-          <p className="text-xs text-muted-foreground">The process&apos;s own first principles will show here.</p>
-        </section>
-      )}
     </>
+  );
+}
+
+const MIXED = "__mixed";
+const AUTOMATIC = "__automatic";
+
+/** "What they achieve" for several steps at once: one undoable edit, holders and starts and ends skipped. */
+function ManyPurposes({ bundle, editor, ids, categories: all }: { bundle: ProcessBundle; editor: ProcessEditor; ids: readonly string[]; categories: readonly PurposeCategory[] }) {
+  const categories = useMemo(() => all.filter((c) => c.key !== UPKEEP_PURPOSE), [all]);
+  const working = bundle.steps.filter((s) => ids.includes(s.id) && hasPurpose(s));
+  if (!working.length) return <p className="text-xs text-muted-foreground">None of these steps has hands-on time to say the purpose of.</p>;
+  const skipped = ids.length - working.length;
+  const first = working[0]!.purpose ?? null;
+  const same = working.every((s) => (s.purpose ?? null) === first);
+  const value = same ? (first ?? AUTOMATIC) : MIXED;
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="flex flex-col gap-1 text-xs font-semibold">
+        <span className="flex items-center">
+          What they achieve
+          <Help
+            label="What they achieve"
+            description="Sets what the hands-on time of every selected step achieves, in one change you can undo. Automatic uses the process."
+            example="Select the five chasing steps and choose Coordination."
+          />
+        </span>
+        <NativeSelect
+          value={value}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v !== MIXED) editor.run((b) => setStepPurposes(b, ids, v === AUTOMATIC ? null : v));
+          }}
+        >
+          {!same && <option value={MIXED}>Different</option>}
+          <option value={AUTOMATIC}>Automatic</option>
+          {categories.map((c) => (
+            <option key={c.key} value={c.key}>
+              {c.name}
+            </option>
+          ))}
+        </NativeSelect>
+      </label>
+      {skipped > 0 && <p className="text-xs text-muted-foreground">{skipped === 1 ? "1 selected item is" : `${skipped} selected items are`} a group, start or end, with no hands-on time, and is left out.</p>}
+    </div>
   );
 }
 

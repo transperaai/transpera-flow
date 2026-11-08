@@ -13,7 +13,6 @@ import {
   isEvidenceColumn,
   type LinkTargets,
   type SourceCitation,
-  type SourceFile,
   type SourceLinkRow,
   type SourceListRow,
   type SourceRow,
@@ -24,7 +23,9 @@ import { SourceDialog, type SourceSubmission } from "@/components/sources/source
 import { SourcesLibrary } from "@/components/sources/sources-library";
 import { DEFAULT_QUERY, PAGE_SIZE, excerptOf, filterSources, toListRow, type LibraryQuery } from "@/lib/sources/library";
 import { liveLibraryBackend, memoryLibraryBackend, type LibraryBackend } from "@/lib/sources/library-backend";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { FileText } from "lucide-react";
+import { EmptyState, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Saver } from "@/lib/fields/field-controller";
 import { useDemoSolutions } from "@/lib/solutions/demo";
@@ -32,7 +33,6 @@ import { demoSourceStore } from "@/lib/sources/demo-store";
 import { liveSourceStore } from "@/lib/sources/live-store";
 import { MemorySourceStore, sourceFieldValue, type SourceStore } from "@/lib/sources/store";
 import { SOURCE_KIND_LABELS, SOURCE_KINDS, parseSpeakers, type SourceField } from "@/lib/sources/validate";
-import { SOURCE_FILE_ACCEPT, SOURCE_FILE_LABELS, fileSize } from "@/lib/sources/file-check";
 import { EDIT_ONLY } from "@/lib/phone";
 import { useIsPhone } from "@/hooks/use-mobile";
 
@@ -42,13 +42,12 @@ const SOURCE_HELP = {
   title: { description: "A name that tells people what this is.", example: "Discovery interview with Maya." },
   speakers: { description: "Who is talking or wrote it, separated by commas. Quotes show who said them.", example: "Maya Collins, Rosa Diaz." },
   date: { description: "When it was recorded or written.", example: "3 October." },
-  link: { description: "Where the original file or recording lives, if you have one.", example: "A link to the recording or screenshot." },
+  link: { description: "Where the original lives, if you have one: a Google Drive, Notion or SharePoint link, a recording, a screenshot. It opens in a new tab.", example: "The Google Drive link to the recording." },
   body: { description: "The words themselves. Values in the model can quote from here as their evidence.", example: "Maya: \"A proper audit is a day's work.\"" },
 } as const;
 
 
 const button = buttonVariants({ variant: "outline", size: "sm" });
-const primary = buttonVariants({ size: "sm" });
 const kindOptions = SOURCE_KINDS.map((k) => ({ value: k, label: SOURCE_KIND_LABELS[k] }));
 
 const FIELD_NAMES: Record<string, string> = {
@@ -124,7 +123,7 @@ export function SourcesPage({
   const [dialog, setDialog] = useState<{ source: SourceListRow | null } | null>(null);
   const [busy, setBusy] = useState(false);
   // The source open in the side panel: its row, and its full text and original file once they have been read.
-  const [opened, setOpened] = useState<{ row: SourceListRow; body: string | null | undefined; file?: SourceFile | null } | null>(null);
+  const [opened, setOpened] = useState<{ row: SourceListRow; body: string | null | undefined } | null>(null);
   const [gone, setGone] = useState(deletedSourceIds);
   const cited = new Set(Object.keys(citations));
   const orphans = Object.entries(citations).filter(([id]) => gone.includes(id));
@@ -174,13 +173,7 @@ export function SourcesPage({
   const open = async (id: string) => {
     const row = rows.find((r) => r.id === id);
     if (!row) return;
-    setOpened({ row, body: undefined, file: undefined });
-    if (store.file) {
-      store
-        .file(id)
-        .then((file) => setOpened((o) => (o && o.row.id === id ? { ...o, file } : o)))
-        .catch(() => setOpened((o) => (o && o.row.id === id ? { ...o, file: null } : o)));
-    }
+    setOpened({ row, body: undefined });
     try {
       const body = await backend.body(id);
       setOpened((o) => (o && o.row.id === id ? { ...o, body } : o));
@@ -212,11 +205,8 @@ export function SourcesPage({
       if (r.status === "error") return r.message;
       setLinks((list) => [...list, ...r.links]);
       setTotalAll((n) => n + 1);
-      // The file goes up once the source is there; if it can't be kept, the source stays and says so.
-      const kept = s.file && store.attachFile ? await store.attachFile(r.source.id, s.file) : null;
       void refresh();
-      changed(kept?.status === "ok" ? "Source added and linked, with its file." : "Source added and linked.");
-      if (kept?.status === "error") setError(`Added the source, but couldn't keep the file: ${kept.message} Open the source to upload it again.`);
+      changed("Source added and linked.");
       return null;
     }
     const r = await store.link(s.source.id, s.link);
@@ -225,31 +215,6 @@ export function SourcesPage({
     void refresh();
     changed("Source linked.");
     return null;
-  };
-
-  // A file kept for the open source: its text is now the source's full text.
-  const attach = async (id: string, file: File): Promise<string | null> => {
-    if (!store.attachFile) return "Files can't be uploaded here.";
-    const r = await store.attachFile(id, file);
-    if (r.status === "error") return r.message;
-    patch(id, "body", r.body);
-    setOpened((o) => (o && o.row.id === id ? { ...o, file: r.file } : o));
-    changed(`Kept ${r.file.name}. Its text is the full text now.`);
-    return null;
-  };
-
-  const download = async (id: string, name: string) => {
-    if (!store.fileLink) return;
-    const r = await store.fileLink(id);
-    if (r.status === "error") return setError(r.message);
-    // Always a download, never opened in the page.
-    const a = document.createElement("a");
-    a.href = r.url;
-    a.download = name;
-    a.rel = "noopener noreferrer";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
   };
 
   const unlink = async (link: SourceLinkRow) => {
@@ -266,22 +231,38 @@ export function SourcesPage({
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-fg-2">
-          {canEdit ? "Owners and editors add sources and link them." : "You can read the sources here; owners and editors can add and change them."}
-          {unlinkedCount > 0 && (
-            <span className="ml-1 font-semibold text-fg" data-unlinked-count={unlinkedCount}>
-              {unlinkedCount === 1 ? "1 source isn't linked to anything yet." : `${unlinkedCount} sources aren't linked to anything yet.`}
+    <div className="flex flex-col gap-5">
+      <PageHeader
+        label="Sources"
+        testId="sources-header"
+        eyebrow={<span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Company</span>}
+        title="Sources"
+        meta={
+          <MetaLine>
+            <span>
+              Your library of transcripts, notes and data. Search it, open one to read it, and link each to what it is evidence for. Cite one for a step&apos;s value from the step&apos;s inspector.
             </span>
-          )}
-        </p>
-        {canEdit && (
-          <button type="button" className={`${primary} ${EDIT_ONLY}`} data-edit-entry onClick={() => setDialog({ source: null })}>
-            + Add source
-          </button>
-        )}
-      </div>
+          </MetaLine>
+        }
+        below={
+          <p className="text-sm text-fg-2">
+            {canEdit ? "Agency admins add sources and link them." : "You can read the sources here; Agency admins can add and change them."}
+            {unlinkedCount > 0 && (
+              <span className="ml-1 font-semibold text-fg" data-unlinked-count={unlinkedCount}>
+                {unlinkedCount === 1 ? "1 source isn't linked to anything yet." : `${unlinkedCount} sources aren't linked to anything yet.`}
+              </span>
+            )}
+          </p>
+        }
+        actionsLabel="Sources actions"
+        actions={
+          canEdit ? (
+            <Button type="button" className={EDIT_ONLY} data-edit-entry onClick={() => setDialog({ source: null })}>
+              + Add source
+            </Button>
+          ) : undefined
+        }
+      />
       <p role="status" aria-live="polite" className={status ? "text-xs text-fg-2" : "sr-only"}>
         {status}
       </p>
@@ -293,27 +274,28 @@ export function SourcesPage({
           </button>
         </p>
       )}
-      {totalAll === 0 ? (
-        <p data-no-sources className="rounded-lg border border-dashed border-line p-4 text-fg-2">
-          No sources yet. Add the audit&apos;s transcripts and notes and link each one to what it is evidence for (a process, a step, an
-          insight, an issue or a solution), or let Claude add them through the MCP server, so every number can be traced to what someone said.
-        </p>
-      ) : (
-        <SourcesLibrary
-          rows={rows}
-          total={total}
-          query={query}
-          onQuery={setQuery}
-          loading={loading}
-          loadError={loadError}
-          onMore={() => void run(query, rows.length)}
-          links={links}
-          targets={targets}
-          citations={Object.fromEntries(Object.entries(citations).map(([id, list]) => [id, list.length]))}
-          openId={opened?.row.id ?? null}
-          onOpen={(id) => void open(id)}
-        />
-      )}
+      <SectionCard id="library" section="library" title="Library">
+        {totalAll === 0 ? (
+          <EmptyState icon={FileText} data-no-sources>
+            No sources yet. Add the audit&apos;s transcripts and notes and link each one to what it is evidence for (a process, a step, an insight, an issue or a solution), or let Claude add them through the MCP server, so every number can be traced to what someone said.
+          </EmptyState>
+        ) : (
+          <SourcesLibrary
+            rows={rows}
+            total={total}
+            query={query}
+            onQuery={setQuery}
+            loading={loading}
+            loadError={loadError}
+            onMore={() => void run(query, rows.length)}
+            links={links}
+            targets={targets}
+            citations={Object.fromEntries(Object.entries(citations).map(([id, list]) => [id, list.length]))}
+            openId={opened?.row.id ?? null}
+            onOpen={(id) => void open(id)}
+          />
+        )}
+      </SectionCard>
       <Sheet open={opened !== null} onOpenChange={(o) => !o && setOpened(null)}>
         <SheetContent side="right" className="gap-0 overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl" aria-describedby={undefined} data-source-panel>
           {opened && (
@@ -321,9 +303,6 @@ export function SourcesPage({
               key={opened.row.id}
               source={{ ...opened.row, body: opened.body ?? null }}
               loadingText={opened.body === undefined && opened.row.has_body}
-              file={opened.file}
-              onUpload={canEditHere && store.attachFile ? (f) => attach(opened.row.id, f) : undefined}
-              onDownload={store.fileLink ? () => void download(opened.row.id, opened.file?.name ?? "file") : undefined}
               citations={citations[opened.row.id] ?? []}
               links={links.filter((l) => l.source_id === opened.row.id)}
               targets={targets}
@@ -357,7 +336,7 @@ export function SourcesPage({
           <Citations citations={orphans.flatMap(([, list]) => list)} processBase={processBase} />
         </section>
       )}
-      <SourceDialog open={dialog !== null} source={dialog?.source ?? null} targets={targets} allowFile={!!store.attachFile} onSubmit={submit} onClose={() => setDialog(null)} />
+      <SourceDialog open={dialog !== null} source={dialog?.source ?? null} targets={targets} onSubmit={submit} onClose={() => setDialog(null)} />
     </div>
   );
 }
@@ -365,9 +344,6 @@ export function SourcesPage({
 function SourcePanel({
   source: s,
   loadingText,
-  file,
-  onUpload,
-  onDownload,
   citations,
   links,
   targets,
@@ -383,11 +359,6 @@ function SourcePanel({
   source: SourceRow;
   /** The text is still being read. */
   loadingText: boolean;
-  /** Its original file: undefined while it is being read, null when it has none. */
-  file?: SourceFile | null;
-  /** Keep a file as its original (editors); resolves to an error, or null. */
-  onUpload?: (file: File) => Promise<string | null>;
-  onDownload?: () => void;
   citations: SourceCitation[];
   links: SourceLinkRow[];
   targets: LinkTargets;
@@ -444,13 +415,17 @@ function SourcePanel({
         ) : (
           <p className="text-fg-3">No text. {s.file_url ? "The original is at the link below." : "Add some under Details and edit."}</p>
         )}
-        {s.file_url && (
-          <a href={s.file_url} target="_blank" rel="noreferrer noopener" className="text-xs text-accent underline">
-            Open {s.kind === "screenshot" ? "the screenshot" : "the file"}
+      </section>
+      <section aria-label="Original" className="flex flex-col gap-1" data-original-link>
+        <h3 className="text-xs font-semibold text-fg-2">Original</h3>
+        {s.file_url ? (
+          <a href={s.file_url} target="_blank" rel="noreferrer noopener" className="w-fit max-w-full text-accent underline break-all">
+            Open the original{s.kind === "screenshot" ? " screenshot" : ""}
           </a>
+        ) : (
+          <p className="text-fg-3">{canEdit ? "No link to the original. Add one in the details below." : "No link to the original."}</p>
         )}
       </section>
-      {(file || onUpload) && <OriginalFile file={file} onUpload={onUpload} onDownload={onDownload} />}
       <section aria-label="Cited in" className="flex flex-col gap-1">
         <h3 className="text-xs font-semibold text-fg-2">Cited in</h3>
         {citations.length ? <Citations citations={citations} processBase={processBase} /> : <p className="text-fg-3">No value quotes this yet. Cite it from a step&apos;s details.</p>}
@@ -478,7 +453,7 @@ function SourcePanel({
           />
           <DateField label="Date" value={s.recorded_at} save={saver(s.id, "recorded_at")} disabled={!canEdit} help={SOURCE_HELP.date} />
           <div className="sm:col-span-2">
-            <TextField label="Link (file or recording)" value={s.file_url} optional save={saver(s.id, "file_url")} disabled={!canEdit} help={SOURCE_HELP.link} />
+            <TextField label="Link to the original" value={s.file_url} optional save={saver(s.id, "file_url")} disabled={!canEdit} help={SOURCE_HELP.link} />
           </div>
           <div className="sm:col-span-2">
             <TextField label="Transcript or notes" value={s.body} optional multiline save={saver(s.id, "body")} disabled={!canEdit} help={SOURCE_HELP.body} />
@@ -505,74 +480,6 @@ function SourcePanel({
           ))}
       </details>
     </article>
-  );
-}
-
-/** A source's original file (issue #182): what it is, a download, and for editors an upload that replaces it. */
-function OriginalFile({ file, onUpload, onDownload }: { file?: SourceFile | null; onUpload?: (file: File) => Promise<string | null>; onDownload?: () => void }) {
-  const [working, setWorking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const input = useRef<HTMLInputElement>(null);
-  const pick = async (f: File | undefined) => {
-    if (!f || !onUpload) return;
-    setWorking(true);
-    setError(null);
-    try {
-      setError(await onUpload(f));
-    } finally {
-      setWorking(false);
-      if (input.current) input.current.value = "";
-    }
-  };
-  return (
-    <section aria-label="Original file" className="flex flex-col gap-1.5" data-original-file>
-      <h3 className="text-xs font-semibold text-fg-2">Original file</h3>
-      {file === undefined ? (
-        <p role="status" className="text-fg-3">
-          Loading…
-        </p>
-      ) : file ? (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg bg-panel-2 p-2" data-source-file={file.name}>
-          <span className="min-w-0 grow break-words">
-            <span className="font-semibold">{file.name}</span>{" "}
-            <span className="text-xs text-fg-2">
-              · {SOURCE_FILE_LABELS[file.type]} · {fileSize(file.size)}
-            </span>
-          </span>
-          {onDownload && (
-            <button type="button" className={button} onClick={onDownload} aria-label={`Download ${file.name}`}>
-              Download
-            </button>
-          )}
-        </div>
-      ) : (
-        <p className="text-fg-3">No file is kept for this source.</p>
-      )}
-      {onUpload && (
-        <div className="flex flex-col gap-1">
-          <input
-            ref={input}
-            type="file"
-            accept={SOURCE_FILE_ACCEPT}
-            className="sr-only"
-            id="source-file-upload"
-            aria-label={file ? "Replace the file" : "Upload a file"}
-            onChange={(e) => void pick(e.target.files?.[0])}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className={button} disabled={working} onClick={() => input.current?.click()}>
-              {working ? "Uploading and reading…" : file ? "Replace the file…" : "Upload a file…"}
-            </button>
-            <span className="text-xs text-fg-3">.txt, .md, .csv, .xlsx or .pdf, up to 10 MB. Its text replaces the full text above.</span>
-          </div>
-          {error && (
-            <p role="alert" className="rounded-lg border border-crit bg-crit-soft p-2 text-xs">
-              {error}
-            </p>
-          )}
-        </div>
-      )}
-    </section>
   );
 }
 

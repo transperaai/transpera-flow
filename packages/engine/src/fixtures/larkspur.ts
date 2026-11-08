@@ -125,3 +125,29 @@ export function larkspurModel(): EngineModel {
     steps,
   };
 }
+
+/** What each Larkspur step achieves (sandbox G), by step id: the golden model `larkspur-time` and the time-by-purpose tests. */
+export const LARKSPUR_PURPOSES: Readonly<Record<string, string>> = {
+  triage: "winning",
+  pitch: "winning",
+  concepts: "winning",
+  decision: "winning",
+  onboard: "winning",
+  workshop: "client_job",
+  social_setup: "client_job",
+  content_plan: "client_job",
+  web_design: "client_job",
+  web_build: "client_job",
+  launch: "coordination",
+  cal_plan: "removable",
+  cal_social: "client_job",
+  cal_design: "client_job",
+  cal_approve: "required",
+  adhoc_design: "client_job",
+};
+
+/** `larkspurModel()` with a purpose on every working step. Reporting only: every other number is `larkspurModel()`'s. */
+export function larkspurWithPurposes(): EngineModel {
+  const m = larkspurModel();
+  return { ...m, steps: m.steps.map((s) => (s.id in LARKSPUR_PURPOSES ? { ...s, purpose: LARKSPUR_PURPOSES[s.id]! } : s)) };
+}

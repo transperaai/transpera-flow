@@ -35,7 +35,7 @@ beforeAll(async () => {
   db = await createTestDb();
   const link = async (email: string, role: string, person: string | null) => {
     const u = await createUser(db, email);
-    await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, $3, $4)", [ws, u.id, role, person]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::public.membership_role, $4)", [ws, u.id, role, person]);
     return u;
   };
   member = await link("jess@tc.example", "member", P.jess!);
@@ -98,7 +98,6 @@ describe("team_capacity per-person times (C6)", () => {
     step_id: string | null;
     workspace_id: string;
     factor: number;
-    source: string;
     [k: string]: unknown;
   }
   type WithFactors = { person_capacity_factors: Factor[]; [k: string]: unknown };
@@ -123,8 +122,7 @@ describe("team_capacity per-person times (C6)", () => {
       const f = await factorsAs(who);
       expect(f.map(key).sort()).toEqual(all);
       for (const row of f) {
-        expect(Object.keys(row).sort()).toEqual(["factor", "items", "person_id", "source", "step_id", "workspace_id"]);
-        expect(row.source).toBe("entered");
+        expect(Object.keys(row).sort()).toEqual(["factor", "person_id", "step_id", "workspace_id"]);
         expect(row.workspace_id).toBe(ws);
         expect(typeof row.factor).toBe("number");
       }
@@ -137,7 +135,7 @@ describe("team_capacity per-person times (C6)", () => {
 
   it("a member linked to nobody and a viewer linked to someone else get only their own or an empty list; no one else's number appears anywhere in the text", async () => {
     const unlinked = await createUser(db, "cf-unlinked@tc.example");
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'member')", [ws, unlinked.id]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'viewer')", [ws, unlinked.id]);
     expect(await factorsAs(unlinked)).toEqual([]);
     const viewer = await createUser(db, "cf-viewer@tc.example");
     await db.client.query("insert into memberships (workspace_id, user_id, role, person_id) values ($1, $2, 'viewer', $3)", [ws, viewer.id, P.callum!]);
@@ -229,10 +227,13 @@ describe("a member's simulation equals an editor's", () => {
     }
     return JSON.parse(text) as T;
   };
-  /** A result without what may differ for a member: people's own cost rates (the engine's overtime cost is null for the member, checked apart). */
+  /** A result without what may differ for a member: people's own cost rates (the engine's overtime cost, labour cost and profit are null for the member, checked apart). */
   const strip = (r: Json) => {
     const copy = JSON.parse(JSON.stringify(r)) as Json;
     delete copy.kpi.overtimeCost;
+    delete copy.kpi.labourCost;
+    delete copy.kpi.profit;
+    delete copy.samples.profit;
     for (const p of Object.values(copy.resolvedPeople) as Record<string, unknown>[]) delete p.cost;
     return copy;
   };
@@ -252,6 +253,11 @@ describe("a member's simulation equals an editor's", () => {
     // Overtime cost: a number for the editor (it is real money), unavailable for the member: null, not 0.
     expect(viaTables.kpi.overtimeCost!.mean).toBeGreaterThan(0);
     expect(viaTeam.kpi.overtimeCost).toBeNull();
+    // Profit first (engine 1.11.0): paid labour and profit depend on pay too, so they are unavailable; revenue and overheads are not.
+    expect(viaTables.kpi.labourCost!.mean).toBeGreaterThan(0);
+    expect(viaTables.kpi.profit).not.toBeNull();
+    expect([viaTeam.kpi.labourCost, viaTeam.kpi.profit, viaTeam.samples.profit]).toEqual([null, null, null]);
+    expect(viaTeam.kpi.revenue).toEqual(viaTables.kpi.revenue);
     expect(strip(viaTeam as unknown as Json)).toEqual(strip(relabel(viaTables, viaTables, viaTeam) as unknown as Json));
 
     // Detected issues: the same issues, ratings, titles and evidence; the costs that need pay are unavailable.
@@ -280,12 +286,13 @@ describe("a member's simulation equals an editor's", () => {
   it("Northbeam (no person rates): deep-equal with only the names removed, and the overtime cost still unavailable", async () => {
     const opts = { startDate: "2026-10-05" };
     const nbMember = await createUser(db, "nb-member@tc.example");
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'member')", [NORTHBEAM_WORKSPACE_ID, nbMember.id]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'viewer')", [NORTHBEAM_WORKSPACE_ID, nbMember.id]);
     const nbEditor = await createUser(db, "nb-editor@tc.example");
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'editor')", [NORTHBEAM_WORKSPACE_ID, nbEditor.id]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, 'owner')", [NORTHBEAM_WORKSPACE_ID, nbEditor.id]);
     const viaTables = simulate(toEngineModel(await bundleFor(nbEditor, NORTHBEAM_WORKSPACE_ID, false), opts), 30, 1);
     const viaTeam = simulate(toEngineModel(await bundleFor(nbMember, NORTHBEAM_WORKSPACE_ID, true), opts), 30, 1);
     expect(viaTeam.kpi.overtimeCost).toBeNull();
+    expect([viaTeam.kpi.labourCost, viaTeam.kpi.profit]).toEqual([null, null]);
     expect(strip(viaTeam as unknown as Json)).toEqual(strip(relabel(viaTables, viaTables, viaTeam) as unknown as Json));
   });
 });

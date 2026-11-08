@@ -1,6 +1,6 @@
 # 5. Presence and live changes: Postgres Changes for data, Presence and Broadcast for people
 
-Date: 7 Oct 2026 · Status: accepted · Issue: #10 · Implements PRD §4.1 (concurrent editing), D14
+Date: 7 Oct 2026 · Status: Superseded: live editing removed (26 Oct 2026, docs/plans/rework-direction.md decision 6) · Issue: #10 · Implements PRD §4.1 (concurrent editing), D14
 
 ## Context
 

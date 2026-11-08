@@ -1,36 +1,15 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { inUse, parseNewRole, parseRoleField, roleUsage, selectableRoles } from "@/lib/roles";
+import { createWorld, signInAs, signOut, type World } from "./action-harness";
 
-// Roles in the settings (issue #88): the checks, the usage counts and the
-// Server Actions. A stand-in for Supabase records what reaches the database.
-const db = vi.hoisted(() => ({
-  calls: [] as { op: string; args: unknown[] }[],
-  signedIn: true,
-  result: { data: null as unknown, error: null as { code?: string } | null },
-  refreshed: 0,
-}));
+// Roles in the settings (issue #88): the checks, the usage counts and the Server Actions, which run against a real database.
+const mocks = vi.hoisted(() => ({ refreshed: 0 }));
 vi.mock("server-only", () => ({}));
-vi.mock("next/cache", () => ({ refresh: () => void (db.refreshed += 1) }));
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => {
-    const chain = {
-      insert: (...args: unknown[]) => (db.calls.push({ op: "insert", args }), chain),
-      delete: () => (db.calls.push({ op: "delete", args: [] }), chain),
-      eq: (...args: unknown[]) => (db.calls.push({ op: "eq", args }), chain),
-      select: () => chain,
-      then: (resolve: (v: unknown) => void) => resolve(db.result),
-    };
-    return {
-      auth: { getClaims: async () => ({ data: db.signedIn ? { claims: { sub: "u1" } } : null }) },
-      from: (table: string) => (db.calls.push({ op: "from", args: [table] }), chain),
-      rpc: async (fn: string, args: unknown) => (db.calls.push({ op: "rpc", args: [fn, args] }), db.result),
-    };
-  },
-}));
+vi.mock("next/cache", () => ({ refresh: () => void (mocks.refreshed += 1) }));
+vi.mock("@/lib/auth/session", async () => (await import("./action-harness")).sessionMock);
 const { createRole, removeRole, saveRoleField } = await import("@/app/w/[slug]/settings/actions");
 
 const ROLE = "b0000000-0000-4000-8000-000000000001";
-const WS = "a0000000-0000-4000-8000-000000000001";
 const form = (fields: Record<string, string>) => {
   const f = new FormData();
   for (const [k, v] of Object.entries(fields)) f.set(k, v);
@@ -105,57 +84,75 @@ describe("selectableRoles", () => {
 });
 
 describe("the role actions", () => {
+  let world: World;
+  let WS: string;
+  let roleId: string;
+  const roleRows = async (name?: string) =>
+    (await world.tdb.client.query("select id, name, active from roles where workspace_id = $1 and ($2::text is null or name = $2)", [WS, name ?? null])).rows;
+
+  beforeAll(async () => {
+    world = await createWorld("rolesco");
+    WS = world.workspaceId;
+    roleId = (await world.tdb.client.query("insert into roles (workspace_id, name) values ($1, 'Finance') returning id", [WS])).rows[0].id;
+    await world.tdb.client.query("insert into roles (workspace_id, name) values ($1, 'Sales')", [WS]);
+  });
+  afterAll(async () => {
+    await world?.tdb.close();
+  });
   beforeEach(() => {
-    db.calls = [];
-    db.signedIn = true;
-    db.result = { data: [], error: null };
-    db.refreshed = 0;
+    mocks.refreshed = 0;
+    signInAs(world, "editor");
   });
 
   it("saves one field through save_fields and refreshes", async () => {
-    db.result = { data: { status: "saved", row: { name: "Finance and admin" } }, error: null };
-    expect(await saveRoleField(ROLE, "name", "Finance", " Finance and admin ")).toEqual({ status: "saved", value: "Finance and admin" });
-    expect(db.calls).toEqual([
-      { op: "rpc", args: ["save_fields", { target: "roles", key: { id: ROLE }, base: { name: "Finance" }, changes: { name: "Finance and admin" } }] },
-    ]);
-    expect(db.refreshed).toBe(1);
+    expect(await saveRoleField(roleId, "name", "Finance", " Finance and admin ")).toEqual({ status: "saved", value: "Finance and admin" });
+    expect((await roleRows("Finance and admin")).map((r) => r.id)).toEqual([roleId]);
+    expect(mocks.refreshed).toBe(1);
+    // Put it back for the tests below.
+    expect((await saveRoleField(roleId, "name", "Finance and admin", "Finance")).status).toBe("saved");
+    mocks.refreshed = 0;
   });
 
-  it("makes no call for malformed input, or when signed out", async () => {
-    expect(await saveRoleField(ROLE, "name", "Finance", "  ")).toMatchObject({ status: "error" });
+  it("makes no change for malformed input, or when signed out", async () => {
+    expect(await saveRoleField(roleId, "name", "Finance", "  ")).toMatchObject({ status: "error" });
     expect(await saveRoleField("nope", "name", "Finance", "x")).toMatchObject({ status: "error" });
-    db.signedIn = false;
-    expect(await saveRoleField(ROLE, "name", "Finance", "x")).toMatchObject({ status: "error" });
-    expect(db.calls).toEqual([]);
+    signOut(world);
+    expect(await saveRoleField(roleId, "name", "Finance", "x")).toMatchObject({ status: "error" });
+    expect((await roleRows("Finance")).map((r) => r.id)).toEqual([roleId]);
+    expect(mocks.refreshed).toBe(0);
   });
 
   it("says a rename onto an existing name is taken", async () => {
-    db.result = { data: null, error: { code: "23505" } };
-    expect(await saveRoleField(ROLE, "name", "Finance", "Sales")).toEqual({ status: "error", message: "That name is already taken." });
-    expect(db.refreshed).toBe(0);
+    expect(await saveRoleField(roleId, "name", "Finance", "Sales")).toEqual({ status: "error", message: "That name is already taken." });
+    expect(mocks.refreshed).toBe(0);
   });
 
   it("adds a role", async () => {
     expect(await createRole(WS, {}, form({ name: " Copywriter " }))).toEqual({});
-    expect(db.calls).toEqual([{ op: "from", args: ["roles"] }, { op: "insert", args: [{ workspace_id: WS, name: "Copywriter" }] }]);
-    expect(db.refreshed).toBe(1);
+    expect(await roleRows("Copywriter")).toHaveLength(1);
+    expect(mocks.refreshed).toBe(1);
   });
 
-  it("refuses a blank name without a call, and names a duplicate", async () => {
+  it("refuses a blank name without a change, and names a duplicate", async () => {
+    const before = (await roleRows()).length;
     expect(await createRole(WS, {}, form({ name: " " }))).toEqual({ error: "Enter a name." });
-    expect(db.calls).toEqual([]);
-    db.result = { data: null, error: { code: "23505" } };
+    expect((await roleRows()).length).toBe(before);
     expect(await createRole(WS, {}, form({ name: "Sales" }))).toEqual({ error: "There is already a role called 'Sales'." });
   });
 
   it("removes a role, and explains why it can't", async () => {
-    db.result = { data: [{ id: ROLE }], error: null };
-    expect(await removeRole(ROLE)).toEqual({});
-    expect(db.refreshed).toBe(1);
-    db.result = { data: null, error: { code: "23503" } };
-    expect(await removeRole(ROLE)).toEqual({ error: "That role is still used by steps, people, clients or a service's fallback load. Make it inactive instead." });
-    db.result = { data: [], error: null };
-    expect(await removeRole(ROLE)).toEqual({ error: "That role was already removed, or you can't edit it." });
-    expect(db.refreshed).toBe(1);
+    const spare = (await world.tdb.client.query("insert into roles (workspace_id, name) values ($1, 'Spare') returning id", [WS])).rows[0].id;
+    expect(await removeRole(spare)).toEqual({});
+    expect(await roleRows("Spare")).toHaveLength(0);
+    expect(mocks.refreshed).toBe(1);
+    // A role a step uses can't go.
+    const used = (await world.tdb.client.query("insert into roles (workspace_id, name) values ($1, 'Used') returning id", [WS])).rows[0].id;
+    const pat = (await world.tdb.client.query("insert into people (workspace_id, name) values ($1, 'Pat') returning id", [WS])).rows[0].id;
+    await world.tdb.client.query("insert into person_roles (person_id, role_id, workspace_id) values ($1, $2, $3)", [pat, used, WS]);
+    expect(await removeRole(used)).toEqual({ error: "That role is still used by steps, people, clients or a service's fallback load. Make it inactive instead." });
+    expect(await roleRows("Used")).toHaveLength(1);
+    // Already gone.
+    expect(await removeRole(spare)).toEqual({ error: "That role was already removed, or you can't edit it." });
+    expect(mocks.refreshed).toBe(1);
   });
 });

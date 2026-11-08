@@ -19,7 +19,7 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const role of ["owner", "editor", "member", "viewer"] as const) {
     users[role] = await createUser(db, `${role}@groups.example.com`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
   }
   users.stranger = await createUser(db, "stranger@groups.example.com");
   otherWs = (await db.client.query("insert into workspaces (name, slug) values ('Other', 'other-groups') returning id")).rows[0].id;
@@ -148,7 +148,7 @@ describe("per-field saves", () => {
 });
 
 describe("the migration's backfill from named clients", () => {
-  const migration = readFileSync(new URL("../supabase/migrations/20261111000000_client_groups.sql", import.meta.url), "utf8");
+  const migration = readFileSync(new URL("../migrations/20261111000000_client_groups.sql", import.meta.url), "utf8");
   const backfill = /(insert into public\.client_groups[\s\S]*?on conflict \(service_id\) do nothing;)/.exec(migration)![1]!;
 
   it("rolls the active named clients up per service, and never changes a group that exists", async () => {
@@ -204,7 +204,7 @@ describe("the migration's backfill from named clients", () => {
 });
 
 describe("the production data alignment block", () => {
-  const migration = readFileSync(new URL("../supabase/migrations/20261111000000_client_groups.sql", import.meta.url), "utf8");
+  const migration = readFileSync(new URL("../migrations/20261111000000_client_groups.sql", import.meta.url), "utf8");
   const block = migration
     .slice(migration.indexOf("-- Production data alignment"))
     .split("\n")

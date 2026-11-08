@@ -9,11 +9,9 @@ import type { SolutionInput } from "./save";
 interface DemoState {
   solutions: SolutionRow[];
   links: SolutionIssueRow[];
-  /** Solutions built from an AI idea (the demo's Suggestions page records them when an idea is built). */
-  aiIds: string[];
 }
 
-const EMPTY: DemoState = { solutions: [], links: [], aiIds: [] };
+const EMPTY: DemoState = { solutions: [], links: [] };
 let state: DemoState = EMPTY;
 const listeners = new Set<() => void>();
 
@@ -27,9 +25,11 @@ export function addDemoSolution(input: SolutionInput): { solution: SolutionRow; 
     base_revision_id: input.baseRevisionId,
     name: input.name,
     notes: "",
+    status: "testing",
     steps: structuredClone(input.copy),
     changed_step_ids: [...input.changedStepIds],
     lever_changes: structuredClone(input.levers),
+    step_changes: structuredClone(input.stepChanges),
     created_at: now,
     updated_at: now,
     created_by: null,
@@ -50,13 +50,6 @@ export function addDemoSolution(input: SolutionInput): { solution: SolutionRow; 
   state = { ...state, solutions: [solution, ...state.solutions], links: [...state.links, ...links] };
   for (const l of listeners) l();
   return { solution, links };
-}
-
-/** Record that a demo solution was built from an AI idea, so it reads "AI block". */
-export function markDemoSolutionAi(solutionId: string): void {
-  if (state.aiIds.includes(solutionId)) return;
-  state = { ...state, aiIds: [...state.aiIds, solutionId] };
-  emit();
 }
 
 const emit = () => {
@@ -118,8 +111,13 @@ export function removeDemoSolution(solutionId: string): void {
     ...state,
     solutions: state.solutions.filter((s) => s.id !== solutionId),
     links: state.links.filter((l) => l.solution_id !== solutionId),
-    aiIds: state.aiIds.filter((id) => id !== solutionId),
   };
+  emit();
+}
+
+/** A solution's status, in this tab (Q10). */
+export function setDemoStatus(solutionId: string, status: SolutionRow["status"]): void {
+  state = { ...state, solutions: state.solutions.map((s) => (s.id === solutionId ? { ...s, status, updated_at: new Date().toISOString() } : s)) };
   emit();
 }
 

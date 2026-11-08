@@ -19,15 +19,18 @@ const canEdit = (claims: Record<string, unknown>) => db.as(claims, async (c) => 
 
 describe("can_edit_workspace, which gates the backup export", () => {
   it.each([
-    ["owner", true],
-    ["editor", true],
     ["agency_admin", true],
-    ["member", false],
     ["viewer", false],
-  ])("%s: %s", async (role, expected) => {
-    const user = await createUser(db, `export.${role}@northbeam.example`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
+  ])("a %s membership: %s", async (kind, expected) => {
+    // The Agency admin's membership role is `owner`; the Viewer's is `viewer` (migration 20270103000000).
+    const user = await createUser(db, `export.${kind}@northbeam.example`);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, kind === "viewer" ? "viewer" : "owner"]);
     expect(await canEdit(user.claims)).toBe(expected);
+  });
+
+  it("is true for the Owner (the agency-admin flag), with no membership at all", async () => {
+    const owner = await createUser(db, "export.owner@northbeam.example", { agency_admin: true });
+    expect(await canEdit(owner.claims)).toBe(true);
   });
 
   it("is not true for a signed-in person who isn't a member (null; the route refuses anything but true)", async () => {

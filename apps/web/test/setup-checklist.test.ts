@@ -18,11 +18,11 @@ describe("setupChecklist", () => {
     ]);
   });
 
-  it("links to the Settings sections and the Processes page, and to the draft when there is one", () => {
+  it("links to the Set up sections and the Processes page, and to the draft when there is one", () => {
     expect(setupChecklist(ZERO, BASE, null).map((i) => i.href)).toEqual([
-      "/w/acme/settings#roles-heading",
-      "/w/acme/settings#people-heading",
-      "/w/acme/settings#clients-heading",
+      "/w/acme/settings/people#roles-heading",
+      "/w/acme/settings/people#people-heading",
+      "/w/acme/settings/clients#clients-heading",
       "/w/acme/processes",
       "/w/acme/processes",
     ]);

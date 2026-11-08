@@ -14,7 +14,7 @@ import {
 import { bottleneckReport, checkScenarioRobustness, compareScenarios, matchNamed, robustnessParameters, stackPatches, ToolError } from "../src";
 
 // The analysis tools' logic (issue #26), without a database. The tools
-// themselves are covered end to end in postgrest.test.ts.
+// themselves are covered end to end in end-to-end.test.ts.
 
 const startDate = "2026-10-05";
 const model = () => toEngineModel(northbeamBundle(), { startDate });

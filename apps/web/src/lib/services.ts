@@ -38,6 +38,9 @@ export const SERVICE_FIELDS = {
   name: (v) => typeof v === "string" && v.trim().length > 0 && v.length <= MAX_NAME,
   pricing_model: isPricingModel,
   price: between(0, MAX_PRICE),
+  // The fee range of a client won (sandbox phase 3, A5): blank is no range.
+  price_low: (v) => v === null || between(0, MAX_PRICE)(v),
+  price_high: (v) => v === null || between(0, MAX_PRICE)(v),
   margin: between(0, 1),
   tenure_months: between(0, MAX_TENURE_MONTHS),
   churn_monthly_base: between(0, 1),

@@ -1,254 +1,323 @@
-import { mkdirSync } from "node:fs";
 import { chromium, type Browser, type Page } from "playwright-core";
+import { mkdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LEVER_KIND_IDS } from "@transpera-flow/db";
 import { bundleHarness } from "./build-harness";
 
-// A play link's page (issue #33, B4) in a real browser: the real SharedView for a Northbeam process in `play` mode, People off and
-// Financials off, with the workspace hiding "Work done twice". The visitor moves levers in their browser; nothing is stored; the Send
-// dialog calls the harness's stub (the Server Action's stand-in) once with the moved patch. A view link of the same snapshot offers none of it.
+// The free-play Sandbox in a real browser, with its simulations in a real Web Worker (./play-harness/entry.tsx), on the engine fixture `capacityModel()` and
+// the Set up data that agrees with it (made-up data): the three parts (company map on top, levers left, results right), the result charts (heatmap, over-line bars, three line charts against
+// today's path dashed, time donuts), a lever that moves the charts, no automation section among the levers (D53), a map version picked from a process's popover (badge, chip, reset to
+// today), a price rise with "Clients react", Reset levers, the levers resetting when the
+// page is left (unmounted and opened again), no save, scenario or compare UI, no automation levers (D53), pay
+// hidden, and a phone, where the page never scrolls sideways. With PLAY_SHOTS=<dir> it also saves the screenshots (light and dark, 1440 and 400 px).
 
 let browser: Browser;
 let script: string;
 let workers: Record<string, string>;
+let css = "";
 
 const META = { "import.meta.url": JSON.stringify("http://harness.test/src/lib/x/") };
-const SHOTS = process.env.SHARE_SHOTS_DIR;
-const LEADS = '[data-lever="demand.leads_per_week"]';
+
+/** The app's real stylesheet (Tailwind compiled from globals.css). Test only: postcss is Tailwind's own dependency. */
+async function appCss(): Promise<string> {
+  const require = createRequire(import.meta.url);
+  const here = dirname(require.resolve("@tailwindcss/postcss"));
+  type Process = { process(css: string, o: { from: string }): Promise<{ css: string }> };
+  const postcss = require(require.resolve("postcss", { paths: [here] })) as (plugins: unknown[]) => Process;
+  const tailwind = require("@tailwindcss/postcss") as (o: { base: string }) => unknown;
+  const file = fileURLToPath(new URL("../src/app/globals.css", import.meta.url));
+  return (await postcss([tailwind({ base: fileURLToPath(new URL("..", import.meta.url)) })]).process(readFileSync(file, "utf8"), { from: file })).css;
+}
 
 beforeAll(async () => {
-  [script, workers] = await Promise.all([
-    bundleHarness(new URL("./share-harness/entry.tsx", import.meta.url), META),
-    Promise.all(
-      ["simulate.worker.ts", "impact.worker.ts", "absence.worker.ts", "issue-costs.worker.ts", "shadow-price.worker.ts", "verdict.worker.ts", "stress.worker.ts", "projection.worker.ts"].map(
-        async (f) => [f, await bundleHarness(new URL(`../src/workers/${f}`, import.meta.url))] as const,
-      ),
-    ).then(Object.fromEntries),
+  [script, workers, css] = await Promise.all([
+    bundleHarness(new URL("./play-harness/entry.tsx", import.meta.url), META),
+    Promise.all(["simulate.worker.ts"].map(async (f) => [f, await bundleHarness(new URL(`../src/workers/${f}`, import.meta.url))] as const)).then(Object.fromEntries),
+    appCss(),
   ]);
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
-  if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 }, 180_000);
 
 afterAll(async () => {
   await browser?.close();
 });
 
-interface Options {
-  mode?: "view" | "play";
-  hidden?: string[];
-  visitorEmail?: string | null;
-  people?: boolean;
-  financials?: boolean;
-}
+type Options = { viewer?: boolean; payHidden?: boolean };
 
-async function mount(options: Options = {}, size = { width: 1440, height: 1800 }, scheme: "light" | "dark" = "light") {
-  const page = await browser.newPage({ viewport: size, colorScheme: scheme });
+async function mount(options: Options = {}, width = 1440, scheme: "light" | "dark" = "light"): Promise<{ page: Page; errors: string[] }> {
+  const page = await browser.newPage({ viewport: { width, height: 1000 }, colorScheme: scheme, deviceScaleFactor: process.env.PLAY_SHOTS ? 2 : 1 });
   const errors: string[] = [];
-  const requests: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
-  page.on("request", (r) => requests.push(r.url()));
-  await page.route("https://share.test/", (route) => route.fulfill({ contentType: "text/html", body: `<!doctype html><div id="root"></div>` }));
-  await page.goto("https://share.test/");
+  await page.setContent(`<style>${css}</style><div id="root"></div>`);
   await page.evaluate((w) => (window.workerScripts = w), workers);
   await page.addScriptTag({ content: script });
-  const { people = false, financials = false, ...rest } = options;
-  await page.evaluate(([t, o]) => window.mountShare("process", t as { people: boolean; financials: boolean }, o as Options), [{ people, financials }, { mode: "play", ...rest }] as const);
-  await page.waitForSelector("[data-share-bar]");
-  return { page, errors, requests };
+  await page.evaluate((o) => window.mountPlay(o), options);
+  return { page, errors };
 }
 
-/** Wait for the levers to be drawn (the page's own run has landed). */
-async function ready(page: Page) {
-  await page.waitForSelector(LEADS, { timeout: 90_000, state: "attached" });
-  await page.waitForTimeout(1500);
-}
+/** Today's path has run: the result charts are on the page. */
+const ready = (page: Page) => page.waitForSelector("[data-play-heatmap]", { timeout: 120_000 });
+/** The run for the levers as they stand has finished. */
+const settled = async (page: Page) => {
+  await page.waitForFunction(() => document.querySelector("[data-run-status]") && !/Working it out/.test(document.querySelector("[data-run-status]")!.textContent ?? ""), null, { timeout: 120_000 });
+  // A change waits a moment before it runs: let that moment pass, then wait again for the run.
+  await page.waitForTimeout(450);
+  await page.waitForFunction(() => !/Working it out/.test(document.querySelector("[data-run-status]")!.textContent ?? ""), null, { timeout: 120_000 });
+};
+const text = (page: Page, sel: string) => page.locator(sel).first().innerText();
+const clientsHeader = (page: Page) => text(page, "[data-chart-header='clients']");
 
-/** Move a slider the way a person does: its value changes and the input event fires. */
-async function move(page: Page, path: string, value: number) {
-  await page.evaluate(
-    ([p, v]) => {
-      const el = document.querySelector(`[data-lever="${p}"]`) as HTMLInputElement;
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, String(v));
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-    },
-    [path, value] as const,
-  );
-}
-
-const value = (page: Page, path: string) => page.evaluate((p) => (document.querySelector(`[data-lever="${p}"]`) as HTMLInputElement).value, path);
-
-describe("a play link's page, People off and Financials off", () => {
-  it("renders without console errors and makes no network request while levers move; shows the section and the bar; offers the shown levers only", async () => {
-    const { page, errors, requests } = await mount({ hidden: ["process.rework"] });
-    await ready(page);
-    const text = await page.locator("body").innerText();
-    expect(text).toContain("Try your own changes");
-    expect(text).toContain("Shared view · try changes");
-    expect(text).toContain("You can try changes here. Nothing is saved unless you send it to the team.");
-    expect(text).not.toContain("Shared view · read only");
-    // The workspace hides "Work done twice": no rework slider. Hands-on time is offered. No per-person slider (People off).
-    expect(await page.locator('[data-lever$=".rework_rate"]').count()).toBe(0);
-    expect(await page.locator('[data-lever$=".work_hours"]').count()).toBeGreaterThan(0);
-    expect(await page.locator('[data-lever^="people."]').count()).toBe(0);
-    // The saved-scenario library is hidden in play mode.
-    expect(text).not.toMatch(/Save as scenario|Saved scenarios/i);
-    await move(page, "demand.leads_per_week", 12);
-    await move(page, "steps.00000000-0000-4000-8000-0000000000e1.work_hours", 0.8).catch(() => undefined);
-    await page.waitForTimeout(1500);
-    expect(requests.filter((u) => !/^(blob:|data:|about:)/.test(u))).toEqual(["https://share.test/"]);
-    expect(errors).toEqual([]);
-    await page.close();
-  }, 240_000);
-
-  it("moving a lever updates the comparison headline; Send is disabled before and enabled after", async () => {
-    const { page } = await mount();
-    await ready(page);
-    expect(await page.locator("[data-play-send]").isDisabled()).toBe(true);
-    expect(await page.locator("[data-play-send]").getAttribute("title")).toBe("Move at least one lever first.");
-    expect(await page.locator('[data-testid="compare-headline"]').count()).toBe(0);
-    await move(page, "demand.leads_per_week", 20);
-    await page.waitForSelector('[data-testid="compare-headline"]', { timeout: 60_000 });
-    expect(await page.locator("[data-play-send]").isDisabled()).toBe(false);
-    await page.close();
-  }, 240_000);
-
-  it("Send: the dialog lists the change in words, checks the name, and calls the stubbed action once with the moved patch; the levers stay", async () => {
-    const { page, errors } = await mount();
-    await ready(page);
-    await move(page, "demand.leads_per_week", 12);
-    await page.click("[data-play-send]");
-    await page.waitForSelector("[data-send-idea]");
-    expect(await page.locator("[data-send-idea] h2").innerText()).toBe("Send your idea to Northbeam Digital");
-    expect(await page.locator("[data-send-changes]").innerText()).toContain("Leads per week: 12");
-    // The honeypot is off-screen and out of the tab order.
-    const box = await page.locator("[data-send-honeypot]").boundingBox();
-    expect(box === null || box.x + box.width <= 0).toBe(true);
-    expect(await page.locator("[data-send-honeypot] input").getAttribute("tabindex")).toBe("-1");
-    // Empty name first.
-    await page.click("[data-send-submit]");
-    expect(await page.locator("[data-send-error]").innerText()).toBe("Give your idea a name.");
-    expect(await page.evaluate(() => window.playSubmits.length)).toBe(0);
-    await page.fill("[data-send-title]", "More leads");
-    await page.fill("[data-send-note]", "Try it for a quarter.");
-    await page.fill("[data-send-name]", "Marta Okoye");
-    await page.click("[data-send-submit]");
-    expect(await page.locator("[data-send-error]").innerText()).toBe("Add your email address so the team can reply.");
-    await page.fill("[data-send-email]", "marta@example.com");
-    await page.click("[data-send-submit]");
-    await page.waitForSelector("[data-send-done]");
-    expect(await page.locator("[data-send-done]").innerText()).toContain("Sent. The team will find your idea in their Suggestions. Nothing changes unless they build it.");
-    const sent = await page.evaluate(() => window.playSubmits);
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ title: "More leads", note: "Try it for a quarter.", name: "Marta Okoye", email: "marta@example.com", issue: null, levers: [{ path: "demand.leads_per_week", op: "set", value: 12 }] });
-    await page.click("[data-send-done] button");
-    // The levers stay where they were.
-    expect(await value(page, "demand.leads_per_week")).toBe("12");
-    expect(errors).toEqual([]);
-    await page.close();
-  }, 240_000);
-
-  it("shows each refusal in plain words, and keeps the dialog open", async () => {
-    const answers: [Parameters<typeof JSON.stringify>[0], string][] = [
-      [{ status: "rate_limited" }, "A lot of ideas have been sent from this link recently. Try again in an hour."],
-      [{ status: "busy" }, "The team has a lot of ideas waiting. Try again later."],
-      [{ status: "gone" }, "This link has expired or been turned off."],
-      [{ status: "sign_in" }, "Sign in again with the address this link was sent to."],
-      [{ status: "error", message: "One of the values is out of range." }, "One of the values is out of range."],
-    ];
-    const { page } = await mount();
-    await ready(page);
-    await move(page, "demand.leads_per_week", 12);
-    await page.click("[data-play-send]");
-    await page.fill("[data-send-title]", "More leads");
-    await page.fill("[data-send-name]", "Marta");
-    await page.fill("[data-send-email]", "marta@example.com");
-    for (const [answer, message] of answers) {
-      await page.evaluate((a) => (window.playAnswer = a as never), answer);
-      await page.click("[data-send-submit]");
-      await page.waitForFunction((m) => document.querySelector("[data-send-error]")?.textContent === m, message);
-    }
-    await page.close();
-  }, 240_000);
-
-  it("keeps nothing: localStorage and sessionStorage are empty after moving levers, and a reload (a fresh mount) shows every lever at neutral", async () => {
-    const { page } = await mount();
-    await ready(page);
-    const before = await value(page, "demand.leads_per_week");
-    await move(page, "demand.leads_per_week", 17);
-    await page.waitForTimeout(500);
-    expect(await value(page, "demand.leads_per_week")).toBe("17");
-    expect(await page.evaluate(() => [localStorage.length, sessionStorage.length, document.cookie])).toEqual([0, 0, ""]);
-    expect(page.url()).toBe("https://share.test/");
-    // A reload: unmount and mount again.
-    await page.evaluate(() => window.unmountShare());
-    await page.evaluate(() => window.mountShare("process", { people: false, financials: false }, { mode: "play" }));
-    await ready(page);
-    expect(await value(page, "demand.leads_per_week")).toBe(before);
-    expect(await page.locator("[data-play-send]").isDisabled()).toBe(true);
-    await page.close();
-  }, 240_000);
-
-  it("a view link of the same snapshot shows no levers and no Send", async () => {
-    const { page, errors } = await mount({ mode: "view" });
-    await page.waitForSelector("[data-cost]", { timeout: 90_000, state: "attached" });
-    await page.waitForTimeout(1500);
-    const text = await page.locator("body").innerText();
-    expect(text).toContain("Shared view · read only");
-    expect(text).not.toContain("Try your own changes");
-    expect(await page.locator("[data-lever]").count()).toBe(0);
-    expect(await page.locator("[data-play-send]").count()).toBe(0);
-    expect(errors).toEqual([]);
-    await page.close();
-  }, 240_000);
-
-  it("when the workspace hides every lever kind the section says so and Send stays disabled", async () => {
-    const { page } = await mount({ hidden: [...LEVER_KIND_IDS] });
-    await page.waitForSelector("[data-play-section]", { timeout: 90_000 });
-    expect(await page.locator("[data-play-note]").innerText()).toBe("The team hasn't shown any levers on this page.");
-    expect(await page.locator("[data-lever]").count()).toBe(0);
-    expect(await page.locator("[data-play-send]").isDisabled()).toBe(true);
-    await page.close();
-  }, 240_000);
-});
-
-describe("a restricted play link", () => {
-  it("shows the verified address, read only, instead of an email field, and sends no typed email", async () => {
-    const { page } = await mount({ people: true, financials: true, visitorEmail: "marta@example.com" });
-    await ready(page);
-    await move(page, "demand.leads_per_week", 12);
-    await page.click("[data-play-send]");
-    await page.waitForSelector("[data-send-idea]");
-    expect(await page.locator("[data-send-verified]").innerText()).toBe("Sent as marta@example.com");
-    expect(await page.locator("[data-send-email]").count()).toBe(0);
-    await page.fill("[data-send-title]", "More leads");
-    await page.fill("[data-send-name]", "Marta");
-    await page.click("[data-send-submit]");
-    await page.waitForSelector("[data-send-done]");
-    expect((await page.evaluate(() => window.playSubmits))[0]).toMatchObject({ email: "" });
-    // With People on a person's hours are offered.
-    await page.click("[data-send-done] button");
-    expect(await page.locator('[data-lever^="people."]').count()).toBeGreaterThan(0);
-    await page.close();
-  }, 240_000);
-});
-
-describe("screenshots", () => {
-  for (const [scheme, width] of [["light", 1440], ["dark", 1440], ["light", 400], ["dark", 400]] as const) {
-    it(`${scheme} at ${width} px: the section and the dialog render without console errors`, async () => {
-      const { page, errors } = await mount({}, { width, height: width === 400 ? 900 : 1800 }, scheme);
+describe("the free-play Sandbox", { timeout: 240_000 }, () => {
+  for (const width of [1440, 400]) {
+    it(`has its three parts, the result charts on today's path, and no save UI (${width}px)`, async () => {
+      const { page, errors } = await mount({}, width);
       await ready(page);
-      await move(page, "demand.leads_per_week", 12);
-      await page.waitForTimeout(1500);
-      await page.locator("[data-play-section]").scrollIntoViewIfNeeded();
-      // No horizontal page scroll at phone width.
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-      if (SHOTS) await page.screenshot({ path: `${SHOTS}/play-${scheme}-${width}.png` });
-      await page.click("[data-play-send]");
-      await page.waitForSelector("[data-send-idea]");
-      if (SHOTS) await page.screenshot({ path: `${SHOTS}/play-send-${scheme}-${width}.png` });
+
+      // 1. Company map on top; 2. levers; 3. results.
+      expect(await page.locator("[data-play-map]").count()).toBe(1);
+      expect(await page.locator("[data-play-levers]").count()).toBe(1);
+      expect(await page.locator("[data-play-results]").count()).toBe(1);
+      const top = await page.evaluate(() => {
+        const p = document.querySelector("[data-play-map]")!.getBoundingClientRect().top;
+        const l = document.querySelector("[data-play-levers]")!.getBoundingClientRect().top;
+        return p < l;
+      });
+      expect(top).toBe(true);
+
+      // Every group of levers the brief lists, and Reset.
+      for (const g of ["market", "add", "lose", "price", "people"]) expect(await page.locator(`[data-lever-group="${g}"]`).count(), g).toBe(1);
+      expect(await text(page, "[data-play-levers]")).toMatch(/Win new clients[\s\S]*Lose clients[\s\S]*Prices[\s\S]*People/);
+      // The levers are business conditions only (D53): an automation is part of a process version, picked on the map.
+      expect(await page.locator('[data-lever-group="automation"], [data-automation-switch], [data-changes-manage], [data-change-add]').count()).toBe(0);
+      expect(await text(page, "[data-play-levers]")).not.toMatch(/Automation and augmentation/);
+      expect(await page.locator("[data-play-reset]").count()).toBe(1);
+      expect(await page.locator('[data-lever="priceReaction"] option').allInnerTexts()).toEqual(["Barely", "Normally", "Strongly"]);
+
+      // The map is a card per process, with one line above it; the per-process cards, step pickers and "No solutions" lines are gone.
+      expect(await page.locator("[data-company-map] [data-id]").count()).toBeGreaterThanOrEqual(6);
+      expect(await text(page, "[data-version-summary]")).toBe("All processes on today's map. Click a process to load another version.");
+      for (const gone of [/No solutions for this process/, /No blocks yet/, /Company processes/]) expect(await page.locator("body").innerText(), String(gone)).not.toMatch(gone);
+      expect(await page.locator("[data-block], [data-step-row], [data-version]").count()).toBe(0);
+
+      // No "What happens" card: the numbers are in the chart headers. On today's path there is no change, no switch and no dashed copy.
+      expect(await page.locator("[data-verdict], [data-verdict-line]").count()).toBe(0);
+      expect(await page.locator("body").innerText()).not.toMatch(/What happens/);
+      expect(await text(page, "[data-chart-header='worst']")).toMatch(/^Worst month: \d+ (person|people) over their line$/);
+      expect(await text(page, "[data-chart-header='clients']")).toMatch(/^\d+ clients by month \d+$/);
+      expect(await text(page, "[data-chart-header='retainers']")).toMatch(/ a month$/);
+      expect(await text(page, "[data-chart-header='dler']")).toMatch(/^DLER \d\.\d by month \d+$/);
+      expect(await page.locator("[data-heat-switch]").count()).toBe(0);
+      expect(await page.locator("[data-play-chart]").count()).toBe(3);
+      for (const title of ["Clients by department", "Retainers a month", "DLER by department"]) expect(await page.locator(`[data-play-chart="${title}"]`).count(), title).toBe(1);
+      expect(await page.locator("[data-play-chart] path[data-line='today']").count()).toBe(0);
+      expect(await page.locator("[data-legend-today]").count()).toBe(0);
+      // The heatmap: a row for every team and a cell per month; the bars under it have today only; one donut.
+      expect(await page.locator("[data-heat-row]").count()).toBeGreaterThan(2);
+      expect(await page.locator("[data-heat-row]").first().locator("[data-heat-cell]").count()).toBeGreaterThanOrEqual(12);
+      expect(await page.locator("[data-over-bar='scene']").count()).toBe(0);
+      expect(await page.locator("[data-over-bar='today']").count()).toBeGreaterThanOrEqual(12);
+      expect(await page.locator("[data-play-donut]").count()).toBe(1);
+      expect(await page.locator("[data-purpose-moves]").count()).toBe(0);
+      // DLER has its 4.5 goal line, and every result card has its (i).
+      expect(await text(page, '[data-play-chart="DLER by department"]')).toContain("Goal 4.5");
+      for (const t of ["Who's overloaded, and when", "Clients by department", "Retainers a month", "DLER by department", "Where the time goes"]) expect(await page.getByRole("button", { name: `About ${t}` }).count(), t).toBe(1);
+
+      // Nothing about saving, scenarios or comparing; goal seek and "What matters most" stay hidden.
+      const all = await page.locator("body").innerText();
+      for (const gone of [/Save/, /Rename/, /Duplicate/, /Compare/i, /Saved scenarios/i, /Name this scenario/i, /Find a value/, /What matters most/]) expect(all, String(gone)).not.toMatch(gone);
+      for (const sel of ["[data-sandbox-scenario]", "[data-scenario-compare]", "[data-goal-open]", "[data-tornado]"]) expect(await page.locator(sel).count(), sel).toBe(0);
+
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow).toBeLessThanOrEqual(0);
       expect(errors).toEqual([]);
       await page.close();
-    }, 240_000);
+    });
   }
+
+  it("winning new clients moves the charts, and Reset levers puts it back", async () => {
+    const { page, errors } = await mount();
+    await ready(page);
+    const before = await clientsHeader(page);
+    expect(before).toMatch(/^\d+ clients by month \d+$/);
+    await page.locator('[data-lever="add:org"]').fill("2");
+    await page.locator('[data-lever="add:perf"]').fill("1");
+    await page.locator('[data-lever="addMonths"]').selectOption("6");
+    await settled(page);
+    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("true");
+    const after = await clientsHeader(page);
+    const gained = Number(/\(\+(\d+)\)$/.exec(after)?.[1]);
+    // 3 a month for 6 months is 18, less the few the example's churn takes in the months after.
+    expect(gained).toBeGreaterThan(12);
+    expect(gained).toBeLessThanOrEqual(18);
+    expect(after).not.toBe(before);
+    // The charts changed too: the solid and dashed clients lines are not the same.
+    const lines = await page.locator('[data-play-chart="Clients by department"] path').evaluateAll((ps) => ps.map((p) => p.getAttribute("d")));
+    expect(new Set(lines).size).toBeGreaterThan(2);
+    // The change brings the switch, the coloured bars beside the grey ones, the dashed lines and the second donut.
+    expect(await page.locator("[data-heat-switch-option='scene']").getAttribute("aria-pressed")).toBe("true");
+    expect(await page.locator("[data-over-bar='scene']").count()).toBeGreaterThanOrEqual(12);
+    expect(await page.locator('[data-play-chart="Clients by department"] path[data-line="today"]').count()).toBeGreaterThan(0);
+    expect(await page.locator("[data-play-donut]").count()).toBe(2);
+    expect(await page.locator("[data-purpose-moves]").count()).toBe(1);
+    // The switch flips the heatmap to today's run and back.
+    await page.locator("[data-heat-switch-option='today']").click();
+    expect(await page.locator("[data-heat-switch-option='today']").getAttribute("aria-pressed")).toBe("true");
+    expect(await page.locator("[data-play-heatmap]").getAttribute("data-heat-view")).toBe("today");
+    await page.locator("[data-heat-switch-option='scene']").click();
+    expect(await page.locator("[data-play-heatmap]").getAttribute("data-heat-view")).toBe("scene");
+    // Hovering a cell tells the team, the month and the busy share.
+    await page.locator("[data-heat-cell]").first().hover();
+    expect(await page.locator("[data-play-tip]").first().innerText()).toMatch(/busy/);
+
+    await page.locator("[data-play-reset]").click();
+    await settled(page);
+    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("false");
+    expect(await clientsHeader(page)).toBe(before);
+    expect(await page.locator("[data-heat-switch]").count()).toBe(0);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("the levers reset when the page is left", async () => {
+    const { page, errors } = await mount();
+    await ready(page);
+    await page.locator('[data-lever="add:org"]').fill("3");
+    await page.locator('[data-lever="leads"] input').fill("20");
+    await settled(page);
+    expect(await page.locator('[data-lever="add:org"]').inputValue()).toBe("3");
+    // Leaving the page unmounts it; coming back opens it fresh.
+    await page.evaluate(() => window.unmountPlay());
+    await page.evaluate(() => window.mountPlay({}));
+    await ready(page);
+    expect(await page.locator('[data-lever="add:org"]').inputValue()).toBe("0");
+    expect(await page.locator('[data-lever="leads"] [data-lever-value]').innerText()).toBe("0%");
+    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("false");
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("clicking a process on the map picks its version: a badge, a chip and the run using it; Reset to today takes it back", async () => {
+    const { page, errors } = await mount();
+    await ready(page);
+    const card = page.locator("[data-company-map] [data-id]").first();
+    const id = (await card.getAttribute("data-id"))!;
+    await card.click();
+    const popover = page.locator(`[data-version-popover="${id}"]`);
+    await popover.waitFor();
+    // "Today", then each map made for the process with its status pill; the month is off until a map is picked.
+    expect(await popover.locator("[data-version-option]").first().getAttribute("data-version-option")).toBe("today");
+    expect(await popover.locator(`[data-version-option="sol-${id}"]`).innerText()).toMatch(/^Faster .+\s+Testing$/);
+    expect(await popover.locator(`[data-version-option="sol-${id}"] [data-status]`).getAttribute("data-status")).toBe("testing");
+    expect(await page.locator(`[data-version-month="${id}"]`).isDisabled()).toBe(true);
+    await popover.locator(`[data-version-option="sol-${id}"]`).click();
+    expect(await page.locator(`[data-version-month="${id}"]`).isDisabled()).toBe(false);
+    await page.locator(`[data-version-month="${id}"]`).selectOption("4");
+    await page.keyboard.press("Escape");
+
+    expect(await card.getAttribute("data-new-version")).toBe("true");
+    expect(await page.locator(`[data-id="${id}"] ~ [data-version-badge], [data-version-badge]`).first().innerText()).toMatch(/^New version: Faster /);
+    expect(await text(page, "[data-version-summary]")).toMatch(/^1 process on new versions\s+.+: Faster .+ from \w{3}\s*✕\s*Reset to today$/);
+    expect(await page.locator(`[data-version-chip="${id}"]`).count()).toBe(1);
+    await settled(page);
+    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("true");
+    expect(await page.locator("[data-run-error]").count()).toBe(0);
+    expect(await page.locator("[data-play-heatmap]").count()).toBe(1);
+
+    // The chip's cross takes the one process back; Reset to today takes them all.
+    await page.locator(`[data-version-remove="${id}"]`).click();
+    expect(await page.locator("[data-version-chip]").count()).toBe(0);
+    expect(await card.getAttribute("data-new-version")).toBeNull();
+    const second = page.locator("[data-company-map] [data-id]").nth(1);
+    for (const c of [card, second]) {
+      await c.click();
+      await page.locator("[data-version-popover] [data-version-option]").nth(1).click();
+      await page.keyboard.press("Escape");
+    }
+    expect(await text(page, "[data-version-summary]")).toMatch(/^2 processes on new versions/);
+    await page.locator("[data-versions-reset]").click();
+    expect(await text(page, "[data-version-summary]")).toBe("All processes on today's map. Click a process to load another version.");
+    await settled(page);
+    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("false");
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("a price rise shows the clients lost to it on their own line, and Strongly loses more than Barely", async () => {
+    const { page, errors } = await mount();
+    await ready(page);
+    expect(await page.locator("[data-price-loss]").count()).toBe(0);
+    await page.locator('[data-lever="price"] input').fill("10");
+    await page.locator('[data-lever="priceFrom"]').selectOption("1");
+    await page.locator('[data-lever="priceReaction"]').selectOption("barely");
+    await settled(page);
+    await page.waitForSelector("[data-price-loss]");
+    const lost = async () => Number(/Clients lost to the price rise: ([\d.]+)/.exec(await text(page, "[data-price-loss]"))?.[1]);
+    const barely = await lost();
+    expect(barely).toBeGreaterThan(0);
+    await page.locator('[data-lever="priceReaction"]').selectOption("strongly");
+    await settled(page);
+    const strongly = await lost();
+    expect(strongly).toBeGreaterThan(barely * 2.5);
+    expect(strongly).toBeLessThan(barely * 5.5);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("someone leaving and a hire change the people over their line", async () => {
+    const { page, errors } = await mount();
+    await ready(page);
+    await page.locator('[data-lever="addLeaver"]').click();
+    await page.locator('[aria-label="Month they leave"]').first().selectOption("0");
+    await settled(page);
+    expect(await text(page, "[data-chart-header='worst']")).toMatch(/^Worst month: \d+ (person|people) over their line \(\d+ today\)$/);
+    await page.locator('[data-lever="addHire"]').click();
+    await settled(page);
+    expect(await page.locator("[data-hire-row]").count()).toBe(1);
+    expect(await page.locator("[data-run-error]").count()).toBe(0);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("hides DLER from someone who can't see pay, and still shows the rest", async () => {
+    const { page, errors } = await mount({ payHidden: true });
+    await ready(page);
+    expect(await page.locator("[data-dler-hidden]").count()).toBe(1);
+    expect(await page.locator("[data-chart-header='dler']").count()).toBe(0);
+    expect(await page.locator("[data-play-chart]").count()).toBe(2);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  const shots = process.env.PLAY_SHOTS;
+  it.skipIf(!shots)("saves screenshots (light and dark, 1440 and 400 px)", async () => {
+    mkdirSync(shots!, { recursive: true });
+    for (const scheme of ["light", "dark"] as const) {
+      for (const width of [1440, 400]) {
+        const shotPopover = true;
+        const { page } = await mount({}, width, scheme);
+        await ready(page);
+        // Today's path first: the charts with no change.
+        await page.waitForSelector("[data-play-donut]");
+        await page.evaluate(() => document.fonts.ready);
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: `${shots}/sandbox-today-${scheme}-${width}.png`, fullPage: true });
+        await page.locator('[data-lever="add:org"]').fill("2");
+        await page.locator('[data-lever="add:perf"]').fill("1");
+        await page.locator('[data-lever="addMonths"]').selectOption("6");
+        const card = page.locator("[data-company-map] [data-id]").first();
+        await card.click();
+        await page.locator("[data-version-popover] [data-version-option]").nth(1).click();
+        if (shotPopover) await page.screenshot({ path: `${shots}/sandbox-popover-${scheme}-${width}.png`, fullPage: false });
+        await page.keyboard.press("Escape");
+        await page.locator('[data-lever="price"] input').fill("8");
+        await settled(page);
+        await page.evaluate(() => document.fonts.ready);
+        await page.screenshot({ path: `${shots}/sandbox-${scheme}-${width}.png`, fullPage: true });
+        await page.close();
+      }
+    }
+  });
 });

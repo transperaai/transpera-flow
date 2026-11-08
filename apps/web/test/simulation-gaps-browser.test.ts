@@ -54,7 +54,7 @@ describe("the Missing for simulation warning", () => {
       "Write proposal has no hands-on time",
       "Wait for payment has no wait time",
       "Client decides: branch odds missing",
-      "No incoming volume: add lead volume in Settings or accept the suggestion",
+      "No incoming volume: add lead volume in Settings",
     ]);
     expect(await page.locator("[data-incomplete-data]").innerText()).toBe("Based on incomplete data: 5 things are still missing for simulation (see the list above).");
     expect(errors).toEqual([]);

@@ -250,3 +250,52 @@ describe("performance", () => {
     expect(best).toBeLessThan(1500);
   });
 });
+
+describe("the leads channel (sandbox phase 3)", () => {
+  const MONTH = WEEKS_PER_CALENDAR_MONTH; // hours: one-hour weeks
+  const starts = [1, 2, 3, 4, 5].map((m) => m * MONTH);
+  const channel = (leads: number[]) => ({ starts, leads });
+
+  it("a factor of 1 in every month is no channel at all", () => {
+    const m = stream(20, 26);
+    expect(draw({ ...m, channels: channel([1, 1, 1, 1, 1, 1]) })).toEqual(draw(m));
+  });
+
+  it("with flat demand the arrivals before the first change are exactly those of the run without the channel, and the rate follows after it", () => {
+    const m = stream(40, 26);
+    const plain = draw(m);
+    const doubled = draw({ ...m, channels: channel([1, 1, 2, 2, 2, 2]) });
+    const edge = 2 * MONTH;
+    const before = (t: number[]) => t.filter((x) => x < edge);
+    expect(before(doubled)).toEqual(before(plain));
+    // 4 months at 40 a week-hour... the later months run at twice the rate (Poisson counts, 4 standard deviations).
+    const later = doubled.filter((x) => x >= edge).length;
+    expectPoisson(later, 2 * 40 * (26 - edge));
+  });
+
+  it("with seasonality and growth the arrivals before the first change are exactly the run without the channel", () => {
+    const demand: EngineDemand = { seasonality: SEASONS, growthMonthly: 0.02, startMonth: 3 };
+    const m = stream(40, 26, demand);
+    const plain = draw(m);
+    const changed = draw({ ...m, channels: channel([1, 1, 1, 0.5, 0.5, 0.5]) });
+    const edge = 3 * MONTH;
+    expect(changed.filter((x) => x < edge)).toEqual(plain.filter((x) => x < edge));
+    expect(changed.filter((x) => x >= edge).length).toBeLessThan(plain.filter((x) => x >= edge).length * 0.7);
+  });
+
+  it("month 0's factor also covers the warm-up, and a factor of 0 stops arrivals for its months", () => {
+    const m = stream(40, 26);
+    const warm = draw({ ...m, channels: channel([0.5, 0.5, 0.5, 0.5, 0.5, 0.5]) }, 1, 20).filter((t) => t < 0).length;
+    const plainWarm = draw(m, 1, 20).filter((t) => t < 0).length;
+    expect(warm).toBeLessThan(plainWarm * 0.7);
+    const gap = draw({ ...m, channels: channel([1, 0, 0, 1, 1, 1]) }).filter((t) => t >= MONTH && t < 3 * MONTH);
+    expect(gap).toEqual([]);
+  });
+
+  it("demandFactor reads the channel", () => {
+    const m = { ...stream(40, 26), channels: channel([1, 3, 1, 1, 1, 1]) };
+    expect(demandFactor(m, 0.5 * MONTH)).toBe(1);
+    expect(demandFactor(m, 1.5 * MONTH)).toBe(3);
+    expect(demandFactor(m, 2.5 * MONTH)).toBe(1);
+  });
+});

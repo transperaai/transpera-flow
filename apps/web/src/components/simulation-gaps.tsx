@@ -76,7 +76,7 @@ export function MissingForSimulation({
         <span className="hidden text-xs font-normal text-fg-2 group-open:inline">Hide</span>
         <Help {...GAPS_HELP} />
       </summary>
-      <div className="mt-2">
+      <div className="mt-2 flex flex-col gap-2">
         <GapList gaps={gaps} onSelectStep={onSelectStep} settingsHref={settingsHref} />
       </div>
     </details>

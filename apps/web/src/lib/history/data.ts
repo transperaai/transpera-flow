@@ -1,6 +1,7 @@
 import "server-only";
 import { loadProcessBySlug, type ProcessListing } from "@transpera-flow/db";
-import { createClient } from "@/lib/supabase/server";
+import { rpcRows } from "@transpera-flow/db/client";
+import { getDb } from "@/lib/auth/session";
 import { parseChanges, type AuthorKind, type VersionMeta } from "./versions";
 
 export interface HistoryData {
@@ -19,12 +20,11 @@ export interface HistoryData {
 
 /** Everything the History screen shows for a process, or null if it isn't visible (RLS decides). */
 export async function loadHistory(slug: string, processId: string): Promise<HistoryData | null> {
-  const db = await createClient();
+  const db = await getDb();
   const found = await loadProcessBySlug(db, slug, { draft: false, processId, includeCompany: true });
   if (!found) return null;
   const { live, draft, processes } = found;
-  const { data: rows, error } = await db.rpc("revision_history", { target_process: processId });
-  if (error) throw error;
+  const rows = await rpcRows(db, "revision_history", { target_process: processId });
   const versions: VersionMeta[] = (rows ?? []).map((r) => ({
     revisionId: r.revision_id,
     number: r.number,

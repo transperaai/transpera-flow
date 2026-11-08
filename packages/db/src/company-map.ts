@@ -38,6 +38,11 @@ function holder(workspaceId: string, revisionId: string, part: ProcessPart, x: n
     rework_rate: 0,
     rework_to_step_id: null,
     tool: null,
+    purpose: null,
+    split: null,
+    split_notes: null,
+    tier_multiplier: null,
+    to_client_manager: false,
     notes: null,
     sla_hours: null,
     expected_wait_hours: null,
@@ -96,7 +101,7 @@ export function defaultCompanyPart(workspaceId: string, parts: readonly ProcessP
     }
   }
   return {
-    process: { id: DEMO_COMPANY_PROCESS_ID, workspace_id: workspaceId, name: "Company map", kind: "pipeline", entity_name: "process", description: null, live_revision_id: revisionId, parent_process_id: null, is_company: true },
+    process: { id: DEMO_COMPANY_PROCESS_ID, workspace_id: workspaceId, name: "Company map", kind: "pipeline", entity_name: "process", description: null, category: "internal", live_revision_id: revisionId, parent_process_id: null, is_company: true },
     revision: { id: revisionId, workspace_id: workspaceId, process_id: DEMO_COMPANY_PROCESS_ID, number: 1, status: "published" },
     steps,
     edges,

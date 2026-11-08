@@ -1,33 +1,20 @@
-# Supabase: things to check when we connect a real project
+# Notes on what was verified only against plain Postgres
 
-Everything database-related has so far been verified only against **plain
-Postgres 16 with a small auth stand-in** (`packages/db/test/sql/auth-shim.sql`),
-because Supabase's Docker images couldn't be pulled in the build environment.
-When we move to a real Supabase project, work through this list; some items
-may need code or migration changes.
+(The file keeps its name from the Supabase days.) Database behaviour is tested against **plain Postgres 16 with a small stand-in
+for the `auth` schema and the Supabase roles** (`packages/db/sql/compat.sql`), through the same runner that builds Neon. The
+database is now Neon, so this is the list of things to check there, and the record of what was found. Some items may need code or
+migration changes. Sections below that mention Supabase's own services (Auth, Storage, Realtime, PostgREST) are history.
 
-## Setup steps (once)
+## Setup steps (once, per deployment)
 
-1. Create a Supabase project (Pro plan per PRD D2) and a Vercel project for `apps/web`.
-2. Add `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` to Vercel
-   (and to `apps/web/.env.local` for local dev). See `apps/web/.env.example`.
-3. Apply migrations and seed. Either:
-   - **SQL editor (works from a phone):** paste `packages/db/supabase/bootstrap.sql`
-     into a new query and run it once. It contains every migration, the seed, and
-     the migration-history rows so the CLI stays in sync afterwards.
-   - **CLI:** `npx supabase link --workdir packages/db` then
-     `npx supabase db push --workdir packages/db`, then run `seed.sql` in the SQL editor.
-   Regenerate the bundle with `pnpm --filter @transpera-flow/db gen:bootstrap` after changing
-   migrations or fixtures (CI fails if it's stale).
-4. (Covered by the bootstrap bundle.)
-5. Auth → URL configuration: set the site URL and add
-   `https://<your-domain>/auth/callback` (and Vercel preview URLs) to the redirect allow-list.
-6. Sign in once with your email, then run `packages/db/scripts/make-agency-admin.sql`
-   (with your email) and sign out/in again.
-
-The Claude Code environment's network policy currently blocks `api.supabase.com`
-and `*.supabase.co`; allow them in the environment's Network access settings so an
-agent can run migrations and checks directly.
+1. Create the database in Neon (Sydney, aws-ap-southeast-2) and the Vercel project for `apps/web`; set `DATABASE_URL` (the owner)
+   and the Better Auth and Google variables in Vercel. See `apps/web/.env.example`.
+2. Apply the schema: `pnpm --filter @transpera-flow/db migrate` (add `--seed` only on a local database).
+3. Create the app's login: `bash packages/db/scripts/db-sql.sh -v app_password="$APP_PASSWORD" -f packages/db/scripts/create-app-login.sql`,
+   then set `APP_DATABASE_URL` to the connection string for `authenticator` with that password.
+4. Add the app's `/api/auth/callback/google` URL to the Google OAuth client's redirect URIs.
+5. Sign in once with your email (it must be in `ACCESS_ADMIN_EMAILS` or a deployment rule), then, if you need an agency admin,
+   run `packages/db/scripts/make-agency-admin.sql` (with your email) and sign out and in again.
 
 ## Verified on the live project (29 Sep 2026)
 
@@ -50,7 +37,7 @@ Project `vgsjkpwvxkpqvyazwcyq`, Postgres 17, production at https://transpera-flo
 
 | Area | What we assumed | What to verify on Supabase |
 |---|---|---|
-| Postgres version | Tested on Postgres 16; `config.toml` says 15 | Match `db.major_version` in `packages/db/supabase/config.toml` to the project's version; nothing in the migration is version-specific as far as we know. |
+| Postgres version | Tested on Postgres 16; `config.toml` (removed in the Neon move) said 15 | Match `db.major_version` in the project's settings to the project's version; nothing in the migration is version-specific as far as we know. |
 | `auth.uid()` / `auth.jwt()` | The shim mirrors Supabase's definitions (reads `request.jwt.claims`) | RLS tests pass against the real functions. Run the RLS suite against a Supabase branch/local stack once available. |
 | Agency admin flag | Read from `app_metadata.agency_admin` in the JWT | The flag only appears in the JWT after the user's session refreshes; confirm sign-out/in picks it up. `raw_app_meta_data` column name in `make-agency-admin.sql` matches the current `auth.users` schema. |
 | Grants | Migration grants table privileges to `authenticated` and revokes from `anon` | Supabase re-applies default privileges to `anon` for **new** tables. Every future migration must keep RLS on and repeat the revoke, or anon inherits privileges (RLS still blocks rows, but keep it tight). |
@@ -285,6 +272,8 @@ Verified only against plain Postgres (`packages/db/test/manual-entry.test.ts`) a
 
 ## Process archive and source files in Storage (issue #182, migration 20261204000000)
 
+> **Superseded for the files (26 Oct 2026, migration 20261230000000, step 4):** uploads are gone; a source's original is a link (`file_url`). The file columns, `private.source_file_guard`, `private.storage_workspace` and the three `sources:` policies were dropped. The `sources` bucket row and its objects were left for step 7 to list. The archive part of this section still applies.
+
 Verified only against plain Postgres (`packages/db/test/process-archive.test.ts`, `packages/db/test/source-files.test.ts`) and PostgREST v14 with Supabase's default table privileges (`packages/mcp/test/postgrest-process-admin.test.ts`), not against a Supabase project. Storage was stood in for by `packages/db/test/sql/storage-shim.sql`: the `storage.buckets` and `storage.objects` columns the migration uses, RLS on both, and the grants a Supabase project has. Queries as `authenticated` (with the JWT's claims) or `anon` against that stand-in are what Supabase's Storage API runs for an upload (insert, with `owner_id` set to the caller), a download or signed link (select) and a delete. Check on the real project:
 
 - [ ] **The migration can write to `storage`.** It inserts the `sources` bucket into `storage.buckets` and creates three policies on `storage.objects` as `postgres`, as Supabase's own docs do from the SQL editor. If the apply is refused (on newer projects `storage` tables are owned by `supabase_storage_admin`), create the bucket in the dashboard (private, 10 MB, the five MIME types) and run the three `create policy` statements from the SQL editor.
@@ -348,6 +337,8 @@ Verified only against plain Postgres 16 (`packages/db/test/saved-text-privacy.te
 
 
 ## Client branding (#34, migration 20261214000000)
+
+> **Superseded for the logo (26 Oct 2026, migration 20261230000000, step 4):** the logo is a row of `workspace_logos` (512 KB at most, as the bucket was), served by `app/api/branding/[workspaceId]/logo` through `public.workspace_logo(uuid)`. The `branding` bucket's policies, the logo guard and the `logo_path` key are gone; the bucket row and its objects were left for step 7. Verified only against plain Postgres (`packages/db/test/workspace-logos.test.ts`, `apps/web/test/branding-logo-route.test.ts`): nothing in it depends on Supabase.
 
 A public `branding` bucket (512 KB; PNG, JPEG, WebP), three policies on `storage.objects` for owners and agency admins (read, upload, delete; no update), `workspaces.branding` and a logo guard. Verified only against plain Postgres and the storage shim (`sql/storage-shim.sql`). The guard does not rely on `storage.objects.owner_id` (B19's live check of it is still open); it reads `storage.objects.metadata` (`mimetype`, `size`), which the shim fills in by hand and Supabase Storage sets on upload. To verify on Supabase:
 
@@ -460,3 +451,161 @@ and DELETE from the defaults. No DML grant changes. Verified only against plain 
 - Post-apply checks written against plain Postgres can now expect the same table privileges on Supabase as locally, for
   tables `postgres` makes after this migration.
 
+
+## Neon move, step 1 (verified only on plain Postgres 16, not Neon)
+
+- `packages/db/sql/compat.sql`, `legacy-shims.sql`, `scripts/migrate.ts` and `createDb` / the ClaimsDriver (`src/client.ts`) were
+  run only against a local Postgres 16 as a superuser. Not checked on Neon: that its login role can `create role ... bypassrls`
+  (compat.sql skips it with a notice if not), `create publication` and `grant anon, authenticated, service_role to current_user`;
+  that `set_config('role', ...)` works through its pooled (PgBouncer) endpoint in a transaction; and the round-trip cost
+  (measured locally: 0.6 ms per `createDb` query against 0.2 ms for a bare query).
+
+### Checked on Neon (26 Oct, project `transpera-flow-db`, `purple-wind-75278769`)
+
+- Postgres 18.6. The login `neondb_owner` is a member of `neon_superuser`, with `rolbypassrls` and `rolcreaterole`.
+  The session `TimeZone` is `GMT`. There is no `postgres` role, so row 72 (`20261224000000`) now skips its
+  `for role postgres` step when that role is missing.
+- `compat.sql` and all 72 migrations apply cleanly, and a second run applies nothing. Roles created by `neondb_owner`
+  come back with admin option only (PG16+). `compat.sql` now grants them `with set true, inherit false`, and after that
+  `begin; set_config('role','authenticated',true), set_config('request.jwt.claims',…,true)` works through the pooled
+  endpoint: `auth.uid()` returns the sub, and `current_user` is back to `neondb_owner` after commit.
+- The owner login has BYPASSRLS, so claims are the only barrier when the app connects as it. Before cutover, give the
+  app its own login (`authenticator`: noinherit, member of `anon` and `authenticated` only, created by SQL so it isn't in
+  `neon_superuser`). Set its URL as a separate Vercel variable through the API, and keep the owner for migrations.
+- The cloud container can't reach Neon on port 5432, but it can over HTTPS. To apply migrations from it, use
+  `@neondatabase/serverless`'s Pool over WebSockets through the agent proxy (`ws` with an `HttpsProxyAgent`), with the
+  connection string fetched from the Neon API (`/projects/{id}/connection_uri`) into a private scratch file, never
+  printed. The repo's `applyCompat`/`applyMigrations` accept that client unchanged. Vercel functions connect over TCP
+  as normal.
+
+## Neon move, step 2: Better Auth (verified only on plain Postgres 16 and against the installed package types, not Neon or Google)
+
+- Row 73 (`20261228000000_better_auth.sql`), `private.deployment_role`, `private.sync_deployment_access`, the `better_auth.sync_auth_user`
+  trigger and the Better Auth instance (`apps/web/src/lib/auth/server.ts`) were run only against a local Postgres 16 as a superuser,
+  with the user and session created through Better Auth's internal adapter (`apps/web/test/auth-hooks.test.ts`), never through a real
+  Google or Microsoft sign-in. Not checked: Neon's pooled endpoint with `schemaName: "better_auth"` (the pool sends no `search_path`
+  startup option); the `oAuthProxy` redirect from a per-commit preview through `transpera-flow-next.vercel.app`; that Google's ID
+  token carries `hd` into `better_auth.account."idToken"` and so into `auth.identities`; the Microsoft `tid` claim.
+- A bare `pg` Pool given as `database` cannot take `schemaName` (the types only offer it with `{ dialect, type }` or `{ db, type }`), so
+  the instance passes `new PostgresDialect({ pool })` with `type: "postgres"`, `schemaName: "better_auth"` and `transaction: true`.
+- The migration's Better Auth DDL is what `auth generate` 1.7.13 emitted for that configuration (already schema-qualified, uuid ids).
+
+## Neon move, step 7a: the copy scripts (verified only on plain Postgres 16, not Supabase or Neon)
+
+- `packages/db/scripts/copy-from-supabase/` (`export.ts`, `import.ts`, `verify.ts`) were run only against local Postgres 16, with a
+  "Supabase-like" source (the shims and migrations up to `20261227000000`) and a local http server standing in for the Management
+  API and the public Storage URL. Never run against Supabase or Neon.
+- Not checked: the real Management API's response size limit and rate limit (the adapter retries 429 and 5xx three times; `--page-size`
+  is the knob), that it answers a `select` with a JSON array of rows as documented, that `metadata ->> 'size'` and `'mimetype'` are
+  how `storage.objects` records an object, that `supabase_migrations.schema_migrations.version` reads `20261227000000` at row 72, and
+  that the public branding URL serves the bytes without a key.
+- Not checked on Neon (Postgres 18): whether `neondb_owner` may `set session_replication_role = replica`. The local test of the refusal
+  uses a non-superuser that owns the tables, which is what Neon's owner is for ownership, but not for `neon_superuser`'s extra rights.
+  Both import paths are tested; the report says which one ran.
+- Numbers keep the database's own text end to end: the export writes `json_agg`'s text as it came, and the import parses with
+  `JSON.rawJSON`, so a `numeric` keeps its digits and scale (`1.50` stays `1.50`) and an `int8` above 2^53 is exact (it did not,
+  before the 26 Oct review: `1.50` became `1.5` and 20-digit numerics were rounded, and `copy:verify` passed). `copy:verify` now
+  compares every exported row with the target's, as row text, in SQL. Tested on Postgres 16 with NaN, Infinity, a 38-digit
+  numeric and a 2^53+1 bigint, plain and in jsonb.
+- `--driver neon-ws` (import, verify and `migrate`) was tested only through a local WebSocket-to-TCP relay standing in for Neon's
+  proxy, not against Neon. Not checked: the agent proxy's `HttpsProxyAgent` route with this code (the 26 Oct Neon check used the
+  same pieces by hand), and how long one transaction may stay open over it for a large import.
+- The export's check that the freeze held reads `pg_stat_all_tables` before and after, through the Management API. Not checked:
+  that Supabase lets `postgres` read it there, and how late Supabase's Postgres 17 counts a write (Postgres flushes these counters
+  up to about a second, at worst ten, after the write). Its refusal of a role subject to row-level security uses
+  `row_security_active()`; not checked that Supabase's `postgres` passes it on every table (it has BYPASSRLS on Supabase as far
+  as known, and the export refuses rather than reads short if not).
+
+### Copy tooling on Neon (checked 26 Oct)
+
+- `neondb_owner` cannot `set session_replication_role = replica` (42501, "permission denied to set parameter"), so
+  `copy:import` will take its fallback path on Neon: `alter table … disable trigger user` (checked: allowed for the
+  owner, in a rolled-back transaction) and inserts in foreign-key order.
+
+### Rehearsal (27 Oct)
+
+- The Management API export (`--supabase`) read every table as `postgres`. It passed the RLS check, and
+  `pg_stat_all_tables` was readable. The whole export took about 10 minutes, mostly API round trips; the data is small.
+- `--driver neon-ws` worked through the agent proxy for `migrate`, `copy:import` and `copy:verify`. The import took the
+  fallback path.
+- Production had 1 user with 2 identities (Google and email). Only the Google one became a Better Auth account; email
+  sign-in doesn't exist on the new stack.
+
+## Drop Suggestions (28 Oct 2026, S2)
+
+Verified only against plain Postgres 16 (`packages/db/test/drop-suggestions.test.ts`), not against Neon. Migration
+`20270102000000_drop_suggestions.sql` drops `review_suggestions`, `private.apply_suggestion`, `review_proposals`, `build_proposal`,
+`submit_play_proposal`, `play_proposal_contacts`, `private.play_patch_problem`, the tables `suggestion_proposals` and `suggestions`
+and their two trigger functions, then replaces `audit_company_write`, `company_needs_review`, `import_process_bundle` and
+`import_workspace_bundle`.
+
+- [ ] On Neon, the migration runs on a copy that holds real `suggestions` and `suggestion_proposals` rows (it drops them with their data;
+      nothing is converted) and the `audit_log` rows with `target_table = 'suggestions'` stay readable in Settings -> Change log.
+- [ ] A backup exported before this migration (it carries `suggestions` / `suggestion_proposals` sections) still checks and restores, with
+      those sections left out.
+- [ ] `anon` still has EXECUTE on `open_share_link` only (no `submit_play_proposal`).
+
+## Sandbox fix (`20270111000000_sandbox_fix.sql`)
+
+Verified only against plain Postgres 16 (`packages/db/test/sandbox-scenarios.test.ts`). The speed-up rests on Postgres inlining
+`private.sandbox_levers()` (a SQL function with no `set` clause) and keeping PL/pgSQL plans for the session; check on Neon:
+
+- [ ] `select count(*) from public.sandbox_scenarios where not private.is_sandbox_changes(changes)` is 0 after applying.
+- [ ] A restore at its limit (900 scenarios) is not slower than before the migration (the restore screen's own timing, or
+      `explain analyze` of the check over 900 one-change lists: about 0.1 s locally, 0.8 s before).
+- [ ] `private.sandbox_scenario_count(<workspace>)` as a Viewer gives 0, as the Owner the real count.
+
+## Step purposes (`20270114000000_step_purpose.sql`)
+
+Verified only against plain Postgres 16 (`packages/db/test/purpose-migration.test.ts`, `purposes.test.ts`, and the real-shaped import in `copy-from-supabase.test.ts`). Check on Neon, on a throwaway branch of Preview:
+
+- [ ] `select count(*), max(updated_at), count(purpose) from public.steps` gives the same count and timestamp as before applying, and 0 for `count(purpose)` (the migration writes no step row).
+- [ ] `select conname, convalidated from pg_constraint where conname in ('steps_purpose_key', 'workspaces_purposes')` shows both validated. `workspaces_purposes` calls `private.is_purpose_list` (an immutable SQL function with `set search_path = ''`) from a table check; plain Postgres allows it, and the constraint is validated in the same transaction after the clean-up `update`.
+- [ ] As an Agency admin, `save_fields('workspaces', ..., 'settings.purposes')` saves a valid list against a null base and refuses a list of 4 (23514).
+
+## Scenario share links and the 5b review fix (`20270116000000_scenario_share_links.sql`, `20270117000000_sandbox_p5b_fix.sql`)
+
+`20270116000000` is applied on the Preview database (a production copy); the review fix `20270117000000` was verified only against plain Postgres 16
+(`packages/db/test/scenario-share-migration.test.ts`, `share-links.test.ts`, `share-snapshot.test.ts`). Check on Neon, on a throwaway branch of Preview:
+
+- [ ] `strict $.**.<key> ? (...)` in `private.share_snapshot_problem` refuses an array of legal strings under `target` (lax would unwrap it) and raises no
+  structural error on a snapshot with arrays of arrays: the probes in the 20270116000000 header.
+- [ ] After `20270117000000`, the header's overheads probe returns "The snapshot contains costs or margins." and its `steps.x.work_hours` twin returns null.
+- [ ] The header's optional preflight query lists the Financials-off links whose stored copy holds an overheads patch (Update copy each, or revoke).
+
+## Capacity Set up (`20270119000000_capacity_setup.sql`)
+
+Verified only against plain Postgres 16 (`packages/db/test/capacity-setup.test.ts`, `capacity-setup-load.test.ts`, `capacity-starter.test.ts`, and the real-shaped import in `copy-from-supabase.test.ts`). Check on Neon, on a throwaway branch of Preview:
+
+- [ ] Every workspace has two departments and no tier: `select count(*) from public.workspaces w where (select count(*) from public.departments d where d.workspace_id = w.id) <> 2` is 0, and `select count(*) from public.tiers` is 0.
+- [ ] Services and roles keep their `updated_at` (the migration disables `set_updated_at` only while it stamps `price_rise_churn` and `line` as `estimate`): `select max(updated_at) from public.services` is the same before and after.
+- [ ] `services_department_fkey` and `services_tier_fkey` are deferred (`select conname, condeferred from pg_constraint where conname like 'services_%_fkey'`), and deleting a workspace that has tiers still works (the test `workspace-delete.test.ts` covers it on plain Postgres).
+- [ ] As the Owner, `select public.add_tier(<workspace>)` then `select public.remove_tier(<that tier>)` work; as a Viewer, `add_tier` raises "Only Agency admins and the Owner can change tiers."
+- [ ] `public.import_workspace_bundle` is still SECURITY INVOKER with `statement_timeout=40s` and `authenticated` the only grantee.
+
+
+## The company map drives the run (`20270134000000_map_drives_run.sql`)
+
+Verified only against plain Postgres 16 (`packages/db/test/map-drives-run-migration.test.ts`: the backfill on a database built up to `20270132000000`, a person's publish and restore, a system-made version). Check on Neon, once, after the apply:
+
+- [x] (Preview, 7 Nov: 5 company maps, all system-made, all true.) Every company map is true except those with a person's version: `select count(*) from public.processes p where p.is_company and not p.map_drives_run and not exists (select 1 from public.process_revisions r where r.process_id = p.id and r.published_by is not null)` is 0, and the same query with `and p.map_drives_run` and `exists` is 0.
+- [ ] `select public.publish_process(<company map id>)` as an editor on a workspace whose flag is false turns it true (the trigger is SECURITY DEFINER and writes `processes` as its owner); adding a process (a system-made map version) leaves it as it was.
+
+## Changes become part of a solution (`20270136000000_changes_into_solutions.sql`)
+
+Verified only against plain Postgres 16 (`packages/db/test/changes-into-solutions-migration.test.ts`: the migration run on a database as it was, `capacity-changes.test.ts`: its move SQL on more shapes, and a restore of the example workspace's data in a scratch database). **The Preview database holds real QA data** (example-agency-2 has changes linked to issues): read the rollback in the migration header before applying, and apply it in one go (it is one transaction). Before applying: `select count(*) from public.capacity_changes;` and `select count(*) from public.schema_migrations where version >= '20270136000000';` (expect 0). Check on Neon, once, after the apply:
+
+- [ ] (Preview, 7 Nov: `migrate.ts` didn't print the notice; the counts below stand in for it.) The notice in the apply output (psql shows it; `migrate.ts` may not): `changes into solutions: N changes read; N solutions made; N issue links; N links skipped (detection or another process); N solutions with no issue; N effects dropped (step not in a live version); N changes with no solution`. Every change should be read; "made" is at least the changes minus "no solution"; a change that acts on steps of two processes makes two solutions.
+- [x] (Preview, 7 Nov: 13 of 13 changes moved in example-agency and 13 of 13 in example-agency-2; none left without a solution; 10 issue links in example-agency-2.) `select count(*) from public.solutions where step_changes <> '[]'` equals "solutions made". `select c.name, count(s.id) from public.capacity_changes c left join public.solutions s on s.workspace_id = c.workspace_id and s.step_changes -> 0 ->> 'id' = c.id::text group by 1` shows 1 (or 2) for each, 0 only for the changes the notice counts as having no solution.
+- [x] (Preview, 7 Nov: all four `solution_issues` triggers `O`; 4 `solution_tested` events, those of the 4 solutions made before; issue statuses weren't counted beforehand.) **No issue changed**: the move links with the `solution_issues` insert triggers (`solution_issues_before_insert`, `solution_issue_tested`) disabled and enabled again inside the transaction (`alter table ... disable trigger` needs the table owner, which the migration role is). `select tgname, tgenabled from pg_trigger where tgrelid = 'public.solution_issues'::regclass and not tgisinternal` shows `O` for both. Issue statuses (`select status, count(*) from public.issues group by 1`) are the same before and after, and `select count(*) from public.issue_events where kind = 'solution_tested'` has not grown.
+- [x] (Preview, 7 Nov: only the delete and read policies are left; the member insert check wasn't run.) `select policyname from pg_policies where tablename = 'capacity_changes'` lists only `delete capacity_changes` and `read capacity_changes`. As a member, an `insert into public.capacity_changes` is refused by row-level security; a foreign-key `on delete set null` (deleting an issue a change was linked to) still works, because referential actions run as the table owner. Dropping the policies, not revoking the grants, is deliberate: a restore (`import_workspace_bundle`, SECURITY INVOKER, not redefined) still runs its empty `capacity_changes` section, which needs the grant but touches no row.
+- [ ] `grant update (step_changes) on public.solutions to authenticated` is in place: as an editor `update public.solutions set step_changes = '[]' where id = <a solution>` updates one row; as a Viewer it updates none. `private.is_step_changes` and `private.is_step_change` must stay executable by `authenticated` (a check constraint runs as the caller; a `revoke ... from authenticated` on them breaks every write of `step_changes`, plain Postgres and Neon alike).
+- [ ] The Sandbox on example-agency-2: pick a moved solution on the company map from month 1; the run moves, and "Automation and augmentation" is no longer among the levers.
+
+## A library process is made by category (`20270137000000_library_process_category.sql`)
+
+Verified only against plain Postgres 16 (`packages/db/test/library-process-category.test.ts`: the RPC with and without `p_category`, a bad category refused, one function left). Check on Neon, once, after the apply:
+
+- [ ] `select proname, pg_get_function_identity_arguments(oid), prosecdef from pg_proc where proname = 'create_library_process'` is one row with seven arguments (the last `p_category text`) and `prosecdef` false: the old six-argument overload is gone.
+- [ ] `authenticated` can still execute it and `anon` cannot: `select has_function_privilege('anon', 'public.create_library_process(uuid, text, text, text, text, text, text)', 'execute')` is false, and the same with `'authenticated'` is true.
+- [ ] As an editor, `select public.create_library_process(<workspace>, 'Check', 'pipeline', null, null, 'manual', 'onboarding')` makes a process whose `category` is `onboarding`; the same call with six arguments gets `sales`. Delete or archive the test process afterwards.

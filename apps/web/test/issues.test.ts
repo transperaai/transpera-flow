@@ -1,11 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   NORTHBEAM_PROCESS_ID,
+  NORTHBEAM_REVISION_ID,
   northbeamBundle,
   northbeamIssues,
   northbeamPersonIds,
   northbeamRoleIds,
   northbeamScenarios,
+  northbeamSourceIds,
   northbeamStepIds,
   toEngineModel,
 } from "@transpera-flow/db";
@@ -23,37 +25,13 @@ import {
 } from "@/lib/issues/register";
 import { ALREADY_TRACKED, MemoryIssueStore } from "@/lib/issues/store";
 import { cleanFieldValue, parseIssueInput, parsePromoteInput, type IssueInput } from "@/lib/issues/validate";
+import { createTestDb, type TestDb } from "../../../packages/db/test/harness";
+import { addMember, signInAs, signOut, type TestUser } from "./action-harness";
 
-// A stand-in for Supabase behind the issue Server Actions: records what
-// reaches the database, so the tests can show malformed input never does.
-const db = vi.hoisted(() => ({
-  calls: [] as { op: string; args: unknown[] }[],
-  signedIn: true,
-  /** What a select (or delete) returns. */
-  result: { data: null as unknown, error: null as unknown },
-  /** What the save_issue call returns. */
-  rpcResult: { data: null as unknown, error: null as unknown },
-}));
+// The issue Server Actions run against a real database (the seeded Northbeam workspace) as an editor, so what they write is
+// read back from the tables.
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => {
-    const chain = {
-      insert: (...args: unknown[]) => (db.calls.push({ op: "insert", args }), chain),
-      delete: () => (db.calls.push({ op: "delete", args: [] }), chain),
-      eq: (...args: unknown[]) => (db.calls.push({ op: "eq", args }), chain),
-      in: (...args: unknown[]) => (db.calls.push({ op: "in", args }), chain),
-      order: () => chain,
-      select: () => chain,
-      single: async () => db.result,
-      then: (resolve: (v: unknown) => void) => resolve(db.result),
-    };
-    return {
-      auth: { getClaims: async () => ({ data: db.signedIn ? { claims: { sub: "u1" } } : null }) },
-      from: (table: string) => (db.calls.push({ op: "from", args: [table] }), chain),
-      rpc: async (fn: string, args: unknown) => (db.calls.push({ op: "rpc", args: [fn, args] }), fn === "save_issue" ? db.rpcResult : db.result),
-    };
-  },
-}));
+vi.mock("@/lib/auth/session", async () => (await import("./action-harness")).sessionMock);
 const { createIssue, deleteIssue, promoteIssue, redismissIssue, saveIssueField, saveIssueFromDialog } = await import("@/app/w/[slug]/issue-actions");
 
 const START = { startDate: "2026-10-05" };
@@ -282,15 +260,31 @@ describe("the demo store", () => {
 });
 
 describe("issue Server Actions", () => {
-  beforeEach(() => {
-    db.calls = [];
-    db.signedIn = true;
-    db.result = { data: null, error: null };
-    db.rpcResult = { data: { id: "i1" }, error: null };
+  let tdb: TestDb;
+  let editor: TestUser;
+  let viewer: TestUser;
+  const q = (sql: string, params: unknown[] = []) => tdb.client.query(sql, params);
+  const issueCount = async () => Number((await q("select count(*) from issues where workspace_id = $1", [WS])).rows[0].count);
+  const issueRow = async (id: string) => (await q("select * from issues where id = $1", [id])).rows[0];
+  const byKey = async (key: string) => (await q("select * from issues where workspace_id = $1 and detected_key = $2", [WS, key])).rows;
+  const linksOf = async (id: string) => (await q("select process_id, step_id from issue_links where issue_id = $1 order by step_id", [id])).rows;
+  const ownersOf = async (id: string) => (await q("select person_id from issue_owners where issue_id = $1", [id])).rows.map((r) => r.person_id);
+
+  beforeAll(async () => {
+    tdb = await createTestDb();
+    editor = await addMember(tdb, WS, "editor");
+    viewer = await addMember(tdb, WS, "viewer");
+  }, 120_000);
+  afterAll(async () => {
+    await tdb?.close();
   });
-  const saved = () => db.calls.find((c) => c.op === "rpc" && c.args[0] === "save_issue")?.args[1] as { p_workspace: string; p_id?: string; p_fields: Record<string, unknown>; p_links: unknown; p_owners: unknown; p_sources: unknown } | undefined;
+  beforeEach(() => {
+    signInAs({ tdb }, editor);
+  });
 
   it("reject malformed input before touching the database", async () => {
+    const before = await issueCount();
+    const seededTitle = (await issueRow(northbeamIssues()[0]!.id)).title;
     expect(await createIssue("not-a-uuid", manual)).toMatchObject({ status: "error" });
     expect(await createIssue(WS, { ...manual, title: "" })).toMatchObject({ status: "error" });
     expect(await createIssue(WS, { ...manual, type: "gremlins" })).toEqual({ status: "error", message: "Pick a type." });
@@ -300,97 +294,112 @@ describe("issue Server Actions", () => {
     expect(await saveIssueField(northbeamIssues()[0]!.id, "detected_key", null, "a:b:c")).toMatchObject({ status: "error" });
     expect(await saveIssueField(northbeamIssues()[0]!.id, "status", "open", "closed")).toMatchObject({ status: "error" });
     expect(await deleteIssue("x")).toMatchObject({ status: "error" });
-    expect(db.calls).toEqual([]);
+    expect(await issueCount()).toBe(before);
+    expect((await issueRow(northbeamIssues()[0]!.id)).title).toBe(seededTitle);
   });
 
   it("refuse a signed-out user", async () => {
-    db.signedIn = false;
+    const before = await issueCount();
+    signOut({ tdb });
     expect(await createIssue(WS, manual)).toEqual({ status: "error", message: "Your session has ended. Sign in again." });
     expect(await saveIssueField(northbeamIssues()[0]!.id, "status", "open", "resolved")).toEqual({
       status: "error",
       message: "Your session has ended. Sign in again.",
     });
-    expect(db.calls).toEqual([]);
+    expect(await issueCount()).toBe(before);
   });
 
   it("save a manual issue into the given workspace through save_issue, with the parsed fields only", async () => {
-    db.result = { data: [{ id: "i1" }], error: null };
     const r = await createIssue(WS, { ...manual, workspace_id: "someone-elses", source: "promoted", detected_key: "a:b:c" });
-    expect(r).toMatchObject({ status: "ok", issue: { id: "i1", links: [], owner_ids: [], source_ids: [] } });
-    const call = saved()!;
-    expect(call.p_workspace).toBe(WS);
-    expect(call.p_id).toBeUndefined();
-    expect(call.p_fields).toMatchObject({ source: "manual", title: "Reports copied by hand", evidence: null });
-    expect(call.p_fields).not.toHaveProperty("detected_key");
-    expect(call.p_fields).not.toHaveProperty("workspace_id");
+    expect(r.status).toBe("ok");
+    if (r.status !== "ok") return;
+    const row = await issueRow(r.issue.id);
+    expect(row).toMatchObject({ workspace_id: WS, source: "manual", title: "Reports copied by hand", evidence: null, detected_key: null });
+    expect(await linksOf(r.issue.id)).toEqual([{ process_id: NORTHBEAM_PROCESS_ID, step_id: audit }]);
+    expect(await ownersOf(r.issue.id)).toEqual([northbeamPersonIds["Rosa Diaz"]]);
+    expect(r.issue).toMatchObject({ id: r.issue.id, title: "Reports copied by hand", links: [{ process_id: NORTHBEAM_PROCESS_ID, step_id: audit }], owner_ids: [northbeamPersonIds["Rosa Diaz"]], source_ids: [] });
   });
+
+  /** A detection not yet tracked in the seeded workspace: its issue, if the seed has one, is removed first. */
+  const untracked = async (index: number) => {
+    const d = northbeamDetections()[index]!;
+    await q("delete from issues where workspace_id = $1 and detected_key = $2", [WS, d.key]);
+    return d;
+  };
+
   it("promote with source 'promoted', status open and the detection's key", async () => {
-    db.result = { data: [{ id: "i2" }], error: null };
-    const d = northbeamDetections()[1]!;
-    await promoteIssue(WS, promoteInput(d, NORTHBEAM_PROCESS_ID, scenarios));
-    expect(saved()!.p_fields).toMatchObject({ source: "promoted", status: "open", detected_key: d.key });
+    const d = await untracked(1);
+    const r = await promoteIssue(WS, promoteInput(d, NORTHBEAM_PROCESS_ID, scenarios));
+    expect(r.status).toBe("ok");
+    const [row] = await byKey(d.key);
+    expect(row).toMatchObject({ source: "promoted", status: "open", detected_key: d.key });
     // What it touches goes in the link table, with the process it was found on.
-    expect(saved()!.p_links).toEqual([{ process_id: NORTHBEAM_PROCESS_ID, step_id: d.stepId }]);
+    expect(await linksOf(row.id)).toEqual([{ process_id: NORTHBEAM_PROCESS_ID, step_id: d.stepId }]);
   });
   const OLD_SENTENCE =
     "Simulated: 44 h/wk of client work against 40 h/wk capacity, so 4 h/wk overtime on average within the 10% cap, costing about £1,040 at cost rates over the 26-week run. The cap is used up.";
+  const NEW_SENTENCE = "Simulated: 44 h/wk of client work against 40 h/wk capacity, so 4 h/wk overtime on average within the 10% cap. The cap is used up.";
   it("promote strips the overtime money an old browser tab still sends (B1 2b)", async () => {
-    db.result = { data: [{ id: "i2" }], error: null };
-    const d = northbeamDetections()[1]!;
+    const d = await untracked(1);
     await promoteIssue(WS, { ...promoteInput(d, NORTHBEAM_PROCESS_ID, scenarios), evidence: OLD_SENTENCE, evidence_metrics: { overtime_hours_week: 4, overtime_cost: 1040 } });
-    const fields = saved()!.p_fields;
-    expect(fields.evidence).toBe("Simulated: 44 h/wk of client work against 40 h/wk capacity, so 4 h/wk overtime on average within the 10% cap. The cap is used up.");
-    expect(fields.evidence_metrics).toEqual({ overtime_hours_week: 4 });
+    const [row] = await byKey(d.key);
+    expect(row.evidence).toBe(NEW_SENTENCE);
+    expect(row.evidence_metrics).toEqual({ overtime_hours_week: 4 });
   });
   it("the Acknowledge dialog strips it too, for a new issue and for an edit", async () => {
-    db.result = { data: [{ id: "i1" }], error: null };
-    const d = northbeamDetections()[1]!;
+    const d = await untracked(1);
     await saveIssueFromDialog(WS, dialog({ evidence: OLD_SENTENCE, from: { detected_key: d.key, evidence: OLD_SENTENCE, evidence_metrics: { overtime_cost: 1040, a: 1 }, role_id: null, person_id: null, client_id: null, scenario_id: null } }));
-    expect(saved()!.p_fields.evidence).not.toMatch(/costing/);
-    expect(saved()!.p_fields.evidence_metrics).toEqual({ a: 1 });
-    db.calls.length = 0;
-    await saveIssueFromDialog(WS, dialog({ id: "00000000-0000-4000-8000-0000000000a1", evidence: OLD_SENTENCE }));
-    expect(saved()!.p_fields.evidence).toBe("Simulated: 44 h/wk of client work against 40 h/wk capacity, so 4 h/wk overtime on average within the 10% cap. The cap is used up.");
+    const [row] = await byKey(d.key);
+    expect(row.evidence).not.toMatch(/costing/);
+    expect(row.evidence_metrics).toEqual({ a: 1 });
+    await saveIssueFromDialog(WS, dialog({ id: row.id, evidence: OLD_SENTENCE }));
+    expect((await issueRow(row.id)).evidence).toBe(NEW_SENTENCE);
   });
   it("promote can store a dismissed insight in one write, with the revision it was dismissed against, and refuses any other status", async () => {
-    db.result = { data: [{ id: "i2" }], error: null };
-    const d = northbeamDetections()[1]!;
-    const revision = "00000000-0000-4000-8000-0000000000aa";
-    await promoteIssue(WS, { ...promoteInput(d, NORTHBEAM_PROCESS_ID, scenarios), status: "dismissed", dismissed_revision_id: revision });
-    expect(saved()!.p_fields).toMatchObject({ source: "promoted", status: "dismissed", detected_key: d.key, dismissed_revision_id: revision });
-    db.calls.length = 0;
+    const d = await untracked(1);
+    await promoteIssue(WS, { ...promoteInput(d, NORTHBEAM_PROCESS_ID, scenarios), status: "dismissed", dismissed_revision_id: NORTHBEAM_REVISION_ID });
+    const [row] = await byKey(d.key);
+    expect(row).toMatchObject({ source: "promoted", status: "dismissed", detected_key: d.key, dismissed_revision_id: NORTHBEAM_REVISION_ID });
+    await q("delete from issues where id = $1", [row.id]);
     const r = await promoteIssue(WS, { ...promoteInput(d, NORTHBEAM_PROCESS_ID, scenarios), status: "resolved" });
     expect(r.status).toBe("error");
-    expect(saved()).toBeUndefined();
+    expect(await byKey(d.key)).toEqual([]);
   });
   it("say so when a detection is already tracked (unique key)", async () => {
-    db.rpcResult = { data: null, error: { code: "23505" } };
-    const d = northbeamDetections()[0]!;
+    const d = await untracked(0);
+    expect((await promoteIssue(WS, promoteInput(d, NORTHBEAM_PROCESS_ID, scenarios))).status).toBe("ok");
     expect(await promoteIssue(WS, promoteInput(d, NORTHBEAM_PROCESS_ID, scenarios))).toEqual({ status: "error", message: ALREADY_TRACKED });
+    expect(await byKey(d.key)).toHaveLength(1);
   });
   it("save one field through save_fields with its base", async () => {
-    db.result = { data: { status: "saved", row: { title: "New" } }, error: null };
     const id = northbeamIssues()[0]!.id;
-    expect(await saveIssueField(id, "title", "Old", "New")).toEqual({ status: "saved", value: "New" });
-    expect(db.calls).toEqual([{ op: "rpc", args: ["save_fields", { target: "issues", key: { id }, base: { title: "Old" }, changes: { title: "New" } }] }]);
+    const old = (await issueRow(id)).title as string;
+    expect(await saveIssueField(id, "title", old, "New")).toEqual({ status: "saved", value: "New" });
+    expect((await issueRow(id)).title).toBe("New");
+    // A stale base is a conflict, and changes nothing.
+    expect(await saveIssueField(id, "title", old, "Newer")).toEqual({ status: "conflict", theirs: "New" });
+    expect((await issueRow(id)).title).toBe("New");
   });
 
   it("save a status as the older spelling plus a resolution, each checked against what the person saw", async () => {
     const id = northbeamIssues()[0]!.id;
-    const change = async (from: string, to: string) => {
-      db.calls.length = 0;
-      db.result = { data: { status: "saved", row: {} }, error: null };
-      const r = await saveIssueField(id, "status", from, to);
-      return { r, call: db.calls[0]!.args[1] as { base: unknown; changes: unknown } };
+    await q("update issues set status = 'open', resolution = null where id = $1", [id]);
+    const stored = async () => {
+      const row = await issueRow(id);
+      return { status: row.status, resolution: row.resolution };
     };
-    expect((await change("open", "testing")).call).toMatchObject({ base: { status: "open", resolution: null }, changes: { status: "in_progress", resolution: null } });
-    expect((await change("testing", "resolved")).call).toMatchObject({ base: { status: "in_progress", resolution: null }, changes: { status: "done", resolution: null } });
-    expect((await change("resolved", "wont_fix")).call).toMatchObject({ base: { status: "done", resolution: null }, changes: { status: "done", resolution: "wont_fix" } });
-    expect((await change("wont_fix", "open")).call).toMatchObject({ base: { status: "done", resolution: "wont_fix" }, changes: { status: "open", resolution: null } });
-    expect((await change("open", "testing")).r).toEqual({ status: "saved", value: "testing" });
+    expect(await saveIssueField(id, "status", "open", "testing")).toEqual({ status: "saved", value: "testing" });
+    expect(await stored()).toEqual({ status: "in_progress", resolution: null });
+    expect((await saveIssueField(id, "status", "testing", "resolved")).status).toBe("saved");
+    expect(await stored()).toEqual({ status: "done", resolution: null });
+    expect((await saveIssueField(id, "status", "resolved", "wont_fix")).status).toBe("saved");
+    expect(await stored()).toEqual({ status: "done", resolution: "wont_fix" });
+    expect((await saveIssueField(id, "status", "wont_fix", "open")).status).toBe("saved");
+    expect(await stored()).toEqual({ status: "open", resolution: null });
     // Someone else moved it on: what they stored is shown as the status it stands for.
-    db.result = { data: { status: "conflict", conflicts: { status: "done", resolution: "wont_fix" } }, error: null };
+    await q("update issues set status = 'done', resolution = 'wont_fix' where id = $1", [id]);
     expect(await saveIssueField(id, "status", "open", "testing")).toEqual({ status: "conflict", theirs: "wont_fix" });
+    expect(await stored()).toEqual({ status: "done", resolution: "wont_fix" });
     // "dismissed" is never offered, and never saved through here.
     expect(await saveIssueField(id, "status", "open", "dismissed")).toMatchObject({ status: "error" });
   });
@@ -409,76 +418,100 @@ describe("issue Server Actions", () => {
   });
 
   it("the Acknowledge dialog creates an issue with its steps, owners and target in one save_issue call", async () => {
-    db.result = { data: [{ id: "i1" }], error: null };
-    const d = northbeamDetections()[1]!;
+    const d = await untracked(1);
     const r = await saveIssueFromDialog(WS, dialog({ from: { detected_key: d.key, evidence_metrics: { a: 1 }, role_id: null, person_id: null, client_id: null, scenario_id: null } }));
     expect(r.status).toBe("ok");
-    expect(db.calls.filter((c) => c.op === "rpc")).toHaveLength(1);
-    const call = saved()!;
-    expect(call.p_id).toBeUndefined();
-    expect(call.p_fields).toMatchObject({ title: "Slow check", severity: "serious", source: "promoted", detected_key: d.key, type: "manual", target_goal: "under 4 hours" });
-    expect(call.p_links).toHaveLength(2);
-    expect(call.p_owners).toEqual([northbeamPersonIds["Rosa Diaz"]]);
-    expect(call.p_sources).toEqual([]);
+    const [row] = await byKey(d.key);
+    expect(row).toMatchObject({ title: "Slow check", severity: "serious", source: "promoted", detected_key: d.key, type: "manual", target_goal: "under 4 hours" });
+    expect(await linksOf(row.id)).toHaveLength(2);
+    expect(await ownersOf(row.id)).toEqual([northbeamPersonIds["Rosa Diaz"]]);
+    expect((await q("select source_id from issue_sources where issue_id = $1", [row.id])).rows).toEqual([]);
+    // One save, one history entry.
+    expect((await q("select count(*) from issue_events where issue_id = $1", [row.id])).rows[0].count).toBe("1");
   });
 
   it("the dialog's edit sends the issue id and only the fields a person can change", async () => {
-    db.result = { data: [{ id: "i1" }], error: null };
     const id = northbeamIssues()[0]!.id;
+    await q("update issues set status = 'open', resolution = null where id = $1", [id]);
+    const before = await issueRow(id);
     await saveIssueFromDialog(WS, dialog({ id, status: "testing" }));
-    const call = saved()!;
-    expect(call.p_id).toBe(id);
-    expect(call.p_fields).toMatchObject({ title: "Slow check", status: "testing" });
-    expect(call.p_fields).not.toHaveProperty("source");
-    expect(call.p_fields).not.toHaveProperty("type");
+    const row = await issueRow(id);
+    expect(row).toMatchObject({ title: "Slow check", status: "in_progress" });
+    expect(row.source).toBe(before.source);
+    expect(row.type).toBe(before.type);
   });
 
-  it("an edit takes the links of only the sources it removed from the issue's list (A53): one made elsewhere stays", async () => {
-    const S1 = "30000000-0000-4000-8000-000000000001";
-    const S2 = "30000000-0000-4000-8000-000000000002";
-    const S3 = "30000000-0000-4000-8000-000000000003";
-    // The issue's list before the save is [S1, S2] (what the select returns); the dialog saves [S2, S3].
-    db.result = { data: [{ source_id: S1 }, { source_id: S2 }], error: null };
-    const id = northbeamIssues()[0]!.id;
-    await saveIssueFromDialog(WS, dialog({ id, source_ids: [S2, S3] }));
-    const at = db.calls.findIndex((c) => c.op === "from" && c.args[0] === "source_links");
-    expect(at).toBeGreaterThan(-1);
-    const after = db.calls.slice(at);
-    expect(after.find((c) => c.op === "delete")).toBeTruthy();
-    expect(after.find((c) => c.op === "in")?.args).toEqual(["source_id", [S1]]);
-  });
+  describe("sources on an issue's list (A53)", () => {
+    const [S1, S2] = [northbeamSourceIds.strategyInterview, northbeamSourceIds.salesNotes];
+    let S3: string;
+    let S4: string;
+    let issueId: string;
+    const sourceLinkIds = async () => (await q("select source_id from source_links where kind = 'issue' and issue_id = $1 order by source_id", [issueId])).rows.map((r) => r.source_id as string);
+    beforeAll(async () => {
+      [S3, S4] = await Promise.all(
+        ["Third", "Fourth"].map(async (title) => (await q("insert into sources (workspace_id, kind, title, body) values ($1, 'notes', $2, 'x') returning id", [WS, title])).rows[0].id as string),
+      );
+    });
+    beforeEach(async () => {
+      const made = await saveIssueFromDialog(WS, dialog({ title: "With sources", source_ids: [S1, S2] }));
+      if (made.status !== "ok") throw new Error("setup failed");
+      issueId = made.issue.id;
+      // A link made elsewhere (another tab, the MCP link_source): on the issue, but not on its own list.
+      await q("insert into source_links (workspace_id, source_id, kind, issue_id) values ($1, $2, 'issue', $3)", [WS, S4, issueId]);
+    });
 
-  it("an edit that removes nothing leaves the links alone, and a new issue has none to take off", async () => {
-    const S1 = "30000000-0000-4000-8000-000000000001";
-    db.result = { data: [{ source_id: S1 }], error: null };
-    await saveIssueFromDialog(WS, dialog({ id: northbeamIssues()[0]!.id, source_ids: [S1] }));
-    // (Reading the issue back reads its links; nothing is deleted.)
-    expect(db.calls.some((c) => c.op === "delete")).toBe(false);
-    db.calls.length = 0;
-    await saveIssueFromDialog(WS, dialog({ source_ids: [S1] }));
-    expect(db.calls.some((c) => c.op === "delete")).toBe(false);
+    it("an edit takes the links of only the sources it removed from the issue's list: one made elsewhere stays", async () => {
+      expect(await sourceLinkIds()).toEqual([S1, S2, S4].sort());
+      // The list before the save is [S1, S2]; the dialog saves [S2, S3].
+      await saveIssueFromDialog(WS, dialog({ id: issueId, source_ids: [S2, S3] }));
+      expect((await q("select source_id from issue_sources where issue_id = $1 order by source_id", [issueId])).rows.map((r) => r.source_id)).toEqual([S2, S3].sort());
+      const remaining = await sourceLinkIds();
+      expect(remaining).not.toContain(S1);
+      expect(remaining).toContain(S2);
+      expect(remaining).toContain(S4);
+    });
+
+    it("an edit that removes nothing leaves the links alone, and a new issue has none to take off", async () => {
+      const before = await sourceLinkIds();
+      await saveIssueFromDialog(WS, dialog({ id: issueId, source_ids: [S1, S2] }));
+      expect(await sourceLinkIds()).toEqual(before);
+      const fresh = await saveIssueFromDialog(WS, dialog({ title: "Fresh", source_ids: [S1] }));
+      expect(fresh.status).toBe("ok");
+      if (fresh.status === "ok") expect((await q("select source_id from source_links where kind = 'issue' and issue_id = $1", [fresh.issue.id])).rows.map((r) => r.source_id)).toEqual([S1]);
+    });
   });
 
   it("the dialog's save is refused without a title, or without steps or the whole process", async () => {
+    const before = await issueCount();
     expect(await saveIssueFromDialog(WS, dialog({ title: " " }))).toMatchObject({ status: "error" });
     expect(await saveIssueFromDialog(WS, dialog({ links: [] }))).toEqual({ status: "error", message: "Pick at least one step, or choose the whole process." });
     expect(await saveIssueFromDialog("nope", dialog())).toMatchObject({ status: "error" });
-    expect(saved()).toBeUndefined();
+    expect(await issueCount()).toBe(before);
   });
 
   it("dismissing again moves the dismissal to the new revision", async () => {
-    db.result = { data: [{ id: "i1" }], error: null };
-    const id = northbeamIssues()[1]!.id;
-    const revision = "00000000-0000-4000-8000-0000000000bb";
-    expect((await redismissIssue(WS, id, revision)).status).toBe("ok");
-    expect(saved()).toMatchObject({ p_id: id, p_fields: { status: "dismissed", dismissed_revision_id: revision } });
-    expect(await redismissIssue(WS, id, "nope")).toMatchObject({ status: "error" });
+    const d = await untracked(1);
+    await promoteIssue(WS, { ...promoteInput(d, NORTHBEAM_PROCESS_ID, scenarios), status: "dismissed", dismissed_revision_id: NORTHBEAM_REVISION_ID });
+    const [row] = await byKey(d.key);
+    // A newer published revision to dismiss it against.
+    const revision = (await q("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, 99, 'draft') returning id", [WS, NORTHBEAM_PROCESS_ID])).rows[0].id;
+    expect((await redismissIssue(WS, row.id, revision)).status).toBe("ok");
+    expect(await issueRow(row.id)).toMatchObject({ status: "dismissed", dismissed_revision_id: revision });
+    expect(await redismissIssue(WS, row.id, "nope")).toMatchObject({ status: "error" });
   });
 
   it("turn RLS refusals into a sentence", async () => {
-    db.rpcResult = { data: null, error: { code: "42501" } };
+    signInAs({ tdb }, viewer);
+    const before = await issueCount();
     expect(await createIssue(WS, manual)).toEqual({ status: "error", message: "You don't have permission to change issues here." });
-    db.result = { data: [], error: null };
+    expect(await issueCount()).toBe(before);
+    // A delete RLS filters out removes nothing.
     expect(await deleteIssue(northbeamIssues()[0]!.id)).toEqual({ status: "error", message: "You don't have permission to change issues here." });
+    expect(await issueCount()).toBe(before);
+    signInAs({ tdb }, editor);
+    const made = await createIssue(WS, manual);
+    if (made.status !== "ok") throw new Error("setup failed");
+    expect(await deleteIssue(made.issue.id)).toEqual({ status: "ok" });
+    expect(await issueCount()).toBe(before);
   });
 });

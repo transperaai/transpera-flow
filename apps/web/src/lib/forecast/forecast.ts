@@ -7,7 +7,8 @@ import { forecastAlerts, toRatingConfig, type AnalysisSettings, type DetectedIss
 import { horizonWeeks } from "@/lib/horizon";
 import { withLeverChanges } from "@/lib/solutions/levers";
 import { visibleFindings } from "@/lib/rules/edit";
-import { calendarMonthStarts, timelineMonths } from "./timeline";
+import { timelineMonths } from "./timeline";
+import { calendarMonthStarts } from "@transpera-flow/db/sandbox";
 
 /** The horizon the forecast opens on: a year ahead. */
 export const DEFAULT_FORECAST_MONTHS = 12;
@@ -28,7 +29,7 @@ export function forecastModel(
   levers: readonly ScenarioPatch[] = [],
 ): { model: EngineModel; monthStarts: number[]; error: null } | { model: null; monthStarts: null; error: string } {
   try {
-    const model = { ...withLeverChanges(toEngineModel(bundle, { startDate, planned: true }), levers).model, horizonWeeks: horizonWeeks(months) };
+    const model = { ...withLeverChanges(toEngineModel(bundle, { startDate, planned: true, purposes: true }), levers).model, horizonWeeks: horizonWeeks(months) };
     // The run's months are the calendar's, so "February" in an alert is February.
     return { model, monthStarts: calendarMonthStarts(startDate, model.horizonWeeks, model.hoursPerWeek), error: null };
   } catch (err) {

@@ -8,7 +8,7 @@
 // Where a process sits comes from the LIVE versions (ADR 0014, B12): the process whose live version holds it. A process sits in
 // one place only, so one that sits elsewhere is listed greyed with where; the database refuses a second place on publish too.
 
-import type { ProcessBundle, ProcessRow, StepRow } from "@transpera-flow/db";
+import type { ProcessBundle, ProcessCategory, ProcessRow, StepRow } from "@transpera-flow/db";
 import { CARD_SIZE } from "@/lib/map/groups";
 import { newStepRow } from "./commands";
 import { nearestFreeSpot, type ViewHint } from "./groups";
@@ -19,6 +19,8 @@ export interface LibraryProcess {
   id: string;
   name: string;
   kind: ProcessRow["kind"];
+  /** What it is for (D52), in the words the Processes page uses. */
+  category: ProcessCategory;
   /** Published at least once (a card for one that is not has nothing to show yet). */
   live: boolean;
   /** The process whose live version holds it, or null when none does. */
@@ -30,6 +32,8 @@ export interface LibraryTemplate {
   id: string;
   name: string;
   kind: ProcessRow["kind"];
+  /** What it is for: what the template's process is made as (D52). */
+  category: ProcessCategory;
   description: string;
 }
 
@@ -37,6 +41,7 @@ export interface LibraryEntry {
   id: string;
   name: string;
   kind: ProcessRow["kind"];
+  category: ProcessCategory;
   live: boolean;
   /**
    * `free`: not on any map, can be added. `map`: on the company map, can be added too (the company map is the default home and
@@ -62,6 +67,7 @@ export function processesOfBundle(bundle: ProcessBundle): LibraryProcess[] {
       id: p.process.id,
       name: p.process.name,
       kind: p.process.kind,
+      category: p.process.category,
       live: true,
       holder: p.process.parent_process_id ? { id: p.process.parent_process_id, name: names.get(p.process.parent_process_id) ?? "another process", company: false } : null,
     }));
@@ -91,6 +97,7 @@ export function libraryEntries(bundle: ProcessBundle, processes: readonly Librar
         id: p.id,
         name: p.name,
         kind: p.kind,
+        category: p.category,
         live: p.live,
         state,
         insideName: state === "inside" && elsewhere ? (elsewhere.company ? "the company map" : elsewhere.name) : null,

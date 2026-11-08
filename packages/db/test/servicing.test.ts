@@ -114,7 +114,7 @@ describe("service_servicing (database)", () => {
     db = await createTestDb();
     for (const role of ["owner", "editor", "member", "viewer"] as const) {
       users[role] = await createUser(db, `${role}@servicing.example.com`);
-      await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+      await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
     }
     users.stranger = await createUser(db, "stranger@servicing.example.com");
   });
@@ -212,7 +212,7 @@ describe("service_servicing (database)", () => {
   it("is company model (issue #25): the MCP server can't write links, and people's writes are audited (read by owners)", async () => {
     const mcp = { ...users.editor!.claims, api_token_id: "00000000-0000-4000-8000-000000000999" };
     await db.as(mcp, async (c) => {
-      await expect(c.query("update service_servicing set sla_hours = 12")).rejects.toThrow(/only by review/);
+      await expect(c.query("update service_servicing set sla_hours = 12")).rejects.toThrow(/can't be changed through an API token/);
     });
     await db.as(users.owner!.claims, async (c) => {
       await c.query("update service_servicing set sla_hours = 12 where service_id = $1 and process_id = $2", [northbeamServiceIds.seo, checkin]);

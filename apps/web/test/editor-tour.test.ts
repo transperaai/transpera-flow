@@ -14,7 +14,7 @@ const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8"
 
 describe("the tour's steps", () => {
   it("has 8 steps for a process, one for each area the issue names, in the order a person works", () => {
-    expect(tourSteps("process").map((s) => s.id)).toEqual(["palette", "canvas", "inspector", "checklist", "draft", "simulate", "publish", "history"]);
+    expect(tourSteps("process").map((s) => s.id)).toEqual(["palette", "canvas", "problems", "inspector", "draft", "simulate", "publish", "history"]);
   });
 
   it("has a shorter tour for the company map, which has nothing to simulate", () => {
@@ -41,8 +41,12 @@ describe("the tour's steps", () => {
     expect(canvas).toMatch(/Double-click/);
   });
 
+  it("no longer mentions what has left the Editor: the process library, loose ends, evidence or citing", () => {
+    for (const s of tourSteps("process")) expect(`${s.title} ${s.body}`, s.id).not.toMatch(/process library|loose end|evidence|cite|cited|citing|\+ Process/i);
+  });
+
   it("points every step at an element the Editor really draws", () => {
-    const editor = ["components/editor/editor-bar.tsx", "components/editor/editor-view.tsx", "components/simulation-gaps.tsx", "components/editor/palette.tsx", "components/editor/inspector.tsx"].map(read).join("\n");
+    const editor = ["components/editor/editor-bar.tsx", "components/editor/editor-view.tsx", "components/editor/palette.tsx", "components/editor/inspector.tsx"].map(read).join("\n");
     for (const step of [...tourSteps("process"), ...tourSteps("company")]) {
       // Each step needs at least one selector that is in the source; the others are fallbacks.
       const found = step.target.some((selector) => {
@@ -57,12 +61,10 @@ describe("the tour's steps", () => {
 
   it("tries a step's selectors in order, and drops a step that points at nothing", () => {
     const root = (present: string[]) => ({ querySelector: (s: string) => (present.includes(s) ? ({} as Element) : null) });
-    const checklist = tourSteps("process").find((s) => s.id === "checklist")!;
-    expect(resolveTarget(checklist, root(["[data-missing-for-simulation]"]))).not.toBeNull();
-    // The checklist step points at the checklist and nothing else: with no list on the screen it is left out.
-    expect(resolveTarget(checklist, root(['aside[aria-label="Inspector"]']))).toBeNull();
-    expect(resolveTarget(checklist, root([]))).toBeNull();
-    expect(checklist.reveal).toBe(true);
+    // The things-to-fix step points at the bar's line and nothing else: with nothing to fix it is left out.
+    const problems = tourSteps("process").find((s) => s.id === "problems")!;
+    expect(resolveTarget(problems, root(["[data-problems-line]"]))).not.toBeNull();
+    expect(resolveTarget(problems, root(['aside[aria-label="Inspector"]']))).toBeNull();
     const history = tourSteps("process").find((s) => s.id === "history")!;
     expect(history.target).toEqual(["[data-tour=history]"]);
     // A block's Editor has no draft chip, Simulate or Publish.

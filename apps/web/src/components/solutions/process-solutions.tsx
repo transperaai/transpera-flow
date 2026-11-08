@@ -7,6 +7,7 @@
 import Link from "next/link";
 import type { IssueRow } from "@transpera-flow/db";
 import { Help } from "@/components/help";
+import { NewSolutionButton } from "@/components/solutions/new-solution";
 import { SolutionCards } from "@/components/solutions/solution-cards";
 import type { SolutionsData } from "@/lib/solutions/cards";
 import { useDemoSolutions } from "@/lib/solutions/demo";
@@ -36,7 +37,7 @@ export function ProcessSolutions({
   /** `/w/<slug>` or `/demo`: where the Editor lives. */
   base: string;
   demo: boolean;
-  /** Who can build a solution: owners and editors. */
+  /** Who can build a solution: Agency admins. */
   canEdit: boolean;
   /** This process's solutions and their links, as loaded with the page (the demo keeps its own). */
   data: SolutionsData;
@@ -56,17 +57,7 @@ export function ProcessSolutions({
     <div className="flex flex-col gap-3" data-testid="process-solutions">
       {canEdit && (
         <div className={`flex flex-wrap items-center gap-x-2 gap-y-2 ${EDIT_ONLY}`} data-edit-entry>
-          <Link
-            href={newSolutionHref(base, processId, from)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-edit px-3 text-sm font-medium text-edit-fg hover:opacity-90"
-          >
-            ✎ New solution
-          </Link>
-          <Help
-            label="New solution"
-            description="Opens the Editor on a copy of this process. Change the steps, simulate, and save it as a solution. The live map and its draft don't change, and you can link the solution to issues afterwards."
-            example="Try an AI lead check before the sales call, save it as “AI lead qualifier”, and compare it with live."
-          />
+          <NewSolutionButton issues={issues} processes={[{ id: processId, name: processName }]} base={base} from={from} />
         </div>
       )}
       <SolutionCards

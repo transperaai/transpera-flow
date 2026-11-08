@@ -43,14 +43,14 @@ const SDK = [
 
 // Product words, from the app's own UI and SQL messages.
 const PRODUCT = [
-  "admin", "agency", "analyse", "analysis", "api", "backup", "block", "blocks", "bundle", "calibration", "child", "churn",
+  "admin", "agency", "analysis", "api", "backup", "block", "blocks", "bundle", "child", "churn",
   "client", "clients", "company", "copy", "decision", "demand", "draft", "drafts", "edge", "edges", "editor", "editors",
-  "end", "engine", "export", "finding", "findings", "first", "forecast", "group", "groups", "held", "history", "horizon",
+  "end", "engine", "export", "first", "forecast", "group", "groups", "held", "history", "horizon",
   "idea", "ideas", "import", "inside", "insight", "insights", "issue", "issues", "itself", "lever", "levers", "link",
-  "links", "live", "map", "marker", "markers", "market", "mcp", "member", "members", "model", "models", "narration",
+  "links", "live", "map", "marker", "markers", "market", "mcp", "member", "members", "model", "models",
   "owner", "owners", "parent", "people", "person", "placeholder", "plan", "plans", "play", "principles", "process",
   "processes", "proposal", "proposals", "report", "result", "results", "revision", "revisions", "role", "roles", "run",
-  "runs", "scenario", "scenarios", "service", "services", "servicing", "settings", "share", "simulate", "simulation",
+  "runs", "sandbox", "scenario", "scenarios", "service", "services", "servicing", "settings", "share", "simulate", "simulation",
   "snapshot", "solution", "solutions", "source", "sources", "start", "step", "steps", "suggestion", "suggestions", "team",
   "terminal", "token", "tokens", "version", "versions", "viewer", "viewers", "wait", "workspace", "workspaces",
 ];

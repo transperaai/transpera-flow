@@ -1,5 +1,7 @@
 # MCP acts as the user through a PostgREST pre-request hook
 
+Date: 5 Oct 2026 · Status: Superseded by 0018 (`0018-mcp-tokens-checked-in-app-code.md`)
+
 The MCP endpoint (`/api/mcp`) must run every query as the API token's owner under RLS and never hold the service-role key (PRD §7.1, §10, D12). Supabase decides who a Data API request is from the request's JWT, and we can't mint JWTs (no JWT signing secret in the app). So the endpoint talks to the Data API with the **publishable key** and sends the caller's token in an `x-api-token` header. A PostgREST **pre-request function** (`private.api_token_pre_request`, registered on the `authenticator` role by migration `20260930040000_api_tokens.sql`) hashes the token, looks it up with a narrow security-definer function that resolves one live token to its owner's claims and nothing else, sets `request.jwt.claims` to those claims and runs `set local role authenticated`. From then on the transaction is the user, exactly as if they were signed in: `auth.uid()`, `app_metadata.agency_admin` and every RLS policy apply unchanged. The Supabase data code (`packages/db/src/queries.ts`) is shared with the web app.
 
 ## Why this shape

@@ -4,13 +4,36 @@ Process-map simulator: turns a company's workflows into a runnable
 discrete-event Monte Carlo model. Product spec and decisions: [`docs/PRD.md`](docs/PRD.md).
 Work is tracked as GitHub issues (milestone parents #1–#3). Picking this up? Start with [`docs/HANDOVER.md`](docs/HANDOVER.md).
 
+## The app
+
+Transpera Flow answers one question for an agency: are we at capacity, and how many more clients per employee could automation or
+augmentation allow? Each client has their own deployment. The screens, in the order the menu shows them:
+
+| Screen | Path | What it is |
+|---|---|---|
+| **Overview** | `/w/<slug>` | The company map, the headline numbers and the department cards, with what is still missing to get a number. |
+| **Set up** | `/w/<slug>/setup/clients`, `/setup/people` | Where the capacity figures' inputs are keyed in. *Tiers & clients*: tiers, what a client of each tier gets, counted and named clients, other services and the client health benchmark. *People & roles*: roles (department, kind, line, leadership flag), shared teams, people (hours, salary, tiers served, portfolios). Every field is edited in one place, and each shows where its value came from (interview, calculator, measured, estimate). |
+| **Processes** | `/w/<slug>/processes`, `/p/<id>` | The process maps and the Editor. A step's base values (work split, tier multiplier, who it goes to) are set in the Editor and read on the process page; `/p/<id>?step=<step id>` opens a process with that step selected. |
+| **Capacity** | `/w/<slug>/capacity` | Today's busy share by person and role, DLER, clients and revenue per employee, the bottleneck, and when to hire (the next 12 months). |
+| **Sandbox** | `/w/<slug>/sandbox` | Free play: change anything (a hire, a price, a tier, automation of a step), see the capacity and money result, and keep the changes you like. |
+| **Settings** | `/w/<slug>/settings` | The workspace, simulation limits, churn drivers, client health rules, demand and market. Services, clients, roles and people moved to Set up. |
+
+A new client's Set up pages start empty. Two loaders fill a workspace for a first look; both refuse a workspace that has anything in it:
+
+```sh
+pnpm --filter @transpera-flow/db capacity:starter --workspace <slug>   # the client's start: departments, tiers, roles, example numbers marked "estimate". For a real deployment.
+pnpm --filter @transpera-flow/db capacity:example --workspace <slug>   # the prototype's made-up agency, to build and test with. Never on a client's deployment.
+```
+
+Add `--driver neon-ws` from a cloud container, where Neon's port 5432 is closed.
+
 ## Layout
 
 | Path | What |
 |---|---|
 | `apps/web` | Next.js 16 app (App Router, Tailwind v4, React Flow) |
 | `packages/engine` | Simulation engine, shared by the browser (Web Worker) and Node |
-| `packages/db` | Supabase migrations, seed, row types, row → engine model mapping |
+| `packages/db` | Postgres migrations and runner, seed, generated types, the Kysely `createDb`, row → engine model mapping |
 | `packages/mcp` | MCP server: tools and the `/api/mcp` request handler (see below) |
 | `prototype/` | The original single-file prototype; the engine port is tested against it |
 
@@ -23,10 +46,41 @@ pnpm install
 pnpm dev            # http://localhost:3000
 ```
 
-Without Supabase settings the app runs in **demo mode** (`/demo`), showing the
-Northbeam sample from the seed fixtures. To use a database, copy
-`apps/web/.env.example` to `apps/web/.env.local` and fill it in; see
-[`docs/supabase-notes.md`](docs/supabase-notes.md).
+The app needs a database and sign-in: copy `apps/web/.env.example` to `apps/web/.env.local` and fill it in. (The public `/demo`
+pages are gone; the Northbeam and Larkspur fixtures stay for the engine's golden tests and the database tests.)
+
+## Stack and database
+
+The database is [Neon](https://neon.tech) Postgres (Sydney, AWS ap-southeast-2); the app is hosted on Vercel. Sign-in is
+[Better Auth](https://www.better-auth.com) with Google (`/api/auth/*`), kept in the `better_auth` schema of the same
+database. Queries go through Kysely and a `pg` pool as the database role `authenticated` (or `anon` when signed out), with the
+user's claims set for each transaction, so the row-level security policies and SECURITY DEFINER functions decide what each
+request sees (`packages/db/src/client.ts`, ADR [0019](docs/adr/0019-neon-and-better-auth.md)). Statements are cut off after
+3 s for `anon` and 8 s for `authenticated`, and a function that sets its own `statement_timeout` gets it.
+
+| Variable | What |
+|---|---|
+| `DATABASE_URL` | The database owner's connection string. Migrations, Better Auth and the sign-in access functions use it. |
+| `APP_DATABASE_URL` | The `authenticator` login the app's queries use. Optional locally (falls back to `DATABASE_URL`). |
+| `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `OAUTH_PROXY_SECRET`, `PREVIEW_ALIAS_URL` | Better Auth's secret, the deployment's URL, the preview-alias proxy secret, and the stable preview alias previews sign in through. |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google sign-in. `AUTH_PROVIDERS` also accepts `microsoft`, which needs `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` and `MICROSOFT_TENANT_ID`. |
+| `ACCESS_ADMIN_EMAILS` | Addresses that sign in as Admin, so a new deployment's first admin can get in. |
+
+```sh
+pnpm --filter @transpera-flow/db migrate [--dry-run]   # apply new migrations to DATABASE_URL (--dry-run lists them)
+bash packages/db/scripts/neon-preview-migrate.sh [--dry-run]   # the same for the Neon PREVIEW database (never production); the connection comes from the Neon API and is never printed
+bash packages/db/scripts/db-sql.sh -c "select 1"    # psql "$DATABASE_URL" -v ON_ERROR_STOP=1 "$@"
+bash packages/db/scripts/db-sql.sh -v app_password="$APP_PASSWORD" -f packages/db/scripts/create-app-login.sql
+pnpm --filter @transpera-flow/db gen:types          # db-types.ts, json-columns.ts, function-types.ts (needs local Postgres)
+```
+
+`create-app-login.sql` creates the `authenticator` login (no privileges of its own; it can only become `anon` or
+`authenticated`) with the password you pass. Put it in `APP_DATABASE_URL`; the password never goes in git. The migration log
+and production steps are in [`docs/production-migrations.md`](docs/production-migrations.md); notes on what was checked only
+against plain Postgres are in [`docs/supabase-notes.md`](docs/supabase-notes.md).
+
+Standing up a deployment for a new client (Vercel project, Neon database, Google or Microsoft sign-in): follow
+[`docs/new-client.md`](docs/new-client.md); `bash scripts/new-client.sh` walks the dashboard steps.
 
 ## Checks
 
@@ -37,9 +91,9 @@ pnpm test           # database tests need Postgres, see below
 pnpm --filter @transpera-flow/web build && pnpm --filter @transpera-flow/web e2e
 ```
 
-`e2e` (needs a finished build, made without Supabase settings so the app is in demo mode) opens every demo page at
-400, 768 and 1024 px and in dark mode: no sideways scroll, nothing past the edge, phones read only, no light surface in
-dark mode. It runs in CI's `check` job after the build.
+`e2e` (needs a finished build, served without a database or auth secret) opens the pages that need no sign-in (today the privacy
+page; the `/demo` pages are gone) at 400, 768 and 1024 px and in dark mode: no sideways scroll, nothing past the edge, phones read
+only, no light surface in dark mode. It runs in CI's `check` job after the build.
 
 `pnpm test` runs the PRD §6.7 timing tests (tagged `perf`) last, on their own, so
 the other suites don't share the CPU with them. A package's own `pnpm test` leaves
@@ -47,20 +101,13 @@ them out; run them there with `pnpm test:perf`.
 
 Database tests create a throwaway database on the Postgres at `DATABASE_URL`
 (default `postgres://postgres:postgres@localhost:5432/postgres`) and load a
-small stand-in for Supabase auth, the migrations and the seed.
+small stand-in for the `auth` schema and roles that policies read, the migrations and the seed.
 
 After changing the fixtures, regenerate the seed with `pnpm --filter @transpera-flow/db gen:seed`.
 
 The engine's golden models fail on any change that moves a snapshotted number. If the change is meant to,
 approve the new baselines, which bumps `ENGINE_VERSION`:
 `pnpm --filter @transpera-flow/engine golden:approve "why the numbers moved"` (see `docs/engine-versioning.md`).
-
-The MCP end-to-end suites (`packages/mcp/test/postgrest*.test.ts`) also need
-PostgREST; it is skipped locally unless `POSTGREST_URL` and
-`POSTGREST_JWT_SECRET` are set. CI prepares its database with
-`packages/mcp/test/postgrest-db.ts` and then starts PostgREST (see
-`.github/workflows/ci.yml`). To run it beside another checkout, set
-`POSTGREST_DATABASE` to a database name of your own for both steps.
 
 ## Storybook and visual tests
 
@@ -79,42 +126,19 @@ claude mcp add --transport http transpera-flow https://<host>/api/mcp \
   --header "Authorization: Bearer tf_…"
 ```
 
-Tools: `list_workspaces`, `set_active_workspace`, `get_workspace_summary`,
-`get_process`, `run_scenario`, and the analysis tools `save_scenario`,
-`compare_scenarios`, `check_robustness` (time-capped; a capped check is flagged
-`partial`), `get_bottlenecks` (with the shadow price: extra completions per
-quarter from one more FTE in the top bottleneck role; see
-`packages/engine/src/shadow-price.ts`), `log_issue` and `list_issues`, and the
-process-building tools `add_source` (it needs `links`, or `link_later: true` when the next call cites it), `link_source`, `create_process`, `add_step`,
-`update_step`, `remove_step`, `connect_steps`, `set_routing`, `import_process`,
-`publish_process`, `discard_draft`, `list_templates` and `create_from_template`, and the first-principles tools `get_first_principles`
-and `update_first_principles` (Claude fills them in from transcripts, into the draft).
-Building tools write only into a process's draft (`open_draft`), never live;
-left-out numbers become assumptions, cited numbers keep their evidence, and
-values someone entered are flagged as conflicts instead of overwritten
-(`packages/mcp/src/building.ts`). Every MCP row write is audit-logged with
-`actor_kind = 'mcp'`. The company-model tools are `set_company`, `upsert_service`,
-`upsert_person`, `upsert_client`, `upsert_role`, `set_demand` and
-`list_suggestions`: they create suggestions a person accepts on the Suggestions
-page, and the database refuses company-model writes made with a token, roles
-included. A missing role is suggested with `upsert_role` and can be used in
-`import_process` once accepted. The endpoint acts as the token's user under
-RLS and uses only `NEXT_PUBLIC_SUPABASE_URL` and
-`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; no extra environment variables. How it
-does that without the service-role key:
-[`docs/adr/0002-mcp-acts-as-user-via-pre-request.md`](docs/adr/0002-mcp-acts-as-user-via-pre-request.md).
+The server is **read-only**: Claude and ChatGPT query and report, and nothing they call writes company data, sources, issues,
+drafts or processes (docs/plans/cut-list.md item 5). Tools: `list_workspaces`, `set_active_workspace` (the only state it
+changes: the token's own active-workspace setting), `get_workspace_summary`, `get_process`, `get_facts`,
+`list_issues`, `list_scenarios`, `list_solutions`, `list_sources`, `list_templates`, `run_scenario` (with `scenario`: a saved Sandbox scenario run month by month), `compare_scenarios`, `check_robustness`
+(time-capped; a capped check is flagged `partial`) and `get_bottlenecks` (with the shadow price: extra completions per quarter
+from one more FTE in the top bottleneck role; see `packages/engine/src/shadow-price.ts`). `run_scenario` and
+`compare_scenarios` take their changes as arguments and save nothing. The database also refuses company-model writes made with a
+token. The endpoint acts as the token's user under RLS through the same database pool as the web app; no extra environment
+variables. How it checks the token and acts as its owner:
+[`docs/adr/0018-mcp-tokens-checked-in-app-code.md`](docs/adr/0018-mcp-tokens-checked-in-app-code.md).
 
-To turn interview transcripts into a draft process, use the `/extract-process` skill: [`docs/extraction/README.md`](docs/extraction/README.md).
-
-## Narration (Claude)
-
-"Explain this run" can be drafted by Claude
-(`claude-opus-5-5`), server-side only, when `ANTHROPIC_API_KEY` is set in the
-server's environment (Vercel: Production and Preview). Without it the templated
-text prints and the UI says narration needs the key. Every number in a draft is
-checked against the run's figures; one redraft, then the template. Tests use
-fakes and never call the API. The public `/demo` uses a stand-in writer, never
-the API. See [`docs/adr/0011-narration.md`](docs/adr/0011-narration.md).
+To turn interview transcripts into a process, use the `process-file` skill and upload the files in the app:
+[`docs/import/README.md`](docs/import/README.md). The upload code lives in `packages/db/src/process-import`.
 
 ## Error reporting (Sentry)
 

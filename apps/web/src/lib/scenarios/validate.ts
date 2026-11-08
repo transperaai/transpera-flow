@@ -1,6 +1,6 @@
 // Input checks behind the scenario Server Actions (app/w/[slug]/scenario-actions.ts).
 // They only reject malformed input early: the database checks the patch shape
-// again (private.is_scenario_patch) and RLS decides who may write.
+// again (private.is_sandbox_changes) and RLS decides who may write.
 
 import { parsePatches, type ScenarioPatch } from "@transpera-flow/engine";
 

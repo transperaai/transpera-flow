@@ -4,7 +4,7 @@
 // its rating, the insights and confirmed issues on it, and the sources behind its
 // numbers. Opens when a step is clicked (or Enter on it) and closes with Escape.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { EVIDENCE_COLUMNS, evidenceOf, type StepRow } from "@transpera-flow/db";
@@ -14,13 +14,11 @@ import { RATING_STYLE } from "@/lib/map/rating";
 
 /** What a screen knows about a step beyond its own numbers. */
 export interface StepExtras {
-  /** Titles of what the analysis found on the step and nobody has acknowledged yet. */
-  insights: string[];
   /** Titles of the confirmed (tracked) open issues on the step. */
   issues: string[];
 }
 
-export const NO_EXTRAS: StepExtras = { insights: [], issues: [] };
+export const NO_EXTRAS: StepExtras = { issues: [] };
 
 /** The titles of the sources cited for a step's numbers, in order of first use. */
 export function sourcesOf(step: Pick<StepRow, "provenance">, titles: Readonly<Record<string, string>> | undefined): string[] {
@@ -58,6 +56,7 @@ export function StepDetail({
   reworkTo,
   extras,
   sources,
+  baseValues,
   onClose,
 }: {
   step: StepRow;
@@ -67,6 +66,8 @@ export function StepDetail({
   reworkTo: string | null;
   extras: StepExtras;
   sources: string[];
+  /** The step's base values for capacity, read only (P9): shown under the numbers when given. */
+  baseValues?: ReactNode;
   onClose: () => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
@@ -123,7 +124,6 @@ export function StepDetail({
           )}
         </dd>
       </dl>
-      <List title="Insights" items={extras.insights} empty="Nothing found on this step yet." />
       <List title="Confirmed issues" items={extras.issues} empty="No confirmed issues." />
       {linking ? (
         <LinkedSources
@@ -134,6 +134,12 @@ export function StepDetail({
         />
       ) : (
         <List title="Sources" items={sources} empty="No source cited for this step's numbers." />
+      )}
+      {baseValues && (
+        <section className="mt-3" data-step-base-values>
+          <h4 className="text-[11px] font-semibold tracking-wide text-fg-3 uppercase">Base values</h4>
+          <div className="mt-1">{baseValues}</div>
+        </section>
       )}
     </aside>
   );

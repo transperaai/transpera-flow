@@ -51,5 +51,5 @@ export const Variants: StoryObj = {
 
 export const Conflict: StoryObj = {
   tags: ["visual-phone"],
-  render: () => <ConflictPrompt subject="the name" by="Tom" theirs="Northbeam Ltd" mine="Northbeam Agency" onKeepMine={() => undefined} onKeepTheirs={() => undefined} />,
+  render: () => <ConflictPrompt subject="the name" theirs="Northbeam Ltd" mine="Northbeam Agency" onKeepMine={() => undefined} onKeepTheirs={() => undefined} />,
 };

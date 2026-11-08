@@ -4,14 +4,15 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { ChevronRight, CornerDownRight } from "lucide-react";
+import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { Help } from "@/components/help";
-import { RatingPill } from "@/components/processes/rating";
 import { Badge } from "@/components/ui/badge";
 import { MapSkeleton } from "@/components/map/map-placeholder";
 import { Skeleton } from "@/components/ui/skeleton";
 import { confirmedBadges, confirmedRatings, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import type { ProcessCardData } from "@/lib/processes/data";
-import { shortDate, type ProcessRowData } from "@/lib/processes/rows";
+import { shortDate, type CompanyRowData, type ProcessRowData } from "@/lib/processes/rows";
+import { EDIT_ONLY } from "@/lib/phone";
 
 // The map is heavy and only needed once a row is opened.
 const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((m) => m.ProcessCanvas), {
@@ -31,7 +32,10 @@ export function ProcessesTable({
   loadCard,
   actions,
   empty,
+  company,
 }: {
+  /** The company map's own row, pinned above the processes. */
+  company?: CompanyRowData;
   rows: ProcessRowData[];
   /** Where each process opens, by id. */
   hrefs: Record<string, string>;
@@ -68,26 +72,14 @@ export function ProcessesTable({
     <div className="overflow-x-auto rounded-token border bg-card">
       <table className="w-full min-w-0 border-collapse text-sm">
         <thead>
-          <tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground">
+          <tr className="border-b bg-muted/40 text-center text-xs text-muted-foreground">
             <th className="w-8 p-0" aria-label="Open or close" />
-            <th className="px-2 py-2 font-medium">Process</th>
-            <th className="hidden px-2 py-2 font-medium md:table-cell">
+            <th className="px-2 py-2 text-left font-medium">Process</th>
+            <th className="hidden px-2 py-2 text-left font-medium md:table-cell">
               Type
-              <Help
-                label="Type"
-                description="Sales pipeline is how new work comes in and is won. Client work is a recurring process this company runs for its own existing clients, like a monthly report."
-                example="Northbeam's sales pipeline is a pipeline; its monthly reporting is client work."
-              />
+              <Help label="Type" description={PROCESS_CATEGORIES.map((c) => `${PROCESS_CATEGORY_LABELS[c]}: ${PROCESS_CATEGORY_HELP[c]}`).join(" ")} example="Northbeam's lead pipeline is Sales; its monthly reporting is Routine client work." />
             </th>
-            <th className="px-2 py-2 font-medium">
-              Rating
-              <Help
-                label="Rating"
-                description="The worst rating among this process's open issues, including the processes inside it. It is the same colour the map uses. Not rated means it has no open issue worse than Great."
-                example="One open Operational risk issue on a step makes the whole process Operational risk."
-              />
-            </th>
-            <th className="hidden px-2 py-2 text-right font-medium lg:table-cell">
+            <th className="hidden px-2 py-2 text-center font-medium lg:table-cell">
               Steps
               <Help
                 label="Steps"
@@ -95,7 +87,7 @@ export function ProcessesTable({
                 example="A process with 5 steps and a sub-process of 3 shows 8."
               />
             </th>
-            <th className="px-2 py-2 text-right font-medium">
+            <th className="px-2 py-2 text-center font-medium">
               Open issues
               <Help
                 label="Open issues"
@@ -116,6 +108,45 @@ export function ProcessesTable({
           </tr>
         </thead>
         <tbody>
+          {company && (
+            <tr data-company-row className="border-b bg-muted/30">
+              <td className="p-0" />
+              <td className="min-w-20 px-2 py-2.5 sm:min-w-44">
+                <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+                  <span className="min-w-0 font-semibold">Company map</span>
+                  {company.draft && (
+                    <Badge data-draft-open variant="outline" className="shrink-0 border-warn bg-warn-soft text-fg">
+                      Draft open
+                    </Badge>
+                  )}
+                </span>
+              </td>
+              <td className="hidden px-2 py-2.5 text-left text-xs md:table-cell">Company</td>
+              <td className="hidden px-2 py-2.5 text-center text-muted-foreground lg:table-cell">·</td>
+              <td className="px-2 py-2.5 text-center text-muted-foreground">·</td>
+              <td className="hidden px-2 py-2.5 text-center text-xs whitespace-nowrap lg:table-cell" data-company-version>
+                {company.version ? `Version ${company.version.number}${company.version.publishedAt ? ` · ${shortDate(company.version.publishedAt)}` : ""}` : <span className="text-muted-foreground">Draft only</span>}
+              </td>
+              {actions && <td className="p-0" />}
+              <td className="px-2 py-2.5 text-center">
+                <span className="inline-flex flex-wrap items-center justify-center gap-1" data-company-actions>
+                  {company.historyHref && (
+                    <Link href={company.historyHref} className="inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium whitespace-nowrap hover:bg-muted">
+                      History
+                    </Link>
+                  )}
+                  {company.editHref && (
+                    <Link href={company.editHref} data-edit-entry className={`inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium whitespace-nowrap hover:bg-muted ${EDIT_ONLY}`}>
+                      Edit
+                    </Link>
+                  )}
+                  <Link href={company.href} className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium whitespace-nowrap hover:bg-muted" aria-label="Open the company map">
+                    Open→
+                  </Link>
+                </span>
+              </td>
+            </tr>
+          )}
           {rows.map((r) => {
             const isOpen = open.has(r.id);
             const panel = `process-card-${r.id}`;
@@ -152,21 +183,18 @@ export function ProcessesTable({
                       )}
                     </span>
                   </td>
-                  <td className="hidden px-2 py-2.5 text-xs md:table-cell">{r.kind === "servicing" ? "Client work" : "Sales pipeline"}</td>
-                  <td className="px-2 py-2.5">
-                    <RatingPill rating={r.rating} />
-                  </td>
-                  <td className="hidden px-2 py-2.5 text-right tabular-nums lg:table-cell">{r.steps}</td>
-                  <td className="px-2 py-2.5 text-right tabular-nums">{r.openIssues > 0 ? <span className="font-semibold">{r.openIssues}</span> : <span className="text-muted-foreground">0</span>}</td>
-                  <td className="hidden px-2 py-2.5 text-xs whitespace-nowrap lg:table-cell">
+                  <td className="hidden px-2 py-2.5 text-left text-xs md:table-cell">{PROCESS_CATEGORY_LABELS[r.category]}</td>
+                  <td className="hidden px-2 py-2.5 text-center tabular-nums lg:table-cell">{r.steps}</td>
+                  <td className="px-2 py-2.5 text-center tabular-nums">{r.openIssues > 0 ? <span className="font-semibold">{r.openIssues}</span> : <span className="text-muted-foreground">0</span>}</td>
+                  <td className="hidden px-2 py-2.5 text-center text-xs whitespace-nowrap lg:table-cell">
                     {r.version ? `v${r.version.number}${r.version.publishedAt ? ` · ${shortDate(r.version.publishedAt)}` : ""}` : <span className="text-muted-foreground">Draft only</span>}
                   </td>
                   {actions && (
-                    <td className="p-0 text-right" onClick={(e) => e.stopPropagation()}>
+                    <td className="p-0 text-center" onClick={(e) => e.stopPropagation()}>
                       {actions(r)}
                     </td>
                   )}
-                  <td className="px-2 py-2.5 text-right">
+                  <td className="px-2 py-2.5 text-center">
                     <Link
                       href={hrefs[r.id] ?? "#"}
                       onClick={(e) => e.stopPropagation()}
@@ -179,7 +207,7 @@ export function ProcessesTable({
                 </tr>
                 {isOpen && (
                   <tr id={panel} className="border-b bg-muted/20">
-                    <td colSpan={actions ? 9 : 8} className="p-3 sm:p-4">
+                    <td colSpan={actions ? 8 : 7} className="p-3 sm:p-4">
                       <MapCard row={r} card={cards[r.id] ?? { state: "loading" }} href={hrefs[r.id] ?? "#"} />
                     </td>
                   </tr>

@@ -4,7 +4,9 @@ import { saveFields } from "@/lib/fields/server";
 import type { OpenResult, PublishResult } from "@/lib/drafts/session";
 import type { UpdateResult, WriteResult } from "@/lib/editor/store";
 import { parseFieldUpdate, parseIds, parseNewEdge, parseNewStep, isId } from "@/lib/editor/validate";
-import { createClient } from "@/lib/supabase/server";
+import { rpc } from "@transpera-flow/db/client";
+import { pgCode } from "@/app/action-db";
+import { getDb, getSessionUser } from "@/lib/auth/session";
 
 // Writes from the process editor (issue #8). Every write runs as the signed-in
 // user through RLS; the checks in lib/editor/validate.ts only reject malformed
@@ -29,39 +31,36 @@ const notDraft = {
  * the database refuses the rest too.
  */
 async function editableRevision(revisionId: string) {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  if (!claims?.claims?.sub) return { ok: false, error: signedOut } as const;
-  const { data: revision, error } = await supabase
-    .from("process_revisions")
-    .select("id, workspace_id, process_id, status")
-    .eq("id", revisionId)
-    .maybeSingle();
-  if (error) return { ok: false, error: forbidden } as const;
+  if (!(await getSessionUser())) return { ok: false, error: signedOut } as const;
+  const db = await getDb();
+  let revision;
+  try {
+    revision = await db.selectFrom("process_revisions").select(["id", "workspace_id", "process_id", "status"]).where("id", "=", revisionId).executeTakeFirst();
+  } catch {
+    return { ok: false, error: forbidden } as const;
+  }
   // A discarded draft is gone.
   if (!revision) return { ok: false, error: notDraft } as const;
-  const { data: canEdit } = await supabase.rpc("can_edit_workspace", { ws: revision.workspace_id });
+  const canEdit = await rpc(db, "can_edit_workspace", { ws: revision.workspace_id }).catch(() => null);
   if (canEdit !== true) return { ok: false, error: forbidden } as const;
   if (revision.status !== "draft") return { ok: false, error: notDraft } as const;
-  return { ok: true, supabase, revision } as const;
+  return { ok: true, db, revision } as const;
 }
 
-const failure = (error: { code?: string }): WriteResult =>
-  error.code === "42501"
+const failure = (e: unknown): WriteResult =>
+  pgCode(e) === "42501"
     ? forbidden
-    : error.code === "55000"
+    : pgCode(e) === "55000"
       ? notDraft
-      : error.code === "23514"
+      : pgCode(e) === "23514"
         ? { status: "error", message: "Some of those values aren't allowed." }
-        : error.code === "23503"
+        : pgCode(e) === "23503"
           ? { status: "error", message: "That refers to something that no longer exists." }
           : { status: "error", message: "Couldn't save. Try again." };
 
 /** The signed-in user's client, or the reason there is none. */
 async function signedIn() {
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  return claims?.claims?.sub ? { ok: true, supabase } as const : { ok: false, error: signedOut } as const;
+  return (await getSessionUser()) ? ({ ok: true, db: await getDb() } as const) : ({ ok: false, error: signedOut } as const);
 }
 
 type Reply = { status: string; revision_id?: string; number?: number; created?: boolean; steps?: { id: string; name: string }[] };
@@ -71,8 +70,12 @@ export async function openDraft(processId: string): Promise<OpenResult> {
   if (!isId(processId)) return invalid;
   const session = await signedIn();
   if (!session.ok) return session.error;
-  const { data, error } = await session.supabase.rpc("open_draft", { target_process: processId });
-  if (error) return failure(error) as OpenResult;
+  let data;
+  try {
+    data = await rpc(session.db, "open_draft", { target_process: processId });
+  } catch (e) {
+    return failure(e) as OpenResult;
+  }
   const r = data as Reply;
   if (r.status !== "ok") return forbidden;
   return { status: "ok", revision: { id: r.revision_id!, number: r.number! }, created: r.created === true };
@@ -83,8 +86,12 @@ export async function discardDraft(processId: string): Promise<WriteResult> {
   if (!isId(processId)) return invalid;
   const session = await signedIn();
   if (!session.ok) return session.error;
-  const { data, error } = await session.supabase.rpc("discard_draft", { target_process: processId });
-  if (error) return failure(error);
+  let data;
+  try {
+    data = await rpc(session.db, "discard_draft", { target_process: processId });
+  } catch (e) {
+    return failure(e);
+  }
   const r = data as Reply;
   return r.status === "not_found" ? forbidden : { status: "ok" };
 }
@@ -97,8 +104,12 @@ export async function publishDraft(processId: string, acceptEstimates: unknown):
   if (!isId(processId) || typeof acceptEstimates !== "boolean") return invalid;
   const session = await signedIn();
   if (!session.ok) return session.error;
-  const { data, error } = await session.supabase.rpc("publish_process", { target_process: processId, accept_estimates: acceptEstimates });
-  if (error) return failure(error) as PublishResult;
+  let data;
+  try {
+    data = await rpc(session.db, "publish_process", { target_process: processId, accept_estimates: acceptEstimates });
+  } catch (e) {
+    return failure(e) as PublishResult;
+  }
   const r = data as Reply;
   if (r.status === "published") {
     return { status: "published", revision: { id: r.revision_id!, number: r.number! } };
@@ -131,15 +142,21 @@ export async function insertProcessRows(revisionId: string, steps: unknown, edge
   if (newSteps.some((s) => !s) || newEdges.some((e) => !e)) return invalid;
   const access = await editableRevision(revisionId);
   if (!access.ok) return access.error;
-  const { supabase, revision } = access;
+  const { db, revision } = access;
   const owner = { revision_id: revision.id, workspace_id: revision.workspace_id, process_id: revision.process_id };
   if (newSteps.length) {
-    const { error } = await supabase.from("steps").insert(newSteps.map((s) => ({ ...s!, ...owner })));
-    if (error) return failure(error);
+    try {
+      await db.insertInto("steps").values(newSteps.map((s) => ({ ...s!, ...owner }))).execute();
+    } catch (e) {
+      return failure(e);
+    }
   }
   if (newEdges.length) {
-    const { error } = await supabase.from("edges").insert(newEdges.map((e) => ({ ...e!, ...owner })));
-    if (error) return failure(error);
+    try {
+      await db.insertInto("edges").values(newEdges.map((e) => ({ ...e!, ...owner }))).execute();
+    } catch (e) {
+      return failure(e);
+    }
   }
   return { status: "ok" };
 }
@@ -151,14 +168,20 @@ export async function deleteProcessRows(revisionId: string, stepIds: unknown, ed
   if (!isId(revisionId) || !steps || !edges) return invalid;
   const access = await editableRevision(revisionId);
   if (!access.ok) return access.error;
-  const { supabase } = access;
+  const { db } = access;
   if (edges.length) {
-    const { error } = await supabase.from("edges").delete().eq("revision_id", revisionId).in("id", edges);
-    if (error) return failure(error);
+    try {
+      await db.deleteFrom("edges").where("revision_id", "=", revisionId).where("id", "in", edges).execute();
+    } catch (e) {
+      return failure(e);
+    }
   }
   if (steps.length) {
-    const { error } = await supabase.from("steps").delete().eq("revision_id", revisionId).in("id", steps);
-    if (error) return failure(error);
+    try {
+      await db.deleteFrom("steps").where("revision_id", "=", revisionId).where("id", "in", steps).execute();
+    } catch (e) {
+      return failure(e);
+    }
   }
   return { status: "ok" };
 }

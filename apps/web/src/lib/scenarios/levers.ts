@@ -6,12 +6,14 @@
 // wait or rework rate that is 0 today gets an absolute lever instead.
 // No React here: the panel renders these, and tests check them directly.
 
-import type { Viewer } from "@transpera-flow/db";
+import { pooledClientReads, type Viewer } from "@transpera-flow/db";
 import { headcount, type EngineModel, type ScenarioPatch } from "@transpera-flow/engine";
-import { PLAY_CAPS } from "@/lib/share/play-input";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
-export type LeverGroup = "demand" | "people" | "process" | "clients" | "finances" | "market";
+/** The most a slider reaches, whatever the model holds. */
+const PLAY_CAPS = { leads: 10000, clients: 100000, price: 10000000, headcount: 500 } as const;
+
+export type LeverGroup = "demand" | "people" | "process" | "clients" | "finances";
 export type LeverUnit = "per_week" | "clients" | "share" | "money" | "people" | "fte" | "hours";
 
 export interface Lever {
@@ -37,7 +39,6 @@ export const GROUP_LABELS: Record<LeverGroup, string> = {
   process: "Process",
   clients: "Clients and churn",
   finances: "Finances",
-  market: "Market",
 };
 
 /** Relative levers run from −90% to +100%. */
@@ -45,8 +46,11 @@ const FACTOR = { min: 0.1, max: 2, step: 0.05 } as const;
 
 const ceilTo = (v: number, step: number) => Math.ceil(v / step) * step;
 
+export { pooledClientReads };
+
 export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
   const levers: Lever[] = [];
+  const { count: pooledClients, churn: pooledChurn } = pooledClientReads(model);
   const add = (l: Lever) => levers.push(l);
 
   // Demand
@@ -62,7 +66,7 @@ export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
     max: Math.min(PLAY_CAPS.leads, Math.max(20, ceilTo(model.leadsPerWeek * 3, 5))),
     step: 0.5,
   });
-  add({
+  if (pooledClients) add({
     path: "demand.active_clients",
     group: "clients",
     section: "Clients",
@@ -74,7 +78,7 @@ export function buildLevers(model: EngineModel, viewer?: Viewer): Lever[] {
     max: Math.min(PLAY_CAPS.clients, Math.max(20, ceilTo(model.activeClients * 2, 10))),
     step: 1,
   });
-  add({
+  if (pooledChurn) add({
     path: "demand.churn_monthly",
     group: "clients",
     section: "Clients",

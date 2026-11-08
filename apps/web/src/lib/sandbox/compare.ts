@@ -1,0 +1,144 @@
+// Scenarios side by side (docs/plans/sandbox-p1-brief.md §4): profit, billed revenue, labour, wins and conversion (phase 2), monthly recurring revenue, clients at risk per client group, active
+// clients per type and how busy each role gets, for "No changes" and up to three scenarios, with each column's average and 10-90%
+// range and its difference from column 0 ("No changes"). Every column runs with the same seed, so a difference comes from the
+// scenarios, not from chance. Pure: no React.
+
+import { DEFAULT_PURPOSES, FIXING_PURPOSE, type ProcessBundle, type PurposeCategory } from "@transpera-flow/db";
+import { isTooBusy, type EngineModel, type MonthBusy, type MonthlyResult, type Stat } from "@transpera-flow/engine";
+import { timelineMonths, type TimelineMonth } from "@/lib/forecast/timeline";
+import { IDLE, UNCOVERED, timeView } from "./time";
+
+/** One series across the columns: `values[c][month]`, and `diff[c][month]` = column c's mean − column 0's (null when either is missing; column 0 is all null). */
+export interface CompareRow {
+  id: string;
+  name: string;
+  values: (Stat | null)[][];
+  diff: (number | null)[][];
+}
+
+/** A headline number per column and its difference from column 0 (null for column 0). */
+export interface CompareTile {
+  values: number[];
+  diff: (number | null)[];
+}
+
+export interface SandboxComparison {
+  months: TimelineMonth[];
+  /** Profit per month (sandbox phase 2); null when any column's costs are hidden (pay hidden: a Viewer's model has none). */
+  profit: CompareRow | null;
+  /** Billed revenue (recurring, one-off and hourly) per month. */
+  revenue: CompareRow;
+  /** Labour with overtime per month; null as `profit` is. */
+  labour: CompareRow | null;
+  /** Clients won per month, and wins as a share of wins and losses. */
+  won: CompareRow;
+  conversion: CompareRow;
+  mrr: CompareRow;
+  /** Active clients, one per type (service); empty when the model has no services. */
+  clients: CompareRow[];
+  /** One per client group (service), named by the service; pooled models: empty. */
+  atRisk: CompareRow[];
+  /** One per role with work in any column (as the timeline filters), in the model's role order. Values are `MonthBusy`. */
+  roles: CompareRow[];
+  /**
+   * Where the time goes (sandbox phase 4), the team: one row per category in the workspace's list, then Idle and "Nobody there to do it"
+   * (hours a month, and each month's difference from column 0), and `shares[c][r]` = column c's whole-run share of row r (Idle included,
+   * uncovered outside the 100%). `runHours[c][r]` is the run's hours (the sum of the months' means).
+   */
+  time: { rows: CompareRow[]; shares: number[][]; runHours: number[][] };
+  /** Last month's MRR, last month's clients at risk (all groups; null when pooled), months too busy (all roles), late tasks in the last month. */
+  totals: {
+    mrr: CompareTile;
+    atRisk: CompareTile | null;
+    tooBusyMonths: CompareTile;
+    lateTasks: CompareTile;
+    /** Profit over the run, the sum of the months' means; null with `profit`. */
+    profit: CompareTile | null;
+    /** Hours spent on Fixing (its steps and all rework) and on steps that could be removed, over the run: the sum of the months' means. */
+    fixingHours: CompareTile;
+    removableHours: CompareTile;
+    /** Net change from price rises over the run, per column (null: the column has no price rise); null when no column has one. */
+    priceNet: (number | null)[] | null;
+  };
+}
+
+const row = (id: string, name: string, columns: (Stat | null)[][]): CompareRow => ({
+  id,
+  name,
+  values: columns,
+  diff: columns.map((col, c) => col.map((s, i) => (c === 0 || !s || !columns[0]![i] ? null : s.mean - columns[0]![i]!.mean))),
+});
+
+const tile = (values: number[]): CompareTile => ({ values, diff: values.map((v, c) => (c === 0 ? null : v - values[0]!)) });
+
+/** A role has work in a run when any month's 90th percentile is above half a percent (as the timeline's rows are filtered). */
+const hasWork = (series: readonly (MonthBusy | null)[] | undefined, uncovered: readonly (number | null)[] | undefined) =>
+  !!series?.some((m) => m && m.p90 > 0.005) || !!uncovered?.some((h) => h !== null);
+
+export function compareSandbox(
+  model: EngineModel,
+  columns: readonly MonthlyResult[],
+  bundle: Pick<ProcessBundle, "services">,
+  startDate: string,
+  cutoffs: readonly [number, number, number],
+  /** Per column, the net change from its price rises over the run (null: none). */
+  priceNet: readonly (number | null)[] = [],
+  /** The workspace's purpose categories, in order. */
+  categories: readonly PurposeCategory[] = DEFAULT_PURPOSES,
+): SandboxComparison {
+  const first = columns[0]!;
+  const months = timelineMonths(startDate, first.months, model.hoursPerWeek);
+  const last = months.length - 1;
+  const serviceName = new Map(bundle.services.map((s) => [s.id, s.name]));
+  const zero = (): Stat[] => months.map(() => ({ mean: 0, p10: 0, p90: 0 }));
+  const keys = (pick: (m: MonthlyResult) => Record<string, unknown>) => [...new Set(columns.flatMap((m) => Object.keys(pick(m))))].sort();
+  const nameOf = (key: string) => (key ? (serviceName.get(key) ?? model.services?.[key]?.name ?? "Other") : "Clients");
+  const atRisk = keys((m) => m.atRisk).map((key) => row(key, nameOf(key), columns.map((m) => m.atRisk[key] ?? zero())));
+  const clients = keys((m) => m.clients).map((key) => row(key, nameOf(key), columns.map((m) => m.clients[key] ?? zero())));
+  const roles = Object.entries(model.roles)
+    .filter(([id]) => columns.some((m) => hasWork(m.roles[id], m.uncovered[id])))
+    .map(([id, r]) => row(id, r.name, columns.map((m) => m.roles[id] ?? months.map(() => null))));
+  const tooBusy = (r: CompareRow, c: number) => r.values[c]!.filter((m) => m !== null && isTooBusy((m as MonthBusy).mean, cutoffs)).length;
+  const sumLast = (c: number) => atRisk.reduce((sum, r) => sum + (r.values[c]![last]?.mean ?? 0), 0);
+  const idx = columns.map((_, c) => c);
+  // Labour is the same in every run, so adding overtime's range gives labour with overtime's range.
+  const labourWithOvertime = (m: MonthlyResult): Stat[] | null =>
+    m.money ? m.money.labour.map((v, i) => ({ mean: v + m.money!.overtimeCost[i]!.mean, p10: v + m.money!.overtimeCost[i]!.p10, p90: v + m.money!.overtimeCost[i]!.p90 })) : null;
+  const labour = columns.map(labourWithOvertime);
+  const costsShown = columns.every((m) => m.money);
+  const total = (stats: readonly Stat[]) => stats.reduce((sum, st) => sum + st.mean, 0);
+  const views = columns.map((m) => timeView(m, months, categories, { kind: "team" }));
+  // Rows by id, not position: a column can have a "Not set" row the others lack. A row a column lacks is zero there.
+  const timeIds: { id: string; name: string }[] = [];
+  for (const v of views) for (const r of v.rows) if (!timeIds.some((x) => x.id === r.id)) timeIds.push({ id: r.id, name: r.name });
+  // Idle and uncovered stay last, in that order, whichever column brought a row.
+  const lastOrder = (id: string) => (id === IDLE ? 1 : id === UNCOVERED ? 2 : 0);
+  timeIds.sort((a, b) => lastOrder(a.id) - lastOrder(b.id));
+  const zeroRow = () => months.map(() => ({ mean: 0, p10: 0, p90: 0 }));
+  const rowIn = (v: (typeof views)[number], id: string) => v.rows.find((r) => r.id === id);
+  const timeRows = timeIds.map(({ id, name }) => row(id, name, views.map((v) => rowIn(v, id)?.hours ?? zeroRow())));
+  const runHoursOf = (id: string) => views.map((v) => rowIn(v, id)?.runHours ?? 0);
+  return {
+    months,
+    time: { rows: timeRows, shares: views.map((v) => timeIds.map(({ id }) => rowIn(v, id)?.runShare ?? 0)), runHours: views.map((v) => timeIds.map(({ id }) => rowIn(v, id)?.runHours ?? 0)) },
+    profit: costsShown ? row("profit", "Profit", columns.map((m) => m.money!.profit)) : null,
+    revenue: row("revenue", "Billed revenue", columns.map((m) => m.revenue.total)),
+    labour: labour.every((l) => l) ? row("labour", "Labour and overtime", labour as Stat[][]) : null,
+    won: row("won", "Wins", columns.map((m) => m.sales.won)),
+    conversion: row("conversion", "Conversion", columns.map((m) => m.sales.conversion)),
+    mrr: row("mrr", "Monthly recurring revenue", columns.map((m) => m.mrr)),
+    clients,
+    atRisk,
+    roles,
+    totals: {
+      mrr: tile(columns.map((m) => m.mrr[last]?.mean ?? 0)),
+      atRisk: atRisk.length ? tile(idx.map(sumLast)) : null,
+      tooBusyMonths: tile(idx.map((c) => roles.reduce((n, r) => n + tooBusy(r, c), 0))),
+      lateTasks: tile(columns.map((m) => m.lateTasks[last]?.mean ?? 0)),
+      profit: costsShown ? tile(columns.map((m) => total(m.money!.profit))) : null,
+      fixingHours: tile(runHoursOf(FIXING_PURPOSE)),
+      removableHours: tile(runHoursOf("removable")),
+      priceNet: priceNet.some((v) => v !== null) ? columns.map((_, c) => priceNet[c] ?? null) : null,
+    },
+  };
+}

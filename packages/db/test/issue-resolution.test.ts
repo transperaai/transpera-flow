@@ -16,7 +16,7 @@ beforeAll(async () => {
   db = await createTestDb();
   for (const role of ["editor", "viewer"] as const) {
     users[role] = await createUser(db, `${role}@northbeam.example`);
-    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, users[role]!.id, role]);
+    await db.client.query("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, users[role]!.id, role]);
   }
 });
 afterAll(async () => {
@@ -99,7 +99,7 @@ describe("resolve_issue", () => {
   });
 
   it("the header's rollback works as written: with the columns gone, status changes still log", async () => {
-    const sql = readFileSync(new URL("../supabase/migrations/20261121500000_issue_resolution.sql", import.meta.url), "utf8");
+    const sql = readFileSync(new URL("../migrations/20261121500000_issue_resolution.sql", import.meta.url), "utf8");
     const header = sql.slice(sql.indexOf("-- Rollback"), sql.indexOf("\nalter table public.issues\n  add column"));
     const steps = header
       .split("\n")
@@ -112,7 +112,7 @@ describe("resolve_issue", () => {
     // The function must come back before the columns go.
     expect(body.indexOf("create or replace function private.log_issue_change()")).toBeLessThan(body.indexOf("drop column resolved_how"));
     // Rollbacks run newest first: A50's migration (20261125000000) sits on top of this one, and its trigger reads `resolved_how`.
-    const newer = readFileSync(new URL("../supabase/migrations/20261125000000_resolution_solution.sql", import.meta.url), "utf8");
+    const newer = readFileSync(new URL("../migrations/20261125000000_resolution_solution.sql", import.meta.url), "utf8");
     const newerSteps = newer
       .slice(newer.indexOf("-- Rollback"), newer.indexOf("\nalter table public.issues add column"))
       .split("\n")

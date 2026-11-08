@@ -4,7 +4,8 @@
 // (`simulate(…, { monthly: true })`) can draw the same timeline from it (the Overview's team load chart, B15).
 
 import { monthOfHour, type EngineModel, type MonthBusy, type MonthlyResult, type SimulationResult, type Stat } from "@transpera-flow/engine";
-import { workingDaysBetween, type ProcessBundle } from "@transpera-flow/db";
+import type { ProcessBundle } from "@transpera-flow/db";
+import { dateAtHour } from "@transpera-flow/db/sandbox";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -18,32 +19,15 @@ export interface TimelineMonth {
   long: string;
   /** "October": what the alerts say. */
   name: string;
-}
-
-/** Working days a month has to have to stand alone: a first or last part of a month shorter than this joins its neighbour. */
-const MIN_PART_DAYS = 5;
-
-/**
- * Where each calendar month after the first starts, in working hours from the start of `startDate` (weekdays only,
- * as the model counts time), for `simulate(…, { monthly: true, monthStarts })`. A first or last part of a month
- * shorter than a working week joins the month next to it, so no month is a few days long.
- */
-export function calendarMonthStarts(startDate: string, horizonWeeks: number, hoursPerWeek: number): number[] {
-  const perDay = hoursPerWeek / 5;
-  const H = horizonWeeks * hoursPerWeek;
-  const [y, m] = startDate.split("-").map(Number) as [number, number];
-  const starts: number[] = [];
-  for (let k = 1; ; k++) {
-    const year = y + Math.floor((m - 1 + k) / 12);
-    const month = (m - 1 + k) % 12;
-    const first = `${year}-${String(month + 1).padStart(2, "0")}-01`;
-    const hours = workingDaysBetween(startDate, first) * perDay;
-    if (hours >= H) break;
-    starts.push(hours);
-  }
-  if (starts.length && starts[0]! < MIN_PART_DAYS * perDay) starts.shift();
-  if (starts.length && H - starts[starts.length - 1]! < MIN_PART_DAYS * perDay) starts.pop();
-  return starts;
+  /** The first and last working day it covers (ISO dates). The first month starts today, and the last may stop short of its month's end. */
+  from: string;
+  to: string;
+  /** The first month starts part-way through its calendar month, or the last ends before its calendar month does: a part month. */
+  partial: boolean;
+  /** What a part month covers, "from 28 Oct", "to 27 Oct" (or both); null for a whole month. */
+  span: string | null;
+  /** `long`, and for a part month what it covers: "November 2026 (from 28 Oct)". For tables and tooltips. */
+  label: string;
 }
 
 /**
@@ -52,14 +36,44 @@ export function calendarMonthStarts(startDate: string, horizonWeeks: number, hou
  * joined to its neighbour takes the neighbour's name).
  */
 export function timelineMonths(startDate: string, months: MonthlyResult["months"], hoursPerWeek: number): TimelineMonth[] {
+  const last = months.length - 1;
   return months.map((mo, index) => {
     const mid = dateAtHour(startDate, (mo.start + mo.end) / 2, hoursPerWeek);
     const month = mid.getUTCMonth();
     const year = mid.getUTCFullYear();
     const name = MONTH_NAMES[month]!;
     const yy = String(year % 100).padStart(2, "0");
-    return { index, name, long: `${name} ${year}`, short: index === 0 || month === 0 ? `${name.slice(0, 3)} ${yy}` : name.slice(0, 3) };
+    // The days it covers. Only the first month (it starts today) and the last (the horizon is weeks, not months) can be part of one.
+    const first = dateAtHour(startDate, mo.start, hoursPerWeek);
+    const final = dateAtHour(startDate, Math.max(mo.start, mo.end - 1e-6), hoursPerWeek);
+    const partStart = index === 0 && !isMonthEdge(first, -1);
+    const partEnd = index === last && !isMonthEdge(final, 1);
+    const span = partStart || partEnd ? [partStart ? `from ${dayMonth(first)}` : "", partEnd ? `to ${dayMonth(final)}` : ""].filter(Boolean).join(" ") : null;
+    const long = `${name} ${year}`;
+    return { index, name, long, short: index === 0 || month === 0 ? `${name.slice(0, 3)} ${yy}` : name.slice(0, 3), from: isoDay(first), to: isoDay(final), partial: span !== null, span, label: span ? `${long} (${span})` : long };
   });
+}
+
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+const dayMonth = (d: Date) => `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]!.slice(0, 3)}`;
+
+/** Is `d` the first (`-1`) or last (`1`) working day of its calendar month? Its neighbouring working day, before or after, is in another month. */
+function isMonthEdge(d: Date, dir: -1 | 1): boolean {
+  const n = new Date(d);
+  do n.setUTCDate(n.getUTCDate() + dir);
+  while (n.getUTCDay() === 0 || n.getUTCDay() === 6);
+  return n.getUTCMonth() !== d.getUTCMonth();
+}
+
+/**
+ * A line saying which columns are part months, for under a chart or table: "Part months: the first column covers from 5 Oct, the last
+ * to 27 Oct; the others are whole months." Null when every month is whole.
+ */
+export function partMonthNote(months: readonly Pick<TimelineMonth, "partial" | "span" | "index">[]): string | null {
+  const parts = months.filter((m) => m.partial);
+  if (!parts.length) return null;
+  const which = (m: (typeof parts)[number]) => (m.index === 0 ? "the first column" : "the last column");
+  return `Part month${parts.length > 1 ? "s" : ""}: ${parts.map((m) => `${which(m)} covers ${m.span}`).join(", ")}; the others are whole months.`;
 }
 
 /** Something planned that changes someone's hours: a hire starting, someone leaving for good, or leave. */
@@ -78,19 +92,6 @@ export interface TimelineMarker {
   label: string;
   /** When, in words: "1 Feb 2027", "14 Dec 2026 to 8 Jan 2027". */
   when: string;
-}
-
-/** The calendar date `hours` working hours after the start of `startDate` (weekdays only, as the model counts them). */
-export function dateAtHour(startDate: string, hours: number, hoursPerWeek: number): Date {
-  const perDay = hoursPerWeek / 5;
-  let days = Math.floor(hours / perDay + 1e-9);
-  const d = new Date(`${startDate}T00:00:00Z`);
-  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1);
-  while (days > 0) {
-    d.setUTCDate(d.getUTCDate() + 1);
-    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) days--;
-  }
-  return d;
 }
 
 const dayLabel = (d: Date) => `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]!.slice(0, 3)} ${d.getUTCFullYear()}`;

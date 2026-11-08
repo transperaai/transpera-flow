@@ -221,3 +221,20 @@ describe("market conditions", () => {
     expect(m.months[23]!.leads).toBe(0.9);
   });
 });
+
+describe("the conv channel beside the market (sandbox phase 3)", () => {
+  it("multiplies the market's conv: 0.8 in the market and 0.5 in the channel is 0.4 in the market", () => {
+    const viaChannel = simulate({ ...withMarketCondition(funnel(), f({ conv: 0.8 })), channels: { starts: [], conv: [0.5] } }, 10, 3);
+    const viaMarket = simulate(withMarketCondition(funnel(), f({ conv: 0.4 })), 10, 3);
+    expect(viaChannel.won).toBe(viaMarket.won);
+    expect(viaChannel.lost).toBe(viaMarket.lost);
+    expect(viaChannel.kpi).toEqual(viaMarket.kpi);
+  });
+
+  it("works without a market", () => {
+    const base = run(funnel());
+    const halved = simulate({ ...funnel(), channels: { starts: [], conv: [0.5] } }, 10, 3);
+    expect(halved.won).toBeLessThan(base.won * 0.7);
+    expect(halved.won).toBeGreaterThan(base.won * 0.3);
+  });
+});

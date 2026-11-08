@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
  * prefix and without the comment lines among them. Parsing it from the file means a test runs what the operator would run.
  */
 export function headerRollback(file: string): string {
-  const sql = readFileSync(new URL(`../supabase/migrations/${file}`, import.meta.url), "utf8");
+  const sql = readFileSync(new URL(`../migrations/${file}`, import.meta.url), "utf8");
   const start = sql.indexOf("-- ROLLBACK (");
   if (start < 0) throw new Error(`${file} has no ROLLBACK block`);
   const lines = sql.slice(start).split("\n").slice(1);

@@ -250,3 +250,5 @@ Austin (5 Oct 2026): everything can be added by hand, including taking a process
 - **Changing a process's kind** needs no migration: the map's sync already moves the card between the pipeline and client work
   columns as a system version. The app warns what changes for the simulation before saving, and refuses client work to pipeline
   while services still generate it (the database refuses it too), naming the services.
+
+- **Amended by 0023 (7 Nov 2026).** The company map is no longer only a picture: the processes on a company map version are what is simulated, and its hand-off lines route work between them. See `docs/adr/0023-company-map-drives-the-run.md`.

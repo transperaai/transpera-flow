@@ -57,7 +57,7 @@ async function world(names = ["Sales", "Onboarding", "Delivery", "Support"]): Pr
   const n = ++counter;
   const [{ id: ws }] = await q("insert into workspaces (name, slug) values ($1, $2) returning id", [`Everywhere ${n}`, `library-everywhere-${n}`]);
   for (const [user, role] of [[editor, "editor"], [viewer, "viewer"]] as const) {
-    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, $3)", [ws, user.id, role]);
+    await q("insert into memberships (workspace_id, user_id, role) values ($1, $2, (case $3::text when 'editor' then 'owner' when 'member' then 'viewer' else $3::text end)::membership_role)", [ws, user.id, role]);
   }
   const [{ id: cid }] = await q("select id from processes where workspace_id = $1 and is_company", [ws]);
   const p: Record<string, string> = {};

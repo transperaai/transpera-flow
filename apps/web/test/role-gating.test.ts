@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Members and viewers look, owners and editors change (issue #30, B1 part 1). The database refuses every write from the others
+// Members and viewers look, Agency admins change (issue #30, B1 part 1). The database refuses every write from the others
 // (packages/db/test/role-matrix.test.ts); these keep the app from offering what would be refused. Source text, in the style of
 // archived-process-page.test.ts: each page in the audit passes `canEdit` (`can_edit_workspace`) into its `mode`, `editHref` or
 // action props, so a page that lost its gate fails here rather than showing a button to a viewer.
@@ -20,10 +20,7 @@ describe("pages that pass canEdit into a read only mode", () => {
     ["the solution page", PAGE("solutions/[id]")],
     ["the Block library", PAGE("blocks")],
     ["Sources", PAGE("sources")],
-    ["the Forecast", PAGE("forecast")],
-    ["Settings → AI analysis", PAGE("settings/ai")],
-    ["Settings → Levers", PAGE("settings/levers")],
-    ["Settings → Historical data", PAGE("settings/calibration")],
+    ["the Sandbox", PAGE("sandbox")],
   ])("%s", (_, file) => {
     const source = read(file);
     expect(source).toContain("canEditWorkspace");
@@ -34,14 +31,6 @@ describe("pages that pass canEdit into a read only mode", () => {
     const page = read("components/workspace-process-page.tsx");
     expect(page).toContain('mode={canEdit && !earlier && !archivedAt ? "live" : "readonly"}');
     expect(page).toContain("editHref={canEdit && !archivedAt ?");
-    expect(page).toContain("create={canEdit ? createProcess.bind(null, live.workspace.id, slug) : undefined}");
-  });
-
-  it("the first-principles page: read only, no Run, no New process", () => {
-    const page = read("components/workspace-first-principles-page.tsx");
-    expect(page).toContain("const editing: FlowEditing = !canEdit");
-    expect(page).toContain('mode: canEdit ? "live" : "readonly"');
-    expect(page).toContain("canRun: canEdit && !unpublished");
     expect(page).toContain("create={canEdit ? createProcess.bind(null, live.workspace.id, slug) : undefined}");
   });
 
@@ -70,16 +59,18 @@ describe("screens whose controls come in as props that are undefined without can
     expect(read("components/history/company-history-view.tsx")).toContain("{actions && !v.live && (");
   });
 
-  it("Solutions: New solution only with canEdit, and Delete solution and New solution on the solution page too", () => {
-    expect(read(PAGE("solutions"))).toContain("actions={canEdit ? <NewSolutionButton");
+  it("Solutions: New solution only with canEdit, and Open in editor and Delete solution on the solution page too", () => {
+    expect(read("components/solutions/solutions-list.tsx")).toContain("actions={canEdit ? <NewSolutionButton");
+    expect(read(PAGE("solutions"))).toContain("canEdit={canEdit}");
     const page = read("components/solutions/solution-page.tsx");
-    expect(page).toContain('const canEdit = !isReadOnly(mode);');
-    // On a phone the whole block is hidden too (issue #44): the class carries EDIT_ONLY.
-    expect(page).toMatch(/\{canEdit && \(\s*<span className=\{`flex flex-wrap items-center gap-2 \$\{EDIT_ONLY\}`\} data-edit-entry>\s*(\{props\.share\}\s*)?<DeleteSolution/);
+    expect(page).toContain('const canEdit = props.mode !== "readonly";');
+    // On a phone the block is hidden too (issue #44): the class carries EDIT_ONLY. Open in editor and Delete sit behind canEdit (no Adopt, D55).
+    expect(page).toMatch(/canEdit && \(\s*<span className=\{EDIT_ONLY\} data-edit-entry>\s*<Link href=\{editorHref\}/);
+    expect(page).toMatch(/canEdit && \(\s*<span className=\{cn\("flex flex-wrap items-center gap-2", EDIT_ONLY\)\} data-edit-entry>\s*<DeleteSolution/);
   });
 
   it("the Block library: no New block link without canEdit", () => {
-    expect(read(PAGE("blocks"))).toContain("const newHref = canEdit && first ?");
+    expect(read(PAGE("blocks"))).toContain("const editBase = canEdit && first ?");
   });
 
   it("the process page offers New solution and Build solution only to those who can edit", () => {
@@ -87,18 +78,12 @@ describe("screens whose controls come in as props that are undefined without can
     expect(read("components/solutions/process-solutions.tsx")).toMatch(/\{canEdit && \(/);
   });
 
-  it("the issue page: Edit, Resolve, Reopen, Build solution and Link a source only with canEdit", () => {
+  it("the issue page: Edit, Resolve, Reopen, Try a new solution and Link a source only with canEdit", () => {
     const page = read("components/issues/issue-page.tsx");
     expect(page).toContain('const canEdit = !isReadOnly(mode);');
-    expect(page).toMatch(/\{canEdit && \(\s*<div[^>]*>\s*(\{props\.share\}\s*)?<span[^>]*>\s*<Button type="button" variant="outline" onClick=\{\(\) => setEdit\(true\)\}>/);
-  });
-
-  it("Suggestions: Accept and Dismiss only with canEdit, and the page says who reviews", () => {
-    const page = read(PAGE("suggestions"));
-    expect(page.match(/canEdit=\{data\.canEdit\}/g)).toHaveLength(2);
-    expect(page).toContain("You can view suggestions; editors and owners review them.");
-    expect(read("components/suggestions-review.tsx")).toContain("{canEdit && selectable.length > 0 && (");
-    expect(read("components/proposals-review.tsx")).toMatch(/\{canEdit && \(/);
+    expect(page).toMatch(/canEdit \? \(\s*<span className=\{`flex flex-wrap items-center gap-2 \$\{EDIT_ONLY\}`\} data-edit-entry>\s*(\{props\.share\}\s*)?<span[^>]*>\s*<Button type="button" variant="outline" onClick=\{\(\) => setEdit\(true\)\}>/);
+    // "+ Try a new solution" and "Link an existing solution" are offered to editors, on an issue still open.
+    expect(page).toMatch(/canEdit && open \? \(/);
   });
 });
 
@@ -111,13 +96,33 @@ describe("the Editor and the Settings", () => {
     const page = read(PAGE("settings"));
     expect(page).toContain("canManage={data.canManage}");
     expect(page).toContain('mode={data.canEdit ? "live" : "readonly"}');
-    expect(page).toContain("canEdit={data.canEdit}");
     const data = read("lib/data.ts");
-    expect(data).toContain("canEdit: canEdit.data === true,");
-    expect(data).toContain("canManage: canManage.data === true,");
-    for (const file of ["roles", "services", "demand", "market", "people"]) {
+    expect(data).toContain('rpc(db, "can_edit_workspace", { ws }),');
+    expect(data).toContain('rpc(db, "can_manage_workspace", { ws }),');
+    expect(data).toContain("canEdit: canEdit === true,");
+    expect(data).toContain("canManage: canManage === true,");
+    for (const file of ["roles", "services", "demand", "people"]) {
       expect(read(`app/w/[slug]/settings/${file}-settings.tsx`), file).toMatch(/canEdit/);
     }
+  });
+
+  it("Set up (Tiers & clients, People & roles): everyone reads, the loader says who may change, and the tables show text, not inputs, without it", () => {
+    for (const route of ["settings/clients", "settings/people"]) {
+      const page = read(PAGE(route));
+      expect(page, route).toContain("loadCapacitySetup(");
+      expect(page, route).toContain("notFound()");
+    }
+    const loader = read("../../../packages/db/src/capacity-setup.ts");
+    expect(loader).toContain('rpc(db, "can_edit_workspace", { ws: workspaceId })');
+    expect(loader).toContain('rpc(db, "can_see_people", { ws: workspaceId })');
+    // Every table cell takes `canEdit` from the loaded setup: a Viewer gets text.
+    expect(read("components/setup/cells.tsx")).toMatch(/canEdit \?/);
+    for (const file of ["tiers-clients", "people-roles"]) expect(read(`components/setup/${file}.tsx`), file).toContain("setup.canEdit");
+    // Pay: the salary column only exists for whoever can see pay.
+    expect(read("components/setup/people-roles.tsx")).toContain("const showSalary = !setup.payHidden;");
+    expect(read("components/setup/people-roles.tsx")).toMatch(/\{showSalary && \(\s*<ColHead/);
+    // The actions need a signed-in user and run through row-level security.
+    expect(read("app/w/[slug]/settings/setup-actions.ts")).toContain("if (!(await signedIn())) return");
   });
 
   it("the People page changes nothing: it has no action to call", () => {
@@ -126,8 +131,11 @@ describe("the Editor and the Settings", () => {
   });
 
   it("Access is for owners and agency admins: the page 404s without can_manage_workspace and the link is hidden", () => {
-    expect(read("lib/access-data.ts")).toContain("if (!canManage.data) return null;");
+    const access = read("lib/access-data.ts");
+    expect(access).toContain('rpc(db, "can_manage_workspace", { ws }),');
+    expect(access).toContain("if (!canManage) return null;");
     expect(read(PAGE("settings/access"))).toContain("if (!settings) notFound();");
-    expect(read("lib/shell/nav.ts")).toContain("access: canManage");
+    // The link is on the Settings page, for managers only.
+    expect(read(PAGE("settings"))).toContain("...(data.canManage ? [{ href: `/w/${slug}/settings/access`");
   });
 });

@@ -56,7 +56,6 @@ async function walk(page: Page) {
         palette: ['aside[aria-label="Palette"]'],
         canvas: ["[data-tour=canvas]"],
         inspector: ['aside[aria-label="Inspector"]'],
-        checklist: ["[data-missing-for-simulation]"],
         draft: ["[data-tour=draft]"],
         simulate: ["[data-tour=simulate]"],
         publish: ["[data-tour=publish]"],
@@ -83,29 +82,17 @@ async function walk(page: Page) {
 
 describe("the Editor tour", () => {
   it("opens by itself the first time, and walks the Editor's areas in order, each pointing at a real element", async () => {
-    const { page, errors } = await open({ userId: "user-a", gaps: true });
+    const { page, errors } = await open({ userId: "user-a" });
     await card(page).waitFor();
-    expect(await page.locator("[data-tour-count]").innerText()).toBe("Step 1 of 8");
+    expect(await page.locator("[data-tour-count]").innerText()).toBe("Step 1 of 7");
     const seen = await walk(page);
-    expect(seen.map((s) => s.id)).toEqual(["palette", "canvas", "inspector", "checklist", "draft", "simulate", "publish", "history"]);
-    expect(seen.map((s) => s.title)).toEqual(["The palette", "The canvas", "The inspector", "The assumptions checklist", "Your draft", "Simulate", "Publish", "History"]);
-    expect(seen.map((s) => s.count)).toEqual(Array.from({ length: 8 }, (_, i) => `Step ${i + 1} of 8`));
+    expect(seen.map((s) => s.id)).toEqual(["palette", "canvas", "inspector", "draft", "simulate", "publish", "history"]);
+    expect(seen.map((s) => s.title)).toEqual(["The palette", "The canvas", "The inspector", "Your draft", "Simulate", "Publish", "History"]);
+    expect(seen.map((s) => s.count)).toEqual(Array.from({ length: 7 }, (_, i) => `Step ${i + 1} of 7`));
     for (const s of seen) expect(s.onTarget, `${s.id} points at its element`).toBe(true);
-    // The checklist step opened the folded-away list it talks about.
-    expect(await page.locator("[data-missing-for-simulation]").evaluate((el) => (el as HTMLDetailsElement).open)).toBe(true);
     expect(await card(page).count()).toBe(0);
     expect(await page.locator("[data-tour-highlight]").count()).toBe(0);
     expect(errors).toEqual([]);
-    await page.context().close();
-  }, 60_000);
-
-  it("leaves out the checklist step when nothing is missing, rather than pointing at something else", async () => {
-    const { page } = await open({ userId: "user-a" });
-    await card(page).waitFor();
-    expect(await page.locator("[data-missing-for-simulation]").count()).toBe(0);
-    const seen = await walk(page);
-    expect(seen.map((s) => s.id)).toEqual(["palette", "canvas", "inspector", "draft", "simulate", "publish", "history"]);
-    for (const s of seen) expect(s.onTarget, s.id).toBe(true);
     await page.context().close();
   }, 60_000);
 

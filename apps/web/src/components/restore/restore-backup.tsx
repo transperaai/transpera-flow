@@ -40,7 +40,7 @@ function Lines({ lines }: { lines: SummaryLine[] }) {
   );
 }
 
-export function RestoreBackup({ slug, canManage = true, post }: { slug: string; /** An owner or agency admin applies the backup's workspace settings; an editor leaves them as a suggestion. */ canManage?: boolean; /** Replaces `fetch` in tests. */ post?: (url: string, init: RequestInit) => Promise<Response> }) {
+export function RestoreBackup({ slug, canManage = true, post }: { slug: string; /** Whether the restore applies the backup's workspace settings: true for the Owner and every Agency admin, the only people who can restore. */ canManage?: boolean; /** Replaces `fetch` in tests. */ post?: (url: string, init: RequestInit) => Promise<Response> }) {
   const router = useRouter();
   const inputId = useId();
   const [step, setStep] = useState<Step>({ kind: "choose" });
@@ -154,7 +154,7 @@ export function RestoreBackup({ slug, canManage = true, post }: { slug: string; 
                   <p className="mt-1 text-fg-2">
                     {check.summary.settings === "applied"
                       ? "The workspace settings (hours a week, horizon, currency) are applied."
-                      : "The workspace settings wait as a suggestion for an owner to accept; until then this workspace uses its own defaults."}
+                      : "The workspace settings are not applied, because only an Agency admin or the Owner can apply them. This workspace keeps its own."}
                   </p>
                 )}
               </div>
@@ -165,7 +165,7 @@ export function RestoreBackup({ slug, canManage = true, post }: { slug: string; 
                 </div>
               )}
               <p className="text-fg-2">
-                A backup never holds members, people&apos;s emails, API tokens, share links, AI settings, findings or calibration, so they are not restored. Dismissed items come
+                A backup never holds members, people&apos;s emails, API tokens, share links, so they are not restored. Dismissed items come
                 back dismissed and may show again after the first publish. This workspace keeps its own company map.
               </p>
               {check.warnings.length > 0 && (

@@ -13,9 +13,11 @@ import type { BlockTools } from "@/components/editor/use-blocks";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { addStep, deleteSelection } from "@/lib/editor/commands";
 import type { ViewHint } from "@/lib/editor/groups";
+import { kindForCategory } from "@transpera-flow/db";
 import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
 import type { LibraryCreate, LibraryCreateInput } from "@/lib/editor/library-create";
 import { ProcessEditor } from "@/lib/editor/editor";
+import { StepBaseValues } from "@/components/step-base-values";
 import { MemoryStore } from "@/lib/editor/store";
 import { demoBundle } from "@/lib/sources/demo";
 
@@ -27,6 +29,8 @@ export interface HarnessOptions {
   highlight: string[] | null;
   /** The company map (B11) of Northbeam, as the Editor draws it: process cards joined by handoff lines. */
   company?: boolean;
+  /** The company map's department lanes (Q4): the pipeline's card under Sales and whole business, the others under two departments. */
+  bands?: boolean;
   /** The Editor's palette beside the map (as the Editor lays it out), whose buttons add steps where the map is looking. */
   palette?: boolean;
   /** A read-only map in a flex column as wide as the page, as the Overview's card holds it (the default is a plain 1300px block). */
@@ -41,6 +45,12 @@ export interface HarnessOptions {
   run?: boolean;
   /** Seen by a member: the Audit step is pinned to a named person, whom the map must not name. */
   member?: boolean;
+  /** A step whose detail is open when the map first shows, as `?step=<id>` opens it on the process page. */
+  openStep?: string;
+  /** The swimlane view is on when the map first shows, as the process page opens it. */
+  lanes?: boolean;
+  /** The step's base values, read only, in its detail, as the process page shows them to a Viewer. */
+  baseValues?: boolean;
 }
 
 declare global {
@@ -71,6 +81,7 @@ const NO_BLOCKS: BlockTools = {
   library: [],
   note: null,
   save: async () => ({ ok: false, error: "not in this harness" }) as never,
+  update: async () => ({ ok: false, error: "not in this harness" }) as never,
   saveGroup: async () => undefined,
   insert: () => undefined,
   replace: () => undefined,
@@ -90,19 +101,22 @@ const created: unknown[] = [];
 
 /** The library an ordinary editor is handed (B12 part 2): the other processes sit nowhere, one more sits on the company map. */
 function libraryOf(bundle: ProcessBundle): { processes: LibraryProcess[]; templates: LibraryTemplate[]; onCreate: LibraryCreate } {
-  const others = (bundle.otherProcesses ?? []).map<LibraryProcess>((p) => ({ id: p.process.id, name: p.process.name, kind: p.process.kind, live: true, holder: null }));
+  const others = (bundle.otherProcesses ?? []).map<LibraryProcess>((p) => ({ id: p.process.id, name: p.process.name, kind: p.process.kind, category: p.process.category, live: true, holder: null }));
   return {
     processes: [
-      { id: bundle.process.id, name: bundle.process.name, kind: bundle.process.kind, live: true, holder: { id: "cccc0000-0000-4000-8000-00000000c0c0", name: "Company map", company: true } },
+      { id: bundle.process.id, name: bundle.process.name, kind: bundle.process.kind, category: bundle.process.category, live: true, holder: { id: "cccc0000-0000-4000-8000-00000000c0c0", name: "Company map", company: true } },
       ...others,
-      { id: "f0000000-0000-4000-8000-000000000001", name: "Renewals", kind: "servicing", live: true, holder: null },
-      { id: "f0000000-0000-4000-8000-000000000002", name: "Referrals", kind: "pipeline", live: true, holder: { id: "cccc0000-0000-4000-8000-00000000c0c0", name: "Company map", company: true } },
+      { id: "f0000000-0000-4000-8000-000000000001", name: "Renewals", kind: "servicing", category: "routine_client_work", live: true, holder: null },
+      { id: "f0000000-0000-4000-8000-000000000002", name: "Referrals", kind: "pipeline", category: "sales", live: true, holder: { id: "cccc0000-0000-4000-8000-00000000c0c0", name: "Company map", company: true } },
     ],
-    templates: [{ id: "agency-delivery", name: "Agency delivery", kind: "servicing", description: "A template." }],
+    templates: [
+      { id: "agency-delivery", name: "Agency delivery", kind: "servicing", category: "routine_client_work", description: "A template." },
+      { id: "client-onboarding", name: "Client onboarding", kind: "servicing", category: "onboarding", description: "A template." },
+    ],
     onCreate: async (input: LibraryCreateInput) => {
       created.push(input);
       const name = input.kind === "new" ? input.name : "Agency delivery";
-      return { process: { id: `e0000000-0000-4000-8000-00000000000${created.length}`, name, kind: input.kind === "new" ? input.processKind : "servicing", live: false } };
+      return { process: { id: `e0000000-0000-4000-8000-00000000000${created.length}`, name, kind: input.kind === "new" ? kindForCategory(input.category) : "servicing", category: input.kind === "new" ? input.category : "routine_client_work", live: false } };
     },
   };
 }
@@ -132,6 +146,21 @@ function Harness({ options }: { options: HarnessOptions }) {
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   const viewRef = useRef<(() => ViewHint | null) | null>(null);
   const library = useMemo(() => (options.library ? libraryOf(base) : undefined), [base, options.library]);
+  const departmentLanes = useMemo(() => {
+    if (!options.bands) return undefined;
+    const holders = [...base.steps].sort((a, b) => Number(a.x) - Number(b.x) || Number(a.y) - Number(b.y));
+    const keys = ["whole", "seo", "ppc"];
+    return {
+      spec: {
+        lanes: [
+          { key: "whole", label: "Sales and whole business" },
+          { key: "seo", label: "Organic (SEO)" },
+          { key: "ppc", label: "Performance" },
+        ],
+        laneOf: new Map(holders.map((h, i) => [h.id, keys[Math.min(i, 2)]!])),
+      },
+    };
+  }, [base, options.bands]);
   const [highlight, setHighlight] = useState(options.highlight);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
@@ -173,10 +202,18 @@ function Harness({ options }: { options: HarnessOptions }) {
         result={result}
         showPlayback={false}
         handoffs={options.company}
+        departmentLanes={departmentLanes}
         hideAdd={options.palette}
         viewRef={viewRef}
         stepExtras={() => ({ insights: ["An insight"], issues: ["An issue"] })}
         computing={options.computing}
+        initialStepId={options.openStep ?? null}
+        defaultLanes={options.lanes}
+        stepBaseValues={
+          options.baseValues
+            ? (step) => <StepBaseValues bundle={base} step={step} editor={{ run: () => undefined } as unknown as ProcessEditor} stamp={() => ({ at: "2026-10-05T00:00:00Z" })} readOnly />
+            : undefined
+        }
       />
       {options.palette && editor && options.company && (
         <aside aria-label="Inspector" style={{ width: 260, padding: 8 }}>
@@ -187,9 +224,7 @@ function Harness({ options }: { options: HarnessOptions }) {
             setSelection={setSelection}
             inspectFocus={null}
             onFocused={() => undefined}
-            sources={[]}
             stamp={() => ({ at: "2026-10-05T00:00:00Z", by: null }) as never}
-            mode="draft"
             draft={null}
             blocks={NO_BLOCKS}
             company

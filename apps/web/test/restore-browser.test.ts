@@ -53,15 +53,13 @@ function backup(change: (b: Record<string, unknown>) => void = () => {}): string
     issues: [{ id: u(50), workspace_id: WS, number: 1, source: "manual", status: "open", links: [], owner_ids: [], source_ids: [], events: [] }],
     sources: [{ id: u(60), workspace_id: WS, title: "Notes", body: "x" }],
     source_links: [],
-    suggestions: [],
-    suggestion_proposals: [],
   };
   change(b);
   const versions = (b.processes as { versions: { steps: unknown[]; edges: unknown[] }[] }[]).flatMap((p) => p.versions);
   const cm = b.company_model as Record<string, unknown[]>;
   const counts: Record<string, number> = { processes: (b.processes as unknown[]).length, process_versions: versions.length, steps: versions.reduce((n, v) => n + v.steps.length, 0), edges: versions.reduce((n, v) => n + v.edges.length, 0) };
   for (const k of Object.keys(cm)) counts[`company_model.${k}`] = cm[k]!.length;
-  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links", "suggestions", "suggestion_proposals"]) counts[k] = (b[k] as unknown[]).length;
+  for (const k of ["scenarios", "solutions", "solution_issues", "blocks", "issues", "sources", "source_links"]) counts[k] = (b[k] as unknown[]).length;
   b.counts = counts;
   return JSON.stringify(b);
 }
@@ -149,7 +147,7 @@ describe("the restore component", () => {
   });
 
   it("shows the server's message when the restore is refused, and nothing is navigated", async () => {
-    const { page } = await mount({ status: 409, body: { message: "Backups restore only into an empty workspace. Ask an agency admin to create a new workspace, then restore it there." } });
+    const { page } = await mount({ status: 409, body: { message: "Backups restore only into an empty workspace. Ask an Owner to create a new workspace, then restore it there." } });
     await page.setInputFiles("input[type=file]", file("mini.json", backup()));
     await page.waitForSelector("[data-restore-summary]");
     await page.click("[data-restore-submit]");

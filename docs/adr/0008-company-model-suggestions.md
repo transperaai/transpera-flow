@@ -1,6 +1,11 @@
 # 8. Company-model suggestions are applied by the database, and runs keep a snapshot to diff
 
-Date: 30 Sep 2026 · Status: accepted · Issue: #25 · Implements PRD §7.1c, D19 · Amended by 0012 (roles)
+Date: 30 Sep 2026 · Status: **Superseded: removed 28 Oct 2026, docs/plans/cut-list.md item 2** · Issue: #25 · Implements PRD §7.1c, D19 · Amended by 0012 (roles)
+
+> Superseded. The Suggestions page, the `suggestions` and `suggestion_proposals` tables, their review functions and the MCP tools that wrote
+> company facts were removed by migration `20270102000000_drop_suggestions.sql`. People, clients, services, demand and company settings are
+> changed in the app only; MCP is read-only (ADR 0018). What stays from this ADR: runs keep a snapshot of the company model, and the
+> change log (now Settings → Change log) reads `audit_log`. The text below is the record of what was decided then.
 
 ## Context
 

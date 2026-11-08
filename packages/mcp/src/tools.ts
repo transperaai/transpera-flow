@@ -1,14 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { listProcesses, loadLiveCompanyPart, loadProcessBundle, ModelError, toEngineModel } from "@transpera-flow/db";
+import { PROCESS_TEMPLATES } from "@transpera-flow/db/process-import";
+import { listProcesses, loadLiveCompanyPart, loadProcessBundle, withCompanyRun, ModelError, resolveBundlePurposes, toEngineModel, workspacePurposes, type WorkspaceSettings } from "@transpera-flow/db";
 import { applyPatches, isBlocking, MAX_PATCHES, PATCH_OPS, simulate, type EngineModel, type ScenarioPatch, type SimulationResult } from "@transpera-flow/engine";
 import { resolveProcess, resolveWorkspace, revisionIdFor, visibleWorkspaces, matchWorkspace, type ToolContext } from "./context";
 import { runTool, ToolError } from "./result";
 import { ANALYSIS_TOOL_NAMES, registerAnalysisTools } from "./analysis-tools";
-import { registerSuggestionTools, SUGGESTION_TOOL_NAMES } from "./suggestion-tools";
-import { BUILDING_TOOL_NAMES, registerBuildingTools } from "./building-tools";
-import { FIRST_PRINCIPLES_TOOL_NAMES, registerFirstPrinciplesTools } from "./first-principles-tools";
-import { FINDINGS_TOOL_NAMES, registerFindingsTools } from "./findings-tools";
+import { isRunDate, runSaved } from "./saved-scenarios";
+import { FACT_TOOL_NAMES, registerFactTools } from "./facts-tools";
 
 /** The browser's defaults (apps/web useSimulation): 30 replications, seed 1. */
 export const DEFAULT_REPS = 30;
@@ -21,11 +20,9 @@ export const TOOL_NAMES = [
   "get_workspace_summary",
   "get_process",
   "run_scenario",
+  "list_templates",
   ...ANALYSIS_TOOL_NAMES,
-  ...SUGGESTION_TOOL_NAMES,
-  ...BUILDING_TOOL_NAMES,
-  ...FIRST_PRINCIPLES_TOOL_NAMES,
-  ...FINDINGS_TOOL_NAMES,
+  ...FACT_TOOL_NAMES,
 ] as const;
 
 const workspaceArg = z
@@ -34,11 +31,6 @@ const workspaceArg = z
   .describe("Workspace id, slug or name. Defaults to the active workspace (set_active_workspace).");
 const processArg = z.string().optional().describe("Process id or name. Defaults to the workspace's only process.");
 const revisionArg = z.enum(["live", "draft"]).optional().describe("Which revision to use (default live).");
-
-function check<T>(r: { data: T | null; error: unknown }): T {
-  if (r.error) throw r.error;
-  return r.data as T;
-}
 
 /**
  * Apply scenario overrides (the same `{path, op, value}` patches saved
@@ -96,7 +88,10 @@ export function summarizeRun(model: EngineModel, result: SimulationResult) {
   };
 }
 
-/** An MCP server exposing the v1 tools (read, analysis and process building), acting as the context's user. */
+/**
+ * An MCP server exposing the read-only tools, acting as the context's user. Nothing it exposes writes company data (docs/plans/
+ * cut-list.md item 5): `set_active_workspace` only stores a preference on the API token, and `run_scenario` simulates without saving.
+ */
 export function createMcpServer(ctx: ToolContext): McpServer {
   const server = new McpServer({ name: "transpera-flow", version: "0.1.0" });
 
@@ -125,10 +120,13 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     ({ workspace }) =>
       runTool(async () => {
         const target = matchWorkspace(await visibleWorkspaces(ctx.db), workspace);
-        const updated = check(
-          await ctx.db.from("api_tokens").update({ active_workspace_id: target.id }).eq("token_hash", ctx.tokenHash).select("id"),
-        );
-        if (!updated?.length) throw new ToolError("token", "Could not update this API token");
+        const updated = await ctx.db
+          .updateTable("api_tokens")
+          .set({ active_workspace_id: target.id })
+          .where("token_hash", "=", ctx.tokenHash)
+          .returning("id")
+          .execute();
+        if (!updated.length) throw new ToolError("token", "Could not update this API token");
         ctx.activeWorkspaceId = target.id;
         return { id: target.id, name: target.name, slug: target.slug };
       }),
@@ -138,7 +136,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "get_workspace_summary",
     {
       title: "Workspace summary",
-      description: "Company model overview: settings, processes, roles and people of the active workspace.",
+      description: "Company model overview: settings, processes, roles and people of the active workspace, and the workspace's purpose categories (what a step's hands-on time achieves).",
       inputSchema: { workspace: workspaceArg },
       annotations: { readOnlyHint: true },
     },
@@ -148,17 +146,19 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         const [processes, company, roles, people] = await Promise.all([
           listProcesses(ctx.db, ws.id),
           loadLiveCompanyPart(ctx.db, ws.id),
-          ctx.db.from("roles").select("id, name, headcount, default_cost_rate, active").eq("workspace_id", ws.id).order("name"),
-          ctx.db.from("people").select("id, name, fte, capacity_hours_week, active").eq("workspace_id", ws.id).order("name"),
+          ctx.db.selectFrom("roles").select(["id", "name", "headcount", "default_cost_rate", "active"]).where("workspace_id", "=", ws.id).orderBy("name").execute(),
+          ctx.db.selectFrom("people").select(["id", "name", "fte", "capacity_hours_week", "active"]).where("workspace_id", "=", ws.id).orderBy("name").execute(),
         ]);
         const revisionIds = processes.flatMap((p) => [p.live_revision_id, p.draft_revision_id]).filter((id): id is string => !!id);
         const revisions = revisionIds.length
-          ? check(await ctx.db.from("process_revisions").select("id, number").in("id", revisionIds))
+          ? await ctx.db.selectFrom("process_revisions").select(["id", "number"]).where("id", "in", revisionIds).execute()
           : [];
         const number = (id: string | null) => revisions.find((r) => r.id === id)?.number ?? null;
         assumptions.push("No runs are stored yet, so there are no baseline KPIs; call run_scenario for current numbers.");
         return {
           workspace: { id: ws.id, name: ws.name, slug: ws.slug, settings: ws.settings },
+          // The categories a step's purpose is chosen from, in order (the defaults while the workspace has none of its own).
+          purpose_categories: workspacePurposes(ws.settings as WorkspaceSettings),
           processes: processes.map((p) => ({
             id: p.id,
             name: p.name,
@@ -186,8 +186,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
                 }),
               }
             : null,
-          roles: check(roles),
-          people: check(people),
+          roles,
+          people,
           last_baseline_run: null,
         };
       }),
@@ -197,7 +197,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     "get_process",
     {
       title: "Get process",
-      description: "A process graph (steps, edges, roles) at its live or draft revision.",
+      description:
+        "A process graph (steps, edges, roles) at its live or draft revision; each step's purpose (what its hands-on time achieves; null is Automatic) and the workspace's purpose categories.",
       inputSchema: { process: processArg, revision: revisionArg, workspace: workspaceArg },
       annotations: { readOnlyHint: true },
     },
@@ -205,18 +206,28 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       runTool(async (assumptions) => {
         const ws = await resolveWorkspace(ctx, workspace, assumptions);
         const proc = await resolveProcess(ctx, ws, process, assumptions, { allowCompany: true });
-        // A process built over MCP has only a draft until it is first published.
+        // A process that has not been published yet has only a draft.
         const which = revision ?? (!proc.live_revision_id && proc.draft_revision_id ? "draft" : "live");
         if (!revision) assumptions.push(which === "live" ? "revision defaulted to live." : "revision defaulted to draft: the process hasn't been published yet.");
         const bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, which));
         if (proc.is_company) {
           assumptions.push("This is the company map: each step holds a process (its child_process_id) at the position the map draws it; each edge is a handoff line between two of them. It is layout only: nothing here is simulated.");
         }
+        // What each working step's purpose comes to.
+        const categories = workspacePurposes(ws.settings as WorkspaceSettings);
+        const names = new Map(categories.map((c) => [c.key, c.name]));
+        const resolved = proc.is_company
+          ? new Map<string, { key: string; source: string }>()
+          : resolveBundlePurposes(bundle);
         return {
           process: { ...bundle.process, draft_revision_id: proc.draft_revision_id },
           revision: bundle.revision,
           roles: bundle.roles,
-          steps: bundle.steps,
+          purpose_categories: categories,
+          steps: bundle.steps.map((st) => {
+            const r = st.kind === "task" || st.kind === "wait" || st.kind === "decision" ? resolved.get(st.id) : undefined;
+            return { ...st, purpose_resolved: r ? { key: r.key, name: names.get(r.key) ?? r.key, source: r.source } : null };
+          }),
           edges: bundle.edges,
         };
       }),
@@ -227,7 +238,8 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     {
       title: "Run scenario",
       description:
-        "Simulate a process on the server (Monte Carlo) and return means with 10th–90th percentile ranges. Same engine, model and seed as the browser, so the numbers match.",
+        "Simulate a process on the server (Monte Carlo) and return means with 10th–90th percentile ranges. Same engine, model and seed as the browser, so the numbers match. " +
+        "With `scenario` (a saved Sandbox scenario's id or name, or \"No changes\"), runs it as the Sandbox does: the live company model month by month with the scenario's changes (timed ones included; a solution put live also brings the automations and augmentations it holds, from its month), returning monthly series, roles, time by purpose, totals and the difference from \"No changes\".",
       inputSchema: {
         process: processArg,
         revision: revisionArg,
@@ -236,6 +248,10 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         reps: z.number().int().min(1).max(MAX_REPS).optional().describe(`Replications (default ${DEFAULT_REPS})`),
         seed: z.number().int().min(0).optional().describe(`Random seed (default ${DEFAULT_SEED})`),
         horizon_weeks: z.number().int().min(1).max(104).optional().describe("Weeks to simulate (default: workspace setting)"),
+        scenario: z.string().min(1).optional().describe("A saved Sandbox scenario's id or name, or \"No changes\": runs the Sandbox's month-by-month run (see list_scenarios). Not with process, revision, overrides or horizon_weeks."),
+        months: z.number().int().min(1).max(24).optional().describe("With scenario: months to run (default the scenario's horizon, else 12)."),
+        include_baseline: z.boolean().optional().describe("With scenario: also run \"No changes\" and return the difference (default true)."),
+        include_people: z.boolean().optional().describe("With scenario: also return each person's busy share by month, as the Sandbox shows them: everyone to an Agency admin or the Owner, only their own person to anyone else (default false)."),
         start_date: z
           .string()
           .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -246,6 +262,21 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     },
     (args) =>
       runTool(async (assumptions) => {
+        const saved = args.scenario !== undefined;
+        if (!saved && (args.months !== undefined || args.include_baseline !== undefined || args.include_people !== undefined)) {
+          throw new ToolError("invalid_args", "months, include_baseline and include_people only go with `scenario`.");
+        }
+        if (saved) {
+          const clash = (["process", "revision", "overrides", "horizon_weeks", "reps", "seed"] as const).filter((k) => args[k] !== undefined);
+          if (clash.length) throw new ToolError("invalid_args", `With a saved scenario, the run is the Sandbox's: the live company model, month by month, 30 replications with seed 1. Leave out ${clash.join(", ")}.`);
+          const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
+          const startDate = args.start_date ?? ctx.today;
+          // The month-by-month run walks calendar months from the start: a date that isn't one (2026-13-01) would never reach the horizon.
+          if (!isRunDate(startDate)) throw new ToolError("invalid_args", `start_date '${startDate}' isn't a calendar date between 2000 and 2100 (YYYY-MM-DD).`);
+          if (!args.start_date) assumptions.push(`start_date defaulted to today (${ctx.today}).`);
+          if (args.include_baseline === undefined) assumptions.push("include_baseline defaulted to true.");
+          return await runSaved(ctx, ws, { scenario: args.scenario!, months: args.months, include_baseline: args.include_baseline ?? true, include_people: args.include_people ?? false, startDate }, assumptions);
+        }
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
         const proc = await resolveProcess(ctx, ws, args.process, assumptions);
         const revision = args.revision ?? "live";
@@ -255,9 +286,12 @@ export function createMcpServer(ctx: ToolContext): McpServer {
         const seed = args.seed ?? DEFAULT_SEED;
         if (args.seed === undefined) assumptions.push(`seed defaulted to ${DEFAULT_SEED}.`);
         const startDate = args.start_date ?? ctx.today;
+        if (!isRunDate(startDate)) throw new ToolError("invalid_args", `start_date '${startDate}' isn't a calendar date between 2000 and 2100 (YYYY-MM-DD).`);
         if (!args.start_date) assumptions.push(`start_date defaulted to today (${ctx.today}).`);
 
-        const bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, revision));
+        let bundle = await loadProcessBundle(ctx.db, ws, proc, revisionIdFor(proc, revision));
+        // No process named: the company run, as every page reads it (once a person has published a company map version, the map decides what runs).
+        if (args.process === undefined && revision === "live") bundle = await withCompanyRun(ctx.db, bundle);
         let model: EngineModel;
         try {
           model = toEngineModel(bundle, { startDate });
@@ -284,10 +318,29 @@ export function createMcpServer(ctx: ToolContext): McpServer {
       }),
   );
 
+  server.registerTool(
+    "list_templates",
+    {
+      title: "List templates",
+      description: "The process templates the app can start a new process from, with their steps.",
+      annotations: { readOnlyHint: true },
+    },
+    () =>
+      runTool(async () => ({
+        templates: PROCESS_TEMPLATES.map((t) => ({
+          id: t.id,
+          name: t.name,
+          industry: t.industry,
+          kind: t.kind,
+          entity_name: t.entity_name,
+          description: t.description,
+          steps: t.steps.map((s) => ({ name: s.name, kind: s.kind ?? "task" })),
+        })),
+        text: `${PROCESS_TEMPLATES.length} ${PROCESS_TEMPLATES.length === 1 ? "template" : "templates"}: ${PROCESS_TEMPLATES.map((t) => `${t.name} (${t.kind})`).join(", ")}.`,
+      })),
+  );
+
   registerAnalysisTools(server, ctx);
-  registerSuggestionTools(server, ctx);
-  registerBuildingTools(server, ctx);
-  registerFirstPrinciplesTools(server, ctx);
-  registerFindingsTools(server, ctx);
+  registerFactTools(server, ctx);
   return server;
 }

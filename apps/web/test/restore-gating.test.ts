@@ -10,7 +10,7 @@ const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8"
 describe("the restore card and page", () => {
   it("shows the card only to someone who can edit, in an empty workspace", () => {
     const page = read("components/overview/workspace-overview.tsx");
-    expect(page).toContain("const canRestore = canEdit && (await workspaceIsEmpty(await createClient(), head.id));");
+    expect(page).toContain("const canRestore = canEdit && (await workspaceIsEmpty(await getDb(), head.id));");
     const overview = read("components/overview/start-overview.tsx");
     expect(overview).toContain("{canRestore && (");
     expect(overview).toContain("Restore a backup");
@@ -26,8 +26,8 @@ describe("the restore card and page", () => {
     expect(page).toContain("workspaceIsEmpty");
     expect(page.indexOf("canEditWorkspace(head.id)")).toBeLessThan(page.indexOf("workspaceIsEmpty("));
     const errors = read("lib/restore/errors.ts");
-    expect(errors).toContain("Only owners, editors and agency admins can restore a backup.");
-    expect(errors).toContain("Backups restore only into an empty workspace. Ask an agency admin to create a new workspace, then restore it there.");
+    expect(errors).toContain("Only Agency admins and the Owner can restore a backup.");
+    expect(errors).toContain("Backups restore only into an empty workspace. Ask an Owner to create a new workspace, then restore it there.");
   });
 
   it("says 'backup' and 'restore' on the page and the card, never 'bundle' or 'import'", () => {

@@ -48,3 +48,7 @@ are facts about the company like people and services, so the same review applies
 - The run snapshot (`ROLE_FIELDS` in `company.ts`) doesn't include `active`, so making a role inactive doesn't show as
   "model changed since this run" on old runs; its name and numbers still do.
 - The migration is additive, but it takes brief ACCESS EXCLUSIVE locks on `roles` and `suggestions`, both tiny.
+
+## Amendment, 28 Oct 2026 (migration 20270103000000)
+
+`create_workspace` is still Owner-only, but it no longer gives the creator a membership: the Owner passes every policy by the flag, and a trigger on `workspaces` gives everyone the sign-in list names (Agency admins as `owner`, Viewers as `viewer`) a membership in the new workspace. See docs/adr/0020-three-roles.md.

@@ -5,7 +5,7 @@ description: Turn interviews, rough process maps, SOPs and spreadsheets into tra
 
 # Build process files
 
-Turn a mix of materials into upload files in the `transpera-process/2` format that Austin uploads on the app's Processes page. Each file becomes a **draft**; people, clients and ideas arrive as **suggestions** and **proposals** that wait for him to accept. The schema (`docs/import/transpera-process-2.schema.json`) and the example beside it hold the field names; read both first (in Claude desktop they are attached to the Project).
+Turn a mix of materials into upload files in the `transpera-process/2` format that Austin uploads on the app's Processes page. Each file becomes a **draft**. The file holds the process, its sources and its first principles only: people, clients, services, demand, company settings, issues and ideas are not file content (the app ignores a `company` or `proposals` field and warns), so they are listed in the summary for Austin to enter in the app. The schema (`docs/import/transpera-process-2.schema.json`) and the example beside it hold the field names; read both first (in Claude desktop they are attached to the Project).
 
 Leading words: **evidence** (a verbatim quote that backs a number), **assumed** (a reason for a number Austin told you to guess), **conflict** (sources give different numbers), **gap** (a value in the useful minimum that is absent), **question** (every gap and ambiguity is asked, never guessed).
 
@@ -32,7 +32,7 @@ Every number carries evidence or an assumed reason. A stated number is kept, how
 - **Evidence** is the shortest verbatim stretch of one line that states the number, with `source`, `speaker` (the label as written), `time` (`00:03:12`, `page 3`, `cell B7`, `arrow from Review to Call`) and `value` in the field's units. Case and punctuation may differ; the words match.
 - **Assumed** is any reason a value is not a plain quote: a conversion (naming the day length Austin gave), a ceiling, a number the interviewer proposed, an approximation, a future date. A **guess** (a value no material states) is written only when Austin says "skip" or "use your best guess" for it, and its reason ends `(Austin said to assume)`.
 - **Silence.** A value nobody stated and Austin did not supply is left out, never invented. The app marks it missing, and the gap shows in the summary.
-- **Shapes.** A step's `evidence` and `assumed` are objects keyed by field, and only `hands_on_hours`, `wait_hours`, `rework_rate`, `waiting_now` and `sla_hours` take them: `"evidence": {"wait_hours": [{...}]}`, `"assumed": {"wait_hours": "reason"}`. A link's `evidence` is a list of quotes and its `assumed` a string. Every company, proposal and first-principles item takes `evidence` (a list) and `assumed` (a string).
+- **Shapes.** A step's `split`, `split_notes`, `tier_multiplier` and `sources` are plain objects (see "Base values for capacity"); they take no `evidence` of their own, so quote the line that gives the proportion in `notes` and label it in `sources`. A step's `evidence` and `assumed` are objects keyed by field, and only `hands_on_hours`, `wait_hours`, `rework_rate`, `waiting_now` and `sla_hours` take them: `"evidence": {"wait_hours": [{...}]}`, `"assumed": {"wait_hours": "reason"}`. A link's `evidence` is a list of quotes and its `assumed` a string. Every company, proposal and first-principles item takes `evidence` (a list) and `assumed` (a string).
 - **Units.** Everything is hours per item; shares run 0 to 1; minutes divide by 60 (twenty minutes is 0.33). A "day" converts at the company's day (7.5 hours when it works a 37.5-hour week), asked once in step 3 when no material says. Keep the speaker's words in the quote and the converted number in `value`, with the day length in `assumed`.
 - **Ranges.** A symmetric hedge ("two, three hours") is the midpoint in `hands_on_hours`, the bounds in `hands_on_range`, and the midpoint as the quote's `value`. A typical value with a tail ("usually an hour, sometimes a half-day") is the typical value, with the tail in `notes`. A **ceiling** ("within two weeks", "up to an hour") is the number to use: put it in `wait_hours` (or `hands_on_hours`) with an assumed reason that quotes it and says it is a maximum, and add the range when a minimum is known too ("some come back in a day").
 - **Conflict.** When sources give different numbers and Austin does not settle them, leave the value out and give each source's quote with its own `value`; when he settles one, use his number with both quotes kept. The checker reports the disagreement, and the app flags it on the draft and logs a perception gap when the largest is at least twice the smallest. For odds, give each branch both quotes, so the branches still add to 1 (one in three win: 0.33 for won, 0.67 for lost).
@@ -49,13 +49,27 @@ Every number carries evidence or an assumed reason. A stated number is kept, how
 | Rough map | Box text is a step name; arrows are links; a diamond or a split is a decision; arrow labels (Yes, No, 30%) are `label` and odds; a lane or colour is a role; a note with a time is a number (`time` says where on the map). A box with no number gets none. |
 | Interview | The order the speaker walks through is the link order; "then", "after that", "goes to" are links. Each person who does work is a role; "only X does it" is `person`; software named is `tool`. |
 | SOP | Numbered steps are steps; a deadline or promise on one step is `sla_hours` there; one spanning several steps is a requirement plus `sla_hours` on the delivering step (see "Elapsed times"). |
-| Spreadsheet | Columns of times, volumes and prices are numbers (`time` is the cell or row); a roster is `company.people`, an account list is `company.clients`. |
+| Spreadsheet | Columns of times, volumes and prices are numbers (`time` is the cell or row); a roster or an account list is not file content: list it in the summary under **Left out**, for Austin to enter in the app. |
 
 - **Step types.** `start` (exactly one, leading to exactly one step), `step` (someone works), `wait` (nobody works), `decision` (items branch), `end` (one per way an item finishes: won, lost, not a fit).
 - **Decisions and odds.** "Some go to X, others Y" is a decision, or odds on the links out of a step when the branch is that step's own result. Branches out of one step add to 1. "Most" or "a few" with no number gets no odds.
 - **Loops.** Work sent back to be redone is `rework_rate` with `rework_to` (the step it returns to; its own step when omitted), never a link back. A loop in the links exists only when a decision step decides when it stops.
 - **Order.** A step a speaker describes that another source omits is a step ("Tom does a pricing check Grace never mentions"). Say so in `notes` and in the summary's conflicts.
 - Leave `x` and `y` out. Names and ids are unique; ids are short (`first-look`).
+
+## Base values for capacity
+
+Three optional step fields feed the capacity app. Add one only when a material supports it; a step the sources are silent on gets none, and the summary lists it under **Missing for simulation**. Ask about each in step 3, with a suggested answer and its quote, like any other gap.
+
+- **`split`**: how the step's hands-on time divides, as shares from 0 to 1 that add up to 1. Read each step as **gather / judge / check**:
+  - `automatable` is the gathering: pulling, collating, flagging, formatting, a first pre-screen. A tool could do all of it.
+  - `augmentable` is the judging: working something out, drafting commentary, research. A tool helps; a person still owns it.
+  - `manual` is the checking and deciding: the decision, the narrative, the client call, the final look.
+  - Use what the speakers said ("I pull the numbers, that's most of it, then I decide the budget" is a large automatable share, a small manual one). Give the shares as the speaker's own proportions where they gave them; otherwise ask, and do not guess a split from the step's name. A step whose speakers say it is all one kind is `{"automatable": 0, "augmentable": 0, "manual": 1}`.
+  - `split_notes` is one line for each part saying what it is, in the speaker's words ("pull spend and budgets, spot under-pacing"). Section 7 of `docs/plans/client-requirements.md` has a table of worked examples (pacing, monthly report, meeting prep, content brief) to match against.
+- **`tier_multiplier`**: when an interview says a tier takes longer or shorter ("Tier 1 clients take about a third longer"), give a number for each tier it names, as × on the base time (`{"T1": 1.3, "T2": 1, "T3": 0.8}`). A tier not listed is 1. Never fill tiers nobody mentioned. Tier names are the company's own; ask when a speaker says "the big clients" and not which tier.
+- **`to_client_manager`**: `true` when a speaker says the client's own manager does the step, whatever their title. Keep the `role` as well; it is the fallback.
+- **`sources`**: where each of `work` (the hands-on time), `split` and `tier_multiplier` came from: `interview` (a person said it), `calculator` (worked out from a sheet or the client's calculator), `measured` (taken from tracked data) or `estimate` (a best guess, or Austin said to assume). Give it for every one of these values the step has. The quote still goes in `evidence`; the label says how far to trust it.
 
 ## One file per process
 
@@ -64,16 +78,13 @@ A process is one trigger to one outcome, with one kind of thing flowing through 
 - Several sources about the same process make one file (two interviews, one SOP).
 - A different trigger or a different thing flowing (a monthly report against onboarding a client) makes a separate file. A passing mention of another process stays out of the steps and is asked about.
 - `kind` is `pipeline` when new leads become clients (it needs lead volume), `servicing` when work recurs for existing clients.
-- Each source appears in every file it supports. Put each company fact in one file only, the one it belongs to, so it is suggested once.
+- `category` (optional) is what the process is for, in the company's words: `sales` (how new work comes in and is won), `onboarding` (getting a new client set up), `routine_client_work` (work done again and again for existing clients), `ad_hoc` (requests that come in at random) or `internal` (work for the agency itself). Leave it out when the sources do not say: a pipeline is then `sales` and a servicing process `routine_client_work`. It does not change `kind`, which is what the simulation uses.
+- Each source appears in every file it supports. 
 
-## Company, proposals, first principles
+## Left out of the file, first principles
 
-- **`company`**: only stated facts go in.
-  - `people`: `fte` (days of five), `roles`, `start_date` (a new hire's first day), `leave` (booked leave only: `[{start_date, end_date, note}]`). A person the materials name belongs here too, a freelancer included, with the role they hold.
-  - `roles` the materials name that nobody holds; `clients`: `services`, `mrr`, `active` (`false` for a client that has left), `assignments` (`{"Account director": "Tom Whitfield"}`, role to person, both already in the company); `demand`: lead sources (volume a week), seasonality (all twelve months, unspoken months at 1).
-  - **Later correction wins.** When a speaker corrects an earlier fact ("Ruby starts on the ninth, not the second"), the file takes the correction and cites both quotes. Two sources that simply disagree keep both quotes, leave the value out and say "settle it before accepting" in `assumed`. Approximate figures say so in `assumed`.
-- **Not file content, asked about instead**: plans, targets and unbooked leave. A change that starts later ("four days from November") is suggested with its date in `assumed`, because accepting applies it at once, and is also asked about.
-- **`proposals`**: a problem a speaker names that touches a step is an `issue` with the quote (`type` `issue`, `steps` the ids it touches). A `solution_idea` needs both `for_issue` (an issue Austin already tracks, by number or title) and `proposed_steps` (the steps it would put in place, in order, each with a `name`); without a tracked issue, the idea goes in the issue's `detail`.
+- **Company facts are not file content.** People (FTE, roles, start dates, leave), roles nobody holds, clients, services, demand, plans, targets and unbooked leave never go in the file. List each under **Left out** in the summary, with its quote, so Austin can enter it in the app. A role a step needs is named on the step (`role`); Upload maps it to a role the company has.
+- **Issues and ideas are not file content.** A problem a speaker names that touches a step goes in that step's `notes` with the quote, and in the summary under **Still open**, so Austin can log it as an issue by hand. Ideas for a fix go there too.
 - **`first_principles`**: a requirement a speaker stated (with `owner`, a named person, never a team), a truth that cannot be argued away (a contract term, `kind` `truth`; a belief is `assumption` with a `test`), a target as a measure, and the job and the why-chain when someone said them. Leave the rest out.
   - Measure: `kpi` is one of `won`, `winsPerWeek`, `winRate`, `newMrr`, `billed`, `cycleHours`, `labour`, `wipEnd` (leave it out when none fits); `comparator` is `atLeast` or `atMost` ("within", "under" are `atMost`); `target` is in the unit people read (30 for a 30% win rate, 40 for five working days at 8 hours).
   - Requirement `verdict` is `keep`, `change`, `drop` or `challenge`, set only when a speaker said so.
@@ -82,11 +93,12 @@ A process is one trigger to one outcome, with one kind of thing flowing through 
 
 Run the checker's rules over each file before showing it; the upload preview applies them again and quotes any it finds.
 
-- Top level: `format`, `name`, `steps` (at least one). Every field is in the schema.
-- Step and source ids and step names are unique; every link, `rework_to`, group member and proposal step names an existing id; every quote's `source` is a source id.
+- Top level: `format`, `name`, `steps` (at least one); `category`, when given, is one of the five. Every field is in the schema.
+- Step and source ids and step names are unique; every link, `rework_to` and group member names an existing id; every quote's `source` is a source id.
 - One `start`; it leads to one step. Nothing leaves an `end`; no link into the start or from a step to itself; no link twice.
 - Branch odds add to 1. No loop without a decision. A step with `rework_to` has a rework rate, stated or quoted.
 - A quote's `value` is in the field's units; `hands_on_range` surrounds `hands_on_hours`.
+- A `split` has all three parts and they add up to 1; a `tier_multiplier` is a number for each tier named; a `sources` label is one of the four and sits beside a value the step has.
 - Each quote is a stretch of one line at its time, said by its speaker, and each assumed reason says why.
 - Count the **gaps** (the useful minimum):
   1. a role on every work step;
@@ -101,11 +113,11 @@ Write each file as `<process-slug>.json` in the working folder when files can be
 
 End with a short summary, in these sections (an empty one says "none"):
 
-- **Built**: each file with its kind, steps, links, sources, and the counts of suggestions and proposals.
+- **Built**: each file with its kind, steps, links, sources and first principles parts.
 - **Questions asked and answers**: each numbered question with Austin's answer (or "unanswered").
 - **Assumptions**: only the items Austin told you to assume: step, value, reason.
 - **Conflicts between sources**: who said what, what Austin decided, and how the file holds it.
 - **Missing for simulation**: per file, each gap in plain words ("Write proposal has no hands-on time", "Client decides: branch odds missing", "No incoming volume").
-- **Left out**: withdrawn numbers, plans, and facts the format cannot hold.
+- **Left out**: withdrawn numbers, plans, and company facts and issues the format cannot hold (each with its quote).
 - **Still open**: questions he did not answer, and what he must ask others, the ones that fill the gaps first.
-- **Ledger** (optional, when he wants to audit): one line per number heard, with speaker, time, quote and where it went (a step field, odds, a suggestion, notes, or left out and why).
+- **Ledger** (optional, when he wants to audit): one line per number heard, with speaker, time, quote and where it went (a step field, odds, notes, or left out and why).

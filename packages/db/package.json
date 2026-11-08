@@ -6,38 +6,51 @@
   "exports": {
     ".": "./src/index.ts",
     "./issue-status": "./src/issue-status.ts",
+    "./process-category": "./src/process-category.ts",
     "./source-links": "./src/source-links.ts",
+    "./process-import": "./src/process-import/index.ts",
+    "./sandbox": "./src/sandbox/index.ts",
     "./process-file": "./src/process-file.ts",
     "./process-file-util": "./src/process-file-util.ts",
     "./process-file-2": "./src/process-file-2.ts",
     "./process-file-2-schema": "./src/process-file-2-schema.ts",
     "./simulation-gaps": "./src/simulation-gaps.ts",
-    "./calibration": "./src/calibration.ts",
-    "./csv-import": "./src/csv-import.ts",
     "./workspace-import": "./src/workspace-import.ts",
-    "./money": "./src/money.ts"
+    "./money": "./src/money.ts",
+    "./client": "./src/client.ts"
   },
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "capacity:starter": "node --experimental-strip-types scripts/capacity-starter.ts",
+    "capacity:example": "node --experimental-strip-types scripts/capacity-example.ts",
+    "capacity:example-issues": "node --experimental-strip-types scripts/capacity-example-issues.ts",
     "gen:seed": "node --experimental-strip-types scripts/gen-seed.ts",
     "gen:import-schema": "node --experimental-strip-types scripts/gen-import-schema.ts",
-    "gen:bootstrap": "node --experimental-strip-types scripts/gen-bootstrap.ts",
-    "gen:types": "npx supabase gen types typescript --linked --workdir . --schema public > src/database.types.ts"
+    "gen:types": "node --experimental-strip-types scripts/gen-types.ts",
+    "migrate": "node --experimental-strip-types scripts/migrate.ts",
+    "copy:export": "node --experimental-strip-types scripts/copy-from-supabase/export.ts",
+    "copy:import": "node --experimental-strip-types scripts/copy-from-supabase/import.ts",
+    "copy:verify": "node --experimental-strip-types scripts/copy-from-supabase/verify.ts"
   },
   "dependencies": {
-    "@transpera-flow/engine": "workspace:*"
+    "@transpera-flow/engine": "workspace:*",
+    "kysely": "0.29.7",
+    "pg": "8.23.1"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "^2.117.2",
+    "@neondatabase/serverless": "1.2.0",
     "@types/node": "^22.20.4",
     "@types/pg": "^8.23.1",
+    "@types/ws": "8.18.1",
     "ajv": "^8.20.0",
     "eslint": "^9.39.5",
-    "pg": "^8.23.0",
+    "https-proxy-agent": "7.0.6",
+    "kysely-codegen": "0.20.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.71.0",
-    "vitest": "^5.0.2"
+    "vitest": "^5.0.2",
+    "ws": "8.18.3"
   }
 }
