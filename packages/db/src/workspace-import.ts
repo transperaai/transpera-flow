@@ -108,7 +108,7 @@ export const IMPORT_COLUMNS = {
     "kind", "lost_per_day_waiting", "name", "notes", "outcome", "parent_step_id", "person_id", "provenance", "purpose", "replaced_by", "rework_rate", "rework_to_step_id",
     "role_id", "sla_hours", "split", "split_notes", "target_cycle_hours", "tier_multiplier", "to_client_manager", "tool", "wait_dist", "wait_hours", "wait_params", "work_dist", "work_hours", "work_params", "x", "y",
   ),
-  edges: cols("edges", "id", "condition_tag", "from_step_id", "label", "probability", "to_step_id"),
+  edges: cols("edges", "id", "condition_tag", "from_step_id", "label", "probability", "to_step_id", "center_dx", "center_dy"),
   sandbox_scenarios: cols("sandbox_scenarios", "id", "parent_id", "name", "description", "changes", "horizon_months", "start_date", "created_at"),
   blocks: cols("blocks", "id", "name", "description", "type", "steps", "created_at"),
   capacity_changes: cols("capacity_changes", "id", "name", "kind", "effects", "adoption", "ramp_months", "tiers", "cost_monthly", "issue_id", "source", "provenance", "created_at"),

@@ -294,7 +294,7 @@ export function ChangesPanel({
                       key: f.field,
                       text: `${fieldLabel(f.field)} ${describeValue(f.field, f.live, names)} → ${describeValue(f.field, f.draft, names)}`,
                     })),
-                  ...(c.table === "steps" && c.moved ? [{ key: "moved", text: "moved" }] : []),
+                  ...(c.moved ? [{ key: "moved", text: c.table === "steps" ? "moved" : "line moved" }] : []),
                 ]
               : [];
           const problem = discardProblem(bundle, c);

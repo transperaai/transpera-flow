@@ -38,6 +38,8 @@ export interface StepChange extends RowChange<StepRow> {
 
 export interface EdgeChange extends RowChange<EdgeRow> {
   table: "edges";
+  /** Only its middle was dragged (`center_dx`, `center_dy`), or that too: layout, like a step's position. */
+  moved: boolean;
 }
 
 export type Change = StepChange | EdgeChange;
@@ -54,7 +56,9 @@ export interface DraftDiff {
  * provenance (a value's provenance goes with the value, lib/editor/provenance.ts).
  */
 export const STEP_DIFF_FIELDS = Object.keys(STEP_FIELDS).filter((f) => f !== "x" && f !== "y" && !isProvenanceField(f));
-export const EDGE_DIFF_FIELDS = Object.keys(EDGE_FIELDS);
+/** The columns of where a line's middle was dragged to: layout, compared apart like a step's x and y. */
+export const EDGE_BEND_FIELDS = ["center_dx", "center_dy"] as const;
+export const EDGE_DIFF_FIELDS = Object.keys(EDGE_FIELDS).filter((f) => !(EDGE_BEND_FIELDS as readonly string[]).includes(f));
 
 function changedFields(live: object, draft: object, fields: readonly string[]): FieldChange[] {
   const out: FieldChange[] = [];
@@ -94,14 +98,15 @@ export function diffBundles(live: Pick<ProcessBundle, "steps" | "edges">, draft:
   for (const d of draft.edges) {
     const l = liveEdges.get(d.id);
     if (!l) {
-      edges.set(d.id, { table: "edges", kind: "added", id: d.id, live: null, draft: d, fields: [] });
+      edges.set(d.id, { table: "edges", kind: "added", id: d.id, live: null, draft: d, fields: [], moved: false });
       continue;
     }
     const fields = changedFields(l, d, EDGE_DIFF_FIELDS);
-    if (fields.length) edges.set(d.id, { table: "edges", kind: "changed", id: d.id, live: l, draft: d, fields });
+    const moved = EDGE_BEND_FIELDS.some((f) => Number(l[f] ?? 0) !== Number(d[f] ?? 0));
+    if (fields.length || moved) edges.set(d.id, { table: "edges", kind: "changed", id: d.id, live: l, draft: d, fields, moved });
   }
   for (const l of live.edges) {
-    if (!draftEdges.has(l.id)) edges.set(l.id, { table: "edges", kind: "removed", id: l.id, live: l, draft: null, fields: [] });
+    if (!draftEdges.has(l.id)) edges.set(l.id, { table: "edges", kind: "removed", id: l.id, live: l, draft: null, fields: [], moved: false });
   }
 
   const names = new Map([...live.steps, ...draft.steps].map((s) => [s.id, s.name]));

@@ -127,6 +127,9 @@ export const EDGE_FIELDS = {
   probability: share,
   condition_tag: optionalText(100),
   label: optionalText(200),
+  // Where the line's middle segment runs (flow coordinates of its path's centre), or null for automatic.
+  center_dx: (v) => v === null || coordinate(v),
+  center_dy: (v) => v === null || coordinate(v),
 } as const satisfies Record<string, Check>;
 
 const FIELDS: Record<Table, Record<string, Check>> = { steps: STEP_FIELDS, edges: EDGE_FIELDS };

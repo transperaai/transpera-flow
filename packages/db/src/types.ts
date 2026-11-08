@@ -309,6 +309,13 @@ export interface EdgeRow {
   probability: number;
   condition_tag: string | null;
   label: string | null;
+  /**
+   * How far the line's middle segment is moved on the map: the offset, in map units, of its smooth-step path's centre from where it
+   * sits automatically (halfway). Null or absent means automatic. Layout only, like a step's x and y. Optional, so fixtures and older
+   * snapshots still type-check.
+   */
+  center_dx?: number | null;
+  center_dy?: number | null;
 }
 
 /**
@@ -1090,7 +1097,9 @@ export type _SchemaDriftChecks = [
   Assert<Matches<ProcessRevisionRow, "process_revisions">>,
   // replaced_by defaults to '{}' in the table; the app leaves it out of new steps.
   Assert<Matches<Omit<StepRow, "replaced_by">, "steps">>,
-  Assert<Matches<EdgeRow, "edges">>,
+  // center_dx and center_dy are optional here (absent on fixtures).
+  Assert<Matches<Omit<EdgeRow, "center_dx" | "center_dy">, "edges">>,
+  Assert<Matches<Required<Pick<EdgeRow, "center_dx" | "center_dy">>, "edges">>,
   // fallback_ongoing_load is jsonb; FallbackLoad is its app-side shape.
   Assert<Matches<Omit<ServiceRow, "provenance">, "services">>,
   // provenance is jsonb; ProvenanceMap is its app-side shape.

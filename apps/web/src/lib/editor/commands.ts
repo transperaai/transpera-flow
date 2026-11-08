@@ -506,6 +506,23 @@ export function reconnectEdge(bundle: ProcessBundle, id: string, from: string, t
   return edit && { ...edit, label: `Rerouted to ${stepName(bundle, to)}` };
 }
 
+/**
+ * Move a line's middle segment: `offset` is how far its smooth-step path's centre sits from where it would sit automatically
+ * (halfway between the steps); null, or a move back to no offset, makes it automatic again. Layout only, like moving a step:
+ * rounded to whole units, one edit with one undo, and null when nothing changes.
+ */
+export function bendEdge(bundle: ProcessBundle, id: string, offset: { x: number; y: number } | null): Edit | null {
+  const edge = bundle.edges.find((e) => e.id === id);
+  if (!edge) return null;
+  const dx = offset ? Math.round(offset.x) : 0;
+  const dy = offset ? Math.round(offset.y) : 0;
+  const at = dx || dy ? { center_dx: dx, center_dy: dy } : null;
+  const edit = updateEdge(bundle, id, at ?? { center_dx: null, center_dy: null });
+  if (!edit) return null;
+  const line = `${stepName(bundle, edge.from_step_id)} → ${stepName(bundle, edge.to_step_id)}`;
+  return { ...edit, label: at ? `Moved the line ${line}` : `Reset the line ${line}` };
+}
+
 export function deleteEdges(bundle: ProcessBundle, ids: readonly string[]): Edit | null {
   const gone = new Set(ids);
   const edges = bundle.edges.filter((e) => gone.has(e.id));

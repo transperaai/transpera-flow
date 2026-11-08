@@ -609,3 +609,16 @@ Verified only against plain Postgres 16 (`packages/db/test/library-process-categ
 - [ ] `select proname, pg_get_function_identity_arguments(oid), prosecdef from pg_proc where proname = 'create_library_process'` is one row with seven arguments (the last `p_category text`) and `prosecdef` false: the old six-argument overload is gone.
 - [ ] `authenticated` can still execute it and `anon` cannot: `select has_function_privilege('anon', 'public.create_library_process(uuid, text, text, text, text, text, text)', 'execute')` is false, and the same with `'authenticated'` is true.
 - [ ] As an editor, `select public.create_library_process(<workspace>, 'Check', 'pipeline', null, null, 'manual', 'onboarding')` makes a process whose `category` is `onboarding`; the same call with six arguments gets `sales`. Delete or archive the test process afterwards.
+
+## A line's moved middle (`20270201000000_edge_bend.sql`)
+
+Verified only against plain Postgres 16 (`apps/web/test/actions-database.test.ts` "saves a line's moved middle…", the
+`workspace-import*` tests' "SQL and TS agree" and live-body md5 checks). Check on Neon, once, after the apply:
+
+- [ ] `select column_name, data_type, is_nullable from information_schema.columns where table_name = 'edges' and column_name like 'center_%'`
+  is two rows, `numeric`, nullable; `select count(*) from public.edges where center_dx is not null or center_dy is not null` is 0.
+- [ ] As an editor, `select public.save_fields('edges', '{"revision_id": "<a draft>", "id": "<an edge of it>"}', '{"center_dx": null}', '{"center_dx": 40}')`
+  says `saved`, and the same with `2000000` is refused by `edges_center_dx`. Put it back to null afterwards.
+- [ ] `select md5(prosrc) from pg_proc where oid = 'public.import_workspace_bundle(uuid, jsonb, text)'::regprocedure` matches the body in
+  the migration file (its edges allow-list ends `"center_dx","center_dy"`), and `private.revision_change_counts`'s ignored list ends
+  `'center_dx', 'center_dy'`.

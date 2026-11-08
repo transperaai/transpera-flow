@@ -51,6 +51,8 @@ export interface HarnessOptions {
   lanes?: boolean;
   /** The step's base values, read only, in its detail, as the process page shows them to a Viewer. */
   baseValues?: boolean;
+  /** Every connection's middle moved by this much, as if dragged and saved (`center_dx`, `center_dy`). */
+  bend?: { dx: number; dy: number };
 }
 
 declare global {
@@ -63,8 +65,11 @@ declare global {
       addStep: () => void;
       /** Delete cards by name (all of them with no names), as the Editor's Delete key does. */
       removeCards: (names?: string[]) => void;
-      /** The editor's connections, by the names of the cards they join, with their labels and shares. */
-      getEdges: () => { from: string; to: string; label: string | null; probability: number }[];
+      /** The editor's connections, by the names of the cards they join, with their labels, shares and moved middles. */
+      getEdges: () => { id: string; from: string; to: string; label: string | null; probability: number; center: [number | null, number | null] }[];
+      /** The editor's Undo, and what it would undo. */
+      undo: () => boolean;
+      undoLabel: () => string | null;
       getSteps: () => string[];
       /** What the stand-in "New process" was asked to make. */
       created: () => unknown[];
@@ -129,11 +134,12 @@ function Harness({ options }: { options: HarnessOptions }) {
       const person = bundle.people[0]!;
       bundle = { ...bundle, viewer: { seesEveryone: false, ownPersonId: null }, steps: bundle.steps.map((st) => (st.id === northbeamStepIds.audit ? { ...st, person_id: person.id } : st)) };
     }
+    if (options.bend) bundle = { ...bundle, edges: bundle.edges.map((e) => ({ ...e, center_dx: options.bend!.dx, center_dy: options.bend!.dy })) };
     if (!options.empty) return bundle;
     const ends = bundle.steps.filter((s) => s.kind === "start" || s.kind === "end");
     const kept = new Set(ends.map((s) => s.id));
     return { ...bundle, steps: ends, edges: bundle.edges.filter((e) => kept.has(e.from_step_id) && kept.has(e.to_step_id)) };
-  }, [options.nested, options.company, options.empty, options.member]);
+  }, [options.nested, options.company, options.empty, options.member, options.bend]);
   // The run's own bottleneck is a step of another process (the model holds all of Northbeam's), so none of this map's tiles
   // would carry the flag; name the Audit step as the bottleneck to see the flag on a tile.
   const result = useMemo(() => (options.run ? { ...simulate(toEngineModel(base), 30, 1), bnStep: northbeamStepIds.audit } : undefined), [base, options.run]);
@@ -169,8 +175,17 @@ function Harness({ options }: { options: HarnessOptions }) {
       getEdges: () => {
         const b = editor?.getState().bundle ?? base;
         const name = (id: string) => b.steps.find((s) => s.id === id)?.name ?? id;
-        return b.edges.map((e) => ({ from: name(e.from_step_id), to: name(e.to_step_id), label: e.label, probability: Number(e.probability) }));
+        return b.edges.map((e) => ({
+          id: e.id,
+          from: name(e.from_step_id),
+          to: name(e.to_step_id),
+          label: e.label,
+          probability: Number(e.probability),
+          center: [e.center_dx ?? null, e.center_dy ?? null] as [number | null, number | null],
+        }));
       },
+      undo: () => editor?.undo() ?? false,
+      undoLabel: () => editor?.getState().undoLabel ?? null,
       getSteps: () => (editor?.getState().bundle ?? base).steps.map((s) => s.name),
       created: () => [...created],
     };

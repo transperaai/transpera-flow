@@ -198,6 +198,14 @@ export interface DeploymentAccess {
 }
 
 export interface Edges {
+  /**
+   * How far the line's middle segment is moved sideways from where it sits automatically (map units). Null: automatic.
+   */
+  center_dx: Numeric | null;
+  /**
+   * How far the line's middle segment is moved up or down from where it sits automatically (map units). Null: automatic.
+   */
+  center_dy: Numeric | null;
   condition_tag: string | null;
   created_at: Generated<string>;
   created_by: Generated<string | null>;
