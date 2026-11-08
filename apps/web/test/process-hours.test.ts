@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
 import { HeaviestSteps, HoursByRole, SupportingHeadline } from "@/components/process-supporting-data";
-import { headlineText, processHeadline, processHours, type DepartmentMap } from "@/lib/process-page/hours";
+import { headlineText, pieSlices, processHeadline, processHours, type DepartmentMap } from "@/lib/process-page/hours";
 
 // The Supporting data's hours (Q3 item 5), worked out by hand from a run's `personTime.stepHours`.
 //
@@ -116,10 +116,29 @@ describe("the panels", () => {
     expect(html).toContain("Executor");
     expect(html).toContain("Bob");
     expect(html).toContain("<details");
+    // A donut with a summary for a screen reader, a slice per role with its numbers on hover, and the legend as text.
+    expect(html).toMatch(/<svg[^>]*role="img"[^>]*aria-label="Hours a month by role, 350 h in all: /);
+    expect(html).toContain("data-pie-slice");
+    expect(html).toMatch(/<title>Executor: \d+ h a month, \d+%<\/title>/);
     expect(html).toContain("Review");
     expect(html).toContain("data-split-bar");
     expect(html).toContain("No work split yet");
     expect(html).not.toContain("Show all");
+  });
+
+  it("fold the roles past the sixth into Others, largest first, naming them on hover", () => {
+    const roles = [120, 80, 60, 40, 25, 15, 6, 4].map((h, i) => ({ id: `r${i}`, label: `Role ${i + 1}`, hours: h, people: [] }));
+    const slices = pieSlices(roles);
+    expect(slices.map((s) => s.label)).toEqual(["Role 1", "Role 2", "Role 3", "Role 4", "Role 5", "Role 6", "Others"]);
+    expect(slices.at(-1)!.hours).toBe(10);
+    expect(slices.at(-1)!.members.map((m) => m.label)).toEqual(["Role 7", "Role 8"]);
+    expect(slices.reduce((s, x) => s + x.share, 0)).toBeCloseTo(1, 9);
+    // One leftover role keeps its own slice; no hours, no slices.
+    expect(pieSlices(roles.slice(0, 7)).map((s) => s.label)).not.toContain("Others");
+    expect(pieSlices([])).toEqual([]);
+    const html = renderToStaticMarkup(createElement(HoursByRole, { hours: { total: 350, roles, steps: [], cells: [] }, result }));
+    expect(html).toContain("<title>Others: 10 h a month, 3% (Role 7 6 h, Role 8 4 h)</title>");
+    expect(html).toContain("and 4 more");
   });
 
   it("show at most ten steps, with Show all for the rest", () => {

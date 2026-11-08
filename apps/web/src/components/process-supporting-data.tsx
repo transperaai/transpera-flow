@@ -1,7 +1,7 @@
 "use client";
 
 // The process page's Supporting data (issue #174; capacity-shaped in Q3), each panel reading the latest run: the headline (what this
-// process takes, in hours a month), the hours by role and by person, the heaviest steps, the time split per step, and key-person
+// process takes, in hours a month), the hours by role (a donut) and by person, the heaviest steps, the time split per step, and key-person
 // risk. No (i)s: the headings and a line under each say what it is.
 
 import { useState, type CSSProperties, type ReactNode } from "react";
@@ -10,13 +10,14 @@ import type { SimulationResult } from "@transpera-flow/engine";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SplitBar, SplitLegend } from "@/components/split-bar";
 import { formatHours, formatPercent } from "@/lib/format";
-import { headlineText, type ProcessHeadline, type ProcessHours } from "@/lib/process-page/hours";
+import { headlineText, pieSlices, type PieSlice, type ProcessHeadline, type ProcessHours } from "@/lib/process-page/hours";
+import { PURPOSE_PALETTE } from "@/lib/capacity/purposes";
 import type { KeyPersonRow, TimeSplitRow } from "@/lib/process-page/supporting";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
 const card = "flex h-full min-w-0 flex-col rounded-lg bg-muted/40 p-4";
 
-/** A titled panel with a one-line description, the same on every part of the "What the run shows" card (Q8). */
+/** A titled panel with a one-line description, the same on every part of the "What the process shows" card (Q8). */
 export function Panel({ id, title, note, children }: { id: string; title: string; note: string; children: ReactNode }) {
   return (
     <section aria-labelledby={`${id}-heading`} className={card} data-panel={id}>
@@ -54,48 +55,114 @@ export function SupportingHeadline({ headline, result }: { headline: ProcessHead
   );
 }
 
-/** Hours a month by role, each opening to the people who carry them. */
+/** The colour of the n-th named slice (the app's categorical palette, the same tokens in both themes); "Others" is the neutral grey. */
+const sliceColour = (s: PieSlice, i: number) => (s.role === null ? OTHERS_COLOUR : PURPOSE_PALETTE[i % PURPOSE_PALETTE.length]!);
+const OTHERS_COLOUR = "var(--purpose-unset)";
+
+/** What a slice says on hover and to a screen reader: "Executor: 300 h a month, 86%", with the folded roles for "Others". */
+function sliceText(s: PieSlice): string {
+  const base = `${s.label}: ${hoursMonth(s.hours)} a month, ${formatPercent(s.share)}`;
+  return s.members.length ? `${base} (${s.members.map((m) => `${m.label} ${hoursMonth(m.hours)}`).join(", ")})` : base;
+}
+
+/** The pie's summary for a screen reader: the three largest slices, then how many more. */
+function pieLabel(slices: readonly PieSlice[], total: number): string {
+  const top = slices.slice(0, 3).map((s) => `${s.label} ${hoursMonth(s.hours)} (${formatPercent(s.share)})`);
+  const more = slices.length - top.length;
+  return `Hours a month by role, ${hoursMonth(total)} in all: ${top.join(", ")}${more > 0 ? `, and ${more} more` : ""}.`;
+}
+
+/** A donut of the slices, largest first clockwise from the top; each ring segment carries its numbers as a title for hover. */
+function HoursDonut({ slices, total }: { slices: readonly PieSlice[]; total: number }) {
+  const r = 15.9155; // a circumference of 100, so a segment's dash is its share in per cent
+  // A 2-unit-wide gap of the panel's surface between segments, when there is more than one.
+  const gap = slices.length > 1 ? 0.8 : 0;
+  // Where each segment starts, in per cent of the ring: the shares of the slices before it.
+  const starts = slices.map((_, i) => slices.slice(0, i).reduce((sum, x) => sum + x.share * 100, 0));
+  return (
+    <svg viewBox="0 0 42 42" role="img" aria-label={pieLabel(slices, total)} className="size-36 shrink-0 -rotate-90" data-hours-pie>
+      <circle cx="21" cy="21" r={r} fill="none" stroke="var(--panel-2)" strokeWidth="7" />
+      {slices.map((s, i) => {
+        const len = Math.max(0, s.share * 100 - gap);
+        return (
+          <circle
+            key={s.key}
+            cx="21"
+            cy="21"
+            r={r}
+            fill="none"
+            stroke={sliceColour(s, i)}
+            strokeWidth="7"
+            strokeDasharray={`${len} ${100 - len}`}
+            strokeDashoffset={-starts[i]!}
+            className="transition-opacity hover:opacity-75"
+            data-pie-slice={s.key}
+          >
+            <title>{sliceText(s)}</title>
+          </circle>
+        );
+      })}
+    </svg>
+  );
+}
+
+const Swatch = ({ colour }: { colour: string }) => <i aria-hidden className="size-2.5 shrink-0 rounded-sm" style={{ background: colour }} />;
+
+/** Hours a month by role as a donut, with a legend of the roles (largest first), each opening to the people who carry them. */
 export function HoursByRole({ hours, result, viewer }: { hours: ProcessHours | null; result: SimulationResult | null; viewer?: Viewer }) {
   const seen = viewerOf({ viewer });
-  const max = Math.max(1e-9, ...(hours?.roles.map((r) => r.hours) ?? []));
+  const slices = hours ? pieSlices(hours.roles) : [];
+  const legendRow = "grid cursor-pointer list-none grid-cols-[auto_1fr_auto_2.75rem] items-center gap-2 [&::-webkit-details-marker]:hidden";
   return (
-    <Panel id="hours-by-role" title="Hours a month, by role and person" note="Who carries this process's hands-on work. Open a role to see its people.">
-      {!hours || hours.roles.length === 0 ? (
+    <Panel id="hours-by-role" title="Hours a month, by role and person" note="Who carries this process's hands-on work, as a share of its hours. Open a role to see its people.">
+      {!hours || slices.length === 0 ? (
         <Waiting result={result} />
       ) : (
         <>
           <p className="mb-2 text-sm font-semibold tabular-nums" data-hours-total>
             {hoursMonth(hours.total)} a month
           </p>
-          <ul className="flex flex-col gap-1.5">
-            {hours.roles.map((r) => (
-              <li key={r.id ?? "none"} data-role-hours={r.id ?? "none"}>
-                <details className="group">
-                  <summary
-                    className="grid cursor-pointer list-none grid-cols-[7rem_1fr_4rem] items-center gap-2 sm:grid-cols-[9.5rem_1fr_4rem] [&::-webkit-details-marker]:hidden"
-                    aria-label={`${r.label}: ${hoursMonth(r.hours)} a month, ${r.people.length} ${r.people.length === 1 ? "person" : "people"}`}
-                  >
-                    <span className="truncate">{r.label}</span>
-                    <span aria-hidden className="h-3 overflow-hidden rounded-sm bg-panel-2">
-                      <span className="block h-full bg-accent" style={{ width: `${Math.max(1, (r.hours / max) * 100)}%` }} />
-                    </span>
-                    <span className="text-right text-xs tabular-nums">{hoursMonth(r.hours)}</span>
-                  </summary>
-                  <ul className="mt-1 mb-1.5 flex flex-col gap-1 pl-3">
-                    {ownRowsOnly(seen, r.people, (p) => p.id).map((p) => (
-                      <li key={p.id} className="grid grid-cols-[6rem_1fr_4rem] items-center gap-2 text-xs sm:grid-cols-[8.5rem_1fr_4rem]">
-                        <span className="truncate">{p.name}</span>
-                        <span aria-hidden className="h-2 overflow-hidden rounded-sm bg-panel-2">
-                          <span className="block h-full bg-fg-3/70" style={{ width: `${Math.max(1, (p.hours / r.hours) * 100)}%` }} />
-                        </span>
-                        <span className="text-right tabular-nums">{hoursMonth(p.hours)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              </li>
-            ))}
-          </ul>
+          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+            <HoursDonut slices={slices} total={hours.total} />
+            <ul className="flex w-full min-w-0 flex-col gap-1.5" aria-label="Hours a month by role">
+              {slices.map((s, i) => (
+                <li key={s.key} data-role-hours={s.key} title={sliceText(s)}>
+                  <details className="group">
+                    <summary
+                      className={legendRow}
+                      aria-label={
+                        s.role
+                          ? `${s.label}: ${hoursMonth(s.hours)} a month, ${formatPercent(s.share)}, ${s.role.people.length} ${s.role.people.length === 1 ? "person" : "people"}`
+                          : `${sliceText(s)}`
+                      }
+                    >
+                      <Swatch colour={sliceColour(s, i)} />
+                      <span className="truncate">{s.label}</span>
+                      <span className="text-right text-xs tabular-nums">{hoursMonth(s.hours)}</span>
+                      <span className="text-right text-xs text-fg-3 tabular-nums">{formatPercent(s.share)}</span>
+                    </summary>
+                    <ul className="mt-1 mb-1.5 flex flex-col gap-1 pl-4.5">
+                      {s.role
+                        ? ownRowsOnly(seen, s.role.people, (p) => p.id).map((p) => (
+                            <li key={p.id} className="grid grid-cols-[1fr_auto_2.75rem] items-center gap-2 text-xs">
+                              <span className="truncate">{p.name}</span>
+                              <span className="text-right tabular-nums">{hoursMonth(p.hours)}</span>
+                              <span className="text-right text-fg-3 tabular-nums">{formatPercent(p.hours / hours.total)}</span>
+                            </li>
+                          ))
+                        : s.members.map((m) => (
+                            <li key={m.id ?? "none"} className="grid grid-cols-[1fr_auto_2.75rem] items-center gap-2 text-xs" data-others-member={m.id ?? "none"}>
+                              <span className="truncate">{m.label}</span>
+                              <span className="text-right tabular-nums">{hoursMonth(m.hours)}</span>
+                              <span className="text-right text-fg-3 tabular-nums">{formatPercent(m.hours / hours.total)}</span>
+                            </li>
+                          ))}
+                    </ul>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </div>
         </>
       )}
     </Panel>

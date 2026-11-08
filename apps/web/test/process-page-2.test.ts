@@ -251,12 +251,18 @@ describe("the supporting data panels", () => {
 describe("the process page layout", () => {
   const page = read("components/process-page.tsx");
   const at = (s: string) => page.indexOf(s);
-  it("runs the header, Process map, What the run shows (facts, then the supporting panels), Issues and solutions, then Sources", () => {
+  it("runs the header, Process map, What the process shows (facts, then the supporting panels), Issues and solutions, then Sources", () => {
     const order = ["<ProcessHeader", 'id="map"', 'id="run"', 'id="facts"', 'id="supporting-data"', "issuesUi.issuesList", "<ProcessSources"].map(at);
     expect(order.every((n) => n > 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(page).toContain("Other improvements");
     expect(page).not.toContain('title="Solutions"');
+  });
+  it("puts the process's notes in Sources with the same editable text as a solution's notes, above the linked sources", () => {
+    const sources = page.slice(at("function ProcessSources"));
+    expect(sources).toContain("<EditableText");
+    expect(sources).toContain("data-process-notes");
+    expect(sources.indexOf("<EditableText")).toBeLessThan(sources.indexOf("<LinkedSources"));
   });
   it("keeps what QA wave 1 removed out", () => {
     for (const gone of ["HeadlineCards", "HorizonPicker", "LeverPanel", 'id="projection"']) expect(page).not.toContain(gone);

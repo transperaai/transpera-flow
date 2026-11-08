@@ -144,3 +144,41 @@ export function headlineText(h: ProcessHeadline): string {
   const auto = h.automatable === null ? "" : `; about ${percentText(h.automatable)} of it is automatable`;
   return `${takes}${of}${auto}.`;
 }
+
+// ---------------------------------------------------------------------------
+// The pie of hours by role
+// ---------------------------------------------------------------------------
+
+/** How many roles the pie names before the rest fold into "Others". */
+export const PIE_SLICES = 6;
+
+export interface PieSlice {
+  /** The role id, null for "No role", or "others" for the folded slice. */
+  key: string;
+  label: string;
+  hours: number;
+  /** Of the process's hours, 0 to 1. */
+  share: number;
+  /** The role, for a named slice; null for "Others". */
+  role: RoleHours | null;
+  /** The roles folded into "Others", largest first; empty for a named slice. */
+  members: RoleHours[];
+}
+
+/**
+ * The roles as pie slices, largest first: the first `limit` by name, the rest folded into one "Others" slice (only when that folds two
+ * or more; a single leftover role keeps its own slice). Roles with no hours are left out.
+ */
+export function pieSlices(roles: readonly RoleHours[], limit = PIE_SLICES): PieSlice[] {
+  const rows = roles.filter((r) => r.hours > 0).sort((a, b) => b.hours - a.hours || a.label.localeCompare(b.label));
+  const total = rows.reduce((s, r) => s + r.hours, 0);
+  if (!(total > 0)) return [];
+  const named = rows.length > limit + 1 ? rows.slice(0, limit) : rows;
+  const rest = rows.slice(named.length);
+  const slices: PieSlice[] = named.map((r) => ({ key: r.id ?? "none", label: r.label, hours: r.hours, share: r.hours / total, role: r, members: [] }));
+  if (rest.length > 0) {
+    const hours = rest.reduce((s, r) => s + r.hours, 0);
+    slices.push({ key: "others", label: "Others", hours, share: hours / total, role: null, members: rest });
+  }
+  return slices;
+}

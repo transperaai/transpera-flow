@@ -39,6 +39,20 @@ export const SupportingHoursNoRun: StoryObj = {
   ),
 };
 
+/** Nine roles: six by name, the last three folded into "Others" (their names on hover and when opened). */
+export const HoursPieOthers: StoryObj = {
+  name: "Supporting data: hours by role (Others)",
+  render: () => {
+    const hours = [120, 80, 60, 40, 25, 15, 6, 4, 2];
+    const roles = hours.map((h, i) => ({ id: `r${i}`, label: `Role ${i + 1}`, hours: h, people: [{ id: `p${i}`, name: `Person ${i + 1}`, hours: h }] }));
+    return (
+      <div className="w-full max-w-md">
+        <HoursByRole hours={{ total: hours.reduce((a, b) => a + b, 0), roles, steps: [], cells: [] }} result={null} />
+      </div>
+    );
+  },
+};
+
 export const Kpis: StoryObj = {
   name: "KpiStrip",
   tags: ["visual-phone"],

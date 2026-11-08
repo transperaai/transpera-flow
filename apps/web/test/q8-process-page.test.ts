@@ -14,7 +14,7 @@ import { bundleHarness } from "./build-harness";
 
 // Q8, the process page as one card system, in a real browser on the example agency's "Performance: Pacing and hygiene, per channel" process:
 // the header card (title, pills, pencil popover, History, Edit, Export), the Process map card (Key popover, playback docked in the card),
-// What the run shows, and Issues and solutions (rows, and the empty state). Nothing sideways at 400 px.
+// What the process shows, and Issues and solutions (rows, and the empty state). Nothing sideways at 400 px.
 // With Q8_SHOTS=<dir> it also saves the screenshots (with and without issues; 1440 px light and dark, 400 px light).
 
 const META = { "import.meta.url": JSON.stringify("http://harness.test/src/lib/x/") };
@@ -99,7 +99,7 @@ async function mount(o: { editor: boolean; issues: boolean; width?: number; sche
 }
 
 describe("the process page as cards", () => {
-  it("an editor sees the header, the map card, the run card and the issues rows", async () => {
+  it("an editor sees the header, the map card, the What the process shows card and the issues rows", async () => {
     const { page, errors } = await mount({ editor: true, issues: true });
     // Header: the title, the pills, History, Edit, Export.
     const header = page.locator("[data-testid=about-process]");
@@ -121,7 +121,7 @@ describe("the process page as cards", () => {
     await map.getByRole("button", { name: "Key" }).click();
     expect(await page.locator("[data-slot=popover-content][data-state=open]").innerText()).toContain("Operational risk");
     await page.keyboard.press("Escape");
-    // The run card: the headline, then the panels.
+    // The What the process shows card: the headline, then the panels.
     const run = page.locator("#run");
     for (const panel of ["facts", "hours-by-role", "heaviest-steps", "time-split", "key-person"]) expect(await run.locator(`[data-panel=${panel}]`).count()).toBe(1);
     // Issues: counts, a Log an issue button, and rows that open the issue page.

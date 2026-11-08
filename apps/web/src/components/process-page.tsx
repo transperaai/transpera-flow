@@ -1,7 +1,8 @@
 "use client";
 
 // The process page (issue #103, A38): a read-only review of one process on a single scrolling column, no tabs and no
-// drawers. About this process, Map, Facts from the run (the evidence, B17), Issues and solutions (one section, each issue with its status track), then Supporting data and, closed at the bottom, Sources. Editing happens in the
+// drawers. About this process, Map, What the process shows (facts from the run, the evidence, B17, and the supporting data), Issues and
+// solutions (one section, each issue with its status track) and, closed at the bottom, Sources with the process's notes. Editing happens in the
 // Editor (A39), which "✎ Open in Editor" opens; History (A40) lists the earlier versions this page can show.
 
 import { isReadOnly } from "@/lib/mode";
@@ -19,6 +20,7 @@ import { IssueTrackView } from "@/components/issue-track";
 import { HeaviestSteps, HoursByRole, KeyPersonPanel, SupportingHeadline, TimeSplit } from "@/components/process-supporting-data";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
 import { FactsList } from "@/components/facts-list";
+import { EditableText } from "@/components/page-kit/editable-text";
 import type { FactNames } from "@/lib/insights/fact-sentence";
 import { capacityBlockers, findGaps, gapInputFromBundle } from "@transpera-flow/db/simulation-gaps";
 import { MissingForSimulation } from "@/components/simulation-gaps";
@@ -77,7 +79,13 @@ export function ProcessPage({
   notice,
   tierSetup,
   department,
+  notes,
 }: {
+  /**
+   * The process's notes, shown in Sources above the linked sources (like a solution's "Notes and sources"). `save` stores the new text
+   * and returns a sentence when it failed, null when it saved; absent, the notes are read only. Omitted: no notes field at all.
+   */
+  notes?: { value: string | null; save?: (next: string) => Promise<string | null> };
   /** The Department field of "About this process" (Q4): omitted where there is no workspace to read departments from. */
   department?: DepartmentFieldData;
   /** The tiers and what each service's tier gets, for the step base values (a driver recurrence is read from them). */
@@ -356,7 +364,7 @@ export function ProcessPage({
         <Card id="run" className="scroll-mt-16" aria-labelledby="run-heading">
           <CardHeader>
             <CardTitle id="run-heading" className="font-display text-base font-bold">
-              What the run shows
+              What the process shows
             </CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -387,7 +395,7 @@ export function ProcessPage({
 
         {issuesUi.issuesList}
 
-        <ProcessSources processId={bundle.process.id} name={bundle.process.name} />
+        <ProcessSources processId={bundle.process.id} name={bundle.process.name} notes={notes} canEditNotes={!isReadOnly(mode) && !old && !!notes?.save} />
       </div>
     </div>
   );
@@ -398,7 +406,17 @@ export function ProcessPage({
  * (and opens for a #sources address). A heading holding a button that opens and closes it. Only where the page loads source
  * links (the others have nothing to show).
  */
-function ProcessSources({ processId, name }: { processId: string; name: string }) {
+function ProcessSources({
+  processId,
+  name,
+  notes,
+  canEditNotes,
+}: {
+  processId: string;
+  name: string;
+  notes?: { value: string | null; save?: (next: string) => Promise<string | null> };
+  canEditNotes: boolean;
+}) {
   const linking = useSourceLinking();
   const [open, setOpen] = useState(false);
   useEffect(() => {
@@ -411,18 +429,38 @@ function ProcessSources({ processId, name }: { processId: string; name: string }
     window.addEventListener("hashchange", fromHash);
     return () => window.removeEventListener("hashchange", fromHash);
   }, []);
-  if (!linking) return null;
+  // The saved text, kept here once a save succeeds so the field shows it without a reload.
+  const [savedNotes, setSavedNotes] = useState<string | null | undefined>(undefined);
+  if (!linking && !notes) return null;
   return (
     <section id="sources" aria-labelledby="sources-heading" className="min-w-0 scroll-mt-16 rounded-xl border bg-card">
       <h2 id="sources-heading" className="font-display text-lg font-bold">
         <button type="button" aria-expanded={open} aria-controls="sources-body" onClick={() => setOpen((o) => !o)} className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left">
           <ChevronRight aria-hidden className={`size-4 shrink-0 text-fg-2 transition-transform ${open ? "rotate-90" : ""}`} />
           Sources
-          <span className="text-sm font-normal text-fg-2">The interviews, notes and data that are evidence for this process as a whole.</span>
+          <span className="text-sm font-normal text-fg-2">Notes, and the interviews and data that are evidence for this process as a whole.</span>
         </button>
       </h2>
-      <div id="sources-body" hidden={!open} className="px-4 pb-4">
-        <LinkedSources target={{ kind: "process", processId }} label={`Process: ${name}`} empty="No source linked to this process yet." hideTitle className="flex flex-col gap-2" />
+      <div id="sources-body" hidden={!open} className="flex flex-col gap-4 px-4 pb-4">
+        {notes && (
+          <EditableText
+            key={processId}
+            value={savedNotes === undefined ? notes.value : savedNotes}
+            canEdit={canEditNotes}
+            label="Notes"
+            emptyMessage="No notes yet. Say where this process's numbers come from: who you spoke to, what was measured, what is still a guess."
+            emptyReader="No notes."
+            addLabel="Add notes"
+            maxLength={4000}
+            data-process-notes=""
+            onSave={async (next) => {
+              const failed = await notes.save!(next);
+              if (failed === null) setSavedNotes(next);
+              return failed;
+            }}
+          />
+        )}
+        {linking && <LinkedSources target={{ kind: "process", processId }} label={`Process: ${name}`} empty="No source linked to this process yet." hideTitle className="flex flex-col gap-2" />}
       </div>
     </section>
   );
