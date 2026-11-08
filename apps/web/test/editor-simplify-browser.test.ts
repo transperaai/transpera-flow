@@ -1,4 +1,6 @@
 import { chromium, type Browser, type Page } from "playwright-core";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundleHarness } from "./build-harness";
 import type { TourHarnessOptions } from "./tour-harness/entry";
@@ -12,6 +14,7 @@ let script: string;
 const ORIGIN = "https://editor.test/";
 const AUDIT = "e0000000-0000-4000-8000-000000000003";
 const DISCOVERY = "e0000000-0000-4000-8000-000000000002";
+const KICKOFF = "e0000000-0000-4000-8000-000000000006";
 
 beforeAll(async () => {
   script = await bundleHarness(new URL("./tour-harness/entry.tsx", import.meta.url));
@@ -38,6 +41,13 @@ async function open(options: TourHarnessOptions = {}): Promise<{ page: Page; err
   await page.waitForTimeout(800);
   return { page, errors };
 }
+
+/**
+ * React Flow's own stylesheet, and the one layout class a decision card's rows need, for the tests that look at where a dot is or
+ * drag one: without them a dot is not placed on the card's edge.
+ */
+const mapStyles = (page: Page) =>
+  page.addStyleTag({ content: `${readFileSync(createRequire(import.meta.url).resolve("@xyflow/react/dist/style.css"), "utf8")} .relative { position: relative }` });
 
 const node = (page: Page, id: string) => page.locator(`.react-flow__node[data-id="${id}"]`);
 // The page here has none of the app's stylesheet, so the toolbar and the inspector lie over the nodes: the click goes to the node itself.
@@ -117,7 +127,7 @@ describe("a decision", () => {
     await page.context().close();
   }, 60_000);
 
-  it("changing a share in the panel changes the card, the last branch takes what is left, and + Add branch adds a third", async () => {
+  it("changing a share in the panel changes the card, and + Add branch adds a third with an even share, the others making room in proportion", async () => {
     const { page } = await withDecision();
     const share = inspector(page).locator("[data-branch]").first().getByLabel("Share", { exact: true });
     await share.fill("70");
@@ -128,6 +138,111 @@ describe("a decision", () => {
     const rows = await rowsOf(page);
     const total = rows.reduce((n, r) => n + Number(r.split(" ").pop()), 0);
     expect(total).toBe(100);
+    // The new branch gets 100 / 3 = 33; Yes and No share 67 as 70 : 30 (46.9 and 20.1, the 1 left over to the larger).
+    expect(rows).toEqual(["Yes 47", "No 20", "Branch 3 33"]);
+    await page.context().close();
+  }, 60_000);
+
+  it("gives each branch its own dot on the card, its line leaving from it, and a + dot to add one (round 2, item 12)", async () => {
+    const { page, errors } = await withDecision();
+    await mapStyles(page);
+    const ids = await added(page).locator("[data-branch-row]").evaluateAll((els) => els.map((e) => e.getAttribute("data-branch-row")!));
+    expect(ids).toHaveLength(2);
+    // One source dot per branch, named after it, and its line drawn (React Flow draws no line whose dot is missing).
+    const dots = added(page).locator(".react-flow__handle.source[data-branch-handle]");
+    expect(await dots.evaluateAll((els) => els.map((e) => e.getAttribute("data-handleid")))).toEqual(ids);
+    expect(await dots.evaluateAll((els) => els.map((e) => e.getAttribute("aria-label")))).toEqual(["Yes, 50%", "No, 50%"]);
+    for (const id of ids) expect(await page.locator(`.react-flow__edge[data-id="${id}"]`).count()).toBe(1);
+    expect(await added(page).locator("[data-add-branch-handle]").count()).toBe(1);
+    // Each dot sits level with its own row.
+    const middles = (sel: string) => added(page).locator(sel).evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return r.top + r.height / 2; }));
+    const rowMiddles = await middles("[data-branch-li]");
+    const dotMiddles = await middles("[data-branch-handle]");
+    expect(new Set(dotMiddles).size).toBe(2);
+    dotMiddles.forEach((y, i) => expect(Math.abs(y - rowMiddles[i]!)).toBeLessThan(2));
+    // A step that isn't a decision keeps its single dot.
+    expect(await node(page, KICKOFF).locator(".react-flow__handle.source").count()).toBe(1);
+    expect(errors).toEqual([]);
+    await page.context().close();
+  }, 60_000);
+
+  it("dragging the + dot to a step adds a branch to it, and dragging a branch's dot sends that branch elsewhere", async () => {
+    const { page } = await withDecision();
+    await mapStyles(page);
+    // The map over the whole page, so the dots are on screen and under the mouse.
+    await page.addStyleTag({ content: ".react-flow { position: fixed !important; inset: 0; z-index: 50; height: 100vh !important; background: white }" });
+    await page.waitForTimeout(500);
+    const centre = async (loc: ReturnType<Page["locator"]>) => {
+      const box = (await loc.boundingBox())!;
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    };
+    // The page has no stylesheet, so the panels lie over the map: the drag starts on the dot itself and React Flow follows the
+    // mouse on the document, finding the nearest dot to drop on.
+    const drag = async (from: ReturnType<Page["locator"]>, to: ReturnType<Page["locator"]>) => {
+      const a = await centre(from);
+      const b = await centre(to);
+      await page.mouse.move(a.x, a.y);
+      await from.dispatchEvent("mousedown", { button: 0, clientX: a.x, clientY: a.y });
+      await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 4 });
+      await page.mouse.move(b.x, b.y, { steps: 4 });
+      await page.mouse.up();
+    };
+    await drag(added(page).locator("[data-add-branch-handle]"), node(page, KICKOFF).locator(".react-flow__handle.target"));
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-tile="decision"]')].some((d) => !/Client decision/.test(d.textContent ?? "") && d.querySelectorAll("[data-branch-row]").length === 3));
+    // An even share for the new branch (100 / 3), the other two making room in proportion.
+    expect(await rowsOf(page)).toEqual(["Yes 34", "No 33", "Branch 3 33"]);
+    // The new branch is in focus in the panel, and goes to Kickoff.
+    await page.waitForSelector("[data-branch][data-focused]");
+    expect(await inspector(page).locator("[data-branch][data-focused] legend").innerText()).toBe("Branch 3");
+    const kickoffName = await node(page, KICKOFF).locator('[data-field="name"]').first().innerText();
+    expect(await inspector(page).getByLabel("Branch 3 goes to").locator("option:checked").innerText()).toBe(kickoffName);
+    // Dragging No's dot to Discovery, a step before the decision, sends No back there: a go back, not a new branch.
+    const noId = (await added(page).locator("[data-branch-row]").nth(1).getAttribute("data-branch-row"))!;
+    await drag(added(page).locator(`[data-branch-handle="${noId}"]`), node(page, DISCOVERY).locator(".react-flow__handle.target"));
+    await page.waitForFunction((id) => document.querySelector(`[data-branch-row="${id}"]`)?.getAttribute("aria-label")?.includes("goes back"), noId);
+    expect(await added(page).locator("[data-branch-row]").count()).toBe(3);
+    expect(await page.locator('[data-tile="goback"]').count()).toBe(1);
+    // Each was one undo step, named as the panel's would be.
+    expect(await page.locator("[data-undo]").getAttribute("title")).toMatch(/^Undo: Sent a branch of Decision to go back to /);
+    await page.locator("[data-undo]").dispatchEvent("click");
+    await page.waitForFunction((id) => !document.querySelector(`[data-branch-row="${id}"]`)?.getAttribute("aria-label")?.includes("goes back"), noId);
+    expect(await added(page).locator("[data-branch-row]").count()).toBe(3);
+    expect(await page.locator("[data-undo]").getAttribute("title")).toMatch(/^Undo: Added a branch from Decision to /);
+    await page.locator("[data-undo]").dispatchEvent("click");
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-tile="decision"]')].some((d) => !/Client decision/.test(d.textContent ?? "") && d.querySelectorAll("[data-branch-row]").length === 2));
+    expect(await rowsOf(page)).toEqual(["Yes 50", "No 50"]);
+    await page.context().close();
+  }, 60_000);
+
+  it("edits a branch's % on the card: Enter saves and the others make room in proportion, Escape puts it back", async () => {
+    const { page } = await withDecision();
+    await page.getByRole("button", { name: "+ Add branch" }).dispatchEvent("click");
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-tile="decision"]')].some((d) => !/Client decision/.test(d.textContent ?? "") && d.querySelectorAll("[data-branch-row]").length === 3));
+    expect(await rowsOf(page)).toEqual(["Yes 34", "No 33", "Branch 3 33"]);
+    const ids = await added(page).locator("[data-branch-row]").evaluateAll((els) => els.map((e) => e.getAttribute("data-branch-row")!));
+    // Escape: nothing changes.
+    await added(page).locator(`[data-branch-share="${ids[0]}"]`).dispatchEvent("click");
+    const field = added(page).locator(`[data-branch-share-input="${ids[0]}"]`);
+    await field.fill("90");
+    await field.press("Escape");
+    await added(page).locator(`[data-branch-share="${ids[0]}"]`).waitFor();
+    expect(await rowsOf(page)).toEqual(["Yes 34", "No 33", "Branch 3 33"]);
+    // Enter: Yes 60, and No and Branch 3 share 40 as 33 : 33.
+    await added(page).locator(`[data-branch-share="${ids[0]}"]`).dispatchEvent("click");
+    await field.fill("60");
+    await field.press("Enter");
+    await page.waitForFunction((id) => /^Yes, 60%/.test(document.querySelector(`[data-branch-row="${id}"]`)?.getAttribute("aria-label") ?? ""), ids[0]);
+    expect(await rowsOf(page)).toEqual(["Yes 60", "No 20", "Branch 3 20"]);
+    // Leaving the field saves too: Branch 3 at 50 leaves 50 for Yes and No as 60 : 20 (37.5 and 12.5, the 1 left over to the larger).
+    await added(page).locator(`[data-branch-share="${ids[2]}"]`).dispatchEvent("click");
+    const third = added(page).locator(`[data-branch-share-input="${ids[2]}"]`);
+    await third.fill("50");
+    await third.blur();
+    await page.waitForFunction((id) => /, 50%/.test(document.querySelector(`[data-branch-row="${id}"]`)?.getAttribute("aria-label") ?? ""), ids[2]);
+    expect(await rowsOf(page)).toEqual(["Yes 38", "No 12", "Branch 3 50"]);
+    // The panel shows the same shares.
+    const shares = await inspector(page).locator("[data-branch]").evaluateAll((els) => els.map((e) => (e.querySelectorAll("input")[1] as HTMLInputElement | undefined)?.value));
+    expect(shares).toEqual(["38", "12", "50"]);
     await page.context().close();
   }, 60_000);
 

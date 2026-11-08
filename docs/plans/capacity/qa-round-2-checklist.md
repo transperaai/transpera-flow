@@ -76,3 +76,32 @@ The design, as picked on the options page (A1, B1, C1; no new widgets yet). Sand
       ahead a month and added over the months, departments at the 4.5 DLER goal.
 - [ ] 4.8 Where the time goes: two stacked bars (Today, This scene) in the same order and colours, the legend, the total
       hours a month, and what moved most. Hover a segment for its hours. No pies.
+
+## Request 5: the Editor, round 2 items 7–12 (PR #308)
+
+Open any process → ✎ Edit, then the company map (Overview → ✎ Edit the company map).
+
+- [ ] 5.1 No Simulate button or footer at the bottom of the Editor, on either map.
+- [ ] 5.2 A step's Hands-on time and Wait: one box, "[ ] h usually". Tick "It varies" and Quickest / Usually / Longest
+      appear; untick it and it goes back to one number.
+- [ ] 5.3 The company map's palette has + Step, + Wait, + Decision and + Process (which opens the process library). A
+      process's palette has no + Process. Neither has "From a template".
+- [ ] 5.4 Right-click on either map gives the same menu. On a card that links to a process: "Open process page", "Remove
+      from this map", no Rename, no Change kind, Copy and Duplicate greyed out.
+- [ ] 5.5 Click a step on the company map: the same side panel as on a process.
+- [ ] 5.6 A Decision card lists its branches, each with its own dot on the right, and each line leaves from its branch's dot.
+      Also on the process page's map and a solution's maps (there the dots can't be dragged).
+- [ ] 5.7 Drag the "+" dot under the rows to a step: a new branch is added. Drag a branch's dot to another step: that
+      branch moves. Drop on an earlier step: it becomes a "Go back to …".
+- [ ] 5.8 Click a branch's % on the card, type 60 and press Enter: the others share the rest in proportion (50 / 30 / 20 →
+      60 / 24 / 16). Escape cancels. The side panel shows the same numbers.
+- [ ] 5.9 The same Decision card, dots and % on the company map.
+- [ ] 5.10 Ctrl+Z undoes each of these in one step.
+
+## Request 6: Capacity, the clear-cut changes (PR #308; the rest waits on your design picks)
+
+- [ ] 6.1 "Avg time to serve one client by tier, per month", with revenue as "Avg A$x a month".
+- [ ] 6.2 Each task has its own colour in those bars.
+- [ ] 6.3 Bigger "Organic / Performance" and "Named clients" headings.
+- [ ] 6.4 No "Shared team" section.
+- [ ] 6.5 Clients and DLER at the top stand out (large numbers, status colour).

@@ -53,6 +53,7 @@ export function SolutionMaps({ comparison, notes }: { comparison: Comparison; no
                 focus={comparison.changed}
                 height="auto"
                 stepDetail={false}
+                branchNodes
               />
             </div>
           </div>

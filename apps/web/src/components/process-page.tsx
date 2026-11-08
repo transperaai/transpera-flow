@@ -334,6 +334,7 @@ export function ProcessPage({
             result={result}
             savedLabel="Saved"
             defaultLanes
+            branchNodes
             rating={issuesUi.rating}
             stepExtras={issuesUi.stepExtras}
             highlight={issuesUi.highlight ?? (gapStep ? [gapStep] : linkedStep ? [linkedStep] : null)}

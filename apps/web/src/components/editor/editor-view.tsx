@@ -459,7 +459,7 @@ export function EditorView({
               savedLabel={scratch ? "Edited" : hasDraft ? "Saved to draft" : "Saved"}
               hideAdd
               problems={problems}
-              branchNodes={!company}
+              branchNodes
               onTurnIntoSteps={turnInto.run}
               viewRef={viewRef}
               // The Editor edits; it doesn't run the process (brainstorm round 2, item 7), so there is nothing to play.

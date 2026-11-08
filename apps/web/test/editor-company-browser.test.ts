@@ -49,6 +49,17 @@ describe("the company map's Editor", { timeout: 120_000 }, () => {
     await page.close();
   });
 
+  it("draws a decision as a card with a dot per branch and a + dot, as on a process's map (round 2, item 12)", async () => {
+    const { page, errors } = await open();
+    const palette = page.locator('aside[aria-label="Palette"]');
+    await palette.getByRole("button", { name: "+ Decision", exact: true }).click();
+    const card = page.locator('[data-tile="decision"]');
+    await expect.poll(() => card.count()).toBe(1);
+    expect(await card.locator('.react-flow__handle[data-handleid="add-branch"]').count()).toBe(1);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
   it("gives a process card the menu of a link: remove from this map, no rename, copy or change of kind", async () => {
     const { page, errors } = await open();
     // A card that links to a process (the company map's cards all do).

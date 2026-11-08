@@ -6,8 +6,10 @@
 // the line's `condition_tag`. "Go back" is not a kind of step: it is a line from a branch to an earlier step, which the engine
 // already runs as a loop (packages/engine/test/loops.test.ts). `isGoBack` tells the canvas to draw one as "Go back to X".
 //
-// Shares are whole percents that add up to exactly 100, stored as percent / 100. The last branch (in line order, the order of
-// `bundle.edges`) is the one that takes what the others leave.
+// Shares are whole percents that add up to exactly 100, stored as percent / 100. Changing one share re-balances the others in
+// proportion to what they had (brainstorm round 2, item 12): setting a branch, adding one and removing one all keep the others'
+// shares in the same ratio to each other. That replaces "the last branch takes what is left" (item 5), which made the last branch
+// special for no reason a person could see.
 
 import { type EdgeRow, type ProcessBundle, type StepOutcome, type StepRow } from "@transpera-flow/db";
 import { OUTCOME_LABELS, connectionProblem, newStepRow, updateEdge } from "./commands";
@@ -115,8 +117,9 @@ const describeTarget = (bundle: ProcessBundle, target: BranchTarget, to: string)
 };
 
 /**
- * Add a branch to a decision. It takes its share from the last branch: half of it, rounded down, so "Yes 50 / No 50" becomes
- * "Yes 50 / No 25 / new 25". The new branch is the last in line order. A decision with no branches gives it 100%.
+ * Add a branch to a decision. The new branch gets an even share (100 / the new number of branches, rounded) and the others shrink
+ * in proportion to make room, so "Yes 50 / No 50" becomes "Yes 34 / No 33 / new 33". The new branch is the last in line order.
+ * A decision with no branches gives it 100%.
  */
 export function addBranch(bundle: ProcessBundle, decisionId: string, target: BranchTarget): BranchResult {
   const decision = stepOf(bundle, decisionId);
@@ -124,15 +127,13 @@ export function addBranch(bundle: ProcessBundle, decisionId: string, target: Bra
   const problem = branchTargetProblem(bundle, decisionId, target);
   if (problem) return { problem };
   const branches = branchesOf(bundle, decisionId);
-  const last = branches[branches.length - 1];
-  const lastPercent = last ? toPercent(last.probability) : 100;
-  const share = last ? Math.floor(lastPercent / 2) : 100;
+  const share = Math.round(100 / (branches.length + 1));
+  const rest = shareOut(branches.map((e) => toPercent(e.probability)), 100 - share);
   const { to, steps } = resolveTarget(bundle, decision, target);
   const edge: EdgeRow = { ...edgeRow(bundle, decisionId, to, share / 100), label: `Branch ${branches.length + 1}` };
   const ops: Op[] = [{ kind: "insert", steps, edges: [edge] }];
-  if (last) {
-    ops.push({ kind: "update", changes: [{ table: "edges", id: last.id, before: { probability: last.probability }, after: { probability: (lastPercent - share) / 100 } }] });
-  }
+  const changes = shareChanges(branches, rest);
+  if (changes.length) ops.push({ kind: "update", changes });
   return { edit: { label: `Added a branch from ${decision.name} to ${describeTarget(bundle, target, to)}`, ops }, id: edge.id };
 }
 
@@ -152,30 +153,31 @@ export function setBranchTarget(bundle: ProcessBundle, edgeId: string, target: B
 }
 
 /**
- * Largest-remainder split of `total` whole percents over `weights` (in proportion to them; all zero: all to the first). Whole
- * numbers that add up to `total` exactly.
+ * Share `total` whole percents over branches that now have `weights` percent, in proportion to them, so they keep their ratio to
+ * each other. All zero: evenly. Each gets its exact share rounded down, and what rounding leaves goes to the largest (the first of
+ * equals), so the result is whole numbers that add up to `total` exactly and no branch moves against the others' direction.
  */
-function apportion(weights: readonly number[], total: number): number[] {
+function shareOut(weights: readonly number[], total: number): number[] {
   if (!weights.length) return [];
   const sum = weights.reduce((a, b) => a + b, 0);
-  if (!(sum > 0)) return weights.map((_, i) => (i === 0 ? total : 0));
-  const exact = weights.map((w) => (w * total) / sum);
-  const out = exact.map(Math.floor);
-  let left = total - out.reduce((a, b) => a + b, 0);
-  const order = exact.map((x, i) => ({ i, r: x - Math.floor(x) })).sort((a, b) => b.r - a.r || a.i - b.i);
-  for (const { i } of order) {
-    if (left <= 0) break;
-    out[i]! += 1;
-    left -= 1;
-  }
+  const exact = weights.map((w) => (sum > 0 ? (w * total) / sum : total / weights.length));
+  const out = exact.map((x) => Math.floor(x + 1e-9));
+  const largest = exact.reduce((best, x, i) => (x > exact[best]! ? i : best), 0);
+  out[largest]! += total - out.reduce((a, b) => a + b, 0);
   return out;
 }
 
+/** The row changes that give `branches` these whole percents (none for a branch already at its share, as stored). */
+function shareChanges(branches: readonly EdgeRow[], percents: readonly number[]): RowChange[] {
+  return branches.flatMap((e, i) =>
+    // Compare as stored, so a share that was 0.333 is settled to 33%.
+    Number(e.probability) === percents[i]! / 100 ? [] : [{ table: "edges" as const, id: e.id, before: { probability: e.probability }, after: { probability: percents[i]! / 100 } }],
+  );
+}
+
 /**
- * Set one branch's share, in whole percent. The last branch (in line order) takes what is left, so the shares always add up to 100%:
- * - setting any but the last: the others keep theirs, and the last gets the rest. If the others would then pass 100%, they shrink
- *   in proportion and the last gets 0;
- * - setting the last: the others share what it leaves, in proportion to what they had.
+ * Set one branch's share, in whole percent. The other branches share what is left in proportion to what they had (all at 0: evenly),
+ * so the shares always add up to 100%: "Yes 50 / No 30 / Maybe 20" with Yes set to 60 gives "60 / 24 / 16".
  * Null when the share isn't a number from 0 to 100, the line isn't a branch of the decision, there is only one branch (it is
  * always 100%), or nothing changes.
  */
@@ -185,30 +187,10 @@ export function setBranchShare(bundle: ProcessBundle, decisionId: string, edgeId
   const at = branches.findIndex((e) => e.id === edgeId);
   if (!decision || at < 0 || branches.length < 2 || !Number.isFinite(percent) || percent < 0 || percent > 100) return null;
   const value = Math.round(percent);
-  const now = branches.map((e) => toPercent(e.probability));
-  const lastAt = branches.length - 1;
-  const next = [...now];
-  next[at] = value;
-  if (at !== lastAt) {
-    const middle = branches.map((_, i) => i).filter((i) => i !== at && i !== lastAt);
-    const kept = middle.reduce((n, i) => n + now[i]!, 0);
-    if (value + kept <= 100) next[lastAt] = 100 - value - kept;
-    else {
-      const shrunk = apportion(middle.map((i) => now[i]!), 100 - value);
-      middle.forEach((i, k) => (next[i] = shrunk[k]!));
-      next[lastAt] = 0;
-    }
-  } else {
-    const others = branches.map((_, i) => i).filter((i) => i !== lastAt);
-    const shared = apportion(others.map((i) => now[i]!), 100 - value);
-    others.forEach((i, k) => (next[i] = shared[k]!));
-  }
-  const changes: RowChange[] = [];
-  branches.forEach((e, i) => {
-    // Compare as stored, so a share that was 0.333 is settled to 33%.
-    if (Number(e.probability) === next[i]! / 100) return;
-    changes.push({ table: "edges", id: e.id, before: { probability: e.probability }, after: { probability: next[i]! / 100 } });
-  });
+  const others = branches.filter((_, i) => i !== at);
+  const shared = shareOut(others.map((e) => toPercent(e.probability)), 100 - value);
+  const next = branches.map((_, i) => (i === at ? value : shared[i < at ? i : i - 1]!));
+  const changes = shareChanges(branches, next);
   if (!changes.length) return null;
   const name = branches[at]!.label?.trim() || stepOf(bundle, branches[at]!.to_step_id)?.name || "branch";
   return { label: `Set ${name} to ${value}%`, ops: [{ kind: "update", changes }] };
@@ -231,9 +213,9 @@ export function setBranchCondition(bundle: ProcessBundle, edgeId: string, condit
 }
 
 /**
- * Take a branch off a decision. The last branch (in line order) takes what is left, so the shares still add up to 100%: the removed
- * branch's share goes to the branch that is last after it goes. A decision with one branch left keeps it (at 100%); it never loses
- * its last branch this way. Null when the line isn't a branch, or is the only one.
+ * Take a branch off a decision. The branches left grow in proportion to what they had, so the shares still add up to 100%:
+ * "Yes 50 / No 30 / Maybe 20" without Yes gives "No 60 / Maybe 40". A decision with one branch left keeps it (at 100%); it never
+ * loses its last branch this way. Null when the line isn't a branch, or is the only one.
  */
 export function removeBranch(bundle: ProcessBundle, edgeId: string): Edit | null {
   const edge = bundle.edges.find((e) => e.id === edgeId);
@@ -242,15 +224,9 @@ export function removeBranch(bundle: ProcessBundle, edgeId: string): Edit | null
   const branches = branchesOf(bundle, decision.id);
   if (branches.length < 2) return null;
   const rest = branches.filter((e) => e.id !== edgeId);
-  const shares = rest.map((e) => toPercent(e.probability));
-  const lastAt = rest.length - 1;
-  shares[lastAt] = 100 - shares.slice(0, lastAt).reduce((n, v) => n + v, 0);
-  if (shares[lastAt]! < 0) return null;
+  const changes = shareChanges(rest, shareOut(rest.map((e) => toPercent(e.probability)), 100));
   const ops: Op[] = [{ kind: "remove", steps: [], edges: [edge] }];
-  const last = rest[lastAt]!;
-  if (Number(last.probability) !== shares[lastAt]! / 100) {
-    ops.push({ kind: "update", changes: [{ table: "edges", id: last.id, before: { probability: last.probability }, after: { probability: shares[lastAt]! / 100 } }] });
-  }
+  if (changes.length) ops.push({ kind: "update", changes });
   const name = edge.label?.trim() || stepOf(bundle, edge.to_step_id)?.name || "branch";
   return { label: `Removed the ${name} branch from ${decision.name}`, ops };
 }

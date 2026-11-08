@@ -46,8 +46,8 @@ question.
    - **Adding one.** A new decision comes with two branches, "Yes" and "No", at 50% each, already drawn as lines out of
      it.
    - **On the canvas.** The node shows its question as the title, then one row per branch: name and %.
-   - **The side panel.** It holds the question, then each branch's name and %, and "+ Add branch". The last branch
-     always takes what is left, so the shares always add up to 100%.
+   - **The side panel.** It holds the question, then each branch's name and %, and "+ Add branch". Changing one
+     branch's % shares the difference across the others in proportion (item 12), so the shares always add up to 100%.
    - **Where a branch goes.** Drag its line, or pick from its row's menu: "Next step…", "Go back to…" or "End (won /
      lost / done)".
    - **Conditions.** The condition tag stays, as an optional "Only when…" field on a branch.
