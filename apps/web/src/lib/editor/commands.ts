@@ -475,8 +475,9 @@ export function outgoingTotal(bundle: ProcessBundle, stepId: string): number {
 export function addEdge(bundle: ProcessBundle, from: string, to: string): { edit: Edit; id: string } | null {
   if (connectionProblem(bundle, from, to)) return null;
   const { revision } = bundle;
-  // A handoff line on the company map is not a branch: it has no share to divide (a hand-off takes every won client).
-  const handoff = bundle.process.is_company === true;
+  // A handoff line on the company map is not a branch: it has no share to divide (a hand-off takes every won client). A line out of a decision on the
+  // company map is one of its branches, with a share (QA round 2, item 7).
+  const handoff = bundle.process.is_company === true && bundle.steps.find((s) => s.id === from)?.kind !== "decision";
   const edge: EdgeRow = {
     id: newId(),
     revision_id: revision.id,

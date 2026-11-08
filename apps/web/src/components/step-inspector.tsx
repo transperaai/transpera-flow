@@ -276,7 +276,7 @@ export function StepInspector({
         </p>
       ) : null}
 
-      {decision && !company && onFocusBranch && <DecisionPanel bundle={bundle} editor={editor} decision={step} focus={branchFocus} onFocusBranch={onFocusBranch} />}
+      {decision && onFocusBranch && <DecisionPanel bundle={bundle} editor={editor} decision={step} focus={branchFocus} onFocusBranch={onFocusBranch} />}
 
       {wait && (
         <div className={sectionClass}>

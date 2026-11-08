@@ -69,11 +69,7 @@ window.mountEditor = (options) => {
       editorMode={options.editorMode ?? "draft"}
       userId={options.userId ?? null}
       canAddPurpose={options.canAddPurpose}
-      library={options.company ? { processes: [], templates: [
-          { id: "agency-sales-pipeline", name: "Agency sales pipeline", kind: "pipeline", category: "sales", description: "" },
-          { id: "client-onboarding", name: "Client onboarding", kind: "servicing", category: "onboarding", description: "" },
-          { id: "monthly-reporting", name: "Monthly client reporting", kind: "servicing", category: "routine_client_work", description: "" },
-        ],
+      library={options.company ? { processes: [],
         onCreate: async () => ({ error: "Not available in this test." }),
       } : undefined}
       stepChanges={options.solutionChanges}

@@ -2,7 +2,7 @@
 
 // The process library (issue #164, B12), in the company map's editor only (a process's own editor makes no links, editor brainstorm item 3): this workspace's processes, to place in the draft being edited as
 // links. Pick several and add them at once; they land where the person is looking. Adding never edits or copies a process, and
-// a process sits in one place only, so one that sits elsewhere is greyed with where. "New process" and the templates make a new
+// a process sits in one place only, so one that sits elsewhere is greyed with where. "New process" makes a new
 // process and place it the same way. The edit goes into the draft like any other change, so it is undone, saved and published
 // with the rest.
 
@@ -16,7 +16,7 @@ import type { Selection } from "@/components/process-canvas";
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { PLACED_REMOVE_NOTE } from "@/lib/editor/commands";
 import type { ViewRef } from "@/lib/editor/groups";
-import { filterLibrary, isAddable, libraryEntries, placeProcesses, processesOfBundle, type LibraryEntry, type LibraryProcess, type LibraryTemplate } from "@/lib/editor/library";
+import { filterLibrary, isAddable, libraryEntries, placeProcesses, processesOfBundle, type LibraryEntry, type LibraryProcess } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
 
 export function ProcessLibrary({
@@ -25,7 +25,6 @@ export function ProcessLibrary({
   setSelection,
   viewRef,
   processes,
-  templates = [],
   onCreate,
 }: {
   bundle: ProcessBundle;
@@ -34,9 +33,7 @@ export function ProcessLibrary({
   viewRef?: ViewRef;
   /** The workspace's processes and where each sits (live links); without it, the processes the bundle carries. */
   processes?: readonly LibraryProcess[];
-  /** Templates to make a new process from. */
-  templates?: readonly LibraryTemplate[];
-  /** Makes a new process ("New process", a template); without it, the library only places existing ones. */
+  /** Makes a new process ("New process"); without it, the library only places existing ones. No templates (QA round 2). */
   onCreate?: LibraryCreate;
 }) {
   const [query, setQuery] = useState("");
@@ -69,7 +66,6 @@ export function ProcessLibrary({
   // Ticked processes that the search is hiding are still ticked, and still added: the button says so.
   const shownIds = new Set([...free, ...onMap].map((e) => e.id));
   const hidden = chosen.filter((id) => !shownIds.has(id)).length;
-  const shownTemplates = filterLibrary(templates, query);
 
   const toggle = (id: string) =>
     setPicked((now) => {
@@ -123,9 +119,9 @@ export function ProcessLibrary({
         Search processes by name
       </label>
       <Input id={searchId} type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name" autoComplete="off" />
-      {!all.length && !templates.length ? (
+      {!all.length ? (
         <p className="text-xs text-muted-foreground">This workspace has no other processes yet.</p>
-      ) : !shown.length && !shownTemplates.length ? (
+      ) : !shown.length ? (
         <p role="status" className="text-xs text-muted-foreground">
           No process matches “{query.trim()}”.
         </p>
@@ -227,24 +223,6 @@ export function ProcessLibrary({
           <Button type="button" size="sm" variant="outline" disabled={busy || !newName.trim()} onClick={() => create({ kind: "new", name: newName, category: newCategory })} data-library-new-make className="self-end">
             Make and add
           </Button>
-          {shownTemplates.length > 0 && (
-            <>
-              <h3 className="text-xs font-medium text-fg-2">From a template (its numbers are rough estimates to check)</h3>
-              <ul className="flex flex-col gap-1" aria-label="Templates">
-                {shownTemplates.map((t) => (
-                  <li key={t.id} data-library-template={t.id} className="flex items-center justify-between gap-2 rounded-token border border-line px-2 py-1.5 text-sm">
-                    <span className="flex min-w-0 flex-col">
-                      <span className="truncate">{t.name}</span>
-                      <span className="text-xs text-muted-foreground">{PROCESS_CATEGORY_LABELS[t.category]}</span>
-                    </span>
-                    <Button type="button" size="xs" variant="outline" disabled={busy} onClick={() => create({ kind: "template", templateId: t.id })}>
-                      Use
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
         </div>
       )}
       {note && (

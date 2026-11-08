@@ -15,7 +15,7 @@ import { retiredSteps, isUnpublished, workspacePurposes, type BlockBundle, type 
 import { createSolution } from "@/app/w/[slug]/solution-actions";
 import { addPurpose } from "@/app/w/[slug]/settings/actions";
 import { createLibraryProcess } from "@/app/w/[slug]/library-actions";
-import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
+import type { LibraryProcess } from "@/lib/editor/library";
 import type { LibraryCreate } from "@/lib/editor/library-create";
 import { blockFromSteps, bundleFromBlock, turnIntoSteps, turnIntoStepsProblem } from "@/lib/blocks/blocks";
 import { firstProblem, nodeProblems, problemsLine, publishBlocker } from "@/lib/editor/problems";
@@ -121,8 +121,8 @@ export function EditorView({
   editBlock?: { id: string; name: string; description: string; bundle: BlockBundle };
   /** Solution mode opened from a solution's page ("Open in editor", `?solution=<id>`): the map starts as that solution's copy, not as live. */
   solutionSeed?: { bundle: ProcessBundle; name: string };
-  /** The process library (B12): the workspace's processes, where each sits (live links), and the templates. */
-  library?: { processes: LibraryProcess[]; templates: LibraryTemplate[]; /** Makes a process for the library; default in a workspace is the server action (a harness stands in). */ onCreate?: LibraryCreate };
+  /** The process library (B12): the workspace's processes, and where each sits (live links). */
+  library?: { processes: LibraryProcess[]; /** Makes a process for the library; default in a workspace is the server action (a harness stands in). */ onCreate?: LibraryCreate };
 }) {
   const router = useRouter();
   // The company map (B11): the processes of the business as cards, moved and joined by handoff lines. It is not run from here (the Sandbox runs the company from it), so no Simulate or problems.
@@ -184,10 +184,11 @@ export function EditorView({
   // A branch of a decision, picked on its line or its row or its "Go back to" node, is the decision in the panel with that branch's fields in
   // focus (the keys and the map keep the line selected, so Delete takes the line, not the decision).
   const { inspected, branchFocus } = useMemo(() => {
-    const only = !company && selected.steps.length === 0 && selected.edges.length === 1 ? working.edges.find((e) => e.id === selected.edges[0]) : undefined;
+    // On the company map too: a decision there has branches (QA round 2, item 7).
+    const only = selected.steps.length === 0 && selected.edges.length === 1 ? working.edges.find((e) => e.id === selected.edges[0]) : undefined;
     const from = only && working.steps.find((s) => s.id === only.from_step_id);
     return from?.kind === "decision" ? { inspected: { steps: [from.id], edges: [] as string[] }, branchFocus: only!.id } : { inspected: selected, branchFocus: null };
-  }, [company, selected, working.edges, working.steps]);
+  }, [selected, working.edges, working.steps]);
   // A branch just added is put in focus even though the line isn't selected.
   const pickKey = `${selection.steps.join(",")}|${selection.edges.join(",")}`;
   const [freshBranch, setFreshBranch] = useState<{ key: string; id: string } | null>(null);
@@ -259,7 +260,10 @@ export function EditorView({
     [working, partOf, turnNote, editor],
   );
 
-  const { commands, inspectFocus, clearInspectFocus } = useEditCommands({ editor, bundle: working, selected, setSelection });
+  // "Open process page" on a node that links to a process (QA round 2, item 7). The demo has no process pages to open.
+  const slug = initialLive.workspace.slug;
+  const openProcess = useCallback((processId: string) => router.push(`/w/${slug}/p/${processId}`), [router, slug]);
+  const { commands, inspectFocus, clearInspectFocus } = useEditCommands({ editor, bundle: working, selected, setSelection, ...(mode === "live" ? { openProcess } : {}) });
   // Where the map is looking, for the palette (new steps appear there).
   const viewRef = useRef<(() => ViewHint | null) | null>(null);
   const blockTools = useBlockTools({
@@ -444,8 +448,8 @@ export function EditorView({
               editorState={state}
               selection={selected}
               onSelectionChange={setSelection}
-              // The company map's cards can't be copied or split (removing one is Delete or the inspector's Remove from this map), so the card menu has nothing to offer.
-              commands={company ? null : commands}
+              // The same right-click menu on both maps (QA round 2, item 7); a linked card can't be copied, and offers its process's page.
+              commands={commands}
               handoffs={company}
               departmentLanes={departmentLanes}
               cardTags={cardTags}

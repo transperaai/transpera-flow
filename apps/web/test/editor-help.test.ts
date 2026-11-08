@@ -90,7 +90,8 @@ describe("every (i) on the Editor screen", () => {
     const expected: Record<string, string[]> = {
       "components/editor/inspector.tsx": ["What they achieve", "First step", "Save this group as a block"],
       "components/editor/decision-panel.tsx": ["Branches", "Goes to"],
-      "components/editor/palette.tsx": ["The company map", "Add", "Groups", "Blocks", "Insert", "Replace selected"],
+      // The company map's Add has its own words (QA round 2, item 7: both maps share one palette).
+      "components/editor/palette.tsx": ["Add", "Add", "Groups", "Blocks", "Insert", "Replace selected"],
       "components/editor/editor-bar.tsx": ["Save to library", "Save solution", "Block name", "Description", "Solution name"],
       "components/editor/issue-area.tsx": ["Issue area"],
       // "New solution" moved to the shared button (Q12), which draws its (i) from SOLUTIONS_LIST_HELP.
@@ -102,7 +103,7 @@ describe("every (i) on the Editor screen", () => {
     }
   });
 
-  it("puts one beside each heading of the palette, as the prototype has them (and one for the company map's), and one beside the block buttons", () => {
+  it("puts one beside each heading of the palette, as the prototype has them (Add twice: a process's and the company map's), and one beside the block buttons", () => {
     expect(helpTags(read("components/editor/palette.tsx"))).toHaveLength(6);
   });
 

@@ -14,7 +14,7 @@ import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { addStep, deleteSelection } from "@/lib/editor/commands";
 import type { ViewHint } from "@/lib/editor/groups";
 import { kindForCategory } from "@transpera-flow/db";
-import type { LibraryProcess, LibraryTemplate } from "@/lib/editor/library";
+import type { LibraryProcess } from "@/lib/editor/library";
 import type { LibraryCreate, LibraryCreateInput } from "@/lib/editor/library-create";
 import { ProcessEditor } from "@/lib/editor/editor";
 import { StepBaseValues } from "@/components/step-base-values";
@@ -35,7 +35,7 @@ export interface HarnessOptions {
   palette?: boolean;
   /** A read-only map in a flex column as wide as the page, as the Overview's card holds it (the default is a plain 1300px block). */
   card?: boolean;
-  /** An ordinary process's editor with the process library (B12 part 2): Northbeam's other processes, one on the company map, templates, and a stand-in "New process". */
+  /** An ordinary process's editor with the process library (B12 part 2): Northbeam's other processes, one on the company map, and a stand-in "New process". */
   library?: boolean;
   /** The first run is still computing (issue #44): the map carries the "Running the first simulation" chip. */
   computing?: boolean;
@@ -100,7 +100,7 @@ function companyBundle(): ProcessBundle {
 const created: unknown[] = [];
 
 /** The library an ordinary editor is handed (B12 part 2): the other processes sit nowhere, one more sits on the company map. */
-function libraryOf(bundle: ProcessBundle): { processes: LibraryProcess[]; templates: LibraryTemplate[]; onCreate: LibraryCreate } {
+function libraryOf(bundle: ProcessBundle): { processes: LibraryProcess[]; onCreate: LibraryCreate } {
   const others = (bundle.otherProcesses ?? []).map<LibraryProcess>((p) => ({ id: p.process.id, name: p.process.name, kind: p.process.kind, category: p.process.category, live: true, holder: null }));
   return {
     processes: [
@@ -108,10 +108,6 @@ function libraryOf(bundle: ProcessBundle): { processes: LibraryProcess[]; templa
       ...others,
       { id: "f0000000-0000-4000-8000-000000000001", name: "Renewals", kind: "servicing", category: "routine_client_work", live: true, holder: null },
       { id: "f0000000-0000-4000-8000-000000000002", name: "Referrals", kind: "pipeline", category: "sales", live: true, holder: { id: "cccc0000-0000-4000-8000-00000000c0c0", name: "Company map", company: true } },
-    ],
-    templates: [
-      { id: "agency-delivery", name: "Agency delivery", kind: "servicing", category: "routine_client_work", description: "A template." },
-      { id: "client-onboarding", name: "Client onboarding", kind: "servicing", category: "onboarding", description: "A template." },
     ],
     onCreate: async (input: LibraryCreateInput) => {
       created.push(input);
