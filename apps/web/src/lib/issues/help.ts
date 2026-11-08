@@ -77,11 +77,6 @@ export const ISSUE_PAGE_HELP = {
     description: "Every solution built for this issue, with an automatic pass or fail against its target, how often that holds across the simulated runs, and your own verdict. You make the final call.",
     example: "“Lead scoring”: automatic pass, holds in 92% of runs, your verdict pass.",
   },
-  target: {
-    label: "Target",
-    description: "What is measured to know the problem is fixed: where it was, where it is now and the goal. Solutions get an automatic pass or fail against the goal.",
-    example: "Wait at Check fit: now 1.4 days, goal under 4 hours.",
-  },
   owners: {
     label: "Owners",
     description: "The people responsible for sorting this out. Change them with Edit.",

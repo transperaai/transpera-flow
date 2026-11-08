@@ -32,3 +32,21 @@ Issues → open one.
 - [ ] 2.6 No "History" card.
 - [ ] 2.7 "What's wrong and sources": the issue's sources sit under What's wrong, with + Link. No separate Sources or
       "Linked to" card on the right.
+
+## Request 3: issues belong to a process; the target is part of What's wrong; no automatic pass/fail (PR #308)
+
+- [ ] 3.1 No red issue badges on any map: a process page, the Overview's company map, the Processes list's map preview,
+      and an issue's own "Where this issue sits".
+- [ ] 3.2 "+ New issue" and Edit on an issue: no "What does it touch?" / steps choice, and no Target measure / Value now /
+      Goal fields. Only the process (when there is more than one), title, rating, owners and sources.
+- [ ] 3.3 Acknowledging a finding from the run (Facts) makes an issue of the process, not of the step.
+- [ ] 3.4 The Issue page is one column: no Target card.
+- [ ] 3.5 Click an empty "What's wrong": it starts with four questions to answer (what goes wrong, how often, what it
+      costs, what good would look like).
+- [ ] 3.6 An older issue that had a target shows it as a last line of What's wrong ("What good looks like: …"). Save
+      What's wrong once and the line stays only if you keep it.
+- [ ] 3.7 The Issues list no longer shows "Target: …" or step names on an issue's line.
+- [ ] 3.8 "Solutions tried" on an issue shows "Your call: Pass/Fail" or "No verdict yet", never "Against today" or "holds
+      in x% of runs". The process page's issue track shows no "holds in x% of runs" either.
+- [ ] 3.9 Save a solution from the editor for an issue, and link one to an issue: both work, and no automatic verdict
+      appears anywhere.

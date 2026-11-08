@@ -62,7 +62,7 @@ describe("the issue status track", () => {
     expect(trackOf(issue("open"), linkedSolutions(data, "i")).stage).toBe(1);
   });
   it("a solution with a verdict, or the Testing solutions status, is Being built", () => {
-    const data = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: "fail" })] };
+    const data = { solutions: [sol("a")], links: [link("a", "i", { user_verdict: "fail" })] };
     expect(trackOf(issue("open"), linkedSolutions(data, "i")).stage).toBe(2);
     expect(trackOf(issue("testing"), []).stage).toBe(2);
   });
@@ -70,13 +70,12 @@ describe("the issue status track", () => {
     expect(trackOf(issue("resolved", "process_change"), []).stage).toBe(3);
     const failed = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: "pass", user_verdict: "fail" })] };
     expect(trackOf(issue("resolved", "solution", "a"), linkedSolutions(failed, "i")).stage).toBe(3);
-    const passed = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: "pass", holds_pct: 92 })] };
+    const passed = { solutions: [sol("a")], links: [link("a", "i", { user_verdict: "pass" })] };
     const t = trackOf(issue("resolved", "solution", "a"), linkedSolutions(passed, "i"));
     expect(t.stage).toBe(4);
-    expect(t.verified?.holdsPct).toBe(92);
   });
   it("a pass by a solution that did not fix the issue does not verify it", () => {
-    const data = { solutions: [sol("a"), sol("bb")], links: [link("a", "i", { auto_verdict: "fail" }), link("bb", "i", { auto_verdict: "pass" })] };
+    const data = { solutions: [sol("a"), sol("bb")], links: [link("a", "i", { user_verdict: "fail" }), link("bb", "i", { user_verdict: "pass" })] };
     const t = trackOf(issue("resolved", "solution", "a"), linkedSolutions(data, "i"));
     expect(t.stage).toBe(3);
     expect(t.verified).toBeNull();
@@ -84,16 +83,16 @@ describe("the issue status track", () => {
     expect(trackOf(issue("resolved", "solution", null), linkedSolutions(data, "i")).stage).toBe(3);
     expect(trackOf(issue("resolved", "process_change", "bb"), linkedSolutions(data, "i")).stage).toBe(3);
   });
-  it("a person's Pass over a simulation Fail verifies, and shows both", () => {
+  it("only the person's verdict counts: an automatic pass stored before QA round 2 verifies nothing", () => {
     const data = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: "fail", holds_pct: 20, user_verdict: "pass" })] };
     const t = trackOf(issue("resolved", "solution", "a"), linkedSolutions(data, "i"));
     expect(t.stage).toBe(4);
     expect(t.verified?.solution.id).toBe("a");
     const html = renderToStaticMarkup(createElement(IssueTrackView, { track: t, base: "/demo" }));
-    expect(html).toMatch(/Pass.*\(your verdict\).*simulation: holds in 20% of runs/);
-    // A person's Pass where the simulation could not check it, or agreed, is a plain verified pass.
-    const unchecked = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: null, user_verdict: "pass" })] };
-    expect(trackOf(issue("resolved", "solution", "a"), linkedSolutions(unchecked, "i")).stage).toBe(4);
+    expect(html).toMatch(/Pass.*\(your verdict\)/);
+    expect(html).not.toMatch(/holds in|simulation:/);
+    const autoOnly = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: "pass", user_verdict: null })] };
+    expect(trackOf(issue("resolved", "solution", "a"), linkedSolutions(autoOnly, "i")).stage).toBe(3);
   });
   it("won't fix and not a problem leave the track", () => {
     expect(trackOf(issue("wont_fix"), [])).toMatchObject({ stage: null, closed: "wont_fix" });
@@ -106,12 +105,12 @@ describe("the issue status track", () => {
   });
 
   it("renders the track with the current stage marked, the verdict and a build link", () => {
-    const data = { solutions: [sol("a")], links: [link("a", "i", { auto_verdict: "pass", holds_pct: 90 })] };
+    const data = { solutions: [sol("a")], links: [link("a", "i", { user_verdict: "pass" })] };
     const done = renderToStaticMarkup(createElement(IssueTrackView, { track: trackOf(issue("resolved", "solution", "a"), linkedSolutions(data, "i")), base: "/demo" }));
     for (const label of TRACK_STAGES) expect(done).toContain(label);
     expect(done).toContain('data-state="here"');
     expect(done).toContain("Before and after");
-    expect(done).toContain("holds in 90% of runs");
+    expect(done).not.toContain("holds in");
     expect(done).toContain("/demo/solutions/a");
     const open = renderToStaticMarkup(createElement(IssueTrackView, { track: trackOf(issue("open"), []), base: "/w/x", buildHref: "/w/x/p/p1/edit?mode=solution" }));
     expect(open).toContain("✎ Build solution");

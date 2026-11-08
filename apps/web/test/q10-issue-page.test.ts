@@ -175,7 +175,8 @@ describe("the Issue page as cards", () => {
     expect(await row.locator("[data-status-menu]").getAttribute("data-status")).toBe("works");
     expect(await row.locator("[data-status-menu]").innerText()).toContain("Works");
     expect(await row.locator("[data-tried-changes]").innerText()).toMatch(/Changes: /);
-    expect(await row.locator("[data-tried-result]").innerText()).toMatch(/Against today|against today|Open to compare/);
+    // The person's own verdict only, no automatic one (QA round 2).
+    expect(await row.locator("[data-tried-result]").innerText()).toMatch(/^(Your call: (Pass|Fail)|No verdict yet\.\s*Open to compare)$/);
     expect(await row.locator("a[href='/w/example/solutions/" + vettingSolutionId + "']").count()).toBeGreaterThan(0);
     expect(await section.locator("[data-try-solution]").innerText()).toBe("+ Try a new solution");
     expect(await section.locator("[data-try-solution]").getAttribute("href")).toMatch(/\/edit\?mode=solution&issue=/);

@@ -1,10 +1,9 @@
 "use server";
 
-import { carryStepChanges, checkStepChange, cleanStepChange, type BlockBundle, type Json, type ProcessBundle, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
+import { carryStepChanges, checkStepChange, cleanStepChange, type Json, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
 import { rpc } from "@transpera-flow/db/client";
 import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/save";
-import { serverVerdict, type CopyRun } from "@/lib/solutions/server-verdict";
-import { parsePatches, type ScenarioPatch } from "@transpera-flow/engine";
+import { linkCheck } from "@/lib/solutions/server-verdict";
 import { isId } from "@/lib/sources/validate";
 import { pgCode } from "@/app/action-db";
 import { getDb, getSessionUser } from "@/lib/auth/session";
@@ -22,12 +21,6 @@ const SOLUTION_ISSUE_COLS = ["solution_id", "issue_id", "workspace_id", "auto_ve
 const signedOut = { status: "error", message: "Your session has ended. Sign in again." } as const;
 const forbidden = { status: "error", message: "You don't have permission to save solutions here." } as const;
 const invalid = { status: "error", message: "That solution isn't valid." } as const;
-
-/** A stored solution's lever changes, as patches (anything that isn't valid counts as none). */
-const leversOf = (stored: unknown): ScenarioPatch[] => {
-  const p = parsePatches(stored);
-  return p.ok ? p.patches : [];
-};
 
 function failure(e: unknown) {
   const error = { code: pgCode(e), message: (e as { message?: string } | null)?.message };
@@ -58,17 +51,12 @@ export async function createSolution(workspaceId: unknown, input: unknown): Prom
     const problem = checkStepChange(c, copyIds);
     if (problem) return { status: "error", message: `${c.name}: ${problem}` };
   }
+  // No automatic verdict (QA round 2): each link is checked, and the person gives their own verdict.
   const links: { issue_id: string; auto_verdict: string | null; holds_pct: number | null; auto_note: string }[] = [];
-  // The copy is simulated once, for all the issues it is linked to.
-  let base: ProcessBundle | undefined;
-  let run: CopyRun | undefined;
   for (const l of v.links) {
-    const r = await serverVerdict({ db, workspaceId, processId: v.processId, baseRevisionId: v.baseRevisionId, copy: v.copy, levers: v.levers, issueId: l.issueId, base, run });
-    if (!r.ok) return { status: "error", message: r.message };
-    base = r.base;
-    run = r.run;
-    const checked = r.verdict.status !== "unchecked";
-    links.push({ issue_id: l.issueId, auto_verdict: checked ? r.verdict.status : null, holds_pct: checked ? r.verdict.holdsPct : null, auto_note: r.verdict.note });
+    const problem = await linkCheck(db, workspaceId, v.processId, l.issueId);
+    if (problem) return { status: "error", message: problem };
+    links.push({ issue_id: l.issueId, auto_verdict: null, holds_pct: null, auto_note: "" });
   }
   const args = {
     p_workspace: workspaceId,
@@ -103,8 +91,8 @@ export async function createSolution(workspaceId: unknown, input: unknown): Prom
 export type LinkSolutionResult = { status: "ok"; link: SolutionIssueRow } | { status: "error"; message: string };
 
 /**
- * Link a saved solution to an issue it solves. The automatic verdict is worked out here from the stored copy and the issue's
- * target. The issue moves to Testing solutions. (For a solution started without an issue; A50's solution page puts a button on it.)
+ * Link a saved solution to an issue it solves (no automatic verdict, QA round 2: the person gives their own). The issue moves to
+ * Testing solutions. (For a solution started without an issue; A50's solution page puts a button on it.)
  */
 export async function linkSolutionToIssue(workspaceId: unknown, solutionId: unknown, issueId: unknown): Promise<LinkSolutionResult> {
   if (!isId(workspaceId) || !isId(solutionId) || !isId(issueId)) return invalid;
@@ -118,9 +106,8 @@ export async function linkSolutionToIssue(workspaceId: unknown, solutionId: unkn
     .executeTakeFirst()
     .catch(() => undefined);
   if (!sol) return { status: "error", message: "That solution isn't there any more." };
-  const r = await serverVerdict({ db, workspaceId, processId: sol.process_id, baseRevisionId: sol.base_revision_id, copy: sol.steps as unknown as BlockBundle, levers: leversOf(sol.lever_changes), issueId });
-  if (!r.ok) return { status: "error", message: r.message };
-  const checked = r.verdict.status !== "unchecked";
+  const problem = await linkCheck(db, workspaceId, sol.process_id, issueId);
+  if (problem) return { status: "error", message: problem };
   try {
     const data = await db
       .insertInto("solution_issues")
@@ -128,9 +115,9 @@ export async function linkSolutionToIssue(workspaceId: unknown, solutionId: unkn
         solution_id: solutionId,
         issue_id: issueId,
         workspace_id: workspaceId,
-        auto_verdict: checked ? r.verdict.status : null,
-        holds_pct: checked ? r.verdict.holdsPct : null,
-        auto_note: r.verdict.note.slice(0, 1000),
+        auto_verdict: null,
+        holds_pct: null,
+        auto_note: "",
       })
       .returning(SOLUTION_ISSUE_COLS)
       .executeTakeFirstOrThrow();

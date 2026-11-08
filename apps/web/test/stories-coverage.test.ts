@@ -46,7 +46,6 @@ const SHARED: [string, string][] = [
   ["solutions/solution-cards", "VerdictWord"],
   ["solutions/solution-cards", "SolutionCards"],
   ["provenance-badge", "ProvenanceBadge"],
-  ["step-issue-badges", "StepIssueBadges"],
   ["shell/skeletons", "PageSkeleton"],
   ["shell/skeletons", "ListSkeleton"],
   ["shell/skeletons", "CardGridSkeleton"],

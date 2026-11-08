@@ -29,8 +29,8 @@ export function builtBy(createdBy: string | null, viewerId: string | null | unde
   return createdBy === viewerId ? "You" : (names[createdBy] ?? "A team member");
 }
 
-/** The verdict that counts for a link: the person's own, else the automatic one, else none. */
-export const effectiveVerdict = (l: Pick<SolutionIssueRow, "auto_verdict" | "user_verdict">): SolutionVerdict | null => l.user_verdict ?? l.auto_verdict;
+/** The verdict that counts for a link: the person's own, else none (QA round 2: no automatic verdict, even one stored before). */
+export const effectiveVerdict = (l: Pick<SolutionIssueRow, "user_verdict">): SolutionVerdict | null => l.user_verdict;
 
 export const VERDICT_WORDS: Record<SolutionVerdict, string> = { pass: "Pass", fail: "Fail" };
 

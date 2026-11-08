@@ -95,7 +95,7 @@ describe("every (i) on the Editor screen", () => {
       "components/editor/decision-panel.tsx": ["Branches", "Goes to"],
       "components/editor/palette.tsx": ["The company map", "Add", "Groups", "Blocks", "Insert", "Replace selected"],
       "components/editor/editor-bar.tsx": ["Simulate", "Save to library", "Save solution", "Block name", "Description", "Solution name"],
-      "components/editor/simulate-footer.tsx": ["Compared with live", "Automatic verdict"],
+      "components/editor/simulate-footer.tsx": ["Compared with live"],
       "components/editor/issue-area.tsx": ["Issue area"],
       // "New solution" moved to the shared button (Q12), which draws its (i) from SOLUTIONS_LIST_HELP.
       "components/solutions/process-solutions.tsx": ["Build solution"],
@@ -144,11 +144,11 @@ describe("every control of the block library (issue #116)", () => {
 });
 
 describe("every control of solution mode (issue #114)", () => {
-  it("has an (i) beside the name, the save, the issue area, the verdict and the ways in", () => {
+  it("has an (i) beside the name, the save, the issue area and the ways in, and no automatic verdict (QA round 2)", () => {
     const labels = (file: string) => helpTags(read(file)).map((t) => /label="([^"]+)"/.exec(t)?.[1]);
     expect(labels("components/editor/editor-bar.tsx")).toEqual(expect.arrayContaining(["Solution name", "Save solution"]));
     expect(labels("components/editor/issue-area.tsx")).toEqual(["Issue area"]);
-    expect(labels("components/editor/simulate-footer.tsx")).toContain("Automatic verdict");
+    expect(labels("components/editor/simulate-footer.tsx")).not.toContain("Automatic verdict");
     expect(labels("components/solutions/process-solutions.tsx")).toEqual(["Build solution"]);
     expect(read("components/solutions/new-solution.tsx")).toContain("{...SOLUTIONS_LIST_HELP.newSolution}");
     // The (i) on the process page's Solutions heading was removed on purpose (QA wave 1); its two buttons above keep theirs.

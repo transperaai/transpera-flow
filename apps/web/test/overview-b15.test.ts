@@ -231,10 +231,11 @@ const link = (solution_id: string, verdict: "pass" | "fail" | null): SolutionIss
   solution_id,
   issue_id: "i",
   workspace_id: live.workspace.id,
-  auto_verdict: verdict,
+  // The person's verdict: an automatic one no longer counts (QA round 2).
+  auto_verdict: null,
   holds_pct: null,
   auto_note: "",
-  user_verdict: null,
+  user_verdict: verdict,
   user_notes: "",
   created_at: "",
   updated_at: "",

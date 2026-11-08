@@ -9,7 +9,7 @@
 // mode (issue #114: a copy of live, edited in memory and saved as a solution of its own; the process's live version and its
 // single draft are never touched, D18).
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { retiredSteps, isUnpublished, workspacePurposes, type BlockBundle, type BlockRow, type ProcessBundle, type PurposeCategory, type ScenarioRow, type StoredStepChange } from "@transpera-flow/db";
 import { createSolution } from "@/app/w/[slug]/solution-actions";
@@ -33,12 +33,10 @@ import { connect, connectScratch } from "@/lib/drafts/connect";
 import { newlyBroken } from "@/lib/scenarios/broken";
 import { useSimulation } from "@/lib/sim/use-simulation";
 import type { EngineModel } from "@transpera-flow/engine";
-import { currentArea, verdictArea, type SolutionIssue } from "@/lib/solutions/area";
+import { currentArea, type SolutionIssue } from "@/lib/solutions/area";
 import { changedStepIds, solutionCopy } from "@/lib/solutions/bundle";
 import { addDemoSolution } from "@/lib/solutions/demo";
 import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/save";
-import type { TargetVerdict } from "@/lib/solutions/verdict";
-import { verdictInWorker } from "@/lib/solutions/verdict-client";
 import { Button } from "@/components/ui/button";
 import { PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
@@ -309,7 +307,6 @@ export function EditorView({
   const [refusedWithout, setRefusedWithout] = useState(false);
   const added = useMemo(() => [...diff.steps.values()].filter((c) => c.kind === "added").map((c) => c.id), [diff]);
   const outlined = useMemo(() => (solutionMode && issue ? currentArea(issue, working.steps, added) : null), [solutionMode, issue, working.steps, added]);
-  const area = useMemo(() => (issue ? verdictArea(working.steps, issue, added) : []), [issue, working.steps, added]);
   const saveSolution = async () => {
     setSolutionError(null);
     setRefusedWithout(false);
@@ -325,17 +322,6 @@ export function EditorView({
     const changes = diffBundles(live, now);
     if (!changes.list.length && !stepChanges.length) return setSolutionError("Change at least one step first. A solution with no changes has nothing to test.");
     setSolutionSaving(true);
-    // The automatic verdict. In a workspace the server works it out again from the stored copy and ignores what is sent; the demo has no
-    // server, so it keeps the one worked out here, in a worker.
-    let auto: TargetVerdict | null = null;
-    if (issue && mode === "demo" && workingModel.model) {
-      const addedIds = changedStepIds(changes).filter((id) => changes.steps.get(id)?.kind === "added");
-      try {
-        auto = await verdictInWorker({ target: issue.target, model: workingModel.model, area: verdictArea(now.steps, issue, addedIds) }).promise;
-      } catch {
-        auto = null;
-      }
-    }
     const input = {
       name: solutionName,
       processId: live.process.id,
@@ -345,7 +331,8 @@ export function EditorView({
       levers: [],
       // Only the effects on the saved copy's steps are kept, and the server checks them again.
       stepChanges: [...stepChanges],
-      links: issue ? [{ issueId: issue.id, autoVerdict: auto && auto.status !== "unchecked" ? auto.status : null, holdsPct: auto?.holdsPct ?? null, autoNote: auto?.note ?? "" }] : [],
+      // No automatic verdict (QA round 2): the person gives their own on the issue.
+      links: issue ? [{ issueId: issue.id, autoVerdict: null, holdsPct: null, autoNote: "" }] : [],
     };
     const checked = parseSolutionInput(input);
     let result: SaveSolutionResult;
@@ -394,20 +381,6 @@ export function EditorView({
   // Stale: the draft, or the live model, is no longer what was simulated.
   const stale = !!asked && (asked.draftKey !== workingKey || asked.liveKey !== liveKey);
 
-  // Solution mode: the automatic verdict for the run on screen, against the issue's target.
-  const draftResult = draftSim.status === "done" ? draftSim.run.result : null;
-  const liveResult = liveSim.status === "done" ? liveSim.run.result : null;
-  const [verdictState, setVerdictState] = useState<{ key: string; result: TargetVerdict } | null>(null);
-  const verdictKey = solutionMode && issue && !stale && asked && draftResult && asked.live && liveResult ? `${asked.draftKey}|${area.join(",")}` : null;
-  useEffect(() => {
-    if (!verdictKey || !issue || !asked) return;
-    const job = verdictInWorker({ target: issue.target, model: asked.draft, area });
-    job.promise.then((result) => setVerdictState({ key: verdictKey, result })).catch(() => undefined);
-    return () => job.cancel();
-    // `asked` and `area` are what verdictKey is made of.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [verdictKey]);
-  const verdict = issue && verdictKey && verdictState?.key === verdictKey ? { issue, result: verdictState.result } : null;
 
   const breaks = useMemo(
     () =>
@@ -567,7 +540,6 @@ export function EditorView({
         currency={working.workspace.settings.currency}
         liveNumber={live.revision.number}
         solution={solutionMode}
-        verdict={verdict}
       />
       )}
     </div>

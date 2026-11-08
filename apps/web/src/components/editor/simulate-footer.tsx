@@ -5,8 +5,6 @@
 import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
 import { Help } from "@/components/help";
 import { compareRuns } from "@/lib/drafts/compare";
-import type { SolutionIssue } from "@/lib/solutions/area";
-import type { TargetVerdict } from "@/lib/solutions/verdict";
 
 export interface SimulatedPair {
   live: { model: EngineModel; result: SimulationResult | null } | null;
@@ -21,7 +19,6 @@ export function SimulateFooter({
   currency,
   liveNumber,
   solution = false,
-  verdict = null,
 }: {
   /** Simulate has been pressed. */
   asked: boolean;
@@ -32,9 +29,8 @@ export function SimulateFooter({
   stale: boolean;
   currency: string;
   liveNumber: number;
-  /** Solution mode (A49): the second number is the solution's, and the footer says how it did against the issue's target. */
+  /** Solution mode (A49): the second number is the solution's. */
   solution?: boolean;
-  verdict?: { issue: SolutionIssue; result: TargetVerdict } | null;
 }) {
   const what = solution ? "solution" : "draft";
   const rows = pair?.live?.result && pair.draft.result ? compareRuns({ model: pair.live.model, result: pair.live.result }, { model: pair.draft.model, result: pair.draft.result }, currency) : null;
@@ -73,23 +69,6 @@ export function SimulateFooter({
               </li>
             ))}
           </ul>
-          {verdict && (
-            <span className="flex basis-full flex-wrap items-center gap-x-2 text-xs" data-testid="auto-verdict">
-              <span className="flex items-center font-semibold">
-                Automatic verdict
-                <Help
-                  label="Automatic verdict"
-                  description="Pass or fail against the issue's target, worked out from the simulation, with how many of the 30 runs meet the goal. It is a first opinion: you make the final call after saving."
-                  example="Pass, holds in 97% means 29 of the 30 runs (97%) got first contact under the 4 hour goal."
-                />
-              </span>
-              <b className={verdict.result.status === "pass" ? "text-good" : verdict.result.status === "fail" ? "text-crit" : "text-muted-foreground"}>
-                {verdict.result.status === "pass" ? "Pass" : verdict.result.status === "fail" ? "Fail" : "Not checked"}
-                {verdict.result.holdsPct !== null ? `, holds in ${verdict.result.holdsPct}%` : ""}
-              </b>
-              <span className="text-muted-foreground">{verdict.result.note}</span>
-            </span>
-          )}
           {stale && <span className="text-xs text-warn">You&apos;ve changed the {what} since. Simulate again.</span>}
         </>
       )}

@@ -68,7 +68,7 @@ beforeAll(async () => {
   [script, css, workers] = await Promise.all([
     bundleHarness(new URL("./q11c-harness/entry.tsx", import.meta.url), META),
     appCss(),
-    Promise.all(["simulate.worker.ts", "absence.worker.ts", "issue-costs.worker.ts", "shadow-price.worker.ts", "projection.worker.ts", "verdict.worker.ts"].map(async (f) => [f, await bundleHarness(new URL(`../src/workers/${f}`, import.meta.url))] as const)).then(Object.fromEntries),
+    Promise.all(["simulate.worker.ts", "absence.worker.ts", "issue-costs.worker.ts", "shadow-price.worker.ts", "projection.worker.ts"].map(async (f) => [f, await bundleHarness(new URL(`../src/workers/${f}`, import.meta.url))] as const)).then(Object.fromEntries),
   ]);
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 }, 300_000);
@@ -298,14 +298,11 @@ describe("History pages", () => {
   }, 300_000);
 });
 
-describe("Issue page, the right column and the map card", () => {
-  it("Target is a section card with the kit's title, and the sources sit in What's wrong", async () => {
+describe("Issue page, its one column and the map card", () => {
+  it("has no right column: the target and the sources sit in What's wrong (QA round 2)", async () => {
     const { page, errors } = await pageOf("issue-6");
-    for (const [id, title] of [["target", "Target"]] as const) {
-      const card = page.locator(`aside #${id}[data-section=${id}]`);
-      expect((await card.locator("[role=heading][aria-level='2']").innerText()).startsWith(title)).toBe(true);
-      expect(await card.locator(".uppercase").count()).toBe(0);
-    }
+    expect(await page.locator("[data-issue-page] aside, #target").count()).toBe(0);
+    expect(await page.locator("#wrong [role=heading][aria-level='2']").innerText()).toMatch(/^What's wrong and sources/);
     expect(await page.locator("#wrong [data-issue-sources] [data-edit-entry]").count()).toBeGreaterThan(0);
     expect(errors).toEqual([]);
     await page.close();

@@ -225,7 +225,6 @@ export function Overview({
   const state = useIssues(live.workspace.id, issues, mode, liveRevisions);
   const entries = useMemo(() => registerEntries(state.issues, [], state.revisionOf), [state.issues, state.revisionOf]);
   const feed = useMemo(() => mapFeed(entries), [entries]);
-  const openIssueBadges = useMemo(() => Object.fromEntries(Object.entries(feed.badges).map(([id, b]) => [id, b.count])), [feed]);
   const rating = useMemo(() => stepRatingOf(feed.ratings), [feed]);
 
   // Solutions: the workspace's, or on the demo the ones built in this tab.
@@ -361,7 +360,6 @@ export function Overview({
                     const r = rating(id);
                     return r ? ratingOfRank(r.rank) : null;
                   },
-                  issues: openIssueBadges,
                   handoffs: true,
                 })}
               />
@@ -423,7 +421,6 @@ export function Overview({
                 bundle={map.bundle}
                 result={horizonResult}
                 selection={NO_SELECTION}
-                openIssues={openIssueBadges}
                 rating={rating}
                 expanded={expanded}
                 onExpandedChange={setExpanded}

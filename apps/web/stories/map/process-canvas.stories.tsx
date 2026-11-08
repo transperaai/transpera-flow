@@ -1,13 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
-import { StepIssueBadges } from "@/components/step-issue-badges";
 import { diffBundles } from "@/lib/drafts/diff";
 import { DEMO_GROUP_IDS, withDemoGroups } from "@/lib/demo/nested";
 import { ProcessEditor } from "@/lib/editor/editor";
 import { MemoryStore } from "@/lib/editor/store";
 import { demoBundle } from "@/lib/sources/demo";
-import type { StepBadge } from "@/lib/issues/register";
 import { companyBundle, northbeamRun, northbeamStepIds, ratingsByStep } from "../fixtures";
 
 const meta: Meta = { title: "Map/ProcessCanvas", parameters: { layout: "padded" } };
@@ -167,15 +165,10 @@ function useSettled(needs: readonly string[], ready: () => void) {
 }
 
 /** Fixed badges for two steps: Audit has two confirmed issues (the worst a risk), Kickoff one (bad). */
-const BADGES: Record<string, StepBadge> = {
-  [northbeamStepIds.audit]: { count: 2, rating: "risk", titles: ["One strategist does every audit", "Proposals wait on one person"] },
-  [northbeamStepIds.kickoff]: { count: 1, rating: "bad", titles: ["Kickoff slips when the audit is late"] },
-};
-
 function NodeStatesMap() {
   const { bundle, result } = northbeamRun();
   const [pending, setPending] = useState(true);
-  useSettled(["[data-issue-badge]"], () => setPending(false));
+  useSettled([".react-flow__node"], () => setPending(false));
   // The run's own bottleneck is a step of another process, so name Audit the bottleneck to show the flag on a tile.
   const run = useMemo(() => ({ ...result, bnStep: northbeamStepIds.audit }), [result]);
   const cycle = useMemo(() => ratingsByStep(bundle), [bundle]);
@@ -189,10 +182,8 @@ function NodeStatesMap() {
           result={run}
           rating={rating}
           selection={{ steps: [northbeamStepIds.onboard], edges: [] }}
-          openIssues={{ [northbeamStepIds.audit]: 2, [northbeamStepIds.kickoff]: 1 }}
           showPlayback={false}
         />
-        <StepIssueBadges badges={BADGES} onOpen={() => undefined} />
       </Block>
     </div>
   );

@@ -59,7 +59,7 @@ beforeAll(async () => {
   [script, css, workers] = await Promise.all([
     bundleHarness(new URL("./q15-harness/entry.tsx", import.meta.url), META),
     appCss(),
-    Promise.all(["simulate.worker.ts", "absence.worker.ts", "issue-costs.worker.ts", "shadow-price.worker.ts", "projection.worker.ts", "verdict.worker.ts"].map(async (f) => [f, await bundleHarness(new URL(`../src/workers/${f}`, import.meta.url))] as const)).then(Object.fromEntries),
+    Promise.all(["simulate.worker.ts", "absence.worker.ts", "issue-costs.worker.ts", "shadow-price.worker.ts", "projection.worker.ts"].map(async (f) => [f, await bundleHarness(new URL(`../src/workers/${f}`, import.meta.url))] as const)).then(Object.fromEntries),
   ]);
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 }, 300_000);

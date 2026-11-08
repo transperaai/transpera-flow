@@ -20,6 +20,7 @@ export function EditableText({
   label,
   maxLength = 4000,
   rows = 4,
+  starter = "",
   className,
   ...rest
 }: {
@@ -36,6 +37,8 @@ export function EditableText({
   label: string;
   maxLength?: number;
   rows?: number;
+  /** The text an empty field starts with when someone edits it, such as questions to answer. */
+  starter?: string;
   className?: string;
 } & Record<`data-${string}`, string | undefined>) {
   const [editing, setEditing] = useState(false);
@@ -44,7 +47,7 @@ export function EditableText({
   const [busy, setBusy] = useState(false);
   const shown = value?.trim() ?? "";
   const begin = () => {
-    setText(value ?? "");
+    setText(value?.trim() ? value : starter);
     setError(null);
     setEditing(true);
   };

@@ -1,6 +1,6 @@
 "use client";
 
-// Issues on the process page (issue #17): the Issues tab in the map's Insights panel, badges on the steps.
+// Issues on the process page (issue #17): the Issues tab in the map's Insights panel. No badges on the steps: an issue belongs to its process (QA round 2).
 
 import { isReadOnly } from "@/lib/mode";
 import { useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
@@ -18,13 +18,10 @@ import { issueFormOptions } from "@/lib/issues/draft";
 import { useAbsenceTest } from "@/lib/sim/absence";
 import { IssuesRegister } from "./issues-register";
 import type { EditMode } from "@/lib/sim/use-engine-model";
-import { StepIssueBadges } from "./step-issue-badges";
 import type { StepExtras } from "./map/step-detail";
 import { namedForViewer, viewerOf } from "@/lib/viewer";
 
 export interface ProcessIssues {
-  /** Badges on the map's steps (portals; render anywhere). */
-  badges: ReactNode;
   /** The Insights panel: `utilisation` in one tab, the issues in another. */
   rail: (utilisation: ReactNode) => ReactNode;
   /** The run's facts (read-only evidence), worst first; null until the run is in. */
@@ -33,8 +30,6 @@ export interface ProcessIssues {
   issuesList: ReactNode;
   /** Switch the rail to its Issues tab (the sidebar's Issues item, on the demo). */
   showIssues: () => void;
-  /** Open issues per step, which a closed group on the map adds up. */
-  openIssues: Record<string, number>;
   /** A step's worst open-issue rating, which a closed group takes the worst of. */
   rating: (stepId: string) => { rank: number; label: string } | null;
   /** What the analysis found on a step and the confirmed issues on it, for a step's detail on the map. */
@@ -62,7 +57,6 @@ export function useProcessIssues({
   initialScenarios,
   registerHref,
   retired = NO_RETIRED,
-  onShowIssues,
   sources = NO_SOURCES,
   liveRevisions,
   issueExtra,
@@ -83,8 +77,6 @@ export function useProcessIssues({
   registerHref?: string;
   /** Steps the model no longer has and what replaced them, for broken-scenario issues (issue #16). */
   retired?: RetiredSteps;
-  /** A step's issue badge was clicked: the caller opens the panel the Issues tab is in. */
-  onShowIssues?: () => void;
   /** The workspace's sources, which the Acknowledge dialog can link to an issue. */
   sources?: SourceRow[];
   /** Each process's live revision id: a dismissed insight stays away until its process is published again. */
@@ -148,7 +140,7 @@ export function useProcessIssues({
     [entries, bundle.process.id],
   );
   // Nothing reaches the map until it is acknowledged (D24): badges count, and colours come from, confirmed issues only.
-  const { badges, ratings } = useMemo(() => mapFeed(here), [here]);
+  const { ratings } = useMemo(() => mapFeed(here), [here]);
   // Per step: the titles of what was found and not acknowledged yet (insights), and of the confirmed issues.
   const extras = useMemo(() => {
     const out = new Map<string, StepExtras>();
@@ -268,17 +260,6 @@ export function useProcessIssues({
   );
 
   return {
-    badges: (
-      <StepIssueBadges
-        badges={badges}
-        onOpen={(id) => {
-          setStepFilter(id);
-          setTab("issues");
-          onShowIssues?.();
-        }}
-      />
-    ),
-    openIssues: Object.fromEntries(Object.entries(badges).map(([id, b]) => [id, b.count])),
     rating: stepRatingOf(ratings),
     stepExtras: (id) => extras.get(id) ?? null,
     highlight,

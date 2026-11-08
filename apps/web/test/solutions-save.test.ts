@@ -8,20 +8,13 @@ import { createTestDb, type TestDb } from "../../../packages/db/test/harness";
 import { addMember, signInAs, signOut, type TestUser } from "./action-harness";
 
 // The Server Actions that save a solution (issue #114): they write only the solution's own rows, as the signed-in user, and
-// never the process's live version or its draft (D18). The automatic verdict is worked out on the server; what the browser sends is ignored.
-// Run against a real database with the seeded Northbeam workspace. The verdict simulation (`serverVerdict`) is stubbed so each test
-// chooses the verdict; it has its own tests below and in the lib.
+// never the process's live version or its draft (D18). No automatic verdict is stored (QA round 2), whatever the browser sends: each
+// link is only checked (`linkCheck`). Run against a real database with the seeded Northbeam workspace.
 
 const db = vi.hoisted(() => ({
-  verdict: { ok: true, verdict: { status: "fail", holdsPct: 12, note: "Hands-on time: 9 h on average, against under 3 hours.", value: 9 } } as unknown,
-  verdictCalls: [] as unknown[],
   failWith: null as { code: string; message?: string } | null,
 }));
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/solutions/server-verdict", async (orig) => ({
-  ...(await orig<typeof import("@/lib/solutions/server-verdict")>()),
-  serverVerdict: async (args: unknown) => (db.verdictCalls.push({ ...(args as object) }), { ...(db.verdict as object), base: { b: 1 }, run: { r: 1 } }),
-}));
 vi.mock("@/lib/auth/session", async () => (await import("./action-harness")).sessionMock);
 // Only for database errors the real database can't be made to give (a foreign-key failure, an unknown error).
 vi.mock("@transpera-flow/db/client", async (importOriginal) => {
@@ -59,9 +52,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await tdb.client.query("delete from solutions");
-  db.verdictCalls = [];
   db.failWith = null;
-  db.verdict = { ok: true, verdict: { status: "fail", holdsPct: 12, note: "Hands-on time: 9 h on average, against under 3 hours.", value: 9 } };
   signInAs({ tdb }, editor);
 });
 
@@ -140,35 +131,25 @@ describe("createSolution with automations (D53)", () => {
 });
 
 describe("createSolution", () => {
-  it("saves through save_solution with the server's verdict, not the browser's", async () => {
+  it("saves through save_solution with no automatic verdict, whatever the browser claims (QA round 2)", async () => {
     const before = await processState();
     const r = await createSolution(WS, input());
     expect(r.status).toBe("ok");
-    expect(await links()).toEqual([{ issue_id: ISSUE, auto_verdict: "fail", holds_pct: 12, auto_note: "Hands-on time: 9 h on average, against under 3 hours." }]);
-    expect(db.verdictCalls).toHaveLength(1);
-    expect(db.verdictCalls[0]).toMatchObject({ workspaceId: WS, processId: live.process.id, baseRevisionId: live.revision.id, issueId: ISSUE });
+    expect(await links()).toEqual([{ issue_id: ISSUE, auto_verdict: null, holds_pct: null, auto_note: "" }]);
     // Nothing of the process: not its revisions, steps, edges or draft.
     expect(await processState()).toBe(before);
     if (r.status === "ok") expect(r.links).toHaveLength(1);
   });
 
-  it("simulates the copy once for all the issues it is linked to", async () => {
+  it("links every issue it is for", async () => {
     await createSolution(WS, { ...input(), links: [{ issueId: ISSUE }, { issueId: OTHER_ISSUE }] });
-    expect(db.verdictCalls).toHaveLength(2);
-    expect(db.verdictCalls[0]).toMatchObject({ base: undefined, run: undefined });
-    expect(db.verdictCalls[1]).toMatchObject({ base: { b: 1 }, run: { r: 1 } });
     expect(await links()).toHaveLength(2);
   });
 
-  it("stores no verdict, with the reason, when the target can't be checked", async () => {
-    db.verdict = { ok: true, verdict: { status: "unchecked", holdsPct: null, note: "Couldn't read the goal.", value: null } };
-    await createSolution(WS, input());
-    expect(await links()).toEqual([{ issue_id: ISSUE, auto_verdict: null, holds_pct: null, auto_note: "Couldn't read the goal." }]);
-  });
-
-  it("refuses, without saving, an issue that is closed, a detection or about another process", async () => {
-    db.verdict = { ok: false, message: "That issue is already resolved or marked won't fix, so a solution can't be linked to it. Reopen it first." };
-    expect(await createSolution(WS, input())).toEqual({ status: "error", message: "That issue is already resolved or marked won't fix, so a solution can't be linked to it. Reopen it first." });
+  it("refuses, without saving, an issue that is closed", async () => {
+    const closed = await issue({ title: "Closed" });
+    await tdb.client.query("update issues set status = 'done' where id = $1", [closed]);
+    expect(await createSolution(WS, { ...input(), links: [{ issueId: closed }] })).toEqual({ status: "error", message: "That issue is already resolved or marked won't fix, so a solution can't be linked to it. Reopen it first." });
     expect(await solutions()).toEqual([]);
   });
 
@@ -183,7 +164,6 @@ describe("createSolution", () => {
     expect((await createSolution(WS, { ...input(), links: [] })).status).toBe("ok");
     expect(await links()).toEqual([]);
     expect(await solutions()).toHaveLength(1);
-    expect(db.verdictCalls).toEqual([]);
   });
 
   it("refuses without calling the database when signed out, or when the input is bad", async () => {
@@ -201,7 +181,7 @@ describe("createSolution", () => {
       return (await createSolution(WS, { ...input(), ...over })) as { message: string };
     };
     expect((await attempt(viewer)).message).toBe("You don't have permission to save solutions here.");
-    // The triggers on a link refuse these (the verdict is stubbed to pass, so only the database stands in the way).
+    // The link check refuses these before anything is written.
     const detected = await issue({ source: "detected", detected_key: "delay:p:step1" });
     expect((await attempt(editor, { links: [{ issueId: detected }] })).message).toMatch(/only a detection/);
     const elsewhere = (await tdb.client.query("insert into processes (workspace_id, name) values ($1, 'Elsewhere') returning id", [WS])).rows[0].id;
@@ -209,7 +189,7 @@ describe("createSolution", () => {
     expect((await attempt(editor, { links: [{ issueId: foreign }] })).message).toMatch(/another process/);
     const closed = await issue({ title: "Closed" });
     await tdb.client.query("update issues set status = 'dismissed' where id = $1", [closed]);
-    expect((await attempt(editor, { links: [{ issueId: closed }] })).message).toMatch(/resolved, marked won't fix or dismissed/);
+    expect((await attempt(editor, { links: [{ issueId: closed }] })).message).toMatch(/dismissed/);
     expect((await attempt(editor, { baseRevisionId: "5f1c2b4a-0000-4000-8000-0000000000aa" })).message).toMatch(/published version/);
     expect(await solutions()).toEqual([]);
     // Errors the database can't be made to give from here.
@@ -227,23 +207,21 @@ describe("linkSolutionToIssue", () => {
     const made = await createSolution(WS, { ...input(), links: [] });
     if (made.status !== "ok") throw new Error("setup failed");
     SOL = made.solution.id;
-    db.verdictCalls = [];
   });
 
-  it("links a saved solution to an issue with the server's verdict, whatever the browser claims", async () => {
+  it("links a saved solution to an issue with no automatic verdict", async () => {
     const r = await linkSolutionToIssue(WS, SOL, ISSUE);
     expect(r.status).toBe("ok");
-    expect(await links(SOL)).toEqual([{ issue_id: ISSUE, auto_verdict: "fail", holds_pct: 12, auto_note: "Hands-on time: 9 h on average, against under 3 hours." }]);
-    if (r.status === "ok") expect(r.link).toMatchObject({ solution_id: SOL, issue_id: ISSUE, workspace_id: WS, auto_verdict: "fail", holds_pct: 12 });
-    expect(db.verdictCalls[0]).toMatchObject({ processId: live.process.id, issueId: ISSUE });
+    expect(await links(SOL)).toEqual([{ issue_id: ISSUE, auto_verdict: null, holds_pct: null, auto_note: "" }]);
+    if (r.status === "ok") expect(r.link).toMatchObject({ solution_id: SOL, issue_id: ISSUE, workspace_id: WS, auto_verdict: null, holds_pct: null });
   });
 
   it("refuses a closed issue, another process's issue or a missing solution, and a second link to the same issue", async () => {
-    db.verdict = { ok: false, message: "That issue is about another process, so this solution can't be linked to it." };
-    expect(await linkSolutionToIssue(WS, SOL, ISSUE)).toEqual({ status: "error", message: "That issue is about another process, so this solution can't be linked to it." });
+    const elsewhere = (await tdb.client.query("insert into processes (workspace_id, name) values ($1, 'Elsewhere') returning id", [WS])).rows[0].id;
+    const foreign = await issue({ process_id: elsewhere });
+    expect(await linkSolutionToIssue(WS, SOL, foreign)).toEqual({ status: "error", message: "That issue is about another process, so this solution can't be linked to it." });
     expect(await links(SOL)).toEqual([]);
     expect(await linkSolutionToIssue(WS, "5f1c2b4a-0000-4000-8000-0000000000ff", ISSUE)).toEqual({ status: "error", message: "That solution isn't there any more." });
-    db.verdict = { ok: true, verdict: { status: "pass", holdsPct: 90, note: "", value: 1 } };
     expect((await linkSolutionToIssue(WS, SOL, ISSUE)).status).toBe("ok");
     expect(await linkSolutionToIssue(WS, SOL, ISSUE)).toEqual({ status: "error", message: "That solution is already linked to this issue." });
   });

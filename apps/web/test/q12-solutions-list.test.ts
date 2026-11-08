@@ -120,8 +120,8 @@ describe("every solution is tied to an issue", () => {
 });
 
 describe("the Solution page's three ways on (D44)", () => {
-  it("Try it in the Sandbox opens the Sandbox with the solution picked as its process's map version", () => {
-    expect(read("components/solutions/solution-page.tsx")).toContain("/sandbox?solution=${solution.id}");
+  it("the Solution page has no Try it in the Sandbox button (QA round 2); the Sandbox still opens on a solution picked by its address", () => {
+    expect(read("components/solutions/solution-page.tsx")).not.toContain("/sandbox?solution=");
     expect(read("app/w/[slug]/sandbox/page.tsx")).toContain("initialSolutionId=");
     // The pick is the Sandbox's own map-version state (E6), from the first month, and only for a solution the page lists.
     const view = read("components/sandbox/play-view.tsx");

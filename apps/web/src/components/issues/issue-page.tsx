@@ -2,7 +2,7 @@
 
 // The Issue page (issue #113, A48; redesigned on the page kit in Q10; QA round 2): a header card (the title, pills for the rating, status and
 // its process, owners and dates, Edit and Resolve or Reopen), then where the issue sits on the map, what is wrong (edited where it stands)
-// with its sources, and the solutions tried; its target sits beside. The status is a pill dropdown that saves
+// (its target included) with its sources, and the solutions tried. The status is a pill dropdown that saves
 // at once; choosing Resolved opens the Resolve dialog, to pick the solution that fixed it.
 
 import { isReadOnly, type ScreenMode } from "@/lib/mode";
@@ -12,7 +12,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { IssueEventRow, IssueRow, IssueStatus, ProcessBundle, SolutionIssueRow, SolutionRow, SourceRow } from "@transpera-flow/db";
-import type { StepBadge } from "@/lib/issues/register";
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help, HelpLabel } from "@/components/help";
 import { ISSUE_PAGE_HELP } from "@/lib/issues/help";
@@ -23,21 +22,19 @@ import { RatingPill } from "@/components/overview/rating-pill";
 import { VerdictWord } from "@/components/solutions/solution-cards";
 import { SolutionStatusMenu } from "@/components/solutions/status-menu";
 import { LinkedSources, useSourceLinking } from "@/components/sources/linking-context";
-import { StepIssueBadges } from "@/components/step-issue-badges";
 import { TagPill } from "@/components/tag-pill";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { MapSkeleton } from "@/components/map/map-placeholder";
-import { draftFromIssue, issueFormOptions, toSaveInput } from "@/lib/issues/draft";
-import { isOpenIssue, issueHref, resolvedBar, shortDate } from "@/lib/issues/pages";
+import { draftFromIssue, issueFormOptions, toSaveInput, WRONG_PROMPTS, wrongText } from "@/lib/issues/draft";
+import { isOpenIssue, resolvedBar, shortDate } from "@/lib/issues/pages";
 import { mapFeed, registerEntries, stepRatingOf } from "@/lib/issues/register";
 import { useIssues } from "@/lib/issues/use-issues";
 import { editSourceIds } from "@/lib/sources/links";
-import { NO_SOLUTIONS_DATA, autoWord, changesLine, effectiveVerdict, solutionHref, solutionsForIssue, type SolutionsData } from "@/lib/solutions/cards";
+import { NO_SOLUTIONS_DATA, changesLine, effectiveVerdict, solutionHref, solutionsForIssue, type SolutionsData } from "@/lib/solutions/cards";
 import { addDemoLink, setDemoNotes, useDemoSolutions } from "@/lib/solutions/demo";
-import { demoLinkVerdict } from "@/lib/solutions/demo-link";
 import { linkSolutionToIssue } from "@/app/w/[slug]/solution-actions";
 import { saveSolutionNotes } from "@/app/w/[slug]/solution-page-actions";
 import { ratingOfStored } from "@transpera-flow/engine";
@@ -117,16 +114,7 @@ export function IssuePage(props: IssuePageProps) {
 
   // The map: only confirmed open issues badge a step, so a resolved issue (this one too) is gone from it.
   const feed = useMemo(() => mapFeed(registerEntries(state.issues, [])), [state.issues]);
-  const openIssues = useMemo(() => Object.fromEntries(Object.entries(feed.badges).map(([id, b]) => [id, b.count])), [feed]);
   const rating = useMemo(() => stepRatingOf(feed.ratings), [feed]);
-  const stepIds = issue.links.flatMap((l) => (l.step_id ? [l.step_id] : []));
-  const highlight = stepIds.length ? stepIds : issue.step_id ? [issue.step_id] : null;
-  // A badge on the map opens an open issue on that step: another one if there is one, else this one.
-  const openBadge = (stepId: string) => {
-    const there = state.issues.filter((i) => isOpenIssue(i) && i.links.some((l) => l.step_id === stepId));
-    const target = there.find((i) => i.id !== issue.id) ?? there[0];
-    if (target && target.id !== issue.id) router.push(issueHref(base, target));
-  };
 
   // The workspace's solutions as loaded, kept up to date as they change here; the demo reads what this tab has saved.
   const inTab = useDemoSolutions();
@@ -173,6 +161,12 @@ export function IssuePage(props: IssuePageProps) {
   };
 
   const saveEvidence = async (next: string) => {
+    // A target still in the old fields was shown as a line of this text: save the whole issue once, which keeps the text as edited and
+    // clears the old fields (so a line taken out stays out).
+    if (issue.target_measure || issue.target_now || issue.target_goal) {
+      const saved = await saveDraft({ ...currentDraft(), evidence: next || null, targetMeasure: "", targetNow: "", targetGoal: "" });
+      return saved ? null : (state.error ?? "Couldn't save. Try again.");
+    }
     const out = await state.saver(issue.id, "evidence")(issue.evidence ?? null, next || null);
     if (out.status === "saved") {
       refresh();
@@ -289,7 +283,7 @@ export function IssuePage(props: IssuePageProps) {
         </div>
       )}
 
-      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="grid min-w-0 gap-5">
         <div className="flex min-w-0 flex-col gap-5">
           <SectionCard
             id="where"
@@ -302,20 +296,18 @@ export function IssuePage(props: IssuePageProps) {
             }
           >
             {/* A plain block: the map sizes itself to the width it is given. */}
-            <MapWithBadges badges={feed.badges} onOpen={openBadge}>
+            {/* An issue belongs to its process, not a step (QA round 2): the map shows the process, with no step badges or highlight. */}
+            <MapCut>
               <ProcessCanvas
-                // The highlight is opened into the map once, at the start.
-                key={`${bundle.process.id}:${(highlight ?? []).join("|")}`}
+                key={bundle.process.id}
                 bundle={bundle}
-                openIssues={openIssues}
                 rating={rating}
-                highlight={highlight}
                 showPlayback={false}
                 showLanes={false}
                 height="auto"
                 legend={false}
               />
-            </MapWithBadges>
+            </MapCut>
           </SectionCard>
 
           <SectionCard
@@ -329,11 +321,14 @@ export function IssuePage(props: IssuePageProps) {
             }
           >
             <EditableText
-              value={issue.evidence}
+              // The target is part of what's wrong (QA round 2): one stored in the old fields shows here as a line.
+              value={wrongText(issue.evidence, { measure: issue.target_measure, now: issue.target_now, goal: issue.target_goal })}
               canEdit={canEdit}
               label="What's wrong"
               onSave={saveEvidence}
-              emptyMessage="Say what you saw: what goes wrong, how often, and what it costs."
+              starter={WRONG_PROMPTS}
+              rows={10}
+              emptyMessage="Say what goes wrong, how often, what it costs, and what good would look like."
               emptyReader="Nothing written yet."
               data-evidence=""
             />
@@ -424,34 +419,6 @@ export function IssuePage(props: IssuePageProps) {
 
         </div>
 
-        <aside className="flex min-w-0 flex-col gap-5">
-          <SectionCard
-            id="target"
-            section="target"
-            title={
-              <span className="flex items-center">
-                Target
-                <Help {...ISSUE_PAGE_HELP.target} />
-              </span>
-            }
-            contentClassName="gap-2"
-          >
-            {issue.target_measure || issue.target_now || issue.target_goal ? (
-              <>
-                <b>{issue.target_measure || "Not named yet"}</b>
-                <dl className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-                  <dt className="text-xs text-fg-2">Now</dt>
-                  <dd className="font-mono">{issue.target_now || "—"}</dd>
-                  <dt className="text-xs text-fg-2">Goal</dt>
-                  <dd className="font-mono">{issue.target_goal || "—"}</dd>
-                </dl>
-                <span className="text-xs text-fg-2">Solutions get an automatic pass or fail against this. You make the final call.</span>
-              </>
-            ) : (
-              <span className="text-sm text-fg-2">No target yet. Edit the issue to add one.</span>
-            )}
-          </SectionCard>
-        </aside>
       </div>
 
       <AcknowledgeDialog
@@ -491,7 +458,7 @@ export function IssuePage(props: IssuePageProps) {
           if (mode === "demo") {
             const solution = solutionData.solutions.find((s) => s.id === solutionId);
             if (!solution) return "That solution isn't there any more.";
-            addDemoLink(solution.id, issue.id, await demoLinkVerdict(solution, issue));
+            addDemoLink(solution.id, issue.id, { autoVerdict: null, holdsPct: null, autoNote: "" });
             return null;
           }
           const r = await linkSolutionToIssue(bundle.workspace.id, solutionId, issue.id);
@@ -553,20 +520,13 @@ function TriedRow({
         Changes: {changesLine(solution, 3)}
       </p>
       <p className="flex flex-wrap items-center gap-x-2 text-xs text-fg-2" data-tried-result>
-        {link.auto_verdict ? (
-          <>
-            <span>Against today:</span>
-            <VerdictWord verdict={link.auto_verdict} className="text-xs" />
-            {link.holds_pct !== null && <span>holds in {link.holds_pct}% of runs</span>}
-            {link.user_verdict && (
-              <span>
-                · Your call: <VerdictWord verdict={link.user_verdict} className="text-xs" />
-              </span>
-            )}
-          </>
+        {link.user_verdict ? (
+          <span>
+            Your call: <VerdictWord verdict={link.user_verdict} className="text-xs" />
+          </span>
         ) : (
           <>
-            <span>{autoWord(null)} against today.</span>
+            <span>No verdict yet.</span>
             <Link href={solutionHref(base, solution.id)} className="relative z-10 underline decoration-dotted underline-offset-2 hover:decoration-solid">
               Open to compare
             </Link>
@@ -629,13 +589,9 @@ function OwnersEditor({
   );
 }
 
-/**
- * The map in a plain block, with the red badges on it. The map is loaded after the page, and the badges find their
- * steps in it, so they are drawn once it is there.
- */
-function MapWithBadges({ badges, onOpen, children }: { badges: Record<string, StepBadge>; onOpen: (stepId: string) => void; children: ReactNode }) {
+/** The map in a plain block, cut to its steps until someone moves it. */
+function MapCut({ children }: { children: ReactNode }) {
   const host = useRef<HTMLDivElement>(null);
-  const [ready, setReady] = useState(false);
   // A short map is fitted to a panel that is never shorter than 16rem, which leaves a band of empty card under it. Until someone moves the
   // map, the card is cut to the lowest step plus a little room. (Moving or zooming the map lifts the cut, so nothing is ever hidden.)
   const [cut, setCut] = useState<number | null>(null);
@@ -654,7 +610,6 @@ function MapWithBadges({ badges, onOpen, children }: { badges: Record<string, St
       setCut(Math.ceil(bottom - top + 20));
     };
     const check = () => {
-      setReady(!!el.querySelector("[data-process-map]"));
       clearTimeout(timer);
       timer = setTimeout(measure, 450);
     };
@@ -682,7 +637,6 @@ function MapWithBadges({ badges, onOpen, children }: { badges: Record<string, St
   return (
     <div ref={host} className="min-w-0 overflow-hidden rounded-token border bg-card" style={cut ? { maxHeight: cut } : undefined} data-map-cut={cut ?? undefined}>
       {children}
-      {ready && <StepIssueBadges badges={badges} onOpen={onOpen} />}
     </div>
   );
 }

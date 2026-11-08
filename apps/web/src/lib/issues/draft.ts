@@ -5,7 +5,6 @@
 import type { IssueLinkRef, IssueRow, SourceRow, StepRow } from "@transpera-flow/db";
 import { columnProvenance, EVIDENCE_COLUMNS } from "@transpera-flow/db";
 import { ratingOfStored, storedOfRating, type DetectedIssue, type Rating } from "@transpera-flow/engine";
-import { MAX_TARGET } from "./validate";
 import { MAX_TITLE, type SaveIssueInput } from "./validate";
 
 /** One line on what each rating means, as the prototype words them. Worst first, as the dialog lists them. */
@@ -165,38 +164,52 @@ export interface DraftErrors {
   process?: string;
 }
 
-/** What is missing: a title, and at least one step when the scope is steps (a whole-process scope needs a process). */
+/** What is missing: a title, and the process it is in (an issue belongs to a process, not a step: QA round 2). */
 export function validateDraft(d: IssueDraft): DraftErrors {
   const errors: DraftErrors = {};
   if (!d.title.trim()) errors.title = "Give the issue a title.";
   else if (d.title.trim().length > MAX_TITLE) errors.title = `Keep the title to ${MAX_TITLE} characters.`;
-  if (d.scope === "steps" && d.stepIds.length === 0) errors.steps = "Pick at least one step, or choose the whole process.";
-  if (d.scope === "process" && !d.processId) errors.process = "Pick the process it is in.";
-  for (const [k, v] of [["targetMeasure", d.targetMeasure], ["targetNow", d.targetNow], ["targetGoal", d.targetGoal]] as const) {
-    if (v.trim().length > MAX_TARGET) errors.title ??= `Keep the target ${k === "targetMeasure" ? "measure" : k === "targetNow" ? "value" : "goal"} to ${MAX_TARGET} characters.`;
-  }
+  if (!d.processId && d.stepIds.length === 0) errors.process = "Pick the process it is in.";
   return errors;
+}
+
+/** The questions "What's wrong" starts with when it is empty (QA round 2: the target is part of it, not fields of its own). */
+export const WRONG_PROMPTS = "What goes wrong?\n\n\nHow often?\n\n\nWhat does it cost?\n\n\nWhat would good look like (now → goal)?\n";
+
+/** A target stored in its own fields before QA round 2, as a line of "What's wrong": "What good looks like: Wait at Check fit, now 1.4 d, goal under 4 h". */
+export function targetLine(measure: string | null | undefined, now: string | null | undefined, goal: string | null | undefined): string | null {
+  const parts = [measure?.trim(), now?.trim() ? `now ${now.trim()}` : null, goal?.trim() ? `goal ${goal.trim()}` : null].filter((x): x is string => !!x);
+  return parts.length ? `What good looks like: ${parts.join(", ")}` : null;
+}
+
+/** "What's wrong" as shown and edited: the text, and a target from the old fields when the text doesn't already carry it. */
+export function wrongText(evidence: string | null | undefined, target: { measure?: string | null; now?: string | null; goal?: string | null }): string {
+  const text = evidence?.trim() ?? "";
+  const line = targetLine(target.measure, target.now, target.goal);
+  if (!line || text.includes(line)) return text;
+  return text ? `${text}\n\n${line}` : line;
 }
 
 export const hasErrors = (e: DraftErrors): boolean => Object.keys(e).length > 0;
 
-/** What the dialog sends. The steps' process is looked up from the options, so a step in a nested process keeps its own. */
+/**
+ * What the dialog sends. An issue is linked to its process only (QA round 2): an insight found at a step of a nested process
+ * goes to that step's own process. A target stored in the old fields moves into the evidence, and the fields are cleared.
+ */
 export function toSaveInput(d: IssueDraft, options: Pick<IssueFormOptions, "steps">): SaveIssueInput {
   const processOf = new Map(options.steps.map((s) => [s.id, s.processId]));
-  const links: IssueLinkRef[] =
-    d.scope === "process"
-      ? [{ process_id: d.processId, step_id: null }]
-      : d.stepIds.map((id) => ({ process_id: processOf.get(id) ?? d.processId, step_id: id }));
-  const blank = (v: string) => v.trim() || null;
+  const first = d.stepIds[0];
+  const links: IssueLinkRef[] = [{ process_id: (first ? processOf.get(first) : null) ?? d.processId, step_id: null }];
+  const evidence = wrongText(d.evidence, { measure: d.targetMeasure, now: d.targetNow, goal: d.targetGoal });
   return {
     ...(d.id ? { id: d.id } : {}),
     title: d.title.trim(),
     severity: storedOfRating(d.rating),
     ...(d.type ? { type: d.type } : {}),
-    evidence: d.evidence ?? null,
-    target_measure: blank(d.targetMeasure),
-    target_now: blank(d.targetNow),
-    target_goal: blank(d.targetGoal),
+    evidence: evidence || null,
+    target_measure: null,
+    target_now: null,
+    target_goal: null,
     links,
     owner_ids: d.ownerIds,
     source_ids: d.sourceIds,

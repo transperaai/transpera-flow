@@ -95,3 +95,15 @@ From Austin's QA of the process and company map editors on the Neon preview. Eac
     simulates, as it does in a process (a decision between two processes splits the clients that pass it).
 14. **The fields that go are hidden, not dropped.** Their columns, stored values and the issue detectors that read them
     (wait, drop-off, SLA) stay; only the editor stops showing them.
+15. **The Solution page is the team's own words.** "What it changes" (lines worked out from the map) goes; the notes say what
+    it changes, with its sources in the same card. The live map sits above the solution's. "Built by" becomes "Edited on
+    <date>", and "Try it in the Sandbox" goes.
+16. **An issue belongs to a process, not a step**, as its solutions do.
+    - The issue form asks for no steps; a finding acknowledged from the run becomes an issue of its process.
+    - No issue badges on any map. Steps an older issue was linked to stay in the database but are not shown.
+    - The Issue page has no step pill, no History, and no right column: its sources sit under What's wrong.
+17. **The target is part of What's wrong.** An empty What's wrong starts with four questions (what goes wrong, how often,
+    what it costs, what good would look like). A target stored in the old fields shows as the text's last line and moves
+    into the text the next time the issue is saved. The target columns stay in the database, unused.
+18. **No automatic pass or fail.** Saving or linking a solution stores no automatic verdict; only the person's own counts,
+    including over one stored before.

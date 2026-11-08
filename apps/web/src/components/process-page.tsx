@@ -188,7 +188,6 @@ export function ProcessPage({
     // A dismissed insight is measured against the live revision; an earlier version or a draft isn't one.
     liveRevisions: liveRevisions ?? (viewingVersion === null && liveVersion > 0 ? { [bundle.process.id]: bundle.revision.id } : undefined),
     // A badge on the map takes you down to the issues on that step.
-    onShowIssues: () => document.getElementById("issues")?.scrollIntoView({ behavior: "smooth", block: "start" }),
   });
 
   // What the process still lacks for meaningful numbers (issue #167): the same check as the upload preview, on this version.
@@ -247,7 +246,6 @@ export function ProcessPage({
             const r = issuesUi.rating(id);
             return r ? ratingOfRank(r.rank) : null;
           },
-          issues: issuesUi.openIssues,
           who: (step) => names.get(step.person_id ?? step.role_id ?? "") ?? null,
         };
       }}
@@ -336,7 +334,6 @@ export function ProcessPage({
             result={result}
             savedLabel="Saved"
             defaultLanes
-            openIssues={issuesUi.openIssues}
             rating={issuesUi.rating}
             stepExtras={issuesUi.stepExtras}
             highlight={issuesUi.highlight ?? (gapStep ? [gapStep] : linkedStep ? [linkedStep] : null)}
@@ -391,7 +388,6 @@ export function ProcessPage({
 
         <ProcessSources processId={bundle.process.id} name={bundle.process.name} />
       </div>
-      {issuesUi.badges}
     </div>
   );
 }
