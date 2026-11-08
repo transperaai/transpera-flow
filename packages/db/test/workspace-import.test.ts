@@ -9,6 +9,7 @@ import {
   IMPORT_REFS,
   IMPORT_STEP_REFS,
   LARKSPUR_WORKSPACE_ID,
+  NORTHBEAM_PROCESS_ID,
   NORTHBEAM_WORKSPACE_ID,
   PLACEHOLDER_PREFIX,
   WORKSPACE_IMPORT_LIMITS,
@@ -842,5 +843,27 @@ describe("process categories (Q3, migration 20270126000000)", () => {
     const without = await restoreInto(old);
     const kinds = new Map((await q("select name, kind from processes where workspace_id = $1 and not is_company", [without.ws])).map((r) => [r.name as string, r.kind as string]));
     for (const [name, category] of await categories(without.ws)) expect(category, String(name)).toBe(kinds.get(String(name)) === "servicing" ? "routine_client_work" : "sales");
+  });
+});
+
+describe("process notes (migration 20270202000000)", () => {
+  const notesOf = async (ws: string) => (await q("select name, notes from processes where workspace_id = $1 and not is_company order by name", [ws])).map((r) => [r.name, r.notes]);
+
+  it("a backup carries each process's notes and restores them; one from before notes restores null", async () => {
+    await q("update processes set notes = 'From the March interview with Sam.' where id = $1", [NORTHBEAM_PROCESS_ID]);
+    try {
+      const original = await notesOf(NORTHBEAM_WORKSPACE_ID);
+      expect(original.some((r) => r[1] === "From the March interview with Sam.")).toBe(true);
+      const bundle = await exportOf(NORTHBEAM_WORKSPACE_ID);
+      const restored = await restoreInto(bundle);
+      expect(await notesOf(restored.ws)).toEqual(original);
+
+      const old = structuredClone(bundle);
+      for (const p of old.processes) delete p.notes;
+      const without = await restoreInto(old);
+      for (const [name, notes] of await notesOf(without.ws)) expect(notes, String(name)).toBeNull();
+    } finally {
+      await q("update processes set notes = null where id = $1", [NORTHBEAM_PROCESS_ID]);
+    }
   });
 });

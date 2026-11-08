@@ -485,6 +485,46 @@ describe("processes", () => {
     await q("update edges set center_dx = null, center_dy = null where revision_id = $1 and id = $2", [live, edge]);
     expect(await discardDraft(P)).toEqual({ status: "ok" });
   });
+
+  it("saves a process's notes and loads them back; a stale base is a conflict, a Viewer can't, and too long is refused", async () => {
+    const { saveProcessNotes, saveProcessNotesFromPage } = await import("@/app/w/[slug]/process-notes-actions");
+    const { loadProcessBySlug } = await import("@transpera-flow/db");
+    const { sessionMock } = await import("./action-harness");
+    const loaded = async () => (await loadProcessBySlug(await sessionMock.getDb(), SLUG, { processId: P }))!.live.process.notes;
+    expect(await loaded()).toBeNull();
+
+    // Trimmed as saved, and read back by the page's loader.
+    expect(await saveProcessNotes(P, null, "  Timings from the March interview with Sam.  ")).toEqual({ status: "saved", value: "Timings from the March interview with Sam." });
+    expect(await loaded()).toBe("Timings from the March interview with Sam.");
+    // Not versioned: no draft is opened and the live version is the same.
+    const before = await one("select live_revision_id, draft_revision_id from processes where id = $1", [P]);
+    // The page still holds no notes: someone saved since, so it is a conflict with what is stored, not an overwrite.
+    expect(await saveProcessNotes(P, null, "Mine")).toEqual({ status: "conflict", theirs: "Timings from the March interview with Sam." });
+    expect(await saveProcessNotesFromPage(P, null, "Mine")).toMatch(/Someone else changed these notes/);
+    expect(await loaded()).toBe("Timings from the March interview with Sam.");
+    // Too long is refused before the database; exactly 4,000 is fine.
+    expect(await saveProcessNotes(P, "Timings from the March interview with Sam.", "x".repeat(4001))).toEqual({ status: "error", message: "Keep the notes to 4,000 characters." });
+    expect(await saveProcessNotesFromPage(P, "Timings from the March interview with Sam.", "x".repeat(4001))).toBe("Keep the notes to 4,000 characters.");
+    expect(await saveProcessNotes(P, "Timings from the March interview with Sam.", "x".repeat(4000))).toEqual({ status: "saved", value: "x".repeat(4000) });
+    // The database's own limit holds too.
+    await expect(q("update processes set notes = $2 where id = $1", [P, "y".repeat(4001)])).rejects.toThrow(/processes_notes_length/);
+    // Cleared (empty) is stored as null, through the page's binding.
+    expect(await saveProcessNotesFromPage(P, "x".repeat(4000), "   ")).toBeNull();
+    expect(await loaded()).toBeNull();
+    expect(await one("select live_revision_id, draft_revision_id from processes where id = $1", [P])).toEqual(before);
+    expect(await saveProcessNotes("not-an-id", null, "x")).toEqual({ status: "error", message: "That value isn't valid." });
+
+    // A Viewer can't save: row-level security finds no row to change.
+    await q("update processes set notes = 'Kept' where id = $1", [P]);
+    signInAs({ tdb }, viewer);
+    expect(await saveProcessNotes(P, "Kept", "Viewer's")).toEqual({ status: "not_found" });
+    expect(await saveProcessNotesFromPage(P, "Kept", "Viewer's")).toMatch(/can't change this process's notes/);
+    expect((await one("select notes from processes where id = $1", [P])).notes).toBe("Kept");
+    // The Owner can.
+    signInAs({ tdb }, owner);
+    expect(await saveProcessNotes(P, "Kept", null)).toEqual({ status: "saved", value: null });
+    expect((await one("select notes from processes where id = $1", [P])).notes).toBeNull();
+  });
 });
 
 describe("settings", () => {

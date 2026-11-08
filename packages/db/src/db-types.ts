@@ -442,6 +442,10 @@ export interface Processes {
   live_revision_id: string | null;
   map_drives_run: Generated<boolean>;
   name: string;
+  /**
+   * Free-text notes on the process, shown with its sources on the process page. Not versioned.
+   */
+  notes: string | null;
   parent_process_id: string | null;
   source: Generated<string>;
   updated_at: Generated<string>;

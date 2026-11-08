@@ -622,3 +622,15 @@ Verified only against plain Postgres 16 (`apps/web/test/actions-database.test.ts
 - [ ] `select md5(prosrc) from pg_proc where oid = 'public.import_workspace_bundle(uuid, jsonb, text)'::regprocedure` matches the body in
   the migration file (its edges allow-list ends `"center_dx","center_dy"`), and `private.revision_change_counts`'s ignored list ends
   `'center_dx', 'center_dy'`.
+
+## A process's notes (`20270202000000_process_notes.sql`)
+
+Verified only against plain Postgres 16 (`apps/web/test/actions-database.test.ts` "saves a process's notes…", the `workspace-import*`
+tests' "SQL and TS agree" and live-body md5 checks). Check on Neon, once, after the apply:
+
+- [ ] `select data_type, is_nullable, column_default from information_schema.columns where table_name = 'processes' and column_name = 'notes'`
+  is `text`, nullable, no default; `select count(*) from public.processes where notes is not null` is 0.
+- [ ] As an editor, `select public.save_fields('processes', '{"id": "<a process>"}', '{"notes": null}', '{"notes": "Check"}')` says `saved`;
+  the same as a Viewer says `not_found`; a 4,001-character value is refused by `processes_notes_length`. Put it back to null afterwards.
+- [ ] `select md5(prosrc) from pg_proc where oid = 'public.import_workspace_bundle(uuid, jsonb, text)'::regprocedure` matches the body in
+  the migration file (its processes allow-list ends `"whole_business","notes"`, and the processes insert names `notes`).

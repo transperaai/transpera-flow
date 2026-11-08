@@ -102,7 +102,7 @@ export const IMPORT_COLUMNS = {
     "channels", "hand_holding_hours", "adhoc_chance", "adhoc_requests", "adhoc_hours", "meetings", "words", "links", "tech_hours", "builds", "creative_sets", "step_factor",
   ),
   sources: cols("sources", "id", "kind", "title", "body", "recorded_at", "speakers", "created_at"),
-  processes: cols("processes", "id", "parent_process_id", "name", "kind", "entity_name", "description", "category", "department_id", "whole_business"),
+  processes: cols("processes", "id", "parent_process_id", "name", "kind", "entity_name", "description", "category", "department_id", "whole_business", "notes"),
   steps: cols(
     "steps", "id", "assumption", "child_process_id", "conflict", "cost_override", "current_wip", "dropoff_benchmark", "expected_wait_hours", "entry_step_id",
     "kind", "lost_per_day_waiting", "name", "notes", "outcome", "parent_step_id", "person_id", "provenance", "purpose", "replaced_by", "rework_rate", "rework_to_step_id",

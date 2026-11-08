@@ -201,6 +201,11 @@ export interface ProcessRow {
    * on every process but the company map.
    */
   map_drives_run?: boolean;
+  /**
+   * Free-text notes on the process (migration 20270202000000), shown with its sources on the process page. On the process, not a version:
+   * not versioned. Absent on fixtures.
+   */
+  notes?: string | null;
 }
 
 export interface ProcessRevisionRow {
@@ -1108,8 +1113,8 @@ export type _SchemaDriftChecks = [
   Assert<Matches<PersonSkillRow, "person_skills">>,
   Assert<Matches<PersonLeaveRow, "person_leave">>,
   // is_company and archived_at are optional here (absent on fixtures).
-  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "category" | "department_id" | "whole_business" | "map_drives_run">, "processes">>,
-  Assert<Matches<Required<Pick<ProcessRow, "archived_at" | "department_id" | "whole_business" | "map_drives_run">>, "processes">>,
+  Assert<Matches<Omit<ProcessRow, "is_company" | "archived_at" | "category" | "department_id" | "whole_business" | "map_drives_run" | "notes">, "processes">>,
+  Assert<Matches<Required<Pick<ProcessRow, "archived_at" | "department_id" | "whole_business" | "map_drives_run" | "notes">>, "processes">>,
   Assert<Matches<ProcessRevisionRow, "process_revisions">>,
   // replaced_by defaults to '{}' in the table; the app leaves it out of new steps.
   Assert<Matches<Omit<StepRow, "replaced_by">, "steps">>,

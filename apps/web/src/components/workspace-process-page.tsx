@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { changeProcessCategory, restoreProcess } from "@/app/w/[slug]/process-admin-actions";
 import { createProcess } from "@/app/w/[slug]/process-actions";
+import { saveProcessNotesFromPage } from "@/app/w/[slug]/process-notes-actions";
 import { ArchivedBanner } from "@/components/processes/archived-banner";
 import { isUnpublished } from "@transpera-flow/db";
 import { ProcessNav } from "@/components/process-nav";
@@ -43,6 +44,8 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
   ]);
   const shown = earlier ?? (isUnpublished(live) && draft ? draft : live);
   const base = `/w/${slug}`;
+  // The same rule as the page's other edits: someone who can edit, on the live page (not an earlier version), of a process in use.
+  const editable = canEdit && !earlier && !archivedAt;
   const hrefs = Object.fromEntries(processes.map((p) => [p.id, `${base}/p/${p.id}`]));
   return (
     <SourceLinkingScope workspaceId={live.workspace.id} sources={sources} canEdit={canEdit && !earlier && !archivedAt}>
@@ -63,6 +66,8 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       settingsHref={`${base}/settings`}
       tierSetup={tierSetup}
       department={departmentField(live.process, laneInput)}
+      // The notes are the process's own, not a version's: the live row's, whichever version is on screen.
+      notes={{ value: live.process.notes ?? null, save: editable ? saveProcessNotesFromPage.bind(null, live.process.id, live.process.notes ?? null) : undefined }}
       editCategory={canEdit && !earlier && !archivedAt ? changeProcessCategory.bind(null, live.process.id) : undefined}
       editHref={canEdit && !archivedAt ? `${base}/p/${live.process.id}/edit` : undefined}
       historyHref={`${base}/p/${live.process.id}/history`}
