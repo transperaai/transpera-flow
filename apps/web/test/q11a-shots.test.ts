@@ -73,7 +73,7 @@ async function shoot(name: string, script: string, mount: string, ready: (page: 
 
 describe("Q11 group A screenshots", { timeout: 600_000 }, () => {
   it.skipIf(!dir)("Overview", async () => {
-    await shoot("overview", scripts.overview!, "mountOverview", async (page) => {
+    await shoot("overview", scripts.overview!, "mountOverviewPage", async (page) => {
       await page.waitForFunction(() => /Playing/.test(document.querySelector("[data-horizon-note]")?.textContent ?? ""), null, { timeout: 120_000 });
       await page.waitForSelector("[data-team-load]", { timeout: 120_000 });
     });

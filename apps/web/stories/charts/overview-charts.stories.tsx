@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { partOf } from "@transpera-flow/db";
 import { Card } from "@/components/ui/card";
 import { MrrChart } from "@/components/overview/charts";
-import { IssuesDonut, TimeSplitChart } from "@/components/overview/trend-charts";
+import { OpenIssuesSummary, TimeSplitChart } from "@/components/overview/trend-charts";
 import { timeSplitByProcess } from "@/lib/overview/health";
 import type { MrrPoint } from "@/lib/overview/projection";
 import { northbeamRun } from "../fixtures";
@@ -46,12 +46,12 @@ export const MrrCompare: StoryObj = {
   ),
 };
 
-export const Donut: StoryObj = {
-  name: "IssuesDonut",
+export const OpenIssues: StoryObj = {
+  name: "OpenIssuesSummary",
   tags: ["visual-phone"],
   render: () => (
     <Frame>
-      <IssuesDonut
+      <OpenIssuesSummary
         byRating={[
           { rating: "risk", count: 2 },
           { rating: "bad", count: 5 },
@@ -59,20 +59,21 @@ export const Donut: StoryObj = {
           { rating: "great", count: 1 },
         ]}
         byProcess={[
-          { id: "p1", name: "Sales pipeline", count: 6 },
+          { id: "p1", name: "Sales pipeline", count: 6, href: "#sales" },
           { id: "p2", name: "Client delivery", count: 4 },
           { id: "p3", name: "Billing", count: 1 },
+          { id: "p4", name: "Reporting", count: 1 },
         ]}
       />
     </Frame>
   ),
 };
 
-export const DonutEmpty: StoryObj = {
-  name: "IssuesDonut (empty)",
+export const OpenIssuesEmpty: StoryObj = {
+  name: "OpenIssuesSummary (empty)",
   render: () => (
     <Frame>
-      <IssuesDonut
+      <OpenIssuesSummary
         byRating={[
           { rating: "risk", count: 0 },
           { rating: "bad", count: 0 },

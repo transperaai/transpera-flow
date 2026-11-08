@@ -7,7 +7,8 @@
 // the file asked for, and notes every message posted to it in `window.workerPosts` (one per run asked for).
 
 import { createRoot } from "react-dom/client";
-import { northbeamIssues, partOf, type IssueRow, type SolutionRow } from "@transpera-flow/db";
+import { capacitySetupFromModel, northbeamIssues, partOf, type IssueRow, type SolutionRow } from "@transpera-flow/db";
+import { capacityModel } from "@transpera-flow/engine";
 import { Overview } from "@/components/overview/overview";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { DEMO_FORECAST_START } from "@/lib/forecast/demo";
@@ -19,7 +20,8 @@ declare global {
     workerScripts: Record<string, string>;
     /** The worker file of each message posted to a worker, in order. */
     workerPosts: string[];
-    mountOverview: () => void;
+    /** `capacity`: pass Set up data (the engine's example agency, `capacityModel()`) so the Money section and the people figures show. */
+    mountOverviewPage: (options?: { capacity?: boolean }) => void;
   }
 }
 
@@ -80,7 +82,14 @@ const resolved: IssueRow = {
   resolved_at: "2026-09-20T00:00:00Z",
 };
 
-window.mountOverview = () =>
+// The Set up data is the example agency's, with its own capacity model: it is not the demo bundle's company, so the people and departments
+// in Money and People differ from the roles in Team load. Good enough to see the page laid out.
+const capacityOf = () => {
+  const model = capacityModel();
+  return { setup: capacitySetupFromModel(model), base: "/w/x", model };
+};
+
+window.mountOverviewPage = ({ capacity = false } = {}) =>
   createRoot(document.getElementById("root")!).render(
     <SidebarProvider>
       <Overview
@@ -95,6 +104,7 @@ window.mountOverview = () =>
         processesHref="/processes"
         forecastHref="/sandbox"
         companyHistoryHref="/w/x/p/company/history"
+        capacity={capacity ? capacityOf() : null}
       />
     </SidebarProvider>,
   );

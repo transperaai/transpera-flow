@@ -66,7 +66,7 @@ const SHARED: [string, string][] = [
 
 const CHARTS: [string, string][] = [
   ["overview/charts", "MrrChart"],
-  ["overview/trend-charts", "IssuesDonut"],
+  ["overview/trend-charts", "OpenIssuesSummary"],
   ["overview/trend-charts", "TimeSplitChart"],
   ["sandbox/time-chart", "TimeChart"],
   ["sandbox/time-chart", "TimeBar"],

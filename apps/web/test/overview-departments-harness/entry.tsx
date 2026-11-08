@@ -1,4 +1,4 @@
-// The Overview's department cards on a bare page, for ../overview-departments-browser.test.ts: the real component with its simulation in
+// The Overview's department figures (Money: the whole business and the department tiles; People: busiest people and where the time goes) on a bare page, for ../overview-departments-browser.test.ts: the real component with its simulation in
 // a real Web Worker, fed with the engine fixture `capacityModel()` and the Set up data that agrees with it (made-up data; the example
 // workspace is the same agency). Next's modules are stood in for by ../build-harness.ts. Nothing here ships.
 //
@@ -6,9 +6,11 @@
 // posted to it in `window.workerPosts` (one per run asked for).
 
 import { createRoot, type Root } from "react-dom/client";
-import { capacitySetupFromModel } from "@transpera-flow/db";
-import { capacityModel } from "@transpera-flow/engine";
-import { DepartmentCards } from "@/components/overview/department-cards";
+import { capacitySetupFromModel, type CapacitySetup } from "@transpera-flow/db";
+import { capacityModel, type EngineModel } from "@transpera-flow/engine";
+import { BusiestPeople } from "@/components/overview/busiest-people";
+import { DepartmentAlerts, DepartmentTiles, StartChecklist, useDepartmentFigures, WholeBusinessHero } from "@/components/overview/department-cards";
+import { WhereTimeGoes } from "@/components/overview/where-time-goes";
 
 declare global {
   interface Window {
@@ -38,6 +40,25 @@ window.Worker = class extends NativeWorker {
 
 let root: Root | null = null;
 
+/** The pieces as the Overview lays them out in its Money and People sections. */
+function Departments({ setup, model }: { setup: CapacitySetup; model: EngineModel }) {
+  const figures = useDepartmentFigures({ setup, model });
+  if (!figures.rows.length) return <StartChecklist setup={setup} base="/w/example" />;
+  return (
+    <div className="flex flex-col gap-6">
+      <section className="flex flex-col gap-4" data-overview-section="money">
+        <DepartmentAlerts failure={figures.failure} />
+        <WholeBusinessHero setup={setup} base="/w/example" />
+        <DepartmentTiles figures={figures} base="/w/example" currency={setup.currency} />
+      </section>
+      <section className="grid gap-6 lg:grid-cols-2" data-overview-section="people">
+        <BusiestPeople people={figures.people} failed={!!figures.failure} capacityHref="/w/example/capacity" />
+        <WhereTimeGoes rows={figures.rows} failed={!!figures.failure} />
+      </section>
+    </div>
+  );
+}
+
 window.mountDepartments = ({ payHidden, noTiers, noSalaries, dlerIncludesLeadership } = {}) => {
   const model = capacityModel();
   const setup = capacitySetupFromModel(model, { payHidden, ...(dlerIncludesLeadership === undefined ? {} : { dlerIncludesLeadership }) });
@@ -46,7 +67,7 @@ window.mountDepartments = ({ payHidden, noTiers, noSalaries, dlerIncludesLeaders
   root = createRoot(document.getElementById("root")!);
   root.render(
     <div className="p-4">
-      <DepartmentCards setup={setup} model={model} purposeNames={{}} base="/w/example" />
+      <Departments setup={setup} model={model} />
     </div>,
   );
 };
