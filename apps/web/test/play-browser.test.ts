@@ -105,13 +105,13 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
       // No "What happens" card: the numbers are in the chart headers. On today's path there is no change, no switch and no dashed copy.
       expect(await page.locator("[data-verdict], [data-verdict-line]").count()).toBe(0);
       expect(await page.locator("body").innerText()).not.toMatch(/What happens/);
-      expect(await text(page, "[data-chart-header='worst']")).toMatch(/^Worst month: \d+ (person|people) over their line$/);
+      expect(await text(page, "[data-chart-header='worst']")).toMatch(/^Worst month: \d+ (person|people) over their utilisation threshold$/);
       expect(await text(page, "[data-chart-header='clients']")).toMatch(/^\d+ clients by month \d+$/);
-      expect(await text(page, "[data-chart-header='retainers']")).toMatch(/ a month$/);
+      expect(await text(page, "[data-chart-header='retainers']")).toMatch(/ MRR$/);
       expect(await text(page, "[data-chart-header='dler']")).toMatch(/^DLER \d\.\d by month \d+$/);
       expect(await page.locator("[data-heat-switch]").count()).toBe(0);
       expect(await page.locator("[data-play-chart]").count()).toBe(3);
-      for (const title of ["Clients by department", "Retainers a month", "DLER by department"]) expect(await page.locator(`[data-play-chart="${title}"]`).count(), title).toBe(1);
+      for (const title of ["Clients by department", "MRR", "DLER by department"]) expect(await page.locator(`[data-play-chart="${title}"]`).count(), title).toBe(1);
       expect(await page.locator("[data-play-chart] path[data-line='today']").count()).toBe(0);
       expect(await page.locator("[data-legend-today]").count()).toBe(0);
       // The heatmap: a row for every team and a cell per month; the bars under it have today only; one donut.
@@ -123,7 +123,7 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
       expect(await page.locator("[data-purpose-moves]").count()).toBe(0);
       // DLER has its 4.5 goal line, and every result card has its (i).
       expect(await text(page, '[data-play-chart="DLER by department"]')).toContain("Goal 4.5");
-      for (const t of ["Who's overloaded, and when", "Clients by department", "Retainers a month", "DLER by department", "Where the time goes"]) expect(await page.getByRole("button", { name: `About ${t}` }).count(), t).toBe(1);
+      for (const t of ["Who's overloaded, and when", "Clients by department", "MRR", "DLER by department", "Where the time goes"]) expect(await page.getByRole("button", { name: `About ${t}` }).count(), t).toBe(1);
 
       // Nothing about saving, scenarios or comparing; goal seek and "What matters most" stay hidden.
       const all = await page.locator("body").innerText();
@@ -272,7 +272,7 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     await page.locator('[data-lever="addLeaver"]').click();
     await page.locator('[aria-label="Month they leave"]').first().selectOption("0");
     await settled(page);
-    expect(await text(page, "[data-chart-header='worst']")).toMatch(/^Worst month: \d+ (person|people) over their line \(\d+ today\)$/);
+    expect(await text(page, "[data-chart-header='worst']")).toMatch(/^Worst month: \d+ (person|people) over their utilisation threshold \(\d+ today\)$/);
     await page.locator('[data-lever="addHire"]').click();
     await settled(page);
     expect(await page.locator("[data-hire-row]").count()).toBe(1);

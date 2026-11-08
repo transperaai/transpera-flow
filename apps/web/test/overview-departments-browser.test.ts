@@ -83,8 +83,8 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
         const c = card(page, name);
         const labels = await c.locator("[data-kpi] > div:first-child").allInnerTexts();
         // D39: no "Clients per employee" (clients aren't spread evenly across employees).
-        expect(labels).toEqual(["Clients", "Revenue per employee", "DLER", "Past their busy line", "Room for more clients"]);
-        expect(await kpi(page, name, "Revenue per employee")).toContain(`retainers ÷ ${per.employees} people`);
+        expect(labels).toEqual(["Clients", "Revenue per employee", "DLER", "Over their utilisation threshold", "Room for more clients"]);
+        expect(await kpi(page, name, "Revenue per employee")).toContain(`MRR ÷ ${per.employees} people`);
         const d = await kpi(page, name, "DLER");
         expect(d).toContain(row.ratio!.toFixed(1));
         expect(d).toContain(`Average of ${row.people} people's DLER`);
@@ -96,9 +96,9 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
         expect(room).toMatch(/Limited by .+/);
         expect(room).toContain("A rough guide from the simulation, not a promise");
         // The count, and what the line is; no names (the busy list names them).
-        const past = await kpi(page, name, "Past their busy line");
+        const past = await kpi(page, name, "Over their utilisation threshold");
         expect(past).toMatch(/\d/);
-        expect(past).toMatch(/Busy above \d+(–\d+% \(each role's line\)|%)/);
+        expect(past).toMatch(/Busy above \d+(–\d+% \(each role's utilisation threshold\)|%)/);
         expect(await c.locator("[data-capacity-link]").getAttribute("href")).toBe("/w/example/capacity");
         // Busiest people: everyone in the department, busiest first, each with a busy bar against the line; where the time goes: purposes with hours and share.
         const people = await c.locator("[data-busiest] tr").count();

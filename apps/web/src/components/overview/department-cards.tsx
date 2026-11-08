@@ -24,7 +24,7 @@ export function busyLineNote(lines: readonly number[]): string | undefined {
   const pct = (v: number) => Math.round(v * 100);
   const low = pct(Math.min(...lines));
   const high = pct(Math.max(...lines));
-  return low === high ? `Busy above ${low}%` : `Busy above ${low}–${high}% (each role's line)`;
+  return low === high ? `Busy above ${low}%` : `Busy above ${low}–${high}% (each role's utilisation threshold)`;
 }
 
 export interface DepartmentCardsProps {
@@ -52,7 +52,7 @@ export function DepartmentCards({ setup, model, modelError = null, purposeNames 
     <div className="flex min-w-0 flex-col gap-6" data-tier="departments">
       {modelError && (
         <div role="alert" data-model-error className="rounded-token border border-crit bg-crit-soft p-3 text-sm">
-          Who is at their line and who has room can&apos;t be worked out yet: {modelError}
+          Who is at their utilisation threshold and who has room can&apos;t be worked out yet: {modelError}
         </div>
       )}
       {runs.today.status === "error" && (
@@ -206,9 +206,9 @@ function DepartmentCard({
     >
       <div className="grid grid-cols-[repeat(auto-fit,minmax(10.5rem,1fr))] gap-2.5" data-kpis>
         <Kpi label="Clients" value={f0(per.clients)} sub={`${f0(lines.both)} also take ${others.length === 1 ? others[0]!.name : "another department"}`} />
-        <Kpi label="Revenue per employee" value={per.revenuePerEmployee === null ? "—" : money(per.revenuePerEmployee)} sub={`a month, retainers ÷ ${per.employees} people`} />
+        <Kpi label="Revenue per employee" value={per.revenuePerEmployee === null ? "—" : money(per.revenuePerEmployee)} sub={`a month, MRR ÷ ${per.employees} people`} />
         <DlerKpi label="DLER" row={row} base={base} />
-        <Kpi label="Past their busy line" value={figures ? f0(figures.over.length) : pending("Past their busy line")} sub={figures?.lineNote} />
+        <Kpi label="Over their utilisation threshold" value={figures ? f0(figures.over.length) : pending("Over their utilisation threshold")} sub={figures?.lineNote} />
         <Kpi
           label="Room for more clients"
           value={

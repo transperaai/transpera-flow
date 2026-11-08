@@ -37,12 +37,12 @@ export function BusyBar({ busy, line, low, high, label }: { busy: number; line: 
       className="flex min-w-[9rem] items-center gap-2"
       data-busy={Math.round(busy * 100)}
       role="img"
-      aria-label={`${label ? `${label}: ` : ""}${formatPercent(busy)} busy against a line of ${formatPercent(line)}${range}`}
+      aria-label={`${label ? `${label}: ` : ""}${formatPercent(busy)} busy against a utilisation threshold of ${formatPercent(line)}${range}`}
     >
       <div className="relative h-2 flex-1 rounded-full bg-panel-2">
         <i className={cn("absolute inset-y-0 left-0 rounded-full", TONE_BG[tone])} style={{ width: at(busy) }} />
         {low !== undefined && high !== undefined && <i className="absolute top-0.5 bottom-0.5 rounded-full bg-fg/25" style={{ left: at(low), width: `calc(${at(high)} - ${at(low)})` }} />}
-        <b className="absolute -top-0.5 -bottom-0.5 w-0.5 bg-fg/60" style={{ left: at(line) }} title={`Line ${formatPercent(line)}`} />
+        <b className="absolute -top-0.5 -bottom-0.5 w-0.5 bg-fg/60" style={{ left: at(line) }} title={`Utilisation threshold ${formatPercent(line)}`} />
       </div>
       <span className="w-10 text-right text-xs tabular-nums">{formatPercent(busy)}</span>
     </div>
@@ -106,7 +106,7 @@ export function Dumbbell({ before, after, line }: { before: number; after: numbe
   const hi = Math.max(before, after);
   return (
     <div className="flex items-center gap-2.5" data-dumbbell>
-      <div className="relative h-3.5 flex-1" role="img" aria-label={`${formatPercent(before)} before, ${formatPercent(after)} after, line ${formatPercent(line)}`}>
+      <div className="relative h-3.5 flex-1" role="img" aria-label={`${formatPercent(before)} before, ${formatPercent(after)} after, utilisation threshold ${formatPercent(line)}`}>
         <span className="absolute inset-x-0 top-[6px] h-0.5 bg-panel-2" />
         <b className="absolute top-0 bottom-0 w-0.5 bg-fg/50" style={{ left: at(line) }} />
         <i className={cn("absolute top-[6px] h-0.5 opacity-60", TONE_BG[tone])} style={{ left: at(lo), width: `calc(${at(hi)} - ${at(lo)})` }} />

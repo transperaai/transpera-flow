@@ -96,7 +96,7 @@ describe("Capacity page", { timeout: 180_000 }, () => {
       expect(await text(page, "[data-shared-teams]")).toContain("Rate not entered yet");
 
       // Bottleneck: the sentence and step links to the process page.
-      expect(await text(page, "[data-bottleneck-sentence]")).toMatch(/is the most stretched, at \d+% against a line of \d+%/);
+      expect(await text(page, "[data-bottleneck-sentence]")).toMatch(/is the most stretched, at \d+% against a utilisation threshold of \d+%/);
       const href = await page.locator("[data-step-link]").first().getAttribute("href");
       expect(href).toMatch(/^\/w\/example\/p\/[\w-]+\?step=\w+$/);
 

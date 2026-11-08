@@ -265,7 +265,7 @@ function Room({ name, ceiling, people }: { name: string; ceiling: DepartmentCeil
           </>
         ) : (
           <>
-            {name} can&apos;t take another client without someone going over their line. Limited by {limitedBy(ceiling.limit)}.
+            {name} can&apos;t take another client without someone going over their utilisation threshold. Limited by {limitedBy(ceiling.limit)}.
           </>
         )}
       </p>
@@ -275,13 +275,13 @@ function Room({ name, ceiling, people }: { name: string; ceiling: DepartmentCeil
       <div className="flex flex-wrap gap-1.5" data-chips>
         {chips.map(({ p, room }) => (
           <Chip key={p.id} tone={room >= 1 ? "ok" : "bad"}>
-            {p.name} <b>{room >= 1 ? `+${Math.floor(room)} more` : Math.abs(room) < 0.5 ? "at the line" : `${Math.ceil(-room)} over`}</b>
+            {p.name} <b>{room >= 1 ? `+${Math.floor(room)} more` : Math.abs(room) < 0.5 ? "at threshold" : `${Math.ceil(-room)} over`}</b>
           </Chip>
         ))}
         {chips.length === 0 && <span className="text-sm text-muted-foreground">Nobody looks after clients in this department yet.</span>}
       </div>
       <How
-        works="Each manager's ceiling is how many clients of their current mix they could hold before reaching their line, from the simulation's busy share. The department ceiling adds those up, then checks each shared team (content, links, tech, implementers): how many clients could it serve at its own line? The lowest figure is the ceiling. The marks on the bar are each of those limits."
+        works="Each manager's ceiling is how many clients of their current mix they could hold before reaching their utilisation threshold (how busy a role can be before it counts as full, set per role under Set up → People & roles), from the simulation's busy share. The department ceiling adds those up, then checks each shared team (content, links, tech, implementers): how many clients could it serve at its own utilisation threshold? The lowest figure is the ceiling. The marks on the bar are each of those limits."
         tells="whether the department can take on work, which team stops it, and who should get the next client."
       />
     </Section>
@@ -303,7 +303,7 @@ function PeopleTable({ name, setup, people, showChannels }: { name: string; setu
               {showChannels && <th className="py-1.5 pr-3 text-right font-medium">Channels</th>}
               <th className="py-1.5 pr-3 text-right font-medium">Hours needed</th>
               <th className="py-1.5 pr-3 text-right font-medium">Available</th>
-              <th className="min-w-[11rem] py-1.5 font-medium">Busy against line</th>
+              <th className="min-w-[11rem] py-1.5 font-medium">Busy against threshold</th>
             </tr>
           </thead>
           <tbody>
@@ -340,7 +340,7 @@ function PeopleTable({ name, setup, people, showChannels }: { name: string; setu
         </table>
       </div>
       <How
-        works="Hours needed adds up every process step for each of the person's clients, at their tier's frequency, from the simulation (the hands-on hours it measured, a month on average). Available is the hours a month they have for client work after leave and team time. Busy is the simulation's busy share, which includes waiting and rework, with its 10 to 90% range shown as the faint band; the dark tick is their line. Can take is their clients × line ÷ busy, less the clients they have now."
+        works="Hours needed adds up every process step for each of the person's clients, at their tier's frequency, from the simulation (the hands-on hours it measured, a month on average). Available is the hours a month they have for client work after leave and team time. Busy is the simulation's busy share, which includes waiting and rework, with its 10 to 90% range shown as the faint band; the dark tick is their utilisation threshold (how busy their role can be before it counts as full). Can take is their clients × utilisation threshold ÷ busy, less the clients they have now."
         tells="who is stretched, who has room, and whether a rule of thumb matches what the work actually takes."
       />
     </Section>
@@ -384,11 +384,11 @@ function SharedTeams({ setup, model, result, busy, missing }: { setup: CapacityS
               <p className="text-xs text-muted-foreground">{members.map((m) => m.name).join(", ")}</p>
               {perHour && unit ? (
                 <p className="text-xs">
-                  <b className="tabular-nums">{f0(demand * perHour)}</b> of <span className="tabular-nums">{f0(atLine * perHour)}</span> {unit} a month at the line
+                  <b className="tabular-nums">{f0(demand * perHour)}</b> of <span className="tabular-nums">{f0(atLine * perHour)}</span> {unit} a month at the utilisation threshold
                 </p>
               ) : (
                 <p className="text-xs">
-                  <b className="tabular-nums">{f0(demand)}</b> of <span className="tabular-nums">{f0(atLine)}</span> hours a month at the line
+                  <b className="tabular-nums">{f0(demand)}</b> of <span className="tabular-nums">{f0(atLine)}</span> hours a month at the utilisation threshold
                   <span className="block text-muted-foreground">
                     {unit ? `Unit: ${unit}. ` : ""}
                     {noUnit.has(t.id) ? "No unit of work entered. " : ""}Rate not entered yet
@@ -401,7 +401,7 @@ function SharedTeams({ setup, model, result, busy, missing }: { setup: CapacityS
         })}
       </div>
       <How
-        works="Each shared team's busy share comes from the simulation: the work its steps put on it, queued for its people. The hours at the line are the team's capacity at its line, which is what it could do before it is stretched."
+        works="Each shared team's busy share comes from the simulation: the work its steps put on it, queued for its people. The hours at the utilisation threshold are the team's capacity at its threshold (how busy it can be before it counts as full), which is what it could do before it is stretched."
         tells="whether a team that serves everyone is close to being the limit. Once a rate is entered the hours turn into the team's own unit."
       />
     </Section>
@@ -416,7 +416,7 @@ function Bottleneck({ setup, model, result, base, stepProcess }: { setup: Capaci
   return (
     <Section title="Bottleneck" data-bottleneck>
       <p className="text-base leading-snug" data-bottleneck-sentence>
-        <b>{p.name}</b> ({p.roleName}) is the most stretched, at <b className={TONE_TEXT[tone]}>{formatPercent(p.busy)}</b> against a line of {formatPercent(p.line)}.
+        <b>{p.name}</b> ({p.roleName}) is the most stretched, at <b className={TONE_TEXT[tone]}>{formatPercent(p.busy)}</b> against a utilisation threshold of {formatPercent(p.line)}.
       </p>
       <h3 className="text-sm font-semibold">What fills their month</h3>
       <StackBar parts={b.steps.map((s) => ({ key: s.stepId, name: s.name, value: s.hours }))} />
@@ -438,7 +438,7 @@ function Bottleneck({ setup, model, result, base, stepProcess }: { setup: Capaci
       </p>
       {b.next.length > 0 && <p className="text-xs text-muted-foreground">Next most stretched: {b.next.map((x) => `${x.name} ${formatPercent(x.busy)}`).join(" · ")}</p>}
       <How
-        works="Ranks everyone by how far they are over (or under) their own line, using the simulation's busy share, and shows the process steps that take the most of the top person's month. Each step links to its place in the process."
+        works="Ranks everyone by how far they are over (or under) their own utilisation threshold, using the simulation's busy share, and shows the process steps that take the most of the top person's month. Each step links to its place in the process."
         tells="who to take work from first, and which steps would free the most time if they were quicker."
       />
     </Section>
@@ -486,10 +486,10 @@ function Leaver({ setup, model, result, people }: { setup: CapacitySetup; model:
             )}{" "}
             {res.goOver.length ? (
               <span className="font-semibold text-crit">
-                {res.goOver.map(nameOf).join(", ")} {res.goOver.length === 1 ? "goes" : "go"} over their line.
+                {res.goOver.map(nameOf).join(", ")} {res.goOver.length === 1 ? "goes" : "go"} over their utilisation threshold.
               </span>
             ) : (
-              "Nobody new goes over their line."
+              "Nobody new goes over their utilisation threshold."
             )}
             {res.unplaced > 0 && <span className="text-crit"> {res.unplaced} clients have nobody who serves their tier.</span>}
           </p>
@@ -505,7 +505,7 @@ function Leaver({ setup, model, result, people }: { setup: CapacitySetup; model:
         </>
       )}
       <How
-        works="Takes the person out, then hands each of their clients to whichever colleague is least busy and serves that tier. A client adds the hours its tier needs from a manager (the planned hours, as in time to serve) to the colleague's busy share, which starts from the simulation's. Each row shows a colleague's busy share before (hollow dot) and after (solid dot); the grey line is their line."
+        works="Takes the person out, then hands each of their clients to whichever colleague is least busy and serves that tier. A client adds the hours its tier needs from a manager (the planned hours, as in time to serve) to the colleague's busy share, which starts from the simulation's. Each row shows a colleague's busy share before (hollow dot) and after (solid dot); the grey line is their utilisation threshold."
         tells="key-person risk: who absorbs the loss, and whether you need a replacement or a rebalance."
       />
     </Section>

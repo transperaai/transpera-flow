@@ -36,7 +36,7 @@ export function capacityRunsOut(monthly: MonthlyResult, roleNames: Readonly<Reco
 
 /** The headline sentence for `capacityRunsOut`: "Capacity runs out in March 2027: Designers are 88% busy on average." */
 export function capacityLine(out: CapacityRunsOut | null, months: readonly Pick<TimelineMonth, "long">[], horizonLabel: string): string {
-  if (!out) return `Capacity doesn't run out within these ${horizonLabel}: no role passes the Too busy line on average.`;
+  if (!out) return `Capacity doesn't run out within these ${horizonLabel}: no role passes the utilisation threshold on average.`;
   const when = months[out.month]?.long ?? `month ${out.month + 1}`;
   const lead = out.month === 0 ? `Capacity has already run out (${when})` : `Capacity runs out in ${when}`;
   if (out.kind === "uncovered") return `${lead}: nobody in ${out.roleName} is there for ${Math.round(out.value * 10) / 10} hours a week of its work.`;

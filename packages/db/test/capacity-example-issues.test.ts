@@ -72,8 +72,8 @@ describe("adding the example issues to a freshly loaded example workspace", () =
     expect(new Set(held.map((h) => h.name)).size).toBe(13);
     expect(linked("Unified pacing with alerts")).toEqual([idOf("Pacing lives in three places")]);
     expect(linked("Anomaly and threshold alerts")).toEqual([idOf("Pacing lives in three places")]);
-    expect(linked("AI link-domain pre-vetting")).toEqual([idOf("Link team runs near its line")]);
-    expect(linked("Link health monitor, publisher CRM, invoice chasing")).toEqual([idOf("Link team runs near its line")]);
+    expect(linked("AI link-domain pre-vetting")).toEqual([idOf("Link team runs near its utilisation threshold")]);
+    expect(linked("Link health monitor, publisher CRM, invoice chasing")).toEqual([idOf("Link team runs near its utilisation threshold")]);
     expect(linked("Content brief automation and freelancer handoff")).toEqual([idOf("Content briefs are re-typed for freelancers")]);
     expect(linked("Pre-call data collation and talking points")).toEqual([idOf("Meeting prep is data hunting")]);
     expect(linked("Pre-call data collation (Organic)")).toEqual([idOf("Meeting prep is data hunting")]);

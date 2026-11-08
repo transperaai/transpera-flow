@@ -78,7 +78,7 @@ export function TimelineLegend({
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5" data-timeline-legend>
       <TimelineLegendItem swatch={<i aria-hidden className="h-0.5 w-4 rounded bg-accent" />}>Average</TimelineLegendItem>
       <TimelineLegendItem swatch={<i aria-hidden className="h-2.5 w-4 rounded-sm bg-accent/20" />}>10–90% range</TimelineLegendItem>
-      <TimelineLegendItem swatch={<i aria-hidden className="w-4 border-t border-dashed border-fg-3" />}>{formatPercent(busyLine)} &ldquo;Too busy&rdquo; line</TimelineLegendItem>
+      <TimelineLegendItem swatch={<i aria-hidden className="w-4 border-t border-dashed border-fg-3" />}>{formatPercent(busyLine)} utilisation threshold</TimelineLegendItem>
       <TimelineLegendItem swatch={<i aria-hidden className="size-2.5 rounded-full border-2 border-panel bg-rate-bad ring-1 ring-rate-bad" />}>Too busy that month</TimelineLegendItem>
       {hasMarkers && (
         <>

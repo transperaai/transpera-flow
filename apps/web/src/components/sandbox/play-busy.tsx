@@ -15,7 +15,7 @@ const TINT: Record<BusyTone, string> = {
   warn: "color-mix(in srgb, var(--warn) 50%, transparent)",
   bad: "color-mix(in srgb, var(--crit) 68%, transparent)",
 };
-const WORDS: Record<BusyTone, string> = { ok: "under the line", warn: "close to the line", bad: "over the line" };
+const WORDS: Record<BusyTone, string> = { ok: "under the utilisation threshold", warn: "close to the utilisation threshold", bad: "over the utilisation threshold" };
 
 export type HeatView = "scene" | "today";
 
@@ -67,7 +67,7 @@ export function Heatmap({ rows, months, view }: { rows: HeatRow[]; months: strin
         {(["ok", "warn", "bad"] as const).map((t) => (
           <li key={t} className="inline-flex items-center gap-1.5">
             <i aria-hidden className="inline-block h-2.5 w-3.5 rounded-[3px]" style={{ background: TINT[t] }} />
-            {t === "ok" ? "Under the line" : t === "warn" ? "Within 10 points of it" : "At or over the line"}
+            {t === "ok" ? "Under the utilisation threshold" : t === "warn" ? "Within 10 points of it" : "At or over the utilisation threshold"}
           </li>
         ))}
       </ul>
@@ -126,7 +126,7 @@ export function OverBars({ months, today, scene }: { months: string[]; today: nu
   const h = (v: number) => `${(v / top) * 100}%`;
   return (
     <figure className="m-0 flex flex-col gap-1" data-play-over-bars>
-      <div className="gap-0.5 text-xs" style={grid} role="img" aria-label="People over their line, month by month">
+      <div className="gap-0.5 text-xs" style={grid} role="img" aria-label="People over their utilisation threshold, month by month">
         <div className="flex flex-col justify-between pr-1 text-2xs text-muted-foreground" style={{ height: BAR_H }}>
           <span>{top} people</span>
           <span>0</span>
@@ -160,12 +160,12 @@ export function OverBars({ months, today, scene }: { months: string[]; today: nu
               <i aria-hidden className="inline-block size-2 rounded-sm" style={{ background: "var(--fg-3)", opacity: 0.55 }} />
               Today: <b className="font-semibold">{today[tip.m]}</b>
             </div>
-            <div className="text-muted-foreground">people over their line</div>
+            <div className="text-muted-foreground">people over their utilisation threshold</div>
           </div>
         </FloatingTip>
       )}
       <figcaption className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" data-legend>
-        <span>People over their line, each month</span>
+        <span>People over their utilisation threshold, each month</span>
         {scene && (
           <span className="inline-flex items-center gap-1.5">
             <i aria-hidden className="inline-block size-2.5 rounded-sm" style={{ background: "var(--chart-1)" }} />
@@ -178,7 +178,7 @@ export function OverBars({ months, today, scene }: { months: string[]; today: nu
         </span>
       </figcaption>
       <table className="sr-only">
-        <caption>People over their line, by month</caption>
+        <caption>People over their utilisation threshold, by month</caption>
         <thead>
           <tr>
             <th scope="col">Month</th>

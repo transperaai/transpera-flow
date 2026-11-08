@@ -347,7 +347,7 @@ describe("People & roles", { timeout: 120_000 }, () => {
     const seo = page.locator("[data-role-panel='SEO Manager']");
     await seo.waitFor();
     expect(await seo.getByLabel("Rule of thumb: most clients", { exact: true }).inputValue()).toBe("10");
-    expect(await seo.getByLabel("Busy line %", { exact: true }).inputValue()).toBe("85");
+    expect(await seo.getByLabel("Utilisation threshold %", { exact: true }).inputValue()).toBe("85");
     expect(await seo.getByLabel("Unit of work").count()).toBe(0);
     expect(await seo.getByLabel("Leadership", { exact: true }).count()).toBe(1);
     await page.keyboard.press("Escape");

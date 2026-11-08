@@ -17,9 +17,9 @@ import { cn } from "@/lib/utils";
  */
 export function whatToDo(advice: readonly Pick<HiringAdvice, "name" | "overFrom" | "hireBy">[], monthName: (i: number) => string, span: string): string[] {
   const over = advice.filter((a) => a.overFrom !== null);
-  if (!over.length) return [`No team goes over its line in the next ${span}.`];
+  if (!over.length) return [`No team goes over its utilisation threshold in the next ${span}.`];
   return over.map((a) => {
-    const from = a.overFrom === 0 ? "over the line now" : `over the line from ${monthName(a.overFrom!)}`;
+    const from = a.overFrom === 0 ? "over the utilisation threshold now" : `over the utilisation threshold from ${monthName(a.overFrom!)}`;
     const hire = a.hireBy! <= 0 ? "Start hiring now" : `Start hiring by ${monthName(a.hireBy!)}`;
     return `${a.name}: ${from}. ${hire}.`;
   });
@@ -58,7 +58,7 @@ export function TeamLoad({
         ))}
       </ul>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[22rem] border-separate border-spacing-y-1 text-xs" aria-label={`How busy each role is per month over the next ${span}, against its own line.`}>
+        <table className="w-full min-w-[22rem] border-separate border-spacing-y-1 text-xs" aria-label={`How busy each role is per month over the next ${span}, against its own utilisation threshold.`}>
           <thead>
             <tr>
               <th className="pr-3 text-left font-medium text-muted-foreground">
@@ -82,7 +82,7 @@ export function TeamLoad({
                   {months.map((m, i) => {
                     const busy = r.series[i]?.mean ?? null;
                     const tone: Tone | null = busy === null ? null : toneOf(busy, line);
-                    const words = busy === null ? "nobody in the role" : `${formatPercent(busy)} busy, against a line of ${formatPercent(line)}`;
+                    const words = busy === null ? "nobody in the role" : `${formatPercent(busy)} busy, against a utilisation threshold of ${formatPercent(line)}`;
                     return (
                       <td key={m.index} className="px-0.5">
                         <span
@@ -105,7 +105,7 @@ export function TeamLoad({
       </div>
       <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1">
-          <i aria-hidden className="size-2.5 rounded-sm bg-good" /> under the line
+          <i aria-hidden className="size-2.5 rounded-sm bg-good" /> under the utilisation threshold
         </span>
         <span className="inline-flex items-center gap-1">
           <i aria-hidden className="size-2.5 rounded-sm bg-warn" /> within 10 points

@@ -50,3 +50,17 @@ Issues → open one.
       in x% of runs". The process page's issue track shows no "holds in x% of runs" either.
 - [ ] 3.9 Save a solution from the editor for an issue, and link one to an issue: both work, and no automatic verdict
       appears anywhere.
+
+## Request 4: the Sandbox (PR #308; design options still being picked)
+
+The words, app-wide:
+
+- [ ] 4.1 "The line" is called the **utilisation threshold** everywhere: Set up → People & roles ("Utilisation threshold %"),
+      the Overview's "Over their utilisation threshold", Team load, Capacity, the Sandbox heatmap and its "Worst month" line,
+      the Forecast legend, and the Sandbox verdict sentences. Lines on charts and maps are still called lines.
+- [ ] 4.2 The Sandbox chart "Retainers a month" is now **MRR** (title, header "£X MRR", help), and DLER's help says "MRR
+      divided by salaries". The Overview's revenue per employee says "MRR ÷ N people". "Retainer" as a kind of client or
+      service is unchanged.
+
+The design (worst month, bigger charts with a 12–60 month filter, Where the time goes, new widgets) waits for the picks on the
+options page; it gets its own checks once built.

@@ -81,7 +81,7 @@ export function PlayResults({ runs, setup, months, moved, purposes = DEFAULT_PUR
   const rows = heatRows(c.teams, view === "scene" || !moved ? c.teams : t.teams);
   const heatLabel = moved && view === "today" ? "today's path" : "this scene";
 
-  // Clients, retainers, DLER.
+  // Clients, MRR, DLER.
   const clientsNow = changed.outcome.clients[last] ?? 0;
   const clientsDelta = clientsNow - (today.outcome.clients[last] ?? 0);
   const retNow = changed.outcome.retainers[last] ?? 0;
@@ -123,7 +123,7 @@ export function PlayResults({ runs, setup, months, moved, purposes = DEFAULT_PUR
         contentClassName="gap-3"
       >
         <Header data-chart-header="worst">
-          Worst month: {worst} {worst === 1 ? "person" : "people"} over their line{moved && <Change> ({worstToday} today)</Change>}
+          Worst month: {worst} {worst === 1 ? "person" : "people"} over their utilisation threshold{moved && <Change> ({worstToday} today)</Change>}
         </Header>
         <Heatmap rows={rows} months={monthNames} view={moved ? view : "today"} />
         <p className="sr-only" data-heat-shows>
@@ -157,19 +157,19 @@ export function PlayResults({ runs, setup, months, moved, purposes = DEFAULT_PUR
             </p>
           )}
         </ChartCard>
-        <ChartCard title="Retainers a month" help={PLAY_HELP.retainers}>
+        <ChartCard title="MRR" help={PLAY_HELP.retainers}>
           <Header data-chart-header="retainers">
-            {money(retNow)} a month
+            {money(retNow)} MRR
             {moved && <Change> ({signedMoney(retDelta, money)})</Change>}
           </Header>
           <PlayChart
-            title="Retainers a month"
+            title="MRR"
             months={monthNames}
             format={money}
             narrow
             series={[
-              { name: "Retainers", values: c.retainers, color: "var(--accent)" },
-              ...(moved ? [{ name: "Retainers", values: t.retainers, color: "var(--accent)", dashed: true }] : []),
+              { name: "MRR", values: c.retainers, color: "var(--accent)" },
+              ...(moved ? [{ name: "MRR", values: t.retainers, color: "var(--accent)", dashed: true }] : []),
             ]}
           />
         </ChartCard>
