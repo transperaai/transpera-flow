@@ -7,14 +7,16 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
-  bottleneck,
+  AT_RISK_MARGIN,
+  atRisk,
   busyShares,
   departmentCeiling,
   DLER_GOAL,
   dler,
-  leaver,
+  leavers,
   limitedBy,
   missingForCapacity,
+  personMax,
   roomPulse,
   serviceLines,
   timeToServe,
@@ -26,14 +28,15 @@ import {
   type PurposeCategory,
 } from "@transpera-flow/db";
 import { capacityProblems, type EngineModel, type SimulationResult } from "@transpera-flow/engine";
-import { namedPurposeParts, purposeColours } from "@/lib/capacity/purposes";
+import { namedPurposeParts, purposeColours, type PurposePart } from "@/lib/capacity/purposes";
 import { MetaLine, PageHeader } from "@/components/page-kit";
 import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
 import { useCapacityRuns } from "@/lib/sim/use-capacity-runs";
 import { cn } from "@/lib/utils";
-import { BusyBar, Chip, Dumbbell, HeroKpi, How, RoomGauge, Section, StackBar, TierChips, toneOf, TONE_TEXT, type KpiStatus } from "./widgets";
+import { PeoplePicker, type PickerGroup } from "./people-picker";
+import { ColourLegend, Dumbbell, HeroKpi, How, RoomBar, Section, StackBar, ThresholdBar, TONE_TEXT, type KpiStatus, type Tone } from "./widgets";
 
 export interface CapacityViewProps {
   setup: CapacitySetup;
@@ -252,118 +255,161 @@ function Headline({ setup }: { setup: CapacitySetup }) {
 // ---------------------------------------------------------------------------------------------------------------------
 
 function TodaySections(props: CapacityViewProps & { model: EngineModel; result: SimulationResult }) {
-  const { setup, model, result, base } = props;
+  const { setup, model, result, purposes } = props;
   const busy = useMemo(() => busyShares(setup, model, result), [setup, model, result]);
   const departments = setup.departments.filter((d) => setup.services.some((s) => s.active && s.department_id === d.id && s.tier_id));
   const ceilings = useMemo(() => Object.fromEntries(departments.map((d) => [d.id, departmentCeiling(setup, model, result, d.id)])), [departments, setup, model, result]);
+  const risk = useMemo(() => atRisk(setup, model, result), [setup, model, result]);
+  const t = useMemo(() => timeToServe(setup, model), [setup, model]);
+  // One colour per purpose across the page: the bottleneck's bars and the time-to-serve bars share them.
+  const riskParts = useMemo(() => new Map(risk.people.map((r) => [r.person.id, namedPurposeParts(r.byPurpose, purposes)] as const)), [risk, purposes]);
+  const tierParts = useMemo(() => new Map(t.departments.flatMap((d) => d.tiers.map((tier) => [tier.serviceId, namedPurposeParts(tier.byPurpose, purposes)] as const))), [t, purposes]);
+  const colours = useMemo(() => purposeColours([...tierParts.values(), ...riskParts.values()]), [tierParts, riskParts]);
+  const cf = (deptId: string) => busy.people.filter((p) => p.kind === "client_facing" && p.departmentId === deptId);
   return (
     <>
       <div className="grid gap-4 md:grid-cols-2" data-rooms>
         {departments.map((d) => (
-          <Room key={d.id} name={d.name} ceiling={ceilings[d.id]!} people={busy.people.filter((p) => p.kind === "client_facing" && p.departmentId === d.id)} />
+          <Room key={d.id} name={d.name} ceiling={ceilings[d.id]!} people={cf(d.id)} />
         ))}
       </div>
-      {departments.map((d) => (
-        <PeopleTable key={d.id} name={d.name} setup={setup} people={busy.people.filter((p) => p.kind === "client_facing" && p.departmentId === d.id)} showChannels={/performance/i.test(d.name)} />
-      ))}
-      <Bottleneck setup={setup} model={model} result={result} base={base} stepProcess={props.stepProcess} />
+      <div className="grid gap-4 md:grid-cols-2">
+        {departments.map((d) => (
+          <ClientFacingPeople key={d.id} name={d.name} setup={setup} ceiling={ceilings[d.id]!} people={cf(d.id)} showChannels={/performance/i.test(d.name)} />
+        ))}
+      </div>
+      <Bottleneck setup={setup} risk={risk} parts={riskParts} colours={colours} base={props.base} stepProcess={props.stepProcess} />
       <Leaver setup={setup} model={model} result={result} people={busy.people} />
-      <TimeToServe setup={setup} model={model} purposes={props.purposes} />
+      <TimeToServe setup={setup} model={model} purposes={purposes} colours={colours} />
     </>
   );
 }
 
+/** "Ann", "Ann and Bo", "Ann, Bo and Cy". */
+function joinAnd(items: string[], last = "and"): string {
+  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} ${last} ${items[items.length - 1]}`;
+}
+
+/** Room left for one person, in whole clients: "+3", or "full" when there is none (the detail says how far over). */
+const roomWords = (canTake: number) => (canTake >= 1 ? `+${Math.floor(canTake)}` : "full");
+
 function Room({ name, ceiling, people }: { name: string; ceiling: DepartmentCeiling; people: PersonBusy[] }) {
-  const chips = people.map((p) => ({ p, room: ceiling.perPerson[p.id]?.canTake ?? 0 })).sort((a, b) => b.room - a.room);
   const pulse = roomPulse(ceiling.room, ceiling.clients);
+  const most = Math.floor(ceiling.max + 1e-9);
+  const spare = ceiling.max - ceiling.clients;
+  // Room for N more (good, or warn when tight); full when less than one client of room is left (warn); over by N (crit).
+  const state: { words: string; tone: Tone } =
+    spare >= 1 ? { words: `Room for ${f0(Math.floor(spare))} more`, tone: pulse.tone === "warn" ? "warn" : "ok" } : spare > -1 ? { words: "Full", tone: "warn" } : { words: `Over by ${f0(Math.floor(-spare))}`, tone: "bad" };
+  const next = people
+    .map((p) => ({ p, room: ceiling.perPerson[p.id]?.canTake ?? 0 }))
+    .filter((x) => x.room >= 1)
+    .sort((a, b) => b.room - a.room || a.p.name.localeCompare(b.p.name))
+    .slice(0, 3)
+    .map((x) => x.p.name);
+  const teams = limitedBy(ceiling.limit);
   return (
     <Section title={`${name}: room for more clients`} data-room={name}>
-      <p className="text-base leading-snug" data-room-sentence>
-        <span className={cn("font-semibold", TONE_TEXT[pulse.tone])} data-room-status>
-          {pulse.status}.
-        </span>{" "}
-        {pulse.words ? (
-          <>
-            {name} can take <b>{pulse.words}</b>. Limited by {limitedBy(ceiling.limit)}.
-          </>
-        ) : (
-          <>
-            {name} can&apos;t take another client without someone going over their utilisation threshold. Limited by {limitedBy(ceiling.limit)}.
-          </>
-        )}
+      <p className="flex flex-wrap items-baseline gap-x-2 leading-none" data-room-clients>
+        <span className="font-mono text-4xl font-semibold tracking-tight tabular-nums">{f0(ceiling.clients)}</span>
+        <span className="text-base font-medium">clients today</span>
       </p>
-      <p className="-mt-1 text-xs text-muted-foreground">{f0(ceiling.clients)} clients today. A rough guide from the simulation, not a promise.</p>
-      <RoomGauge clients={ceiling.clients} limits={ceiling.limits} room={ceiling.room} />
-      <h3 className="mt-1 text-sm font-semibold">Who can take the next client</h3>
-      <div className="flex flex-wrap gap-1.5" data-chips>
-        {chips.map(({ p, room }) => (
-          <Chip key={p.id} tone={room >= 1 ? "ok" : "bad"}>
-            {p.name} <b>{room >= 1 ? `+${Math.floor(room)} more` : Math.abs(room) < 0.5 ? "at threshold" : `${Math.ceil(-room)} over`}</b>
-          </Chip>
-        ))}
-        {chips.length === 0 && <span className="text-sm text-muted-foreground">Nobody looks after clients in this department yet.</span>}
+      <div className="flex flex-col gap-1.5">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm">
+          <span className={cn("font-semibold", TONE_TEXT[state.tone])} data-room-status>
+            {state.words}
+          </span>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {f0(ceiling.clients)} of {f0(most)} clients
+          </span>
+        </div>
+        <RoomBar clients={ceiling.clients} max={ceiling.max} tone={state.tone} label={`${f0(ceiling.clients)} clients today of ${f0(most)} that fit. ${state.words}.`} />
+        <p className="text-xs text-muted-foreground" data-room-sentence>
+          Up to {f0(most)} before {teams} reach their utilisation threshold.
+        </p>
       </div>
+      <p className="text-sm" data-room-next>
+        <b className="font-semibold">Next client goes to:</b> {next.length ? joinAnd(next, "or") : "nobody has room for another client without going over their utilisation threshold."}
+      </p>
       <How
-        works="Each manager's ceiling is how many clients of their current mix they could hold before reaching their utilisation threshold (how busy a role can be before it counts as full, set per role under Set up → People & roles), from the simulation's busy share. The department ceiling adds those up, then checks each shared team (content, links, tech, implementers): how many clients could it serve at its own utilisation threshold? The lowest figure is the ceiling. The marks on the bar are each of those limits."
+        works={
+          <>
+            Each manager&apos;s ceiling is how many clients of their current mix they could hold before reaching their utilisation threshold (how busy a role can be before it counts as full, set per role under Set up → People &amp; roles), from the simulation&apos;s busy share. The department&apos;s ceiling adds those up, then checks each shared team: how many clients could it serve at its own utilisation threshold? The lowest is the most that fit. The next client goes to the people with the most room. A rough guide from the simulation, not a promise. Each team&apos;s ceiling:{" "}
+            <span data-room-limits>
+              {ceiling.limits.map((l, i) => (
+                <span key={l.name}>
+                  {i > 0 && " · "}
+                  <span className={cn(i === 0 && "font-semibold text-fg")}>
+                    {l.kind === "people" ? "Client managers" : l.name} {f0(l.max)}
+                  </span>
+                </span>
+              ))}
+            </span>
+            .
+          </>
+        }
         tells="whether the department can take on work, which team stops it, and who should get the next client."
       />
     </Section>
   );
 }
 
-function PeopleTable({ name, setup, people, showChannels }: { name: string; setup: CapacitySetup; people: PersonBusy[]; showChannels: boolean }) {
+function ClientFacingPeople({ name, setup, ceiling, people, showChannels }: { name: string; setup: CapacitySetup; ceiling: DepartmentCeiling; people: PersonBusy[]; showChannels: boolean }) {
   const roleRule = new Map(setup.roles.map((r) => [r.id, r.rule_of_thumb]));
+  const rows = [...people].sort((a, b) => b.busy - a.busy || a.name.localeCompare(b.name));
   return (
     <Section title={`${name}: client-facing people`} data-people-table={name}>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[44rem] text-sm">
-          <thead>
-            <tr className="border-b border-line text-left text-xs text-muted-foreground">
-              <th className="py-1.5 pr-3 font-medium">Person</th>
-              <th className="py-1.5 pr-3 font-medium">Clients</th>
-              <th className="py-1.5 pr-3 text-right font-medium">Can take</th>
-              <th className="py-1.5 pr-3 text-right font-medium">Rule</th>
-              {showChannels && <th className="py-1.5 pr-3 text-right font-medium">Channels</th>}
-              <th className="py-1.5 pr-3 text-right font-medium">Hours needed</th>
-              <th className="py-1.5 pr-3 text-right font-medium">Available</th>
-              <th className="min-w-[11rem] py-1.5 font-medium">Busy against threshold</th>
-            </tr>
-          </thead>
-          <tbody>
-            {people.map((p) => {
-              const max = p.busy > 0 ? (p.clients * p.line) / p.busy : 0;
-              const room = max - p.clients;
-              const rule = p.roleId ? roleRule.get(p.roleId) : null;
-              const available = p.busy > 0 ? p.hours / p.busy : 0;
-              const sp = setup.people.find((x) => x.id === p.id);
-              return (
-                <tr key={p.id} className="border-b border-line/60 align-top last:border-0">
-                  <td className="py-2 pr-3">
-                    {p.name}
-                    <div className="text-xs text-muted-foreground">
-                      {p.roleName}
-                      {sp && sp.reserved_share > 0 ? ` · ${formatPercent(sp.reserved_share)} team time` : ""}
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Nobody looks after clients in this department yet.</p>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {rows.map((p) => {
+            const canTake = ceiling.perPerson[p.id]?.canTake ?? personMax(p.clients, p.line, p.busy).canTake;
+            const rule = p.roleId ? roleRule.get(p.roleId) : null;
+            const available = p.busy > 0 ? p.hours / p.busy : 0;
+            const sp = setup.people.find((x) => x.id === p.id);
+            const tiers = Object.entries(p.clientsByTier)
+              .filter(([, n]) => n > 0.05)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([tier, n]) => `${tier} ${f0(n)}`)
+              .join(", ");
+            const detail = [
+              `${p.name}, ${p.roleName}${sp && sp.reserved_share > 0 ? ` (${formatPercent(sp.reserved_share)} team time)` : ""}`,
+              `${formatPercent(p.busy)} busy against a utilisation threshold of ${formatPercent(p.line)} (range ${formatPercent(p.low)} to ${formatPercent(p.high)})`,
+              `${f0(p.clients)} clients${tiers ? ` (${tiers})` : ""}`,
+              canTake >= 1 ? `can take ${Math.floor(canTake)} more` : Math.abs(canTake) < 0.5 ? "at their utilisation threshold" : `${Math.ceil(-canTake)} clients over`,
+              `hours needed ${f0(p.hours)} h a month, ${f0(available)} h available`,
+              ...(showChannels ? [`${f0(channelsOf(setup, p))} channels`] : []),
+              `rule of thumb ${rule ?? "not set"}${rule && p.clients > rule ? " (over it)" : ""}`,
+            ].join(". ");
+            return (
+              <li key={p.id}>
+                <div
+                  tabIndex={0}
+                  role="group"
+                  title={`${detail}.`}
+                  aria-label={`${detail}.`}
+                  className="grid grid-cols-[6.5rem_minmax(0,1fr)_2.75rem] items-center gap-2.5 rounded-sm text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring md:grid-cols-[8rem_minmax(0,1fr)_3rem]"
+                  data-person-row={p.name}
+                >
+                  <span className="truncate">{p.name}</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <ThresholdBar busy={p.busy} line={p.line} />
                     </div>
-                  </td>
-                  <td className="py-2 pr-3 tabular-nums">
-                    {f0(p.clients)} <TierChips byTier={p.clientsByTier} />
-                  </td>
-                  <td className={cn("py-2 pr-3 text-right tabular-nums", room < -0.5 && "font-semibold text-crit")}>{room >= 1 ? `+${Math.floor(room)}` : Math.abs(room) < 0.5 ? "0" : `${Math.ceil(-room)} over`}</td>
-                  <td className={cn("py-2 pr-3 text-right tabular-nums", rule && p.clients > rule ? "font-semibold text-crit" : "text-muted-foreground")}>{rule ?? "—"}</td>
-                  {showChannels && <td className="py-2 pr-3 text-right tabular-nums">{f0(channelsOf(setup, p))}</td>}
-                  <td className="py-2 pr-3 text-right tabular-nums">{f0(p.hours)} h</td>
-                  <td className="py-2 pr-3 text-right tabular-nums">{f0(available)} h</td>
-                  <td className="py-2">
-                    <BusyBar busy={p.busy} line={p.line} low={p.low} high={p.high} label={p.name} />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    <span className="w-9 text-right text-xs text-muted-foreground tabular-nums">{formatPercent(p.busy)}</span>
+                  </div>
+                  <span className={cn("text-right font-semibold tabular-nums", canTake >= 1 ? "text-good" : "text-muted-foreground")} data-can-take>
+                    {roomWords(canTake)}
+                  </span>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <p className="text-xs text-muted-foreground">The black tick is each person&apos;s own utilisation threshold. +N is how many more clients they can take. Hover or focus a row for their hours, tiers and rule of thumb.</p>
       <How
-        works="Hours needed adds up every process step for each of the person's clients, at their tier's frequency, from the simulation (the hands-on hours it measured, a month on average). Available is the hours a month they have for client work after leave and team time. Busy is the simulation's busy share, which includes waiting and rework, with its 10 to 90% range shown as the faint band; the dark tick is their utilisation threshold (how busy their role can be before it counts as full). Can take is their clients × utilisation threshold ÷ busy, less the clients they have now."
+        works="Busy is the simulation's busy share, which includes waiting and rework; the black tick is the person's utilisation threshold (how busy their role can be before it counts as full). Green is under it, amber within 10 points of it, red at or over it. +N is their clients × utilisation threshold ÷ busy, less the clients they have now. Hours needed adds up every process step for each of their clients at their tier's frequency, from the simulation; available is the hours a month they have for client work after leave and team time."
         tells="who is stretched, who has room, and whether a rule of thumb matches what the work actually takes."
       />
     </Section>
@@ -382,38 +428,99 @@ function channelsOf(setup: CapacitySetup, p: PersonBusy): number {
   return total;
 }
 
-function Bottleneck({ setup, model, result, base, stepProcess }: { setup: CapacitySetup; model: EngineModel; result: SimulationResult; base: string; stepProcess: Record<string, string> }) {
-  const b = useMemo(() => bottleneck(setup, model, result), [setup, model, result]);
-  if (!b) return null;
-  const p = b.person;
-  const tone = toneOf(p.busy, p.line);
+const MARGIN_POINTS = Math.round(AT_RISK_MARGIN * 100);
+
+function Bottleneck({
+  setup,
+  risk,
+  parts,
+  colours,
+  base,
+  stepProcess,
+}: {
+  setup: CapacitySetup;
+  risk: ReturnType<typeof atRisk>;
+  parts: Map<string, PurposePart[]>;
+  colours: Map<string, string>;
+  base: string;
+  stepProcess: Record<string, string>;
+}) {
+  const deptName = (p: PersonBusy) => setup.departments.find((d) => d.id === p.departmentId)?.name ?? p.roleName;
+  const used = new Map([...colours].filter(([n]) => risk.people.some((r) => parts.get(r.person.id)?.some((x) => x.name === n))));
   return (
-    <Section title="Bottleneck" data-bottleneck>
+    <Section title="Bottleneck: who is at risk" data-bottleneck>
       <p className="text-base leading-snug" data-bottleneck-sentence>
-        <b>{p.name}</b> ({p.roleName}) is the most stretched, at <b className={TONE_TEXT[tone]}>{formatPercent(p.busy)}</b> against a utilisation threshold of {formatPercent(p.line)}.
+        {risk.people.length === 0 ? (
+          <>Nobody is over or within {MARGIN_POINTS} points of their utilisation threshold.</>
+        ) : (
+          <>
+            {risk.over > 0 && <b className="text-crit">{risk.over} over</b>}
+            {risk.over > 0 && risk.near > 0 && " and "}
+            {risk.near > 0 && (
+              <b className="text-warn">
+                {risk.near} within {MARGIN_POINTS} points
+              </b>
+            )}{" "}
+            of their utilisation threshold.
+          </>
+        )}
       </p>
-      <h3 className="text-sm font-semibold">What fills their month</h3>
-      <StackBar parts={b.steps.map((s) => ({ key: s.stepId, name: s.name, value: s.hours }))} />
-      <p className="text-xs">
-        These come from process steps assigned to them:{" "}
-        {b.steps.map((s, i) => (
-          <span key={s.stepId}>
-            {i > 0 && ", "}
-            {s.stepId !== "hand" && stepProcess[s.stepId] ? (
-              <Link href={`${base}/p/${stepProcess[s.stepId]}?step=${s.stepId}`} className="text-accent hover:underline" data-step-link={s.stepId}>
-                {s.name}
-              </Link>
-            ) : (
-              s.name
-            )}
-          </span>
-        ))}
-        .
-      </p>
-      {b.next.length > 0 && <p className="text-xs text-muted-foreground">Next most stretched: {b.next.map((x) => `${x.name} ${formatPercent(x.busy)}`).join(" · ")}</p>}
+      {risk.people.length > 0 && (
+        <>
+          <ul className="flex flex-col gap-3">
+            {risk.people.map(({ person: p, status }) => {
+              const bar = (parts.get(p.id) ?? []).map((x) => ({ ...x, color: colours.get(x.name) }));
+              return (
+                <li key={p.id} className="flex flex-col gap-1" data-at-risk={status}>
+                  <div className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="min-w-0 truncate">
+                      <b className="font-semibold">{p.name}</b> <span className="text-xs text-muted-foreground">{deptName(p)}</span>
+                    </span>
+                    <span className={cn("shrink-0 font-semibold tabular-nums", status === "over" ? "text-crit" : "text-warn")} title={`Utilisation threshold ${formatPercent(p.line)}`}>
+                      {formatPercent(p.busy)}
+                    </span>
+                  </div>
+                  {bar.length > 0 ? <StackBar parts={bar} legend={false} label={`What fills ${p.name}'s month`} /> : <p className="text-xs text-muted-foreground">No step hours in the simulation.</p>}
+                </li>
+              );
+            })}
+          </ul>
+          {used.size > 0 && <ColourLegend colours={used} />}
+        </>
+      )}
       <How
-        works="Ranks everyone by how far they are over (or under) their own utilisation threshold, using the simulation's busy share, and shows the process steps that take the most of the top person's month. Each step links to its place in the process."
-        tells="who to take work from first, and which steps would free the most time if they were quicker."
+        works={
+          <>
+            At risk is anyone, client-facing or in a shared team, whose busy share from the simulation is at or over their own utilisation threshold (over), or within {MARGIN_POINTS} percentage points under it (near). Each bar is the hours the simulation gave them in a month, by the purpose of the process steps; hover a segment for its hours.
+            {risk.people.length > 0 && (
+              <>
+                {" "}
+                The steps that take the most of each month, linked to their place in the process:{" "}
+                {risk.people.map(({ person: p, steps }, i) => (
+                  <span key={p.id}>
+                    {i > 0 && "; "}
+                    {p.name}:{" "}
+                    {steps.map((s, j) => (
+                      <span key={s.stepId}>
+                        {j > 0 && ", "}
+                        {s.stepId !== "hand" && stepProcess[s.stepId] ? (
+                          <Link href={`${base}/p/${stepProcess[s.stepId]}?step=${s.stepId}`} className="text-accent hover:underline" data-step-link={s.stepId}>
+                            {s.name}
+                          </Link>
+                        ) : (
+                          s.name
+                        )}{" "}
+                        ({f1(s.hours)} h)
+                      </span>
+                    ))}
+                  </span>
+                ))}
+                .
+              </>
+            )}
+          </>
+        }
+        tells="who to take work from first, and what kind of work fills their month."
       />
     </Section>
   );
@@ -421,78 +528,90 @@ function Bottleneck({ setup, model, result, base, stepProcess }: { setup: Capaci
 
 function Leaver({ setup, model, result, people }: { setup: CapacitySetup; model: EngineModel; result: SimulationResult; people: PersonBusy[] }) {
   const sorted = useMemo(() => [...people].sort((a, b) => b.clients - a.clients || a.name.localeCompare(b.name)), [people]);
-  const [picked, setPicked] = useState<string | null>(null);
-  const id = picked && sorted.some((p) => p.id === picked) ? picked : (sorted[0]?.id ?? null);
-  const res = useMemo(() => (id ? leaver(setup, model, result, id) : null), [id, setup, model, result]);
-  const who = sorted.find((p) => p.id === id);
+  const groups = useMemo<PickerGroup[]>(() => {
+    const byGroup = new Map<string, PickerGroup>();
+    for (const p of sorted) {
+      const g = p.departmentId ? (setup.departments.find((d) => d.id === p.departmentId)?.name ?? "Other") : "Shared teams";
+      if (!byGroup.has(g)) byGroup.set(g, { name: g, people: [] });
+      byGroup.get(g)!.people.push({ id: p.id, name: p.name, note: p.kind === "client_facing" ? `${f0(p.clients)} clients` : p.roleName });
+    }
+    return [...byGroup.values()];
+  }, [sorted, setup.departments]);
+  const [picked, setPicked] = useState<string[] | null>(null);
+  // Nobody chosen yet: the person with the most clients, so the section opens with an answer.
+  const ids = useMemo(() => (picked ?? (sorted[0] ? [sorted[0].id] : [])).filter((id) => sorted.some((p) => p.id === id)), [picked, sorted]);
+  const res = useMemo(() => (ids.length ? leavers(setup, model, result, ids) : null), [ids, setup, model, result]);
   if (!sorted.length) return null;
   const nameOf = (pid: string) => people.find((p) => p.id === pid)?.name ?? pid;
-  const received = res ? Object.entries(res.received).sort((a, b) => b[1] - a[1]) : [];
+  const roleName = (rid: string) => setup.roles.find((r) => r.id === rid)?.name ?? rid;
+  const received = res ? Object.entries(res.received).sort((a, b) => b[1] - a[1] || nameOf(a[0]).localeCompare(nameOf(b[0]))) : [];
+  const leaving = ids.map((id) => people.find((p) => p.id === id)!);
+  const anyClientFacing = leaving.some((p) => p.kind === "client_facing");
   const ramp = setup.rampDefault.length;
+  const parts: string[] = [];
+  if (res && anyClientFacing) {
+    parts.push(
+      res.clients === 0
+        ? "they have no clients to hand over"
+        : `their ${f0(res.clients)} ${res.clients === 1 ? "client goes" : "clients go"} to ${received.length ? joinAnd(received.map(([pid, n]) => `${nameOf(pid)} (${n})`)) : "nobody: no one else serves those tiers"}`,
+    );
+  }
+  if (res?.sharedTeams.length) parts.push(`the rest of the ${joinAnd(res.sharedTeams.map((r) => roleName(r).toLowerCase()))} ${res.sharedTeams.length === 1 ? "shares" : "share"} their work`);
+  if (res?.emptyTeams.length) parts.push(`nobody is left in the ${joinAnd(res.emptyTeams.map((r) => roleName(r).toLowerCase()))} to do their work`);
   return (
-    <Section
-      title="What if someone leaves?"
-      aside={
-        <label className="flex items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Person</span>
-          <select className="rounded-token border border-line bg-panel px-2 py-1 text-sm" value={id ?? ""} onChange={(e) => setPicked(e.target.value)} data-leaver-select aria-label="Person who leaves">
-            {sorted.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      }
-      data-leaver
-    >
-      {who && res && (
+    <Section title="What if someone leaves?" data-leaver>
+      <PeoplePicker label="Who leaves (choose one or more)" groups={groups} value={ids} onChange={setPicked} />
+      {res ? (
         <>
-          <p className="text-base leading-snug" data-leaver-sentence>
-            {res.kind === "client_facing" ? (
-              <>
-                If <b>{who.name}</b> leaves, their {f0(res.clients)} clients go to {received.map(([pid, n]) => `${nameOf(pid)} (${n})`).join(", ") || "nobody: no one else serves those tiers"}.
-              </>
-            ) : (
-              <>
-                If <b>{who.name}</b> leaves, the {who.roleName.toLowerCase()} shares their work.
-              </>
-            )}{" "}
+          <p className="text-lg leading-snug font-semibold" data-leaver-sentence>
+            If {joinAnd(leaving.map((p) => p.name))} {leaving.length === 1 ? "leaves" : "leave"}, {joinAnd(parts)}.{" "}
             {res.goOver.length ? (
-              <span className="font-semibold text-crit">
-                {res.goOver.map(nameOf).join(", ")} {res.goOver.length === 1 ? "goes" : "go"} over their utilisation threshold.
+              <span className="text-crit">
+                {joinAnd(res.goOver.map(nameOf))} {res.goOver.length === 1 ? "goes" : "go"} over their utilisation threshold.
               </span>
             ) : (
-              "Nobody new goes over their utilisation threshold."
+              <span className="font-normal">Nobody new goes over their utilisation threshold.</span>
             )}
-            {res.unplaced > 0 && <span className="text-crit"> {res.unplaced} clients have nobody who serves their tier.</span>}
+            {res.unplaced > 0 && (
+              <span className="text-crit">
+                {" "}
+                {f0(res.unplaced)} {res.unplaced === 1 ? "client has" : "clients have"} nobody who serves their tier.
+              </span>
+            )}
           </p>
-          <div className="grid gap-2" data-dumbbells>
-            {res.rows.map((r) => (
-              <div key={r.id} className="grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-2.5 text-sm md:grid-cols-[7.5rem_minmax(0,1fr)]">
-                <span className="truncate">{r.name}</span>
-                <Dumbbell before={r.before} after={r.after} line={r.line} />
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground">A replacement takes about {ramp || 3} months to reach full speed.</p>
+          {res.rows.length > 0 && (
+            <div className="grid gap-2" data-dumbbells>
+              {res.rows.map((r) => (
+                <div key={r.id} className="grid grid-cols-[6rem_minmax(0,1fr)] items-center gap-2.5 text-sm md:grid-cols-[8rem_minmax(0,1fr)]">
+                  <span className="truncate">{r.name}</span>
+                  <Dumbbell before={r.before} after={r.after} line={r.line} />
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">Hollow dot: busy today. Filled dot: busy after. The black tick is their utilisation threshold. A replacement takes about {ramp || 3} months to reach full speed.</p>
         </>
+      ) : (
+        <p className="text-base text-muted-foreground" data-leaver-sentence>
+          Choose one or more people to see who takes their work.
+        </p>
       )}
       <How
-        works="Takes the person out, then hands each of their clients to whichever colleague is least busy and serves that tier. A client adds the hours its tier needs from a manager (the planned hours, as in time to serve) to the colleague's busy share, which starts from the simulation's. Each row shows a colleague's busy share before (hollow dot) and after (solid dot); the grey line is their utilisation threshold."
+        works="Takes everyone you choose out together, then hands each of their clients, one at a time, to whichever colleague in the same department is least busy and serves that tier (nobody who is leaving gets a client). A client adds the hours its tier needs from a manager (the planned hours, as in time to serve) to the colleague's busy share, which starts from the simulation's. Someone in a shared team has no clients: the rest of their team shares their hours. Each row shows a colleague's busy share before (hollow dot) and after (filled dot) against their utilisation threshold (the black tick)."
         tells="key-person risk: who absorbs the loss, and whether you need a replacement or a rebalance."
       />
     </Section>
   );
 }
 
-export function TimeToServe({ setup, model, purposes }: { setup: CapacitySetup; model: EngineModel; purposes?: readonly PurposeCategory[] }) {
+export function TimeToServe({ setup, model, purposes, colours: shared }: { setup: CapacitySetup; model: EngineModel; purposes?: readonly PurposeCategory[]; colours?: Map<string, string> }) {
   const t = useMemo(() => timeToServe(setup, model), [setup, model]);
   const money = (v: number) => formatWholeCurrency(v, setup.currency);
   const nameOf = (id: string | null) => setup.people.find((p) => p.id === id)?.name ?? "—";
   // Each tier's bar, named by the workspace's purposes, and one colour per purpose across the whole section.
   const parts = useMemo(() => new Map(t.departments.flatMap((d) => d.tiers.map((tier) => [tier.serviceId, namedPurposeParts(tier.byPurpose, purposes)] as const))), [t, purposes]);
-  const colours = useMemo(() => purposeColours([...parts.values()]), [parts]);
+  // The page passes its colours so a purpose matches the bottleneck's bars; on its own it picks them from these bars.
+  const colours = useMemo(() => shared ?? purposeColours([...parts.values()]), [shared, parts]);
   return (
     <Section title="Avg time to serve one client, by tier, per month" data-time-to-serve>
       {t.departments.map((d) => (

@@ -555,32 +555,43 @@ export interface LeaverRow {
   goesOver: boolean;
 }
 
-export interface LeaverResult {
-  leaverId: string;
-  kind: "client_facing" | "shared";
-  /** Clients the leaver hands over (named and counted). */
+export interface LeaversResult {
+  /** The people taken out, as found (ids that aren't anyone are dropped), in the order given. */
+  leaverIds: string[];
+  /** Clients the client-facing leavers hand over (named and counted). */
   clients: number;
   /** Colleague id → clients they receive. */
   received: Record<string, number>;
-  /** Clients nobody serves the tier of. */
+  /** Clients nobody left serves the tier of. */
   unplaced: number;
+  /** Shared teams (role ids) whose remaining people share a leaver's hours. */
+  sharedTeams: string[];
+  /** Shared teams (role ids) with nobody left to share a leaver's hours. */
+  emptyTeams: string[];
   /** Colleagues whose busy share changes, busiest after first. */
   rows: LeaverRow[];
+  /** Colleagues the move takes from under their line to at or over it. */
   goOver: string[];
 }
 
+export interface LeaverResult extends LeaversResult {
+  leaverId: string;
+  kind: "client_facing" | "shared";
+}
+
 /**
- * Takes `leaverId` out and hands each of their clients, one at a time, to the least-busy colleague of the department who serves the tier.
- * The leaver is removed from the candidates FIRST (the prototype let them take clients back). A move adds the client's planned manager hours
- * ÷ the colleague's hours a month to the colleague's busy share (the engine's busy share is the start). A person of a shared team has no
- * clients: their hours are shared equally by the rest of the team.
+ * Takes every person in `leaverIds` out at once, then hands each client-facing leaver's clients, one at a time, to the least-busy colleague
+ * of that leaver's department who serves the tier. All the leavers are removed from the candidates FIRST, so no leaver takes another's
+ * clients (nor their own back, as the prototype let them). A move adds the client's planned manager hours ÷ the colleague's hours a month
+ * to the colleague's busy share (the engine's busy share is the start). A person of a shared team has no clients: their hours are shared
+ * equally by the rest of the team who stay. Leavers are handled in the order given; within one, counted clients tier by tier, then named.
  */
-export function leaver(setup: CapacitySetup, model: EngineModel, result: SimulationResult, leaverId: string): LeaverResult | null {
+export function leavers(setup: CapacitySetup, model: EngineModel, result: SimulationResult, leaverIds: readonly string[]): LeaversResult | null {
   const { deptOf } = lookups(setup);
   const { people } = busyShares(setup, model, result);
-  const who = people.find((p) => p.id === leaverId);
-  if (!who) return null;
-  const setupPerson = setup.people.find((p) => p.id === leaverId)!;
+  const leaving = [...new Set(leaverIds)].map((id) => people.find((p) => p.id === id)).filter((p): p is PersonBusy => !!p);
+  if (!leaving.length) return null;
+  const gone = new Set(leaving.map((p) => p.id));
   const hoursOf = (id: string): number => {
     const ep = result.resolvedPeople[id] ?? model.people?.[id];
     return ep ? ep.capacity * MONTH_WEEKS * availableShare(ep, 0) : 0;
@@ -588,63 +599,80 @@ export function leaver(setup: CapacitySetup, model: EngineModel, result: Simulat
   const busyNow = new Map(people.map((p) => [p.id, p.busy]));
   const before = new Map(busyNow);
   const received: Record<string, number> = {};
+  const affected = new Set<string>();
+  const sharedTeams = new Set<string>();
+  const emptyTeams = new Set<string>();
   let clients = 0;
   let unplaced = 0;
 
-  if (who.kind === "shared") {
-    const mates = people.filter((p) => p.roleId === who.roleId && p.id !== leaverId);
-    const mine = Object.values(result.personTime?.stepHours[leaverId] ?? {}).reduce((s, v) => s + v, 0);
+  // Shared teams: the leaver's hours, shared equally by the team's people who stay.
+  for (const who of leaving.filter((p) => p.kind === "shared")) {
+    const mates = people.filter((p) => p.roleId === who.roleId && !gone.has(p.id));
+    const mine = Object.values(result.personTime?.stepHours[who.id] ?? {}).reduce((s, v) => s + v, 0);
+    if (!mates.length) {
+      if (who.roleId) emptyTeams.add(who.roleId);
+      continue;
+    }
+    if (who.roleId) sharedTeams.add(who.roleId);
     for (const m of mates) {
+      affected.add(m.id);
       const h = hoursOf(m.id);
       if (h > 0) busyNow.set(m.id, (busyNow.get(m.id) ?? 0) + mine / mates.length / h);
     }
-    return finish(who.kind, mates.map((m) => m.id));
   }
 
-  const dept = deptOf(setupPerson);
-  // Candidates exclude the leaver first.
-  const candidates = people.filter((p) => p.id !== leaverId && p.kind === "client_facing" && p.departmentId === dept && hoursOf(p.id) > 0 && model.people?.[p.id]?.until === undefined);
+  // Client-facing: every leaver is out of the candidates before the first client is handed out.
   const serves = (id: string, tierKey: string): boolean => {
     const tiers = model.people?.[id]?.tiers ?? result.resolvedPeople[id]?.tiers;
     return !tiers || tiers.length === 0 || tiers.includes(tierKey);
   };
-  const give = (serviceId: string, client: EngineClient | null): void => {
-    clients++;
-    const tier = model.services?.[serviceId]?.tier ?? "";
-    let best: PersonBusy | null = null;
-    for (const c of candidates) if (serves(c.id, tier) && (!best || (busyNow.get(c.id) ?? 0) < (busyNow.get(best.id) ?? 0))) best = c;
-    if (!best) {
-      unplaced++;
-      return;
-    }
-    busyNow.set(best.id, (busyNow.get(best.id) ?? 0) + plannedServiceHours(model, serviceId, client).manager / hoursOf(best.id));
-    received[best.id] = (received[best.id] ?? 0) + 1;
-  };
-  const mp = model.people?.[leaverId] ?? result.resolvedPeople[leaverId];
-  // Counted clients first, tier by tier, then the named ones.
-  for (const [sid, n] of Object.entries(mp?.portfolio ?? {}).sort(([a], [b]) => a.localeCompare(b))) for (let i = 0; i < Math.round(n); i++) give(sid, null);
-  for (const c of Object.values(model.clients ?? {})) {
-    if (c.manager !== leaverId) continue;
-    for (const sid of c.services) {
-      const svc = setup.services.find((s) => s.id === sid);
-      if (!svc || (dept && svc.department_id !== dept)) continue;
-      give(sid, c);
+  for (const who of leaving.filter((p) => p.kind === "client_facing")) {
+    const dept = deptOf(setup.people.find((p) => p.id === who.id)!);
+    const candidates = people.filter((p) => !gone.has(p.id) && p.kind === "client_facing" && p.departmentId === dept && hoursOf(p.id) > 0 && model.people?.[p.id]?.until === undefined);
+    for (const c of candidates) affected.add(c.id);
+    const give = (serviceId: string, client: EngineClient | null): void => {
+      clients++;
+      const tier = model.services?.[serviceId]?.tier ?? "";
+      let best: PersonBusy | null = null;
+      for (const c of candidates) if (serves(c.id, tier) && (!best || (busyNow.get(c.id) ?? 0) < (busyNow.get(best.id) ?? 0))) best = c;
+      if (!best) {
+        unplaced++;
+        return;
+      }
+      busyNow.set(best.id, (busyNow.get(best.id) ?? 0) + plannedServiceHours(model, serviceId, client).manager / hoursOf(best.id));
+      received[best.id] = (received[best.id] ?? 0) + 1;
+    };
+    const mp = model.people?.[who.id] ?? result.resolvedPeople[who.id];
+    // Counted clients first, tier by tier, then the named ones.
+    for (const [sid, n] of Object.entries(mp?.portfolio ?? {}).sort(([a], [b]) => a.localeCompare(b))) for (let i = 0; i < Math.round(n); i++) give(sid, null);
+    for (const c of Object.values(model.clients ?? {})) {
+      if (c.manager !== who.id) continue;
+      for (const sid of c.services) {
+        const svc = setup.services.find((s) => s.id === sid);
+        if (!svc || (dept && svc.department_id !== dept)) continue;
+        give(sid, c);
+      }
     }
   }
-  return finish(who.kind, candidates.map((c) => c.id));
 
-  function finish(kind: LeaverResult["kind"], affected: string[]): LeaverResult {
-    const rows: LeaverRow[] = [];
-    for (const id of affected) {
-      const p = people.find((q) => q.id === id)!;
-      const b = before.get(id) ?? 0;
-      const a = busyNow.get(id) ?? 0;
-      if (Math.abs(a - b) <= 0.005) continue;
-      rows.push({ id, name: p.name, line: p.line, before: b, after: a, goesOver: a >= p.line && b < p.line });
-    }
-    rows.sort((x, y) => y.after - x.after);
-    return { leaverId, kind, clients, received, unplaced, rows, goOver: rows.filter((r) => r.goesOver).map((r) => r.id) };
+  const rows: LeaverRow[] = [];
+  for (const id of affected) {
+    const p = people.find((q) => q.id === id)!;
+    const b = before.get(id) ?? 0;
+    const a = busyNow.get(id) ?? 0;
+    if (Math.abs(a - b) <= 0.005) continue;
+    rows.push({ id, name: p.name, line: p.line, before: b, after: a, goesOver: a >= p.line && b < p.line });
   }
+  rows.sort((x, y) => y.after - x.after);
+  return { leaverIds: leaving.map((p) => p.id), clients, received, unplaced, sharedTeams: [...sharedTeams], emptyTeams: [...emptyTeams], rows, goOver: rows.filter((r) => r.goesOver).map((r) => r.id) };
+}
+
+/** One person leaves: `leavers` with a single id, saying which kind of person it was. */
+export function leaver(setup: CapacitySetup, model: EngineModel, result: SimulationResult, leaverId: string): LeaverResult | null {
+  const res = leavers(setup, model, result, [leaverId]);
+  if (!res) return null;
+  const kind = busyShares(setup, model, result).people.find((p) => p.id === leaverId)!.kind;
+  return { ...res, leaverId, kind };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -737,6 +765,57 @@ export function bottleneck(setup: CapacitySetup, model: EngineModel, result: Sim
     .slice(0, topSteps)
     .map(([stepId, hours]) => ({ stepId, name: stepId === "hand" ? "Hand-holding" : (nameOf.get(stepId) ?? stepId), hours }));
   return { person: top, over: top.busy - top.line, steps, next: ranked.slice(1, 5), ranking: rankBottlenecks(model, result) };
+}
+
+/**
+ * How close under their own utilisation threshold someone can be before they count as at risk ("near"): 10 percentage points, so a
+ * threshold of 85% puts everyone from 75% up at risk. At or over the threshold is "over".
+ */
+export const AT_RISK_MARGIN = 0.1;
+
+export type RiskStatus = "over" | "near";
+
+/** Over (at or past the threshold), near (within `AT_RISK_MARGIN` under it), or null (fine). */
+export function riskOf(busy: number, line: number): RiskStatus | null {
+  return busy >= line ? "over" : busy >= line - AT_RISK_MARGIN - 1e-9 ? "near" : null;
+}
+
+export interface AtRiskPerson {
+  person: PersonBusy;
+  status: RiskStatus;
+  /** What fills their month (hours a month, from the run), by the steps' purpose key, largest first; hand-holding is "Hand-holding". */
+  byPurpose: { name: string; hours: number }[];
+  /** The steps that take the most of their month, biggest first (`stepId` "hand" is hand-holding, which has no step). */
+  steps: { stepId: string; name: string; hours: number }[];
+}
+
+/**
+ * Everyone at risk, client-facing and shared teams alike: over their own utilisation threshold or within `AT_RISK_MARGIN` under it, over
+ * first, then busiest first. Each with the hours the run gave them, by the purpose of the steps.
+ */
+export function atRisk(setup: CapacitySetup, model: EngineModel, result: SimulationResult, topSteps = 3): { over: number; near: number; people: AtRiskPerson[] } {
+  const { people } = busyShares(setup, model, result);
+  const purposeOf = new Map(model.steps.map((s) => [s.id, s.purpose?.trim() || "Other"]));
+  const nameOf = new Map(model.steps.map((s) => [s.id, s.name]));
+  const out: AtRiskPerson[] = [];
+  for (const p of people) {
+    const status = riskOf(p.busy, p.line);
+    if (!status) continue;
+    const hours: Record<string, number> = {};
+    for (const [stepId, h] of Object.entries(result.personTime?.stepHours[p.id] ?? {})) {
+      if (!(h > 0)) continue;
+      const key = stepId === "hand" ? "Hand-holding" : (purposeOf.get(stepId) ?? "Other");
+      hours[key] = (hours[key] ?? 0) + h;
+    }
+    const steps = Object.entries(result.personTime?.stepHours[p.id] ?? {})
+      .filter(([, h]) => h > 0)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, topSteps)
+      .map(([stepId, h]) => ({ stepId, name: stepId === "hand" ? "Hand-holding" : (nameOf.get(stepId) ?? stepId), hours: h }));
+    out.push({ person: p, status, byPurpose: purposes(hours), steps });
+  }
+  out.sort((a, b) => (a.status === b.status ? 0 : a.status === "over" ? -1 : 1) || b.person.busy - a.person.busy || a.person.name.localeCompare(b.person.name));
+  return { over: out.filter((x) => x.status === "over").length, near: out.filter((x) => x.status === "near").length, people: out };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

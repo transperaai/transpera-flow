@@ -1,8 +1,8 @@
-// The Capacity page's small pictures (capacity build P5), after the prototype's CSS: the busy bar against a line, the room gauge with every
-// limit marked, the person chips, the before/after dumbbell and the stack bar. Plain markup with the app's colour tokens (light and dark).
+// The Capacity page's small pictures (capacity build P5), after the prototype's CSS: the busy bar against a utilisation threshold, the room
+// bar (clients today against the most that fit), the before/after dumbbell and the stack bar. Plain markup with the app's colour tokens (light and dark).
 
 import type { ReactNode } from "react";
-import { roomPulse } from "@transpera-flow/db";
+import { riskOf } from "@transpera-flow/db";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { SectionCard } from "@/components/page-kit";
 import { cn } from "@/lib/utils";
@@ -13,9 +13,10 @@ const at = (share: number) => `${Math.max(0, Math.min(100, (share * 100) / SCALE
 
 export type Tone = "ok" | "warn" | "bad";
 
-/** Under the line is fine, within 10 points under is a warning, at or over is bad. */
+/** Under the utilisation threshold is fine, within `AT_RISK_MARGIN` (10 points) under is a warning, at or over is bad (`riskOf`). */
 export function toneOf(busy: number, line: number): Tone {
-  return busy >= line ? "bad" : busy >= line - 0.1 ? "warn" : "ok";
+  const risk = riskOf(busy, line);
+  return risk === "over" ? "bad" : risk === "near" ? "warn" : "ok";
 }
 
 export const TONE_BG: Record<Tone, string> = {
@@ -49,53 +50,29 @@ export function BusyBar({ busy, line, low, high, label }: { busy: number; line: 
   );
 }
 
-export interface GaugeLimit {
-  name: string;
-  max: number;
-}
-
-/** Clients so far as a bar, with a mark at every limit; the lowest limit is the heavy one. */
-export function RoomGauge({ clients, limits, room }: { clients: number; limits: GaugeLimit[]; room: number }) {
-  const shown = limits.filter((l) => l.max < clients * 3);
-  const top = Math.max(clients, ...shown.map((l) => l.max), 1) * 1.08;
-  const x = (v: number) => `${Math.min(100, (v * 100) / top)}%`;
-  const tone: Tone = roomPulse(room, clients).tone;
+/**
+ * A department's clients today against the most that fit: the bar fills to today's clients, the heavy tick is the most that fit. The scale
+ * runs a little past whichever is larger so both show.
+ */
+export function RoomBar({ clients, max, tone, label }: { clients: number; max: number; tone: Tone; label: string }) {
+  const top = Math.max(clients, max, 1) * 1.05;
+  const x = (v: number) => `${Math.max(0, Math.min(100, (v * 100) / top))}%`;
   return (
-    <div data-gauge>
-      <div className="relative h-3.5 rounded-full bg-panel-2" role="img" aria-label={`${formatNumber(clients, 0)} clients today. ${shown.map((l) => `${l.name} limit ${formatNumber(l.max, 0)}`).join(". ")}`}>
-        <i className={cn("absolute inset-y-0 left-0 rounded-full", TONE_BG[tone])} style={{ width: x(clients) }} />
-        {shown.map((l, i) => (
-          <b key={l.name} className={cn("absolute -top-1 -bottom-1", i === 0 ? "w-[3px] bg-fg" : "w-0.5 bg-fg-3")} style={{ left: x(l.max) }} title={`${l.name}: ${formatNumber(l.max, 0)}`} />
-        ))}
-      </div>
-      <div className="mt-2 flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
-        {shown.map((l, i) => (
-          <span key={l.name} className={cn(i === 0 && "font-semibold text-fg")}>
-            {i === 0 ? "▲ " : ""}
-            {l.name} <b className="tabular-nums">{formatNumber(l.max, 0)}</b>
-          </span>
-        ))}
-      </div>
+    <div className="relative h-3 rounded-full bg-panel-2" role="img" aria-label={label} data-room-bar>
+      <i className={cn("absolute inset-y-0 left-0 rounded-full", TONE_BG[tone])} style={{ width: x(clients) }} />
+      <b className="absolute -top-1 -bottom-1 w-[3px] -translate-x-1/2 rounded-full bg-fg" style={{ left: x(max) }} />
     </div>
   );
 }
 
-export function Chip({ tone, children }: { tone: "ok" | "bad"; children: ReactNode }) {
-  return <span className={cn("rounded-full border border-line px-2.5 py-0.5 text-xs", tone === "ok" ? "bg-good-soft [&_b]:text-good" : "bg-crit-soft [&_b]:text-crit")}>{children}</span>;
-}
-
-export function TierChips({ byTier }: { byTier: Record<string, number> }) {
+/** One person's busy share as a bar coloured by tone, with a black tick at their own utilisation threshold (0-130% scale). */
+export function ThresholdBar({ busy, line }: { busy: number; line: number }) {
+  const tone = toneOf(busy, line);
   return (
-    <span className="inline-flex flex-wrap gap-1 align-middle">
-      {Object.entries(byTier)
-        .filter(([, n]) => n > 0.05)
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([tier, n]) => (
-          <span key={tier} className="rounded-full bg-panel-2 px-1.5 py-px text-2xs text-muted-foreground">
-            {tier} {formatNumber(n, 0)}
-          </span>
-        ))}
-    </span>
+    <div className="relative h-3 rounded-full bg-panel-2" aria-hidden data-busy={Math.round(busy * 100)}>
+      <i className={cn("absolute inset-y-0 left-0 rounded-full", TONE_BG[tone])} style={{ width: at(busy) }} />
+      <b className="absolute -top-1 -bottom-1 w-0.5 -translate-x-1/2 bg-fg" style={{ left: at(line) }} />
+    </div>
   );
 }
 
@@ -108,13 +85,13 @@ export function Dumbbell({ before, after, line }: { before: number; after: numbe
     <div className="flex items-center gap-2.5" data-dumbbell>
       <div className="relative h-3.5 flex-1" role="img" aria-label={`${formatPercent(before)} before, ${formatPercent(after)} after, utilisation threshold ${formatPercent(line)}`}>
         <span className="absolute inset-x-0 top-[6px] h-0.5 bg-panel-2" />
-        <b className="absolute top-0 bottom-0 w-0.5 bg-fg/50" style={{ left: at(line) }} />
-        <i className={cn("absolute top-[6px] h-0.5 opacity-60", TONE_BG[tone])} style={{ left: at(lo), width: `calc(${at(hi)} - ${at(lo)})` }} />
+        <b className="absolute top-0 bottom-0 w-0.5 -translate-x-1/2 bg-fg" style={{ left: at(line) }} />
+        <i className={cn("absolute top-[5px] h-1 rounded-full opacity-70", TONE_BG[tone])} style={{ left: at(lo), width: `calc(${at(hi)} - ${at(lo)})` }} />
         <i className="absolute top-0.5 -ml-[5px] size-2.5 rounded-full border-2 border-fg-3 bg-panel" style={{ left: at(before) }} />
         <i className={cn("absolute top-0.5 -ml-[5px] size-2.5 rounded-full", TONE_BG[tone])} style={{ left: at(after) }} />
       </div>
       <span className="w-24 text-right text-xs tabular-nums">
-        {formatPercent(before)} → <b className={tone === "bad" ? "text-crit" : undefined}>{formatPercent(after)}</b>
+        {formatPercent(before)} → <b className={TONE_TEXT[tone]}>{formatPercent(after)}</b>
       </span>
     </div>
   );
@@ -123,11 +100,11 @@ export function Dumbbell({ before, after, line }: { before: number; after: numbe
 const SERIES = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5", "bg-chart-1/60", "bg-chart-2/60", "bg-chart-3/60"];
 
 /** One bar split into parts with a legend; `unit` follows each figure. A part's `color` (a CSS colour) overrides the series colour by position. */
-export function StackBar({ parts, unit = "h" }: { parts: { key: string; name: string; value: number; color?: string }[]; unit?: string }) {
+export function StackBar({ parts, unit = "h", legend = true, label }: { parts: { key: string; name: string; value: number; color?: string }[]; unit?: string; legend?: boolean; label?: string }) {
   const total = parts.reduce((s, p) => s + p.value, 0) || 1;
   return (
     <div data-stack>
-      <div className="flex h-3.5 overflow-hidden rounded bg-panel-2" role="img" aria-label={parts.map((p) => `${p.name} ${formatNumber(p.value)} ${unit}`).join(", ")}>
+      <div className="flex h-3.5 overflow-hidden rounded bg-panel-2" role="img" aria-label={`${label ? `${label}: ` : ""}${parts.map((p) => `${p.name} ${formatNumber(p.value)} ${unit}`).join(", ")}`}>
         {parts.map((p, i) => (
           <i
             key={p.key}
@@ -138,15 +115,31 @@ export function StackBar({ parts, unit = "h" }: { parts: { key: string; name: st
           />
         ))}
       </div>
-      <ul className="mt-1.5 flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
-        {parts.map((p, i) => (
-          <li key={p.key} className="flex items-center gap-1.5">
-            <i className={cn("size-2.5 shrink-0 rounded-sm", !p.color && SERIES[i % SERIES.length])} style={p.color ? { background: p.color } : undefined} />
-            {p.name} <b className="tabular-nums text-fg">{formatNumber(p.value)}</b>
-          </li>
-        ))}
-      </ul>
+      {legend && (
+        <ul className="mt-1.5 flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
+          {parts.map((p, i) => (
+            <li key={p.key} className="flex items-center gap-1.5">
+              <i className={cn("size-2.5 shrink-0 rounded-sm", !p.color && SERIES[i % SERIES.length])} style={p.color ? { background: p.color } : undefined} />
+              {p.name} <b className="tabular-nums text-fg">{formatNumber(p.value)}</b>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
+  );
+}
+
+/** One legend for several bars coloured by the same names (`purposeColours`). */
+export function ColourLegend({ colours }: { colours: ReadonlyMap<string, string> }) {
+  return (
+    <ul className="flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground" data-legend>
+      {[...colours].map(([name, color]) => (
+        <li key={name} className="flex items-center gap-1.5">
+          <i className="size-2.5 shrink-0 rounded-sm" style={{ background: color }} />
+          {name}
+        </li>
+      ))}
+    </ul>
   );
 }
 
