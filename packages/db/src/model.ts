@@ -24,7 +24,7 @@ import {
 import { resolvePurpose, workspacePurposes, type PurposeSource } from "./purposes";
 import { engineClientCapacity, enginePersonCapacity, engineRoleUnit, engineTierClientGroups, engineTierService, tierContext, type TierContext } from "./capacity-model";
 import { engineRecurrence } from "./servicing";
-import { STEP_SOURCE_LABELS, type DistParams, type Distribution, type EdgeRow, type LeadSourceRow, type ProcessBundle, type ProcessPart, type SeasonalityRow, type StepRow, type StepSourceLabel, type WorkspaceSettings } from "./types";
+import { COMPANY_DONE, STEP_SOURCE_LABELS, type DistParams, type Distribution, type EdgeRow, type LeadSourceRow, type ProcessBundle, type ProcessPart, type SeasonalityRow, type StepRow, type StepSourceLabel, type WorkspaceSettings } from "./types";
 
 const WORKING_DAYS_PER_WEEK = 5;
 const DAY_MS = 86_400_000;
@@ -168,28 +168,7 @@ function resolveGraph(steps: StepRow[], edges: EdgeRow[], tags: boolean, ctx: Gr
       // Inside a group, no way out means leaving the group.
       if (!next.length && !step.parent_step_id) throw new ModelError(`Step '${step.name}' has no outgoing edge`);
       for (const n of next) checkTarget(step.name, n.to);
-      return {
-        id: step.id,
-        name: step.name,
-        role: step.role_id,
-        ...(step.person_id ? { person: step.person_id } : {}),
-        work: Number(step.work_hours),
-        wait: Number(step.wait_hours),
-        rework: Number(step.rework_rate),
-        ...stepBaseValues(step),
-        ...optional("workDist", engineDistribution(step.work_dist, step.work_params, Number(step.work_hours))),
-        ...optional("waitDist", engineDistribution(step.wait_dist, step.wait_params, Number(step.wait_hours))),
-        // Entered WIP (0 included) makes the run start from it instead of a warm-up.
-        ...(step.current_wip != null ? { currentWip: Number(step.current_wip) } : {}),
-        // An SLA only counts breaches (detected issues); it doesn't change the run.
-        ...(step.sla_hours != null ? { sla: Number(step.sla_hours) } : {}),
-        // The rules' per-step settings (docs/analysis-rules.md rules 5, 12): they rate the report, not the run.
-        ...(step.expected_wait_hours != null ? { expectedWaitHours: Number(step.expected_wait_hours) } : {}),
-        ...(step.lost_per_day_waiting != null ? { lostPerDayWaiting: Number(step.lost_per_day_waiting) } : {}),
-        ...(step.dropoff_benchmark != null ? { dropoffBenchmark: Number(step.dropoff_benchmark) } : {}),
-        ...parentOf(step),
-        next,
-      };
+      return workingStepOf(step, next, parentOf(step));
     });
   return {
     entry,
@@ -199,6 +178,32 @@ function resolveGraph(steps: StepRow[], edges: EdgeRow[], tags: boolean, ctx: Gr
     endSteps: [...steps.filter((step) => step.kind === "end").sort(byIdAsc), ...heldEnds],
     groups,
     targetCycleHours: starts[0]!.target_cycle_hours != null ? Number(starts[0]!.target_cycle_hours) : null,
+  };
+}
+
+/** A working step's row as the engine's step, going to `next` (the fields every working step maps alike, a company map's steps included). */
+function workingStepOf(step: StepRow, next: EngineStep["next"], parent: { parent?: string } = {}): EngineStep {
+  return {
+    id: step.id,
+    name: step.name,
+    role: step.role_id,
+    ...(step.person_id ? { person: step.person_id } : {}),
+    work: Number(step.work_hours),
+    wait: Number(step.wait_hours),
+    rework: Number(step.rework_rate),
+    ...stepBaseValues(step),
+    ...optional("workDist", engineDistribution(step.work_dist, step.work_params, Number(step.work_hours))),
+    ...optional("waitDist", engineDistribution(step.wait_dist, step.wait_params, Number(step.wait_hours))),
+    // Entered WIP (0 included) makes the run start from it instead of a warm-up.
+    ...(step.current_wip != null ? { currentWip: Number(step.current_wip) } : {}),
+    // An SLA only counts breaches (detected issues); it doesn't change the run.
+    ...(step.sla_hours != null ? { sla: Number(step.sla_hours) } : {}),
+    // The rules' per-step settings (docs/analysis-rules.md rules 5, 12): they rate the report, not the run.
+    ...(step.expected_wait_hours != null ? { expectedWaitHours: Number(step.expected_wait_hours) } : {}),
+    ...(step.lost_per_day_waiting != null ? { lostPerDayWaiting: Number(step.lost_per_day_waiting) } : {}),
+    ...(step.dropoff_benchmark != null ? { dropoffBenchmark: Number(step.dropoff_benchmark) } : {}),
+    ...parent,
+    next,
   };
 }
 
@@ -388,6 +393,8 @@ function stepRowsOf(bundle: ProcessBundle): Map<string, { row: StepRow; kind: st
   for (const part of [{ process: bundle.process, steps: bundle.steps }, ...(bundle.otherProcesses ?? [])]) {
     for (const row of part.steps) rows.set(row.id, { row, kind: part.process.kind });
   }
+  // The company map's own steps the run passes through (`companyBundle`): work after the sale, as a handed-to pipeline's is.
+  for (const row of bundle.companySteps ?? []) rows.set(row.id, { row, kind: "pipeline" });
   return rows;
 }
 
@@ -427,10 +434,12 @@ function withStepPurposes(model: EngineModel, bundle: ProcessBundle, handed: Rea
 }
 
 /**
- * The company map's hand-offs (Q17, ADR 0023) as the engine runs them: in order, each process's graph is resolved as a held child's is, its
- * steps join the model, and the ends of the process before it carry on at its entry (`EngineEnd.handoff`): the sales pipeline's won ends
- * (the won sink among them), then every end of a handed-to process, which are all `done` here (a win sticks in the engine, so a client who
- * reaches a lost or won end of onboarding is not lost and not won again). `ends` gets the won sink too when it carries a hand-off.
+ * The company map's hand-offs (Q17, ADR 0023) as the engine runs them. Each process handed to is resolved as a held child's is and its steps
+ * join the model; each of the map's own steps it passes through (`companySteps`: a task, a wait or a decision) is a working step of its own.
+ * Where work leaves a node it carries on at the next node's entry: the sales pipeline's won ends (the won sink among them) and every end of a
+ * handed-to process hand off there (`EngineEnd.handoff`), and a map step's `next` goes there, a decision's split by its branches' shares. A
+ * handed-to process's ends are all `done` (a win sticks in the engine, so a client who reaches a lost or won end of onboarding is not lost and
+ * not won again), and `COMPANY_DONE` is a `done` end. `ends` gets the won sink too when it carries a hand-off.
  * Nothing (the same arrays, no ends touched) for a bundle with no `handoffs`.
  */
 function handedOn(
@@ -441,25 +450,55 @@ function handedOn(
   ends: Record<string, EngineEnd>,
 ): { steps: EngineStep[]; groups: Record<string, EngineGroup> } {
   const out: { steps: EngineStep[]; groups: Record<string, EngineGroup> } = { steps: [], groups: {} };
-  let before = rootEnds.filter((e) => e.outcome === "won").map((e) => e.id);
-  let outcome: EngineEnd["outcome"] = "won";
-  for (const hand of bundle.handoffs ?? []) {
-    const part = held.get(hand.to);
-    const name = bundle.companyNames?.[hand.to] ?? part?.process.name ?? "A process";
+  const handoffs = bundle.handoffs ?? [];
+  if (!handoffs.length) return out;
+  const mapSteps = new Map((bundle.companySteps ?? []).map((st) => [st.id, st]));
+  const root = bundle.process.id;
+
+  // The processes handed to, in the order the hand-offs first reach them, resolved.
+  const graphs = new Map<string, Graph>();
+  for (const { to } of handoffs) {
+    if (to === root || to === COMPANY_DONE || mapSteps.has(to) || graphs.has(to)) continue;
+    const part = held.get(to);
+    const name = bundle.companyNames?.[to] ?? part?.process.name ?? "A process";
     if (!part) throw new ModelError(`Publish '${name}' first: the company map hands work on to it, and it has no published version yet`);
-    let graph: Graph;
     try {
-      graph = resolveGraph(part.steps, part.edges, tags, { parts: held, stack: [part.process.id] });
+      graphs.set(to, resolveGraph(part.steps, part.edges, tags, { parts: held, stack: [part.process.id] }));
     } catch (err) {
       throw err instanceof ModelError ? new ModelError(`Process '${name}', handed work on from the company map: ${err.message}`) : err;
     }
-    for (const id of before) ends[id] = { outcome, handoff: graph.entry };
+  }
+  /** Where work handed to `node` starts: a process's entry, a map step, or the done end. */
+  const entryOf = (node: string): string => {
+    if (node === COMPANY_DONE || mapSteps.has(node)) return node;
+    const graph = graphs.get(node);
+    if (!graph) throw new ModelError("The company map hands work back to its sales pipeline");
+    return graph.entry;
+  };
+  const outOf = (node: string) => handoffs.filter((h) => h.from === node);
+  /** The one place work leaving a process goes, if any. */
+  const onwardOf = (node: string): string | undefined => {
+    const next = outOf(node);
+    return next.length ? entryOf(next[0]!.to) : undefined;
+  };
+
+  // The sales pipeline's won ends carry the won client on.
+  const fromRoot = onwardOf(root);
+  if (fromRoot !== undefined) for (const e of rootEnds.filter((x) => x.outcome === "won")) ends[e.id] = { outcome: "won", handoff: fromRoot };
+  // Each process handed to: its steps, and its ends, all done, carrying on where the map says.
+  for (const [pid, graph] of graphs) {
     out.steps.push(...graph.working);
     Object.assign(out.groups, graph.groups);
-    before = graph.endSteps.map((e) => e.id);
-    outcome = "done";
-    for (const id of before) ends[id] = { outcome };
+    const onward = onwardOf(pid);
+    for (const e of graph.endSteps) ends[e.id] = onward === undefined ? { outcome: "done" } : { outcome: "done", handoff: onward };
   }
+  // The map's own steps, in the order the hand-offs reach them.
+  const tagOf = (tag: string | undefined) => (tags && tag?.trim() ? { tag: tag.trim() } : {});
+  for (const st of mapSteps.values()) {
+    const next = outOf(st.id).map((h) => ({ to: entryOf(h.to), p: h.p ?? 1, ...tagOf(h.tag) }));
+    out.steps.push(workingStepOf(st, next.length ? next : [{ to: COMPANY_DONE, p: 1 }]));
+  }
+  if (handoffs.some((h) => h.to === COMPANY_DONE) || [...mapSteps.keys()].some((id) => !outOf(id).length)) ends[COMPANY_DONE] = { outcome: "done" };
   return out;
 }
 
