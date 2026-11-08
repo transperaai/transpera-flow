@@ -58,3 +58,42 @@ question.
 - Chat B, the screens: `docs/plans/capacity/ui-editor-simplify-brief.md`. It is blocked by Chat A's package.
 - Already briefed: `docs/plans/capacity/editor-quick-fixes-brief.md`, which covers the five categories, block
   placement, undo and redo buttons, and no "+ Group".
+
+## Round 2 (Austin and Chat C, 8 Nov)
+
+From Austin's QA of the process and company map editors on the Neon preview. Each answer is settled once it's written here.
+
+### Settled
+
+7. **One editor layout for both maps.**
+   - Both maps have + Step, + Wait and + Decision. **+ Process** (the process library) is on the company map only.
+   - "From a template" goes from the process library. "New process" (a name and a category) stays.
+   - The canvas right-click menu works on both maps. "Open process page" shows only on a node that links to a process: every
+     card on the company map, and the old linked-process nodes in a process.
+   - The Simulate footer goes. The editor is for editing; simulating happens elsewhere.
+8. **One side panel shape for every node.** The same order everywhere, and a node type skips what it doesn't have:
+   type and name (Question for a decision); what it does; capacity values; more; Delete or Remove from this map.
+9. **Step fields that go:** Promised time, Work already in progress, and all three analysis rules (Expected wait, Lost per
+   day of waiting, Work lost benchmark). Pinned person and Done again stay visible.
+10. **Time is entered one way.** Hands-on time and Wait each read "`[ ]` h usually", with a tick box "It varies" that opens
+    Quickest / Usually / Longest.
+    - Unticked runs as "about this, sometimes longer" with the usual spread (lognormal, as a blank spread does now).
+    - Ticked runs as the range (triangular).
+    - "Always the same" and the "How much it varies" number leave the screen. Steps already stored that way keep running
+      as they are.
+11. **"Automation and augmentation" leaves the step panel.** Automate… / Augment… and "Make a solution to try an
+    automation" go, with the tests for saving step changes (including the flaky `step-change-edit.test.ts`). The step's
+    Work split stays. The Sandbox's automation levers were already removed (D53).
+12. **A decision has one connector per branch on the canvas.**
+    - Each branch row on the node has its own dot, labelled with its name and %. Dragging a dot connects or moves that branch.
+    - A "+" dot adds a branch and connects it in one drag.
+    - A branch's % can be edited on the node and in the side panel.
+    - **Changing one branch's % shares the difference across the others in proportion** (this replaces "the last branch
+      takes what is left" from item 5).
+
+### Open
+
+- **What a step, wait or decision means on the company map.** The Sandbox runs the company from this map (ADR 0023). Does
+  the run use these nodes (e.g. a decision between Sales and Onboarding splitting won clients), or are they only drawn?
+- **Removed fields with stored values.** Promised time, work in progress and the analysis rules are in the database and
+  feed the issue detectors (wait, drop-off, SLA). Hide them only, or drop the columns and detectors too?
