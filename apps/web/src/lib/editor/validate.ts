@@ -236,6 +236,9 @@ export function parseNewEdge(v: unknown): NewEdge | null {
   for (const [field, check] of Object.entries(EDGE_FIELDS)) {
     const value = v[field] === undefined ? null : v[field];
     if (!check(value)) return null;
+    // A line's bend is sent only when it has one, so an unbent new line saves the columns it always had (a database without the
+    // bend columns still takes it).
+    if (value === null && (field === "center_dx" || field === "center_dy")) continue;
     out[field] = typeof value === "string" && !field.endsWith("_id") ? value.trim() || null : value;
   }
   if (out.from_step_id === out.to_step_id) return null;

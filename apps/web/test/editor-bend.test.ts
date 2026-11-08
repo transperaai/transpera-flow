@@ -60,7 +60,10 @@ describe("bendEdge", () => {
     expect(parseFieldUpdate("edges", { center_dx: null }, { center_dx: "40" })).toBeNull();
     expect(parseFieldUpdate("edges", { center_dx: null }, { center_dx: 2e6 })).toBeNull();
     const edge = northbeamBundle().edges[0]!;
-    expect(parseNewEdge(edge)).toMatchObject({ center_dx: null, center_dy: null });
+    // An unbent line doesn't name the bend columns, so it saves on a database the bend migration hasn't reached yet.
+    const plain = parseNewEdge(edge)!;
+    expect(plain).not.toBeNull();
+    expect("center_dx" in plain || "center_dy" in plain).toBe(false);
     expect(parseNewEdge({ ...edge, center_dx: 12, center_dy: 3 })).toMatchObject({ center_dx: 12, center_dy: 3 });
   });
 });
