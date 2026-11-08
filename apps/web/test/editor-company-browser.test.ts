@@ -74,7 +74,7 @@ describe("the company map's Editor", { timeout: 120_000 }, () => {
           await card.dispatchEvent("contextmenu", { clientX: box.x + 20, clientY: box.y + 10, button: 2 });
           return menu.isVisible();
         },
-        { timeout: 20_000, intervals: [250, 500, 1000] },
+        { timeout: 20_000, interval: 500 },
       )
       .toBe(true);
     const items = await menu.getByRole("menuitem").allInnerTexts();
