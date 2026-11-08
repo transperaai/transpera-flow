@@ -31,7 +31,7 @@ export function PurposeBar({ title, slices, order, strong = false }: { title: st
             <span
               key={s.id}
               data-purpose-segment={s.id}
-              className="flex min-w-0 items-center justify-center overflow-hidden border-r border-panel text-2xs font-semibold text-white tabular-nums last:border-r-0"
+              className="flex min-w-0 items-center justify-center overflow-hidden border-r border-panel text-2xs font-semibold text-accent-fg tabular-nums last:border-r-0"
               style={{ width: `${share * 100}%`, background: purposeColor(s.id) }}
               onPointerMove={(e) => setTip({ s, at: { x: e.clientX, y: e.clientY } })}
               onPointerDown={(e) => setTip({ s, at: { x: e.clientX, y: e.clientY } })}

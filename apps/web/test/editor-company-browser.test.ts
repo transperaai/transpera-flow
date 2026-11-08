@@ -64,10 +64,19 @@ describe("the company map's Editor", { timeout: 120_000 }, () => {
     const { page, errors } = await open();
     // A card that links to a process (the company map's cards all do).
     const card = page.locator(".react-flow__node").first();
-    const box = (await card.boundingBox())!;
-    await card.dispatchEvent("contextmenu", { clientX: box.x + 20, clientY: box.y + 10, button: 2 });
+    await card.waitFor({ state: "visible" });
     const menu = page.getByRole("menu");
-    await menu.waitFor();
+    // On a slow machine the map may still be laying out on the first right-click, so try again until the menu opens.
+    await expect
+      .poll(
+        async () => {
+          const box = (await card.boundingBox())!;
+          await card.dispatchEvent("contextmenu", { clientX: box.x + 20, clientY: box.y + 10, button: 2 });
+          return menu.isVisible();
+        },
+        { timeout: 20_000, intervals: [250, 500, 1000] },
+      )
+      .toBe(true);
     const items = await menu.getByRole("menuitem").allInnerTexts();
     expect(items.join(" | ")).toMatch(/Remove from this map/);
     expect(items.join(" | ")).not.toMatch(/Rename|Change kind/);
