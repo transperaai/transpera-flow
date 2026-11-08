@@ -164,7 +164,6 @@ export function ProcessPage({
         loading={c.loading && model !== null}
         base={solBase}
         solutions={solData}
-        onShowStep={showGapStep}
         buildHref={(issue) => (canBuild && (issue.status === "open" || issue.status === "testing") ? buildSolutionHref(solBase, issue, `${solBase}/p/${bundle.process.id}#issues`) : null)}
         registerHref={registerHref}
         other={
@@ -381,10 +380,12 @@ export function ProcessPage({
                   </section>
                   <HoursByRole hours={supporting.hours} result={result} viewer={bundle.viewer} />
                 </div>
-                <div id="supporting-data" className="grid scroll-mt-16 gap-4 lg:grid-cols-3">
+                <div id="supporting-data" className="flex scroll-mt-16 flex-col gap-4">
                   <HeaviestSteps hours={supporting.hours} result={result} />
-                  <TimeSplit rows={supporting.timeSplit} result={result} />
-                  <KeyPersonPanel rows={supporting.keyPeople} result={result} />
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <TimeSplit rows={supporting.timeSplit} result={result} />
+                    <KeyPersonPanel rows={supporting.keyPeople} hours={supporting.hours} result={result} />
+                  </div>
                 </div>
               </>
             ) : (

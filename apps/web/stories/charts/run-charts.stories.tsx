@@ -2,8 +2,9 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { simulate } from "@transpera-flow/engine";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { KpiStrip } from "@/components/kpi-strip";
-import { HeaviestSteps, HoursByRole, SupportingHeadline } from "@/components/process-supporting-data";
+import { HeaviestSteps, HoursByRole, KeyPersonPanel, SupportingHeadline, TimeSplit } from "@/components/process-supporting-data";
 import { processHeadline, processHours } from "@/lib/process-page/hours";
+import { keyPersonRows, timeSplitRows } from "@/lib/process-page/supporting";
 import { northbeamRun } from "../fixtures";
 
 const meta: Meta = { title: "Charts/Run" };
@@ -23,6 +24,23 @@ export const SupportingHours: StoryObj = {
         <SupportingHeadline headline={processHeadline(model, result, ids, null)} result={result} />
         <HoursByRole hours={hours} result={result} viewer={bundle.viewer} />
         <HeaviestSteps hours={hours} result={result} />
+      </div>
+    );
+  },
+};
+
+/** The time split (the totals, then the steps that wait longest) and key-person risk grouped by person, side by side as on the page. */
+export const SupportingTimeAndPeople: StoryObj = {
+  name: "Supporting data: time split and key people",
+  tags: ["visual-phone"],
+  render: () => {
+    const { model } = northbeamRun();
+    const result = simulate(model, 10, 1, { personTime: true });
+    const ids = new Set(model.steps.map((s) => s.id));
+    return (
+      <div className="grid w-full max-w-5xl gap-4 lg:grid-cols-2">
+        <TimeSplit rows={timeSplitRows(model, result, ids)} result={result} />
+        <KeyPersonPanel rows={keyPersonRows(model, result, ids)} hours={processHours(model, result, ids)} result={result} />
       </div>
     );
   },

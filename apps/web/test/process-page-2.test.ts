@@ -4,13 +4,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { simulate, type EngineModel, type EngineStep } from "@transpera-flow/engine";
-import type { IssueRow, SolutionIssueRow, SolutionRow } from "@transpera-flow/db";
+import { northbeamIssues, type IssueRow, type SolutionIssueRow, type SolutionRow } from "@transpera-flow/db";
+import type { RegisterEntry } from "@/lib/issues/register";
+import { IssuesCard } from "@/components/process-issues-card";
 import { ProcessHeader } from "@/components/process-header";
 import { IssueTrackView } from "@/components/issue-track";
 import { KeyPersonPanel, TimeSplit } from "@/components/process-supporting-data";
 import { aboutLine, aboutSummary, type About } from "@/lib/process-page/about";
-import { keyPersonRows, timeSplitRows } from "@/lib/process-page/supporting";
-import { linkedSolutions, otherImprovements, trackOf, TRACK_STAGES } from "@/lib/process-page/track";
+import { keyPersonGroups, keyPersonRows, timeSplitRows, timeSplitSummary, type KeyPersonRow, type TimeSplitRow } from "@/lib/process-page/supporting";
+import { issueGroups, linkedSolutions, otherImprovements, solvedBy, trackOf, TRACK_STAGES } from "@/lib/process-page/track";
 
 // Issue #174, part 2: the process page's About line, the issue status track, "Other improvements" and the supporting data
 // (time split and key-person risk; the hours panels are in process-hours.test.ts), as pure functions and as rendered markup.
@@ -120,6 +122,74 @@ describe("the issue status track", () => {
   });
 });
 
+describe("Issues and solutions: current issues, then solved ones as their solution", () => {
+  const full = (n: number, extra: Partial<IssueRow>): IssueRow => ({ ...northbeamIssues()[0]!, id: `00000000-0000-4000-8000-00000000000${n}`, number: n, owner_ids: [], owner_person_id: null, resolution_note: null, ...extra });
+  const open = full(1, { title: "Slow approvals", status: "open" });
+  const testing = full(2, { title: "Decks rebuilt every time", status: "testing" });
+  const bySolution = full(3, { title: "Access takes weeks", status: "resolved", resolved_how: "solution", resolved_solution_id: "a", resolved_at: "2026-10-05T09:00:00Z" });
+  const noSolution = full(4, { title: "Duplicate invoices", status: "resolved", resolved_how: "process_change", resolved_solution_id: null, resolution_note: "Merged the two billing steps." });
+  const wont = full(5, { title: "Clients email at night", status: "wont_fix" });
+  const data = { solutions: [sol("a", { name: "Access checklist" }), sol("bb", { name: "Template deck" })], links: [link("a", bySolution.id, { user_verdict: "pass" }), link("bb", testing.id)] };
+  const entries: RegisterEntry[] = [open, testing, bySolution, noSolution, wont].map((issue) => ({ kind: "tracked", issue, detection: null }));
+  const html = renderToStaticMarkup(
+    createElement(IssuesCard, {
+      entries,
+      names: { step: new Map([["s", "A step"]]), person: new Map() },
+      openNew: () => undefined,
+      canEdit: true,
+      loading: false,
+      error: null,
+      base: "/demo",
+      solutions: data,
+      buildHref: () => null,
+      other: null,
+    }),
+  );
+  const group = (g: string) => {
+    const at = html.indexOf(`data-issue-group="${g}"`);
+    return at < 0 ? "" : html.slice(at, html.indexOf("data-issue-group=", at + 20) > 0 ? html.indexOf("data-issue-group=", at + 20) : undefined);
+  };
+
+  it("splits the issues into current, solved and won't fix", () => {
+    const g = issueGroups([open, testing, bySolution, noSolution, wont], (i) => i.status);
+    expect(g.current.map((i) => i.number)).toEqual([1, 2]);
+    expect(g.solved.map((i) => i.number)).toEqual([3, 4]);
+    expect(g.wontFix.map((i) => i.number)).toEqual([5]);
+    expect(solvedBy(bySolution, linkedSolutions(data, bySolution.id))?.solution.id).toBe("a");
+    expect(solvedBy(noSolution, linkedSolutions(data, noSolution.id))).toBeNull();
+    expect(solvedBy(testing, linkedSolutions(data, testing.id))).toBeNull();
+  });
+  it("lists the current issues first, each with the solutions tried, and no step names", () => {
+    const current = group("current");
+    expect(html.indexOf('data-issue-group="current"')).toBeLessThan(html.indexOf('data-issue-group="solved"'));
+    expect(current).toContain("Current issues");
+    expect(current).toContain("Slow approvals");
+    expect(current).toContain("Solution: Template deck");
+    expect(current).not.toContain("Access takes weeks");
+    expect(html).not.toContain("data-issue-step");
+    expect(html).not.toContain("A step");
+  });
+  it("shows a solved issue as the solution that resolved it, with Solved <issue> under it and the verdict", () => {
+    const solved = group("solved");
+    expect(solved).toMatch(/<a [^>]*href="\/demo\/solutions\/a"[^>]*>(<span[^>]*>Solution: <\/span>)?Access checklist<\/a>/);
+    expect(solved).toMatch(/Solved <a [^>]*href="\/demo\/issues\/[^"]*"[^>]*>.*Access takes weeks<\/a>/);
+    expect(solved).toContain('data-solved-verdict');
+    expect(solved).toContain('data-verdict="pass"');
+  });
+  it("shows a solved issue with no solution by its title, how it was resolved and the note", () => {
+    const solved = group("solved");
+    expect(solved).toContain("Duplicate invoices");
+    expect(solved).toContain("We changed the process directly");
+    expect(solved).toContain("Merged the two billing steps.");
+  });
+  it("folds won't fix at the end", () => {
+    const wontFix = group("wont_fix");
+    expect(wontFix).toMatch(/^data-issue-group="wont_fix"/);
+    expect(html).toMatch(/<details[^>]*data-issue-group="wont_fix"/);
+    expect(wontFix).toContain("Clients email at night");
+  });
+});
+
 describe("About this process", () => {
   const about: About = { category: "sales", steps: 6, roles: 3, version: 4 };
   it("reads as plain attributes, with the version as a bare number", () => {
@@ -216,35 +286,102 @@ describe("the supporting data", () => {
     // No named people here, so the name is the engine's own ("Solo 1"), flagged as a placeholder.
     expect(rows[0]!.placeholder).toBe(true);
     expect(rows[0]!.person).toBeTruthy();
+    expect(rows[0]!.role).toBe("Solo");
+    expect(rows[0]!.personId).toContain("solo#");
     expect(keyPersonRows(model, simulate(model, 3, 1), ids)).toEqual([]);
   });
 });
 
 describe("the supporting data panels", () => {
+  const keyRows: KeyPersonRow[] = [
+    { id: "draft", step: "Draft", person: "Pat", personId: "pat", role: "Writer", placeholder: false },
+    { id: "plan", step: "Plan", person: "Pat", personId: "pat", role: "Writer", placeholder: false },
+    { id: "x", step: "Send", person: null, personId: null, role: null, placeholder: false },
+    { id: "y", step: "Check", person: "Reviewer 1", personId: "rev#1", role: "Reviewer", placeholder: true },
+  ];
+  const stepHours = { steps: [{ id: "draft", label: "Draft", hours: 40, split: null }, { id: "plan", label: "Plan", hours: 22, split: null }, { id: "y", label: "Check", hours: 70, split: null }] };
   const html = renderToStaticMarkup(
     createElement("div", null, [
       createElement(TimeSplit, { key: 1, rows: timeSplitRows(model, result, ids), result }),
-      createElement(KeyPersonPanel, { key: 3, rows: [{ id: "draft", step: "Draft", person: "Pat", placeholder: false }, { id: "x", step: "Send", person: null, placeholder: false }, { id: "y", step: "Check", person: "Reviewer 1", placeholder: true }], result }),
+      createElement(KeyPersonPanel, { key: 3, rows: keyRows, hours: stepHours, result }),
     ]),
   );
-  it("shows the time split and key-person panels with plain headings, and says what the time split shows", () => {
-    for (const h of ["Time split per step", "Key-person risk per step"]) expect(html).toContain(h);
-    expect(html).toContain("Hands-on work against waiting (for a person, or on others), for one visit to the step.");
+  it("shows the time split as three totals for one visit to each step, then the steps that wait longest", () => {
+    expect(html).toContain("Time split per step");
+    expect(html).toContain("Hours of hands-on work against hours of waiting, for one visit to each step, added up.");
     for (const gone of ["Cycle time spread", "Rework loops"]) expect(html).not.toContain(gone);
-    expect(html).toContain("Hands-on");
-    expect(html).toContain("Pat");
-    expect(html).toContain("Nobody can do it");
-    expect(html).toContain("Reviewer 1");
+    for (const key of ["hands-on", "waiting-person", "waiting-others"]) expect(html).toContain(`data-time-total="${key}"`);
+    expect(html).toContain("summed over the process&#x27;s 2 steps");
+    expect(html).toContain("Most waiting");
+    expect(html).toContain("data-wait-step");
+    expect(html).toContain("How this works");
+  });
+  it("groups key-person risk by the person, the most hours at stake first, with the worst case as the lead and a Nobody card", () => {
+    expect(html).toContain("Key-person risk per step");
+    // Reviewer 1 carries 70 h, Pat 62 h: the placeholder is the worst case, and says so.
+    expect(html).toMatch(/If <b>Reviewer 1<\/b><span[^>]*> \(a placeholder\)<\/span> is away, <span class="whitespace-nowrap text-crit">70 h a month<\/span> of this process stops\./);
     expect(html).toContain("placeholder, no named person");
-    expect(html).toContain("Waiting on others (hatched)");
+    expect(html).toContain("2 steps · 62 h");
+    expect(html).toContain("Draft · 40 h");
+    expect(html).toContain("Writer");
+    expect(html).toContain("Nobody can do it");
+    expect(html).toContain('data-key-person="nobody"');
+    expect(html.indexOf('data-key-person="rev#1"')).toBeLessThan(html.indexOf('data-key-person="pat"'));
+    expect(html).not.toContain("text-white");
   });
   it("says what is missing instead of an empty chart", () => {
     expect(renderToStaticMarkup(createElement(TimeSplit, { rows: [], result: null }))).toContain("Simulating");
     expect(renderToStaticMarkup(createElement(KeyPersonPanel, { rows: [], result }))).toContain("No step depends on one person.");
+    expect(renderToStaticMarkup(createElement(KeyPersonPanel, { rows: [keyRows[2]!], result }))).toContain("Nobody can do <span class=\"text-crit\">1 step</span> of this process.");
   });
   it("the new panels add no (i)s", () => {
     expect(read("components/process-supporting-data.tsx")).not.toContain("<Help");
     expect(read("components/issue-track.tsx")).not.toContain("<Help");
+  });
+});
+
+describe("the time split summary and key-person groups", () => {
+  const row = (id: string, handsOn: number, waitingForPerson: number, fixedWait: number, redonePer100: number | null = null): TimeSplitRow => ({
+    id,
+    label: id,
+    handsOn,
+    waitingForPerson,
+    fixedWait,
+    total: handsOn + waitingForPerson + fixedWait,
+    handsOnShare: handsOn / (handsOn + waitingForPerson + fixedWait),
+    redonePer100,
+  });
+  it("adds up one visit to each step, and lists the four longest waits, longest first, skipping steps with none", () => {
+    const rows = [row("a", 1, 1, 30, 18), row("b", 6, 9, 0), row("c", 2, 0, 0), row("d", 1, 2, 22), row("e", 3, 3, 0), row("f", 1, 1, 0)];
+    const s = timeSplitSummary(rows)!;
+    expect(s).toMatchObject({ handsOn: 14, waitingForPerson: 16, fixedWait: 52, steps: 6 });
+    expect(s.total).toBe(82);
+    expect(s.longestWaits.map((r) => r.id)).toEqual(["a", "d", "b", "e"]);
+    expect(timeSplitSummary([])).toBeNull();
+  });
+  it("counts how many visits in 100 to a step are a repeat pass", () => {
+    const rows = timeSplitRows(model, result, ids);
+    const review = rows.find((r) => r.id === "review")!;
+    expect(review.redonePer100).toBe(Math.round((result.steps.review!.reworks / result.steps.review!.departures) * 100));
+    expect(review.redonePer100).toBeGreaterThan(0);
+    expect(rows.find((r) => r.id === "draft")!.redonePer100).toBe(0);
+  });
+  it("groups the steps by the one person who can do them, with each step's hours a month", () => {
+    const g = keyPersonGroups(
+      [
+        { id: "s1", step: "One", person: "Ann", personId: "ann", role: null, placeholder: false },
+        { id: "s2", step: "Two", person: "Bo", personId: "bo", role: null, placeholder: false },
+        { id: "s3", step: "Three", person: "Ann", personId: "ann", role: null, placeholder: false },
+        { id: "s4", step: "Four", person: null, personId: null, role: null, placeholder: false },
+      ],
+      { steps: [{ id: "s1", label: "One", hours: 5, split: null }, { id: "s2", label: "Two", hours: 12, split: null }, { id: "s3", label: "Three", hours: 9, split: null }] },
+    );
+    expect(g.people.map((p) => [p.person, p.hours, p.steps.map((s) => s.id)])).toEqual([
+      ["Ann", 14, ["s3", "s1"]],
+      ["Bo", 12, ["s2"]],
+    ]);
+    expect(g.nobody).toEqual([{ id: "s4", step: "Four" }]);
+    expect(keyPersonGroups([], null)).toEqual({ people: [], nobody: [] });
   });
 });
 

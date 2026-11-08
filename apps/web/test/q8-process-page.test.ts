@@ -124,6 +124,10 @@ describe("the process page as cards", () => {
     // The What the process shows card: the headline, then the panels.
     const run = page.locator("#run");
     for (const panel of ["facts", "hours-by-role", "heaviest-steps", "time-split", "key-person"]) expect(await run.locator(`[data-panel=${panel}]`).count()).toBe(1);
+    // Heaviest steps as one strip, the time split as three totals, key-person risk grouped by person under its worst case.
+    await run.locator("[data-hours-strip]").waitFor();
+    expect(await run.locator("[data-time-total]").count()).toBe(3);
+    expect(await run.locator("[data-panel=heaviest-steps] [data-lead]").innerText()).toMatch(/of the [\d,.]+ h a month\.$/);
     // Issues: counts, a Log an issue button, and rows that open the issue page.
     const issues = page.locator("#issues");
     expect(await issues.locator("[data-issue-counts]").innerText()).toMatch(/\d+ open · \d+ in progress · \d+ resolved/);
@@ -131,7 +135,17 @@ describe("the process page as cards", () => {
     const rows = issues.locator("li[data-issue]");
     expect(await rows.count()).toBeGreaterThan(0);
     expect(await rows.first().locator("a[href^='/w/example/issues/']").count()).toBe(1);
-    expect(await issues.locator("[data-issue-step]").count()).toBeGreaterThan(0);
+    // Issues belong to the process: no step on a row. Current issues first, then the solved ones as the solution that solved them.
+    expect(await issues.locator("[data-issue-step]").count()).toBe(0);
+    expect(await issues.locator("[data-issue-group=current] h3").innerText()).toMatch(/^Current issues/);
+    // Every resolved issue sits under Solved; one solved by a solution opens that solution, with "Solved <issue>" under it.
+    const resolved = Number((await issues.locator("[data-issue-counts]").innerText()).match(/(\d+) resolved/)![1]);
+    expect(await issues.locator("[data-issue-group=solved] > ul > li").count()).toBe(resolved);
+    const bySolution = issues.locator("[data-issue-group=solved] li[data-solved=solution]");
+    for (let i = 0; i < (await bySolution.count()); i++) {
+      expect(await bySolution.nth(i).locator("a[href^='/w/example/solutions/']").count()).toBe(1);
+      expect(await bySolution.nth(i).locator("[data-solved-issue]").innerText()).toMatch(/^Solved /);
+    }
     expect(errors).toEqual([]);
     await page.close();
   }, 300_000);
