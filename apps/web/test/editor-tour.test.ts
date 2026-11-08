@@ -14,7 +14,7 @@ const read = (f: string) => readFileSync(join(__dirname, "..", "src", f), "utf8"
 
 describe("the tour's steps", () => {
   it("has 8 steps for a process, one for each area the issue names, in the order a person works", () => {
-    expect(tourSteps("process").map((s) => s.id)).toEqual(["palette", "canvas", "problems", "inspector", "draft", "simulate", "publish", "history"]);
+    expect(tourSteps("process").map((s) => s.id)).toEqual(["palette", "canvas", "problems", "inspector", "draft", "publish", "history"]);
   });
 
   it("has a shorter tour for the company map, which has nothing to simulate", () => {

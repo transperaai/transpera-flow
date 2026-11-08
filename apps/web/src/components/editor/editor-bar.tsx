@@ -66,8 +66,6 @@ export function EditorBar({
   blocked,
   unresolved,
   breaks,
-  simulating,
-  onSimulate,
   onReview,
   exitHref,
   onPublished,
@@ -101,8 +99,6 @@ export function EditorBar({
   unresolved: StepRow[];
   /** Saved scenarios publishing would break. */
   breaks: BreakingScenario[];
-  simulating: boolean;
-  onSimulate: () => void;
   /** Show a step in the inspector (from the publish check's list of estimates). */
   onReview: (stepId: string) => void;
   exitHref: string;
@@ -184,19 +180,6 @@ export function EditorBar({
                 <Redo2 aria-hidden />
               </Button>
             </div>
-          )}
-          {mode !== "block" && !company && (
-            <>
-            <Button type="button" variant="outline" size="sm" className={onBar} data-tour="simulate" onClick={onSimulate} disabled={simulating || !!blocked} title={blocked ?? undefined}>
-              {simulating ? "Simulating…" : "▶ Simulate"}
-            </Button>
-            <Help
-              label="Simulate"
-              description="Runs this version of the process 30 times and shows how the headline numbers change compared with the live version. Nothing is published."
-              example="Add a faster approval step, press Simulate, and see cycle time drop from 9.6 days to 8.1."
-              className="border-edit-fg bg-transparent text-edit-fg hover:bg-edit-fg hover:text-edit focus-visible:bg-edit-fg focus-visible:text-edit"
-            />
-            </>
           )}
           {info.save.map((s) => {
             const solid = s.primary;

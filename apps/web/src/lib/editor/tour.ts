@@ -48,12 +48,6 @@ const STEPS: Record<string, TourStep> = {
     title: "Your draft",
     body: "You are working on a draft. The live map doesn't change until you publish. Steps you have added or changed are marked on the map; select one to see what changed in the inspector, and undo it if you like.",
   },
-  simulate: {
-    id: "simulate",
-    target: ["[data-tour=simulate]"],
-    title: "Simulate",
-    body: "Press Simulate to run your draft 30 times and compare it with the live version. Nothing is published. Use it to check a change helps before you commit to it.",
-  },
   publish: {
     id: "publish",
     target: ["[data-tour=publish]"],
@@ -81,7 +75,7 @@ const STEPS: Record<string, TourStep> = {
 };
 
 const ORDER: Record<TourVariant, string[]> = {
-  process: ["palette", "canvas", "problems", "inspector", "draft", "simulate", "publish", "history"],
+  process: ["palette", "canvas", "problems", "inspector", "draft", "publish", "history"],
   // The company map is not run from the Editor (the Sandbox runs the company from it) and has no problems to fix, so the tour is shorter.
   company: ["palette", "canvas", "inspector", "draft", "publishCompany", "historyCompany"],
 };

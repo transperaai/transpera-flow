@@ -84,11 +84,11 @@ describe("the Editor tour", () => {
   it("opens by itself the first time, and walks the Editor's areas in order, each pointing at a real element", async () => {
     const { page, errors } = await open({ userId: "user-a" });
     await card(page).waitFor();
-    expect(await page.locator("[data-tour-count]").innerText()).toBe("Step 1 of 7");
+    expect(await page.locator("[data-tour-count]").innerText()).toBe("Step 1 of 6");
     const seen = await walk(page);
-    expect(seen.map((s) => s.id)).toEqual(["palette", "canvas", "inspector", "draft", "simulate", "publish", "history"]);
-    expect(seen.map((s) => s.title)).toEqual(["The palette", "The canvas", "The inspector", "Your draft", "Simulate", "Publish", "History"]);
-    expect(seen.map((s) => s.count)).toEqual(Array.from({ length: 7 }, (_, i) => `Step ${i + 1} of 7`));
+    expect(seen.map((s) => s.id)).toEqual(["palette", "canvas", "inspector", "draft", "publish", "history"]);
+    expect(seen.map((s) => s.title)).toEqual(["The palette", "The canvas", "The inspector", "Your draft", "Publish", "History"]);
+    expect(seen.map((s) => s.count)).toEqual(Array.from({ length: 6 }, (_, i) => `Step ${i + 1} of 6`));
     for (const s of seen) expect(s.onTarget, `${s.id} points at its element`).toBe(true);
     expect(await card(page).count()).toBe(0);
     expect(await page.locator("[data-tour-highlight]").count()).toBe(0);
@@ -122,7 +122,7 @@ describe("the Editor tour", () => {
     // "Take the tour" starts it again, from the first step.
     await again.page.getByRole("button", { name: "Take the tour" }).click();
     await card(again.page).waitFor();
-    expect(await again.page.locator("[data-tour-count]").innerText()).toBe("Step 1 of 7");
+    expect(await again.page.locator("[data-tour-count]").innerText()).toBe("Step 1 of 6");
     await again.page.close();
 
     // Someone else on the same browser has not seen it.

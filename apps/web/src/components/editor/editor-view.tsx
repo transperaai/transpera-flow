@@ -31,8 +31,6 @@ import type { Table } from "@/lib/editor/ops";
 import { MODE_INFO, NO_ISSUE_REFUSAL, editorHorizonWeeks, type EditorMode } from "@/lib/editor/modes";
 import { connect, connectScratch } from "@/lib/drafts/connect";
 import { newlyBroken } from "@/lib/scenarios/broken";
-import { useSimulation } from "@/lib/sim/use-simulation";
-import type { EngineModel } from "@transpera-flow/engine";
 import { currentArea, type SolutionIssue } from "@/lib/solutions/area";
 import { changedStepIds, solutionCopy } from "@/lib/solutions/bundle";
 import { addDemoSolution } from "@/lib/solutions/demo";
@@ -49,7 +47,6 @@ import { Inspector } from "./inspector";
 import { Palette } from "./palette";
 import { useEditorTour } from "./editor-tour";
 import type { TierSetup } from "@/lib/tier-setup";
-import { SimulateFooter, type SimulatedPair } from "./simulate-footer";
 import { useBlockTools } from "./use-blocks";
 import { useEditCommands } from "./use-edit-commands";
 
@@ -355,33 +352,6 @@ export function EditorView({
     [editor, session],
   );
 
-  // ▶ Simulate: both versions run 30 times, on the models as they were when it was pressed.
-  const [pressed, setAsked] = useState<{
-    draft: EngineModel;
-    live: EngineModel | null;
-    draftKey: string;
-    liveKey: string | null;
-    liveId: string;
-    draftId: string | null;
-  } | null>(null);
-  const workingKey = useMemo(() => (workingModel.model ? JSON.stringify(workingModel.model) : null), [workingModel.model]);
-  const liveKey = useMemo(() => (liveModel.model ? JSON.stringify(liveModel.model) : null), [liveModel.model]);
-  // The comparison is dropped when a publish made a new live version, or the draft it described was discarded.
-  const asked = pressed && pressed.liveId === live.revision.id && !(pressed.draftId !== null && drafts.draft === null) ? pressed : null;
-  const draftSim = useSimulation(asked?.draft ?? null);
-  const liveSim = useSimulation(asked?.live ?? null);
-  const simulating = !!asked && (draftSim.status === "running" || (!!asked.live && liveSim.status === "running"));
-  const failed = draftSim.status === "error" ? draftSim.error : liveSim.status === "error" && asked?.live ? liveSim.error : null;
-  const pair: SimulatedPair | null = asked
-    ? {
-        draft: { model: asked.draft, result: draftSim.status === "done" ? draftSim.run.result : null },
-        live: asked.live ? { model: asked.live, result: liveSim.status === "done" ? liveSim.run.result : null } : null,
-      }
-    : null;
-  // Stale: the draft, or the live model, is no longer what was simulated.
-  const stale = !!asked && (asked.draftKey !== workingKey || asked.liveKey !== liveKey);
-
-
   const breaks = useMemo(
     () =>
       hasDraft && liveModel.model && workingModel.model
@@ -397,11 +367,6 @@ export function EditorView({
         ? `The draft can't be simulated: ${workingModel.error}.`
         : null;
 
-  const simulate = () => {
-    if (workingModel.model && workingKey) {
-      setAsked({ draft: workingModel.model, live: liveModel.model, draftKey: workingKey, liveKey, liveId: live.revision.id, draftId: drafts.draft?.id ?? null });
-    }
-  };
   const select = (id: string) => setSelection({ steps: [id], edges: [] });
 
   // A mode that isn't built: nothing on this screen may touch the draft.
@@ -446,8 +411,6 @@ export function EditorView({
         onTour={tour.start}
         historyHref={historyHref}
         history={{ undoLabel: state.undoLabel, redoLabel: state.redoLabel, onUndo: () => editor.undo(), onRedo: () => editor.redo() }}
-        simulating={simulating}
-        onSimulate={simulate}
         onReview={select}
         exitHref={exitHref}
         // The demo lives in this tab, so it stays here to be looked at; a workspace goes back to the map, now live.
@@ -476,7 +439,7 @@ export function EditorView({
           <div className="flex min-h-0 flex-1" data-tour="canvas" data-highlight-tone={solutionMode ? "issue" : undefined}>
             <ProcessCanvas
               bundle={working}
-              result={!stale && pair?.draft.result ? pair.draft.result : null}
+              result={null}
               editor={editor}
               editorState={state}
               selection={selected}
@@ -495,8 +458,8 @@ export function EditorView({
               branchNodes={!company}
               onTurnIntoSteps={turnInto.run}
               viewRef={viewRef}
-              // Nothing to play until Simulate has run.
-              showPlayback={!company && !stale && !!pair?.draft.result}
+              // The Editor edits; it doesn't run the process (brainstorm round 2, item 7), so there is nothing to play.
+              showPlayback={false}
             />
           </div>
         </main>
@@ -531,17 +494,6 @@ export function EditorView({
         </aside>
       </div>
       {tour.node}
-      {!blockMode && !company && (
-      <SimulateFooter
-        asked={!!asked}
-        pair={pair}
-        failed={failed}
-        stale={stale}
-        currency={working.workspace.settings.currency}
-        liveNumber={live.revision.number}
-        solution={solutionMode}
-      />
-      )}
     </div>
   );
 }

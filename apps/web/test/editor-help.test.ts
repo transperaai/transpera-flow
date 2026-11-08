@@ -54,10 +54,8 @@ describe("the Editor's inspector", () => {
 
   it("uses plain words, not jargon, in its labels, options and (i) text", () => {
     for (const tag of tags) expect(words(tag), words(tag)).not.toMatch(JARGON);
-    const options = /const DIST_OPTIONS[\s\S]*?\];/.exec(source)![0];
-    const optionLabels = [...options.matchAll(/label: "([^"]*)"/g)].map((m) => m[1]);
-    expect(optionLabels).toHaveLength(3);
-    expect(optionLabels.join(" | ")).not.toMatch(JARGON);
+    // A time is "Usually" and "It varies", not a choice of patterns (brainstorm round 2, item 10).
+    expect(source).not.toMatch(/DIST_OPTIONS|Time pattern|How much it varies/);
     // The note under the fields too.
     expect(source).not.toMatch(/warm-up/i);
   });
@@ -68,7 +66,6 @@ describe("every (i) on the Editor screen", () => {
     "components/editor/palette.tsx",
     "components/editor/inspector.tsx",
     "components/editor/decision-panel.tsx",
-    "components/editor/simulate-footer.tsx",
     "components/editor/editor-bar.tsx",
     "components/editor/issue-area.tsx",
     "components/solutions/process-solutions.tsx",
@@ -94,8 +91,7 @@ describe("every (i) on the Editor screen", () => {
       "components/editor/inspector.tsx": ["What they achieve", "First step", "Save this group as a block"],
       "components/editor/decision-panel.tsx": ["Branches", "Goes to"],
       "components/editor/palette.tsx": ["The company map", "Add", "Groups", "Blocks", "Insert", "Replace selected"],
-      "components/editor/editor-bar.tsx": ["Simulate", "Save to library", "Save solution", "Block name", "Description", "Solution name"],
-      "components/editor/simulate-footer.tsx": ["Compared with live"],
+      "components/editor/editor-bar.tsx": ["Save to library", "Save solution", "Block name", "Description", "Solution name"],
       "components/editor/issue-area.tsx": ["Issue area"],
       // "New solution" moved to the shared button (Q12), which draws its (i) from SOLUTIONS_LIST_HELP.
       "components/solutions/process-solutions.tsx": ["Build solution"],
@@ -148,7 +144,9 @@ describe("every control of solution mode (issue #114)", () => {
     const labels = (file: string) => helpTags(read(file)).map((t) => /label="([^"]+)"/.exec(t)?.[1]);
     expect(labels("components/editor/editor-bar.tsx")).toEqual(expect.arrayContaining(["Solution name", "Save solution"]));
     expect(labels("components/editor/issue-area.tsx")).toEqual(["Issue area"]);
-    expect(labels("components/editor/simulate-footer.tsx")).not.toContain("Automatic verdict");
+    // No Simulate in the Editor (brainstorm round 2, item 7), so no footer and no automatic verdict.
+    expect(() => read("components/editor/simulate-footer.tsx")).toThrow();
+    expect(labels("components/editor/editor-bar.tsx")).not.toContain("Simulate");
     expect(labels("components/solutions/process-solutions.tsx")).toEqual(["Build solution"]);
     expect(read("components/solutions/new-solution.tsx")).toContain("{...SOLUTIONS_LIST_HELP.newSolution}");
     // The (i) on the process page's Solutions heading was removed on purpose (QA wave 1); its two buttons above keep theirs.
@@ -162,7 +160,7 @@ describe("every control of solution mode (issue #114)", () => {
   });
 
   it("uses plain words, not jargon, in the solution (i)s", () => {
-    for (const file of ["components/editor/issue-area.tsx", "components/solutions/process-solutions.tsx", "components/editor/simulate-footer.tsx", "components/editor/editor-bar.tsx"]) {
+    for (const file of ["components/editor/issue-area.tsx", "components/solutions/process-solutions.tsx", "components/editor/editor-bar.tsx"]) {
       for (const tag of helpTags(read(file))) expect(words(tag), words(tag)).not.toMatch(JARGON);
     }
   });
