@@ -22,10 +22,9 @@ import {
 import { DecisionPanel } from "@/components/editor/decision-panel";
 import { NewPurpose, type PurposeAdder } from "@/components/editor/new-purpose";
 import { TYPE_CHOICES, TYPE_LABELS } from "@/lib/editor/node-types";
-import { StepBaseValues, type ChangesOnSteps } from "@/components/step-base-values";
+import { StepBaseValues } from "@/components/step-base-values";
 import type { TierSetup } from "@/lib/tier-setup";
 import { NumberField, SelectField, TextField, type SelectOption } from "@/components/fields";
-import { ProvenanceBadge } from "@/components/provenance-badge";
 import {
   OUTCOME_LABELS,
   kindProblem,
@@ -113,7 +112,6 @@ export function StepInspector({
   draft = null,
   stamp,
   tierSetup,
-  changesOnSteps,
   settingsHref,
   readOnly = false,
   purposes,
@@ -126,7 +124,6 @@ export function StepInspector({
   editor: ProcessEditor;
   /** The workspace's tiers and what each tier's service gets, for the base values (capacity P4). */
   tierSetup?: TierSetup;
-  changesOnSteps?: ChangesOnSteps;
   settingsHref?: string;
   /** Show the base values as they are without letting anyone change them. */
   readOnly?: boolean;
@@ -327,7 +324,6 @@ export function StepInspector({
             editor={editor}
             stamp={stamp ?? (() => ({ at: new Date().toISOString() }))}
             tierSetup={tierSetup}
-            changesOnSteps={changesOnSteps}
             readOnly={readOnly}
             settingsHref={settingsHref}
           />
@@ -346,31 +342,6 @@ export function StepInspector({
               step={1}
               save={field("rework_rate")}
             />
-            <div className="grid grid-cols-2 gap-2">
-              <NumberField
-                label="Promised time"
-                help={{ description: "The time you promise to get this step done within, such as in a client agreement. It is kept here for reference; the numbers don't use it yet.", example: "24 h to reply to a new enquiry." }}
-                value={nullableNumber(step.sla_hours)}
-                optional
-                unit="h"
-                min={0}
-                save={field("sla_hours")}
-              />
-              <NumberField
-                label="Work already in progress"
-                help={{ description: "How many items are sitting at this step right now. Fill it in on any step and the simulation starts from today's real queues instead of an empty process.", example: "7 proposals are waiting for review today, so enter 7." }}
-                value={nullableNumber(step.current_wip)}
-                optional
-                min={0}
-                step={1}
-                placeholder="Not entered"
-                save={wholeNumber(field("current_wip"))}
-                hint={step.current_wip !== null && <ProvenanceBadge step={step} column="current_wip" />}
-              />
-            </div>
-            <p className="text-xs text-fg-3">
-              Work already in progress is what sits at this step now. The promised time is saved but doesn&apos;t change the numbers yet.
-            </p>
             <TextField
               label="Tool"
               help={{ description: "The software or channel used for this step, for your own reference.", example: "Xero, Google Docs or Zoom." }}
@@ -379,59 +350,6 @@ export function StepInspector({
               save={field("tool")}
             />
             <PurposeField bundle={bundle} step={step} save={field("purpose")} purposes={purposes ?? ownPurposes} />
-          </div>
-          <div className={sectionClass}>
-            <p className="text-xs font-semibold text-fg-2">Analysis rules</p>
-            <div className="grid grid-cols-2 gap-2">
-              <NumberField
-                label="Expected wait"
-                value={nullableNumber(step.expected_wait_hours)}
-                optional
-                unit="h"
-                min={0}
-                placeholder="Default"
-                save={field("expected_wait_hours")}
-                help={{
-                  description:
-                    "How long an item can sit in the queue for a person here before it counts as waiting too long. Left blank, the workspace default applies: 1 working day for sales steps, 2 for client work.",
-                  example: "4 h at Reply to the lead: a lead that waits 12 h for a reply is waiting 3 times too long.",
-                }}
-              />
-              <NumberField
-                label="Lost per day of waiting"
-                value={nullableNumber(step.lost_per_day_waiting)}
-                optional
-                scale={100}
-                unit="%"
-                min={0}
-                max={100}
-                step={1}
-                placeholder="None"
-                save={field("lost_per_day_waiting")}
-                help={{
-                  description:
-                    "The share of items that go cold for each working day they wait here. It turns waiting time into money in the insights. Left blank, waiting shows as time only.",
-                  example: "5% a day at Reply to the lead: a lead left 3 days has lost about 15% of its chance of signing.",
-                }}
-              />
-            </div>
-            <NumberField
-              label="Work lost benchmark"
-              value={nullableNumber(step.dropoff_benchmark)}
-              optional
-              scale={100}
-              unit="%"
-              min={0}
-              max={100}
-              step={1}
-              placeholder="Not rated"
-              save={field("dropoff_benchmark")}
-              help={{
-                description:
-                  "The share of the work leaving this step that you would accept losing here, such as leads that don't go any further. If the simulation loses more than this, the step is flagged. Left blank, the step isn't checked.",
-                example: "30% at Check fit: losing 45% of leads here is 1.5 times the benchmark, so it is flagged as Bad.",
-              }}
-            />
           </div>
         </>
       )}
@@ -548,12 +466,6 @@ function DraftChanges({ info, change }: { info: DraftInfo; change: StepChange })
 }
 
 const nullableNumber = (v: number | null) => (v === null ? null : Number(v));
-
-/** Refuse fractions before they reach the saver. */
-const wholeNumber =
-  (save: Saver<number | null>): Saver<number | null> =>
-  async (base, next) =>
-    next !== null && !Number.isInteger(next) ? { status: "error", message: "Enter a whole number." } : save(base, next);
 
 function Duration({
   phase,

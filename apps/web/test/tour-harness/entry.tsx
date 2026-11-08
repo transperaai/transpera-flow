@@ -7,7 +7,6 @@ import { defaultCompanyPart, northbeamBundle, partOf, workspacePurposes, type Pr
 import { placeProcesses } from "@/lib/editor/library";
 import { applyEdit } from "@/lib/editor/ops";
 import { EditorView } from "@/components/editor/editor-view";
-import { changesOnStepsOf } from "@/lib/solutions/step-changes";
 import { demoSolutionsNow } from "@/lib/solutions/demo";
 import { demoBundle } from "@/lib/sources/demo";
 
@@ -26,12 +25,10 @@ export interface TourHarnessOptions {
   purposes?: number;
   /** Edit mode: a draft (default) or a block. */
   editorMode?: "draft" | "block" | "solution";
-  /** The step panel in solution mode (D53 part B): these seed the Editor's list of changes (none: a new solution), and Automate… and Augment… are offered. */
+  /** Solution mode: the automations and augmentations already stored on the solution (D53), carried into Save solution as they are. */
   solutionChanges?: StoredStepChange[];
   /** A new solution in solution mode: for an issue, with no seed and no changes yet. */
   newSolution?: boolean;
-  /** The step panel as on the live process: it points at making a solution. */
-  makeSolution?: boolean;
 }
 
 declare global {
@@ -64,12 +61,6 @@ window.mountEditor = (options) => {
     live.workspace = { ...live.workspace, settings: { ...live.workspace.settings, purposes: list } };
   }
   const DISCOVERY_STEP = "e0000000-0000-4000-8000-000000000002";
-  const SOLUTION = "a0000000-0000-4000-8000-0000000000aa";
-  const changesOnSteps = options.solutionChanges
-    ? { changes: changesOnStepsOf(SOLUTION, options.solutionChanges) }
-    : options.makeSolution
-      ? { changes: [], makeSolutionHref: "/p/edit?mode=solution" }
-      : undefined;
   createRoot(document.getElementById("root")!).render(
     <EditorView
       live={live}
@@ -85,7 +76,7 @@ window.mountEditor = (options) => {
         ],
         onCreate: async () => ({ error: "Not available in this test." }),
       } : undefined}
-      changesOnSteps={changesOnSteps}
+      stepChanges={options.solutionChanges}
       // A saved solution's version opens with its own issue and name (as the app does for `?solution=`), not as a new solution.
       issue={options.solutionChanges || options.newSolution ? { id: "a0000000-0000-4000-8000-0000000000bb", number: 12, title: "Pacing alerts go out late", stepIds: [DISCOVERY_STEP], whole: false, target: { measure: null, now: null, goal: null } } : undefined}
       solutionSeed={options.solutionChanges ? { bundle: live, name: "Pace it by machine" } : undefined}

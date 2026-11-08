@@ -82,7 +82,7 @@ From Austin's QA of the process and company map editors on the Neon preview. Eac
     - "Always the same" and the "How much it varies" number leave the screen. Steps already stored that way keep running
       as they are.
 11. **"Automation and augmentation" leaves the step panel.** Automate… / Augment… and "Make a solution to try an
-    automation" go, with the tests for saving step changes (including the flaky `step-change-edit.test.ts`). The step's
+    automation" go. The stored step changes and the code that copies and runs them stay; the step's
     Work split stays. The Sandbox's automation levers were already removed (D53).
 12. **A decision has one connector per branch on the canvas.**
     - Each branch row on the node has its own dot, labelled with its name and %. Dragging a dot connects or moves that branch.
@@ -91,9 +91,7 @@ From Austin's QA of the process and company map editors on the Neon preview. Eac
     - **Changing one branch's % shares the difference across the others in proportion** (this replaces "the last branch
       takes what is left" from item 5).
 
-### Open
-
-- **What a step, wait or decision means on the company map.** The Sandbox runs the company from this map (ADR 0023). Does
-  the run use these nodes (e.g. a decision between Sales and Onboarding splitting won clients), or are they only drawn?
-- **Removed fields with stored values.** Promised time, work in progress and the analysis rules are in the database and
-  feed the issue detectors (wait, drop-off, SLA). Hide them only, or drop the columns and detectors too?
+13. **A step, wait or decision on the company map is part of the run.** Adding or deleting one changes what the Sandbox
+    simulates, as it does in a process (a decision between two processes splits the clients that pass it).
+14. **The fields that go are hidden, not dropped.** Their columns, stored values and the issue detectors that read them
+    (wait, drop-off, SLA) stay; only the editor stops showing them.

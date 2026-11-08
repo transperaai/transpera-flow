@@ -6,12 +6,10 @@
 // `readOnly` shows the same values as plain text (a Viewer never reaches the Editor, but the values read the same anywhere).
 
 import { useId, useState } from "react";
-import { engineRecurrence, STEP_SOURCE_LABELS, type ProcessBundle, type RecurrenceJson, type StepRow, type StepSourcedValue, type StepChangeEdit } from "@transpera-flow/db";
+import { engineRecurrence, STEP_SOURCE_LABELS, type ProcessBundle, type RecurrenceJson, type StepRow, type StepSourcedValue } from "@transpera-flow/db";
 import { recurrenceLabel } from "@transpera-flow/engine";
 import { NumberField, SelectField, TextField } from "@/components/fields";
 import { Help } from "@/components/help";
-import { StepChangesSection } from "@/components/editor/step-changes-section";
-import type { ChangeOnStep } from "@/lib/solutions/step-changes";
 import { SplitBar, SplitLegend } from "@/components/split-bar";
 import {
   clearStepSplit,
@@ -94,7 +92,6 @@ export function StepBaseValues({
   tierSetup = DEFAULT_TIER_SETUP,
   readOnly = false,
   settingsHref,
-  changesOnSteps,
 }: {
   bundle: ProcessBundle;
   step: StepRow;
@@ -103,8 +100,6 @@ export function StepBaseValues({
   tierSetup?: TierSetup;
   readOnly?: boolean;
   settingsHref?: string;
-  /** The changes in the solution being edited (D53) and the Sandbox's address for it, for the list of changes that act on this step. */
-  changesOnSteps?: ChangesOnSteps;
 }) {
   const servicing = bundle.process.kind === "servicing";
   const run = (build: (b: ProcessBundle) => Edit | null) => editor.run(build);
@@ -284,18 +279,7 @@ export function StepBaseValues({
       <div className={sectionClass} data-time-source>
         <SourceSelect step={step} value="work" disabled={readOnly} save={(l) => run((b) => setSourceLabel(b, step.id, "work", l as never, stamp()))} />
       </div>
-
-      {/* Changes that act on this step are part of the solution's version (D53). */}
-      <StepChangesSection stepId={step.id} stepName={step.name} tiers={tierSetup.keys} split={percents} data={changesOnSteps} />
     </div>
   );
 }
 
-/** The automations and augmentations of the solution being edited (D53), and what the step panel may do about them. */
-export interface ChangesOnSteps {
-  changes: ChangeOnStep[];
-  /** In solution mode: one edit applied to the Editor's own list (saved with the solution); returns why not, or null. Set by the Editor. */
-  edit?: { stepIds: string[]; apply: (edit: StepChangeEdit) => string | null };
-  /** On the live process: where a solution is started from this process. */
-  makeSolutionHref?: string;
-}
