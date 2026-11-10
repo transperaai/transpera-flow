@@ -121,7 +121,9 @@ on solution pages): `simulate(withMarketCondition(model, MARKET_PRESETS.downturn
 `EngineModel.churnDrivers` holds the ten built-in drivers' weights (0 to 3) and on/off switches, plus the user's own
 (`packages/engine/src/churn-drivers.ts`, decision D28, issue #121). A client's weekly chance of leaving is
 
-    base × (1 + Σ weight × pressure) × (1 + market weight × (churn factor − 1)) ÷ 4.33
+    1 − (1 − base × (1 + Σ weight × pressure) × (1 + market weight × (churn factor − 1)))^(12/52)
+
+(compounded weekly from engine 1.18.0; before that the monthly figure was divided by 4.33)
 
 where base is its service's normal churn (the client group's), the sum runs over the switched-on drivers other than
 the market, and a driver's *pressure* is how much extra churn its cause adds at weight 1 (0 = nothing wrong, 1 =
@@ -187,6 +189,18 @@ Added 31 Oct 2026 (`docs/plans/capacity/p3-engine-changes-brief.md`, ADR 0022 "E
 - **Not in scope.** Changes act on hands-on time only. Rework, waits and routing stay as they are; "also changes rework or waiting" is later.
 
 **Timing** (`capacity`, 30 replications, month by month with `personTime`, same container, load average about 8): 4.6 to 4.9 s before, 4.85 to 5.06 s after (within the noise; the changes also shorten the work the run does).
+
+## Review fixes (engine 1.18.0)
+
+Added 10 Nov 2026 from a correctness review of the engine. **All eleven golden models moved**; no model's bottleneck role or step changed. Approved with `golden:approve`.
+
+- **Zero-time loops.** An item that visits steps more than 10,000 times at one timestamp (a step with no work, no wait and rework 1, or a cycle of zero-time steps) now throws `ModelError` naming the step, where the run used to never return. Rework is capped at 0.95 (`MAX_REWORK`) in `toEngineModel`, the process-file checker (0.95 to 1 is set to 0.95 with a warning) and the database (`steps_rework_rate_check`, migration `20270203000200`).
+- **One month length.** `WEEKS_PER_MONTH = 52/12` (in `model.ts`) everywhere a month becomes weeks in the run, cost, demand, market, capacity inputs and churn drivers. Billing used 4.33, so billed revenue falls 0.1 to 0.8%. `servicing.ts`'s monthly task clock and `clients.ts`'s `LOAD_WEEKS_PER_MONTH` still use 4.33 (documented; a later change).
+- **Weekly churn compounds.** A monthly churn `c` becomes a weekly keep of `(1 − c)^(12/52)` for the pooled decay, roster hazards and weeks billed; dividing by 4.33 under-churned at high rates. Churned clients rise about 2 to 5%.
+- **Overtime by month.** The overtime cap is applied per person per month (the run's months, or 52/12-week months), and the run total is the sum of the months, so the KPI and the monthly series agree (Larkspur's overtime hours went from 105.3 to 94.6).
+- **Nearest-rank percentiles.** `pct`, `stat` and `statOf` take rank `ceil(p·n) − 1` (clamped), where they took `floor(p·n)` and leaned high. Many P10/P90 bands moved by one rank, and 14 issue ratings in six models crossed a P90 cut-off.
+- **Branch chances.** Outgoing chances are normalised the way `cost.ts` reads them (the fallback route sums the edges). A negative or non-numeric chance is refused by the pre-run `checkModel`.
+- **Bad inputs.** 0 replications, a 0-week horizon, a 0-hour week or negative leads throw `ModelError` instead of a TypeError or NaN.
 
 ## Least-busy placement uses the full step time (engine 1.17.0, capacity P2b)
 
