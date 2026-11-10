@@ -421,3 +421,6 @@ export function ChartSkeleton() {
     </Loading>
   );
 }
+
+/** The Sandbox workbench (drawn next to its page, which owns its shape). */
+export { SandboxSkeleton } from "@/components/sandbox/sandbox-skeleton";

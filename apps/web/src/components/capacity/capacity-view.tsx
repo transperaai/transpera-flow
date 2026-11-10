@@ -652,7 +652,7 @@ export function TimeToServe({ setup, model, purposes, colours: shared, className
       {t.named.length > 0 && (
         <>
           <h3 className="text-sm font-semibold">Named clients</h3>
-          <Table className="min-w-[30rem]" data-named-clients>
+          <Table className="min-w-[30rem] max-w-4xl" data-named-clients>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Client</TableHead>
