@@ -634,3 +634,24 @@ tests' "SQL and TS agree" and live-body md5 checks). Check on Neon, once, after 
   the same as a Viewer says `not_found`; a 4,001-character value is refused by `processes_notes_length`. Put it back to null afterwards.
 - [ ] `select md5(prosrc) from pg_proc where oid = 'public.import_workspace_bundle(uuid, jsonb, text)'::regprocedure` matches the body in
   the migration file (its processes allow-list ends `"whole_business","notes"`, and the processes insert names `notes`).
+
+## Security review fixes (`20270203000000` to `20270203000400`, verified only on plain Postgres 16, not Neon)
+
+Applied with `pnpm --filter @transpera-flow/db migrate` to a scratch Postgres 16 cluster; the db, mcp and web database tests ran against
+it. To check on Neon:
+
+- [ ] `20270203000200_rework_rate_cap.sql` runs `alter table public.steps disable trigger ...` around its clamp. That needs the
+      migrating role to own `steps` (true for the Neon owner that created the schema; the test harness migrates as a non-superuser owner
+      too). Preflight `select count(*) from public.steps where rework_rate > 0.95;` first; the new check takes ACCESS EXCLUSIVE on `steps`
+      while it validates every row, inside the migration's 5 s lock timeout.
+- [ ] Block deletes and solution saves are ordered by row locks (`FOR KEY SHARE` in `private.lock_solution_blocks`, the delete's own
+      row lock in `private.refuse_used_block_delete`). Plain Postgres semantics; through Neon's pooler (transaction mode) both run inside
+      one transaction each, so nothing changes, but try deleting a block that a solution uses from the app once.
+- [ ] Multi-statement Server Actions (insertProcessRows, deleteProcessRows, createSolution, saveClientLookedAfter) now use
+      `db.transaction()`. The claims are `set_config(..., true)` inside the transaction the driver opens on acquire
+      (packages/db/src/client.ts), so they hold for every statement of it; through the pooler a transaction keeps one server
+      connection, as it needs to.
+- [ ] `public.mcp_simulation_use` reads `auth.jwt() ->> 'api_token_id'`, which the MCP handler's claims carry; check one
+      `run_scenario` over the connector stamps `api_tokens.sim_window_count`.
+- [ ] Production must have `APP_DATABASE_URL` (the `authenticator` login) set and different from `DATABASE_URL`: `lib/auth/env.ts`
+      now throws in production (NODE_ENV or VERCEL_ENV production, so Preview too) when it isn't.
