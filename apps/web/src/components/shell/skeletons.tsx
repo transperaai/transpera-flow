@@ -239,27 +239,24 @@ export function SettingsSkeleton() {
   );
 }
 
-/** The Overview: header, the row of five KPI tiles, the company map beside a rail of two panels, then the charts two by two and Departments. */
+/** The Overview: header, the five stat cards on one line, the company map the full width, then the cards sized as the page sizes them. */
 export function OverviewSkeleton() {
   return (
     <div>
       <ShellHeader title="Overview" />
       <Loading name="overview" label="Loading the Overview" className={pageBodyClass()}>
         <HeaderShape eyebrow="Overview" buttons={3} />
-        <CardGridCells cards={5} className="grid-cols-[repeat(auto-fit,minmax(13rem,1fr))]" />
-        <div className="grid min-w-0 gap-6 xl:grid-cols-12">
-          <div className="flex h-[60svh] min-h-[32rem] min-w-0 flex-col xl:col-span-8">
-            <MapSkeleton nested height="fill" />
-          </div>
-          <div className="flex min-w-0 flex-col gap-6 xl:col-span-4">
-            <PanelShape lines={4} />
-            <PanelShape lines={4} />
-          </div>
+        <CardGridCells cards={5} className="grid-cols-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]" />
+        <div className="flex h-[78svh] min-h-[32rem] min-w-0 flex-col">
+          <MapSkeleton nested height="fill" />
         </div>
-        <div className="grid min-w-0 gap-6 xl:grid-cols-2">
-          {Array.from({ length: 4 }, (_, i) => (
-            <PanelShape key={i} lines={5} />
-          ))}
+        <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+          <PanelShape lines={4} />
+          <PanelShape lines={4} />
+          <PanelShape lines={6} className="lg:col-span-2" />
+          <PanelShape lines={5} />
+          <PanelShape lines={5} />
+          <PanelShape lines={4} className="lg:col-span-2" />
         </div>
         <PanelShape lines={4} />
       </Loading>

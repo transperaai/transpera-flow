@@ -582,7 +582,7 @@ export function Overview({
             data-section="company-map"
             data-company-map
             aria-labelledby="company-map-heading"
-            className="flex h-[65svh] min-h-[28rem] min-w-0 scroll-mt-16 flex-col overflow-hidden rounded-xl border border-line bg-card [&_[data-process-map]]:rounded-none [&_[data-process-map]]:border-0"
+            className="flex h-[78svh] min-h-[32rem] min-w-0 scroll-mt-16 flex-col overflow-hidden rounded-xl border border-line bg-card [&_[data-process-map]]:rounded-none [&_[data-process-map]]:border-0"
           >
             {viewingMapVersion !== null && (
               <div data-viewing-map-version className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-2">
@@ -649,7 +649,7 @@ export function Overview({
                 <BusiestPeople people={departmentFigures.people} failed={!!departmentFigures.failure} capacityHref={`${capacity!.base}/capacity`} />
               </div>
             )}
-          {charts.map((c, i) => (
+          {charts.map((c) => (
             <div key={c.key} data-chart={c.key} className={cn("@container flex min-w-0 flex-col", spanFor(c.key, peopleReady))}>
               {c.node}
             </div>
