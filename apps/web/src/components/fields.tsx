@@ -5,14 +5,15 @@
 // Text-like fields save on blur or Enter (Escape reverts); toggles and
 // checklists save on each change.
 
-import { useId, type KeyboardEvent, type ReactNode } from "react";
+import { createContext, useContext, useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-import { mapOutcome, type FieldValue, type Saver } from "@/lib/fields/field-controller";
+import { mapOutcome, sameValue, type FieldValue, type Saver } from "@/lib/fields/field-controller";
 import { useField, type Field } from "@/lib/fields/use-field";
+import { cn } from "@/lib/utils";
 
 /** The plain-English (i) for a field: what it does, and an example. */
 export interface FieldHelp {
@@ -20,6 +21,43 @@ export interface FieldHelp {
   example: string;
 }
 
+
+/**
+ * How the fields inside lay out and whether they say when they've saved:
+ * - `layout`: "stack" (the label over the control: panels, table cells, grids) or "row" (the label and hint at the left, about 13rem,
+ *   the control at the right, sized to what it holds: Settings forms).
+ * - `status`: each field shows "Not saved" while it holds a change it hasn't saved yet (a text or number field saves on blur or Enter),
+ *   then "Saved" once it has. Settings sections turn it on, so every autosaving field there says the same thing.
+ */
+export interface FieldLayout {
+  layout: "stack" | "row";
+  status: boolean;
+}
+const FieldLayoutContext = createContext<FieldLayout>({ layout: "stack", status: false });
+
+/** Sets the layout and save status for the fields inside; what it leaves out it takes from the fields around it. */
+export function FieldLayoutProvider({ value, children }: { value: Partial<FieldLayout>; children: ReactNode }) {
+  const outer = useContext(FieldLayoutContext);
+  return <FieldLayoutContext.Provider value={{ ...outer, ...value }}>{children}</FieldLayoutContext.Provider>;
+}
+
+/** A Settings form: one field per row, label and hint at the left and the control at the right, with a line between rows. */
+export function FieldRows({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <FieldLayoutProvider value={{ layout: "row" }}>
+      <div data-field-rows className={cn("flex flex-col divide-y divide-line", className)}>
+        {children}
+      </div>
+    </FieldLayoutProvider>
+  );
+}
+
+/** The input's width in the current layout: in a row, numbers are narrow and text runs to about 28rem; stacked, the column decides. */
+function useControlWidth(kind: "number" | "text" | "select" | "date"): string | undefined {
+  const { layout } = useContext(FieldLayoutContext);
+  if (layout !== "row") return undefined;
+  return kind === "number" ? "w-28" : kind === "text" ? "max-w-md" : "w-auto max-w-md";
+}
 
 /** The "keep mine / keep theirs" prompt for a same-field conflict. `subject` names the field when it isn't next to it. */
 export function ConflictPrompt({
@@ -53,7 +91,32 @@ export function ConflictPrompt({
   );
 }
 
+/**
+ * "Saved" once the field's last change has been stored, "Not saved" while it holds one it hasn't sent yet (until blur or Enter). Only
+ * where the layout asks for it (`status`). The saved mark comes from watching the phase go from saving back to idle, in render.
+ */
+function useSaveMark<T extends FieldValue>(field: Field<T>): "saved" | "dirty" | null {
+  const { status } = useContext(FieldLayoutContext);
+  const [last, setLast] = useState(field.phase);
+  const [saved, setSaved] = useState(false);
+  if (field.phase !== last) {
+    setLast(field.phase);
+    setSaved(last === "saving" && field.phase === "idle");
+  }
+  if (!status || field.phase !== "idle") return null;
+  if (!sameValue(field.draft, field.base)) return "dirty";
+  return saved ? "saved" : null;
+}
+
 function FieldStatus<T extends FieldValue>({ field, display }: { field: Field<T>; display: (v: T) => string }) {
+  const mark = useSaveMark(field);
+  if (mark) {
+    return (
+      <p className={cn("text-xs", mark === "dirty" ? "text-warn" : "text-muted-foreground")} data-save-status={mark}>
+        {mark === "dirty" ? "Not saved" : "Saved"}
+      </p>
+    );
+  }
   if (field.phase === "saving") {
     return (
       <p className="text-xs text-muted-foreground" aria-live="polite">
@@ -104,14 +167,33 @@ function Shell<T extends FieldValue>({
   hideLabel?: boolean;
   children: ReactNode;
 }) {
+  const { layout } = useContext(FieldLayoutContext);
+  const name = (
+    <span className={hideLabel ? "sr-only" : "flex items-center"}>
+      <label htmlFor={id} className={layout === "row" ? "text-sm font-medium text-foreground" : "text-xs font-medium text-fg-2"}>
+        {label}
+      </label>
+      {help && !hideLabel && <Help label={label} {...help} />}
+    </span>
+  );
+  if (layout === "row" && !hideLabel) {
+    // Label and hint at the left, the control and its status at the right; stacked again on a phone.
+    return (
+      <div data-field-row className="grid gap-x-6 gap-y-1.5 py-3 first:pt-0 last:pb-0 sm:grid-cols-[13rem_minmax(0,1fr)] sm:items-start">
+        <div className="flex min-w-0 flex-col gap-0.5 sm:pt-1.5">
+          {name}
+          {hint && <div className="text-xs text-muted-foreground">{hint}</div>}
+        </div>
+        <div className="flex min-w-0 flex-col gap-1">
+          {children}
+          <FieldStatus field={field} display={display} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-col gap-1">
-      <span className={hideLabel ? "sr-only" : "flex items-center"}>
-        <label htmlFor={id} className="text-xs font-medium text-fg-2">
-          {label}
-        </label>
-        {help && !hideLabel && <Help label={label} {...help} />}
-      </span>
+      {name}
       {children}
       {hint && field.phase === "idle" && <p className="text-xs text-muted-foreground">{hint}</p>}
       <FieldStatus field={field} display={display} />
@@ -144,6 +226,7 @@ export function TextField({
   help?: FieldHelp;
 }) {
   const id = useId();
+  const width = useControlWidth("text");
   const field = useField<string | null>(value, async (base, next) => {
     const cleaned = next === null ? null : next.trim() || null;
     if (cleaned === null && !optional) return { status: "error", message: `${label} can't be blank.` };
@@ -162,7 +245,7 @@ export function TextField({
   };
   return (
     <Shell id={id} label={label} help={help} hint={hint} field={field} display={showText}>
-      {multiline ? <Textarea rows={2} {...props} /> : <Input type={type} {...props} />}
+      {multiline ? <Textarea rows={2} {...props} /> : <Input type={type} className={width} {...props} />}
     </Shell>
   );
 }
@@ -182,12 +265,14 @@ export function DateField({
   help?: FieldHelp;
 }) {
   const id = useId();
+  const width = useControlWidth("date");
   const field = useField<string | null>(value, (base, next) => save(base, next || null));
   return (
     <Shell id={id} label={label} help={help} field={field} display={(v) => v || "blank"}>
       <Input
         id={id}
         type="date"
+        className={width}
         disabled={disabled}
         value={field.draft ?? ""}
         onChange={(e) => void field.commit(e.target.value || null)}
@@ -231,6 +316,7 @@ export function NumberField({
   help?: FieldHelp;
 }) {
   const id = useId();
+  const width = useControlWidth("number");
   const toText = (v: number | null) => (v === null ? "" : String(Math.round(Number(v) * scale * 1e6) / 1e6));
   const field = useField<string>(toText(value), async (base, next) => {
     const trimmed = next.trim();
@@ -258,7 +344,7 @@ export function NumberField({
           placeholder={placeholder}
           disabled={disabled}
           value={field.draft}
-          className="tabular-nums"
+          className={cn("tabular-nums", width)}
           onChange={(e) => field.edit(e.target.value)}
           onBlur={() => void field.commit()}
           onKeyDown={(e) => {
@@ -299,6 +385,7 @@ export function SelectField({
   help?: FieldHelp;
 }) {
   const id = useId();
+  const width = useControlWidth("select");
   const field = useField<string | null>(value, (base, next) => save(base, next || null));
   const names = new Map(options.map((o) => [o.value, o.label]));
   const display = (v: string | null) => (v ? (names.get(v) ?? "a removed item") : (noneLabel ?? "none"));
@@ -307,6 +394,7 @@ export function SelectField({
       <NativeSelect
         id={id}
         disabled={disabled}
+        className={width}
         value={field.draft ?? ""}
         onChange={(e) => void field.commit(e.target.value || null)}
       >
@@ -367,7 +455,7 @@ export interface ChecklistOption {
   sublabel?: string;
 }
 
-/** A set of ids, saved as a whole on each tick. */
+/** A set of ids, saved as a whole on each tick. Always stacked: it sits in panels, never in a Settings row. */
 export function ChecklistField({
   label,
   value,

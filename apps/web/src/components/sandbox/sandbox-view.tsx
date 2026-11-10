@@ -20,6 +20,7 @@ import { Help } from "@/components/help";
 import { HorizonPicker } from "@/components/horizon-picker";
 import { InsightsSection } from "@/components/insights";
 import { PageHeader } from "@/components/shell/page";
+import { Segmented } from "./segmented";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { deleteSandboxScenario, saveSandboxScenario } from "@/app/w/[slug]/sandbox-actions";
@@ -813,22 +814,7 @@ export function SandboxView({ live, issues, sources = NO_SOURCES, mode, issuesHr
               <h2 className={SECTION_TITLE}>Month by month</h2>
               <p className="text-sm text-muted-foreground">How busy each {rows === "roles" ? "role" : "person"} is, with the 10–90% range from 30 runs, and your clients by service.</p>
             </div>
-            <div role="group" aria-label="Show" className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-xs">
-              {(["roles", "people"] as const).map((r) => (
-                <button
-                  key={r}
-                  type="button"
-                  aria-pressed={rows === r}
-                  onClick={() => setRows(r)}
-                  className={cn(
-                    "rounded-md px-2.5 py-1 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    rows === r ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {r === "roles" ? "By role" : "By person"}
-                </button>
-              ))}
-            </div>
+            <Segmented aria-label="Show" value={rows} onChange={setRows} options={(["roles", "people"] as const).map((r) => ({ value: r, label: r === "roles" ? "By role" : "By person" }))} />
           </div>
           <Card className="gap-3 px-4 py-4" data-chart="forecast" aria-busy={working !== null && plan.status === "running" ? true : undefined}>
             <div className="flex flex-wrap items-center gap-x-1 gap-y-1">

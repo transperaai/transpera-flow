@@ -3,13 +3,13 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { AppHeader } from "@/components/app-header";
-import { EmptyState, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
-import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EmptyState, MetaLine, PageHeader } from "@/components/page-kit";
+import { ListTable, ListTableHeader } from "@/components/processes/list-table";
+import { pageBodyClass } from "@/components/shell/page";
+import { TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { authEnv } from "@/lib/auth/env";
 import { getDb } from "@/lib/auth/session";
-import { revokeToken } from "./actions";
-import { CreateTokenForm } from "./create-token-form";
+import { CreateTokenButton, RevokeTokenButton } from "./create-token-form";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 
 const date = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "–");
@@ -29,62 +29,59 @@ export default async function ApiTokensPage() {
   const endpoint = `${proto}://${host}/api/mcp`;
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pb-12 sm:px-6">
-      <AppHeader signedIn />
-      <PageHeader
-        label="API tokens"
-        title="API tokens"
-        meta={
-          <MetaLine>
-            <span>
-              Personal tokens let Claude Code or Claude desktop use Transpera Flow as you, through the MCP server at{" "}
-              <code className="font-mono text-xs break-all">{endpoint}</code>. A token sees exactly what you can see. Revoke any token you no longer use.
-            </span>
-          </MetaLine>
-        }
-      />
-      <PhoneReadOnly>
-        <SectionCard id="new-token" title="Create a token" description="Give it a name that says where it is used. It is shown once.">
-          <CreateTokenForm endpoint={endpoint} />
-        </SectionCard>
-        <SectionCard id="tokens" title="Your tokens">
-          {tokens.length === 0 ? (
-            <EmptyState icon={KeyRound}>No tokens yet. Create one above to connect Claude Code or Claude desktop.</EmptyState>
-          ) : (
-            <Table>
-              <TableHeader>
+    <main className="flex w-full flex-col">
+      <div className="px-4 sm:px-6 lg:px-8">
+        <AppHeader signedIn />
+      </div>
+      <div className={pageBodyClass("fluid")}>
+        <PageHeader
+          label="API tokens"
+          title="API tokens"
+          meta={
+            <MetaLine className="max-w-prose">
+              <span>
+                Personal tokens let Claude Code or Claude desktop read Transpera Flow as you, through the MCP server at <code className="font-mono text-xs break-all">{endpoint}</code>. A token
+                sees exactly what you can see and is read only: Claude can read your workspaces but can&apos;t change anything. Revoke any token you no longer use.
+              </span>
+            </MetaLine>
+          }
+          actions={
+            <PhoneReadOnly notice={false}>
+              <CreateTokenButton endpoint={endpoint} />
+            </PhoneReadOnly>
+          }
+        />
+        {tokens.length === 0 ? (
+          <EmptyState icon={KeyRound} data-no-tokens>
+            No tokens yet. Create one to connect Claude Code or Claude desktop.
+          </EmptyState>
+        ) : (
+          <PhoneReadOnly>
+            <ListTable aria-label="Your tokens" data-tokens>
+              <ListTableHeader stickyTop="page">
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Last used</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead />
+                  <TableHead className="px-3">Name</TableHead>
+                  <TableHead className="px-3">Created</TableHead>
+                  <TableHead className="px-3">Last used</TableHead>
+                  <TableHead className="px-3">Status</TableHead>
+                  <TableHead className="px-3" aria-label="Revoke the token" />
                 </TableRow>
-              </TableHeader>
+              </ListTableHeader>
               <TableBody>
                 {tokens.map((t) => (
-                  <TableRow key={t.id}>
-                    <TableCell>{t.label}</TableCell>
-                    <TableCell className="tabular-nums">{date(t.created_at)}</TableCell>
-                    <TableCell className="tabular-nums">{date(t.last_used_at)}</TableCell>
-                    <TableCell>{t.revoked_at ? `Revoked ${date(t.revoked_at)}` : "Active"}</TableCell>
-                    <TableCell className="text-right">
-                      {!t.revoked_at && (
-                        <form action={revokeToken}>
-                          <input type="hidden" name="id" value={t.id} />
-                          <Button type="submit" variant="ghost" size="sm" className="text-destructive">
-                            Revoke
-                          </Button>
-                        </form>
-                      )}
-                    </TableCell>
+                  <TableRow key={t.id} data-token={t.id}>
+                    <TableCell className="px-3 py-2.5 font-medium">{t.label}</TableCell>
+                    <TableCell className="px-3 tabular-nums">{date(t.created_at)}</TableCell>
+                    <TableCell className="px-3 tabular-nums">{date(t.last_used_at)}</TableCell>
+                    <TableCell className="px-3">{t.revoked_at ? <span className="text-muted-foreground">Revoked {date(t.revoked_at)}</span> : "Active"}</TableCell>
+                    <TableCell className="px-3 py-2 text-right">{!t.revoked_at && <RevokeTokenButton id={t.id} label={t.label} />}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
-            </Table>
-          )}
-        </SectionCard>
-      </PhoneReadOnly>
+            </ListTable>
+          </PhoneReadOnly>
+        )}
+      </div>
     </main>
   );
 }

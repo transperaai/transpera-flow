@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
+import { MAX_REWORK } from "@transpera-flow/engine";
 import { checkProcessFile, checkProcessFileText, claudePrompt, PROCESS_FILE_EXAMPLE, PROCESS_FILE_SCHEMA, rolesInFile } from "../src/process-file";
 
 // The transpera-process/1 checker (issue #166): what it accepts, and the plain-word message for each way a file can be
@@ -178,6 +179,16 @@ describe("errors", () => {
     f.steps.push({ id: "d", name: "Other start", type: "start" });
     f.links.push({ from: "d", to: "b" });
     expect(checkProcessFile(f).errors[0]).toMatch(/one start step, but this file has 2 \('Begin', 'Other start'\)/);
+  });
+
+  it("caps a rework_rate above the engine's MAX_REWORK at it, with a warning", () => {
+    const f = base();
+    f.steps[1].rework_rate = 1;
+    const { errors, warnings, file } = checkProcessFile(f);
+    expect(errors).toEqual([]);
+    expect(warnings).toContain("Step 'Work': rework_rate is 1, but the most Transpera runs is 0.95 (at 1 an item would be sent back forever). It was set to 0.95.");
+    expect(MAX_REWORK).toBe(0.95);
+    expect(file!.steps[1]!.rework_rate).toBe(MAX_REWORK);
   });
 
   it("refuses numbers out of range and the wrong type of value", () => {

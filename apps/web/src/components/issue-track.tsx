@@ -23,7 +23,7 @@ export function IssueTrackView({ track, base, buildHref }: { track: IssueTrack; 
             return (
               <li key={label} aria-current={here ? "step" : undefined} data-stage={i} data-state={here ? "here" : done ? "done" : "todo"} className="flex min-w-0 flex-col gap-1">
                 <span aria-hidden className={`h-1.5 rounded-full ${here ? "bg-accent" : done ? "bg-accent/45" : "bg-line-2"}`} />
-                <span className={`text-[11px] leading-tight ${here ? "font-semibold text-fg" : done ? "text-fg-2" : "text-fg-3"}`}>
+                <span className={`text-2xs leading-tight ${here ? "font-semibold text-fg" : done ? "text-fg-2" : "text-fg-3"}`}>
                   {label}
                   <span className="sr-only">{here ? " (now)" : done ? " (done)" : " (not yet)"}</span>
                 </span>

@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import type { PricingModel, ServiceRow } from "@transpera-flow/db";
 import { NumberField, SelectField, TextField, ToggleField } from "@/components/fields";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
+import { useAddForm } from "@/components/settings/use-add-form";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { EmptyState, Toolbar } from "@/components/page-kit";
@@ -91,9 +92,9 @@ export function ServicesSettings({ data, tierServiceIds = new Set<string>() }: {
 }
 
 function AddService({ workspaceId }: { workspaceId: string }) {
-  const [state, action, pending] = useActionState<ActionResult, FormData>(createService.bind(null, workspaceId), {});
+  const { state, pending, onSubmit } = useAddForm<ActionResult>(createService.bind(null, workspaceId), {});
   return (
-    <form action={action} className="mb-4 flex flex-wrap items-end gap-2">
+    <form onSubmit={onSubmit} className="mb-4 flex flex-wrap items-end gap-2">
       <label className="flex min-w-0 flex-col gap-1">
         <HelpLabel label="Name" description="The service as you'd say it to a client." example="SEO retainer" />
         <Input name="name" required maxLength={200} />

@@ -76,16 +76,30 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
       const { page, errors } = await mount({}, width);
       await ready(page);
 
-      // 1. Company map on top; 2. levers; 3. results.
+      // A workbench: the toolbar, the levers pane and the results pane (the verdict and its figures, then the company map, then the charts). From 1440px
+      // the levers sit beside the results and each pane scrolls on its own; on a phone they stack.
+      expect(await page.locator("[data-play-toolbar]").count()).toBe(1);
       expect(await page.locator("[data-play-map]").count()).toBe(1);
       expect(await page.locator("[data-play-levers]").count()).toBe(1);
       expect(await page.locator("[data-play-results]").count()).toBe(1);
-      const top = await page.evaluate(() => {
-        const p = document.querySelector("[data-play-map]")!.getBoundingClientRect().top;
-        const l = document.querySelector("[data-play-levers]")!.getBoundingClientRect().top;
-        return p < l;
+      const layout = await page.evaluate(() => {
+        const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+        const levers = box("[data-play-levers-column]");
+        const main = box("[data-play-main]");
+        return {
+          beside: levers.right <= main.left + 1,
+          kpisBeforeMap: box("[data-play-kpis]").top < box("[data-play-map]").top,
+          mapBeforeCharts: box("[data-play-map]").top < box("[data-play-charts]").top,
+          ownScroll: ["[data-play-levers-column]", "[data-play-main]"].map((s) => getComputedStyle(document.querySelector(s)!).overflowY),
+        };
       });
-      expect(top).toBe(true);
+      expect(layout.kpisBeforeMap).toBe(true);
+      expect(layout.mapBeforeCharts).toBe(true);
+      expect(layout.beside).toBe(width >= 1024);
+      if (width >= 1024) expect(layout.ownScroll).toEqual(["auto", "auto"]);
+      // The verdict's figures: worst month, clients, profit and DLER, in one flat strip.
+      expect(await page.locator("[data-play-kpis] [data-play-kpi]").evaluateAll((els) => els.map((e) => e.getAttribute("data-play-kpi")))).toEqual(["worst", "clients", "profit", "dler"]);
+      expect(await text(page, "[data-play-summary]")).toMatch(/^(Worst month is [A-Z][a-z]{2} \d{4}|Nobody goes over).+ By [A-Z][a-z]{2} \d{4}: \d+ clients and .+ profit a month\. Move a lever/);
 
       // Every group of levers the brief lists, and Reset.
       for (const g of ["market", "add", "lose", "price", "people"]) expect(await page.locator(`[data-lever-group="${g}"]`).count(), g).toBe(1);
@@ -124,11 +138,11 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
       if (!/^Nobody/.test(worst)) expect(await page.locator("[data-heat-row] [data-worst-month]").count()).toBe(await page.locator("[data-heat-row]").count());
       expect(await page.locator("[data-play-purpose-bar]").count()).toBe(1);
       expect(await page.locator("[data-play-donut]").count()).toBe(0);
-      // One chart per row (B1), and the horizon filter at 12 months; no "how far ahead" lines on today's path.
+      // The charts side by side at 1440px (three across), one per row on a phone, and the horizon filter at 12 months; no "how far ahead" lines on today's path.
       expect(await page.locator("[data-play-horizon-option='12']").getAttribute("aria-pressed")).toBe("true");
       expect(await page.locator("[data-payoff]").count()).toBe(0);
       const tops = await page.locator("[data-play-card]").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
-      expect(new Set(tops).size).toBe(tops.length);
+      expect(new Set(tops).size).toBe(width >= 1440 ? 1 : tops.length);
       expect(await page.locator("[data-purpose-moves]").count()).toBe(0);
       // DLER has its 4.5 goal line, and every result card has its (i).
       expect(await text(page, '[data-play-chart="DLER by department"]')).toContain("Goal 4.5");

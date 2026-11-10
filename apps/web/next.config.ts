@@ -7,13 +7,28 @@ import type { NextConfig } from "next";
 const projectDir = typeof __dirname === "string" ? __dirname : process.cwd();
 const monorepoRoot = path.join(projectDir, "../..");
 
+/** Sent with every response (security review). Exported for the test that checks them. */
+export const SECURITY_HEADERS = [
+  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+];
+
 const nextConfig: NextConfig = {
   transpilePackages: ["@transpera-flow/engine", "@transpera-flow/db", "@transpera-flow/mcp"],
   // Trace from the monorepo root: the pnpm store (node_modules/.pnpm) lives there.
   outputFileTracingRoot: monorepoRoot,
-  // A share link's page (B3): the token is in the address, so nothing may leak it (no Referer to other sites), nothing may keep a copy
-  // (no caching), and search engines stay away.
+  // Every response: no page may be framed by another site (clickjacking; nothing in the app is meant to be embedded), no content-type
+  // sniffing, and a cross-site Referer carries only the origin. The CSP is frame-ancestors alone, so Next's inline scripts are unaffected.
+  // A later entry overrides an earlier one for the same key (Next's rule), so /s/* keeps its stricter Referrer-Policy.
   headers: async () => [
+    {
+      source: "/:path*",
+      headers: SECURITY_HEADERS,
+    },
+    // A share link's page (B3): the token is in the address, so nothing may leak it (no Referer to other sites), nothing may keep a copy
+    // (no caching), and search engines stay away.
     {
       source: "/s/:path*",
       headers: [

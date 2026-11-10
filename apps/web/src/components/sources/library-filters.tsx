@@ -1,8 +1,9 @@
 "use client";
 
-import type { LinkTargets } from "@transpera-flow/db";
-import { Help, HelpLabel } from "@/components/help";
-import { Input } from "@/components/ui/input";
+import type { ReactNode } from "react";
+import type { LinkTargets, SourceKind } from "@transpera-flow/db";
+import { Help } from "@/components/help";
+import { ClearFilters, FilterMenu, Toolbar, ToolbarSearch, type FilterOption } from "@/components/page-kit";
 import { NativeSelect } from "@/components/ui/native-select";
 import { SORTS, SORT_LABELS, type LibraryQuery } from "@/lib/sources/library";
 import { SOURCE_KIND_LABELS, SOURCE_KINDS } from "@/lib/sources/validate";
@@ -36,58 +37,49 @@ export const LIBRARY_HELP = {
   },
 } as const;
 
-/** The library's search box, filters and sort. They change the query the page asks the database for. */
+/** How many sources each choice would show; a kind's count is left out where the page doesn't know it (a workspace's library is asked for a page at a time). */
+export interface LibraryCounts {
+  kinds: Partial<Record<SourceKind, number>> | null;
+  processes: Record<string, number>;
+}
+
+/** One choice at a time: ticking another replaces the one that was on, unticking it shows them all. */
+const single = <V extends string>(current: V | "all", next: string[]): V | "all" => (next.find((v) => v !== current) ?? (next.includes(current) ? current : "all")) as V | "all";
+
+/**
+ * The library's toolbar: search, the Kind and Process filters, "Not linked only", the sort and the count. They change the query the page
+ * asks the database for. Kind and Process take one choice each (the database is asked for one), shown as the list pages' filter menus.
+ */
 export function LibraryFilters({
   query,
   filtered,
   targets,
+  counts,
+  count,
   set,
   onClear,
 }: {
   query: LibraryQuery;
   filtered: boolean;
   targets: LinkTargets;
+  counts: LibraryCounts;
+  /** The line that says how many show. */
+  count: ReactNode;
   set: (patch: Partial<LibraryQuery>) => void;
   onClear: () => void;
 }) {
+  const kindOptions: FilterOption[] = SOURCE_KINDS.map((k) => ({ value: k, label: SOURCE_KIND_LABELS[k], count: counts.kinds?.[k] }));
+  const processOptions: FilterOption[] = targets.processes.map((p) => ({ value: p.id, label: p.name, count: counts.processes[p.id] ?? 0 }));
   return (
-    <div className="flex flex-wrap items-end gap-x-3 gap-y-2" role="search">
-      <label className="flex min-w-48 grow flex-col gap-1 sm:max-w-sm">
-        <HelpLabel {...LIBRARY_HELP.search} />
-        <Input type="search" value={query.search} onChange={(e) => set({ search: e.target.value })} placeholder="Title, person, words in the text…" aria-label="Search sources" autoComplete="off" maxLength={300} />
-      </label>
-      <label className="flex flex-col gap-1">
-        <HelpLabel {...LIBRARY_HELP.kind} />
-        <NativeSelect value={query.kind} onChange={(e) => set({ kind: e.target.value as LibraryQuery["kind"] })} aria-label="Filter by kind">
-          <option value="all">All kinds</option>
-          {SOURCE_KINDS.map((k) => (
-            <option key={k} value={k}>
-              {SOURCE_KIND_LABELS[k]}
-            </option>
-          ))}
-        </NativeSelect>
-      </label>
-      <label className="flex flex-col gap-1">
-        <HelpLabel {...LIBRARY_HELP.process} />
-        <NativeSelect value={query.processId} onChange={(e) => set({ processId: e.target.value })} aria-label="Filter by process">
-          <option value="all">All processes</option>
-          {targets.processes.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </NativeSelect>
-      </label>
-      <label className="flex flex-col gap-1">
-        <HelpLabel {...LIBRARY_HELP.sort} />
-        <NativeSelect value={query.sort} onChange={(e) => set({ sort: e.target.value as LibraryQuery["sort"] })} aria-label="Sort sources">
-          {SORTS.map((s) => (
-            <option key={s} value={s}>
-              {SORT_LABELS[s]}
-            </option>
-          ))}
-        </NativeSelect>
-      </label>
+    <Toolbar label="Filter sources">
+      <span role="search" className="flex w-full min-w-0 items-center sm:w-auto">
+        <ToolbarSearch value={query.search} onChange={(search) => set({ search })} label="Search sources" placeholder="Title, person, words in the text…" />
+        <Help {...LIBRARY_HELP.search} />
+      </span>
+      <FilterMenu name="Kind" options={kindOptions} selected={query.kind === "all" ? [] : [query.kind]} onChange={(next) => set({ kind: single(query.kind, next) })} help={<Help {...LIBRARY_HELP.kind} />} />
+      {processOptions.length > 0 && (
+        <FilterMenu name="Process" options={processOptions} selected={query.processId === "all" ? [] : [query.processId]} onChange={(next) => set({ processId: single(query.processId, next) })} help={<Help {...LIBRARY_HELP.process} />} />
+      )}
       <span className="flex h-8 items-center text-sm">
         <label className="flex cursor-pointer items-center gap-1.5">
           <input type="checkbox" className="size-4 accent-[var(--accent)]" checked={query.unlinkedOnly} onChange={(e) => set({ unlinkedOnly: e.target.checked })} />
@@ -95,11 +87,20 @@ export function LibraryFilters({
         </label>
         <Help {...LIBRARY_HELP.unlinked} />
       </span>
-      {filtered && (
-        <button type="button" className="h-8 text-sm text-fg-2 underline" onClick={onClear}>
-          Clear filters
-        </button>
-      )}
-    </div>
+      {filtered && <ClearFilters onClick={onClear} />}
+      <span className="ml-auto flex items-center gap-3">
+        {count}
+        <span className="flex items-center">
+          <NativeSelect value={query.sort} onChange={(e) => set({ sort: e.target.value as LibraryQuery["sort"] })} aria-label="Sort sources">
+            {SORTS.map((s) => (
+              <option key={s} value={s}>
+                {SORT_LABELS[s]}
+              </option>
+            ))}
+          </NativeSelect>
+          <Help {...LIBRARY_HELP.sort} />
+        </span>
+      </span>
+    </Toolbar>
   );
 }

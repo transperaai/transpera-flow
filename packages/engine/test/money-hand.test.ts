@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { runOnce, simulate, type EngineClient, type EngineModel, type EngineService } from "../src";
 
-// Profit (engine 1.11.0) checked by hand (a fee bills fee / 4.33 a week, as `billed` always has) on tiny deterministic models: one person, constant times, no leads unless
+// Profit (engine 1.11.0) checked by hand (a fee bills fee / (52/12) a week, as `billed` always has; 4.33 before engine 1.18.0) on tiny deterministic models: one person, constant times, no leads unless
 // said. Every expected number below is worked out from the inputs, not read off the engine.
 
 const HPW = 40;
+/** Weeks in a month: a fee of 1,000 × MONTH bills 1,000 a week. */
+const MONTH = 52 / 12;
 
 const svc = (pricingModel: EngineService["pricingModel"], price: number, extra: Partial<EngineService> = {}): EngineService => ({
   name: pricingModel,
@@ -40,8 +42,8 @@ function tiny(extra: Partial<EngineModel> = {}): EngineModel {
 const named = (mrr: number, services: string[] = ["ret"]): EngineClient => ({ name: "Acme", services, mrr, assignments: { r: "ann" } });
 
 describe("hand-checked: one named retainer client", () => {
-  // Fee 4,330 a month = 1,000 a week. 13 weeks. Ann 40 h × 50 = 2,000 a week. Overheads 1,000 a month.
-  const m = tiny({ services: { ret: svc("retainer", 4330) }, clients: { c: named(4330) }, overheadMonthly: 1000 });
+  // Fee 1,000 × 52/12 a month = 1,000 a week. 13 weeks. Ann 40 h × 50 = 2,000 a week. Overheads 1,000 a month.
+  const m = tiny({ services: { ret: svc("retainer", 1000 * MONTH) }, clients: { c: named(1000 * MONTH) }, overheadMonthly: 1000 });
 
   it("revenue, labour, overheads and profit over the run", () => {
     const r = simulate(m, 3, 1);
@@ -82,13 +84,13 @@ describe("hand-checked: one named retainer client", () => {
 
   it("a client churning mid-month bills to its tick and its fee is lost in the tick's month", () => {
     // Certain churn at the first weekly tick (t = 40); months start at 0 and 40, so the tick closes month 0.
-    const churny = { ...m, services: { ret: svc("retainer", 4330, { churnMonthly: 50 }) } };
+    const churny = { ...m, services: { ret: svc("retainer", 1000 * MONTH, { churnMonthly: 50 }) } };
     const r = runOnce(churny, 1, false);
     expect(r.clientsChurned).toBe(1);
     expect(r.revenue.recurring).toBeCloseTo(1000, 6);
     const mo = simulate(churny, 1, 1, { monthly: true, monthStarts: [0, 40, 200] }).monthly!;
     expect(mo.clientsLost[0]!.mean).toBe(1);
-    expect(mo.revenue.lostToChurn[0]!.mean).toBeCloseTo(4330, 6);
+    expect(mo.revenue.lostToChurn[0]!.mean).toBeCloseTo(1000 * MONTH, 6);
     expect(mo.clientsLost[1]!.mean).toBe(0);
     expect(mo.revenue.recurring[0]!.mean).toBeCloseTo(1000, 6);
     expect(mo.revenue.recurring[1]!.mean).toBe(0);
@@ -118,8 +120,8 @@ describe("hand-checked: one-off jobs", () => {
 describe("hand-checked: hourly", () => {
   it("a won hourly client bills its fallback hours from the win, at the rate, and the onboarding step", () => {
     // 2 items at s (1 h each) won at t = 1 and 2, each then carrying 8.66 h a month = 2 h a week of fallback work.
-    // A named client on a retainer (fee 433 = 100 a week) makes it a roster model.
-    const m = tiny({ services: { h: svc("hourly", 100, { fallbackOngoing: { r: 8.66 } }), ret: svc("retainer", 433, { mixShare: 0 }) }, clients: { c: named(433) } });
+    // A named client on a retainer (fee 100 × 52/12 = 100 a week) makes it a roster model.
+    const m = tiny({ services: { h: svc("hourly", 100, { fallbackOngoing: { r: 8.66 } }), ret: svc("retainer", 100 * MONTH, { mixShare: 0 }) }, clients: { c: named(100 * MONTH) } });
     m.steps = [{ ...m.steps[0]!, currentWip: 2 }];
     const r = runOnce(m, 1, false);
     const H = 13 * HPW;
@@ -133,7 +135,7 @@ describe("hand-checked: hourly", () => {
   });
 
   it("an existing client on an hourly service bills its fee, not hours", () => {
-    const m = tiny({ services: { h: svc("hourly", 100, { fallbackOngoing: { r: 8.66 } }) }, clients: { c: named(4330, ["h"]) } });
+    const m = tiny({ services: { h: svc("hourly", 100, { fallbackOngoing: { r: 8.66 } }) }, clients: { c: named(1000 * MONTH, ["h"]) } });
     const r = runOnce(m, 1, false);
     expect(r.revenue.recurring).toBeCloseTo(13_000, 6);
     expect(r.revenue.hourly).toBe(0);
@@ -169,8 +171,8 @@ describe("hand-checked: staffing", () => {
 
 describe("hand-checked: pooled", () => {
   it("interim clients bill the retainer while active, decaying with churn at each weekly tick", () => {
-    // 10 clients at 4,330 (1,000 a week); churn 43.3% a month = 10% a week, applied at t = 40, 80, ...
-    const m = tiny({ activeClients: 10, retainer: 4330, churnMonthly: 0.433, horizonWeeks: 4 });
+    // 10 clients at 1,000 × 52/12 (1,000 a week); churn 1 - 0.9^(52/12) a month (36.7%) keeps 90% a week, applied at t = 40, 80, ...
+    const m = tiny({ activeClients: 10, retainer: 1000 * MONTH, churnMonthly: 1 - 0.9 ** MONTH, horizonWeeks: 4 });
     const r = runOnce(m, 1, false);
     let expected = 0;
     let n = 10;
@@ -183,7 +185,7 @@ describe("hand-checked: pooled", () => {
     const mo = simulate(m, 1, 1, { monthly: true, monthStarts: [0, 80] }).monthly!;
     expect(mo.revenue.recurring[0]!.mean).toBeCloseTo(10_000 + 9_000, 6);
     // Lost at the ticks at 40 (month 0) and 80 (closes month 0), and 120 (month 1).
-    expect(mo.revenue.lostToChurn[0]!.mean).toBeCloseTo(4330 * (1 + 0.9), 6);
+    expect(mo.revenue.lostToChurn[0]!.mean).toBeCloseTo(1000 * MONTH * (1 + 0.9), 6);
     expect(mo.clientsLost[0]!.mean).toBeCloseTo(1 + 0.9, 9);
   });
 });

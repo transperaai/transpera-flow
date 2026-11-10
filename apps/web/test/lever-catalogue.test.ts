@@ -41,7 +41,7 @@ describe("the lever catalogue", () => {
 
   it("points a lever set on a Settings page at that page", () => {
     for (const k of LEVER_KINDS.filter((x) => x.control === "settings")) {
-      expect(k.settingsPath, k.id).toMatch(/^\/settings#/);
+      expect(k.settingsPath, k.id).toMatch(/^\/settings(#|\/)/);
       expect(k.settingsLabel, k.id).toBeTruthy();
     }
   });

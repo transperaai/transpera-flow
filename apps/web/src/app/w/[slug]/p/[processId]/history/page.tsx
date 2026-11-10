@@ -33,13 +33,14 @@ export default async function ProcessHistoryPage(props: PageProps<"/w/[slug]/p/[
             <span className="font-medium text-fg">Company map</span>
           </nav>
         ) : (
-        <ProcessNav
-          processes={processes}
-          current={process.id}
-          hrefs={Object.fromEntries(processes.map((p) => [p.id, `${base}/p/${p.id}/history`]))}
-          processesHref={`${base}/processes`}
-          companyMapHref={base}
-        />
+          <ProcessNav
+            heading={false}
+            processes={processes}
+            current={process.id}
+            hrefs={Object.fromEntries(processes.map((p) => [p.id, `${base}/p/${p.id}/history`]))}
+            processesHref={`${base}/processes`}
+            companyMapHref={base}
+          />
         )
       }
       processName={process.name}

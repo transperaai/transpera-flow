@@ -1,10 +1,6 @@
-import { ChartSkeleton, PageSkeleton } from "@/components/shell/skeletons";
+import { SandboxSkeleton } from "@/components/shell/skeletons";
 
-/** Shown while the Sandbox's loaders run. The page draws its own header (`hideHeader`), so the skeleton has none either. */
+/** Shown while the Sandbox's loaders run: the workbench's shape (toolbar, levers pane, verdict, figures and the charts' grid). */
 export default function LoadingSandbox() {
-  return (
-    <PageSkeleton title="Sandbox" width="max-w-6xl" hideHeader>
-      <ChartSkeleton />
-    </PageSkeleton>
-  );
+  return <SandboxSkeleton />;
 }

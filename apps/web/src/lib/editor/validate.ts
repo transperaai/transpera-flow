@@ -22,6 +22,8 @@ const optionalShare: Check = (v) => v === null || share(v);
 const optionalUpTo = (max: number): Check => (v) => v === null || (atLeast0(v) && (v as number) <= max);
 const optionalPositiveUpTo = (max: number): Check => (v) => v === null || (number(v) && (v as number) > 0 && (v as number) <= max);
 const share: Check = (v) => number(v) && (v as number) >= 0 && (v as number) <= 1;
+/** A rework rate: at most 95%, the engine's `MAX_REWORK` and the database's `steps_rework_rate_check` (at 100% an item is redone forever). */
+const reworkShare: Check = (v) => number(v) && (v as number) >= 0 && (v as number) <= 0.95;
 const oneOf =
   (...values: string[]): Check =>
   (v) =>
@@ -90,7 +92,7 @@ export const STEP_FIELDS = {
   "wait_params.min": optionalAtLeast0,
   "wait_params.mode": optionalAtLeast0,
   "wait_params.max": optionalAtLeast0,
-  rework_rate: share,
+  rework_rate: reworkShare,
   rework_to_step_id: optionalId,
   // Nesting (issue #102): the group a step sits in, a group's first step, the child process a step holds.
   parent_step_id: optionalId,

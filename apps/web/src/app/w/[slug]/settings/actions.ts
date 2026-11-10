@@ -27,7 +27,13 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 const isId = (v: unknown): v is string => typeof v === "string" && UUID.test(v);
-const isDate = (v: unknown): v is string => typeof v === "string" && DATE.test(v) && !Number.isNaN(Date.parse(v));
+/** A real calendar day as YYYY-MM-DD: the shape alone lets through 2026-02-31, and Date.parse may roll it over to March. */
+const isDate = (v: unknown): v is string => {
+  if (typeof v !== "string" || !DATE.test(v)) return false;
+  const [y, m, d] = v.split("-").map(Number) as [number, number, number];
+  const day = new Date(Date.UTC(y, m - 1, d));
+  return day.getUTCFullYear() === y && day.getUTCMonth() === m - 1 && day.getUTCDate() === d;
+};
 const text: Check = (v) => typeof v === "string" && v.trim().length > 0 && v.length <= 200;
 const optionalText: Check = (v) => v === null || (typeof v === "string" && v.length <= 2000);
 const number: Check = (v) => typeof v === "number" && Number.isFinite(v);

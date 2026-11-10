@@ -6,7 +6,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { PlayState } from "@transpera-flow/db";
-import { EmptyState, SectionCard, StatusPill } from "@/components/page-kit";
+import { ChevronDown } from "lucide-react";
+import { EmptyState, StatusPill } from "@/components/page-kit";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
@@ -111,42 +112,47 @@ export function PlayMapCard({
 
   return (
     <div data-play-map>
-      <SectionCard
-        id="play-map"
-        title="Company map"
-        description="Every process in the business, with this run playing on it. Click a process to load another version of it. Nothing here changes live data."
-      >
-        {header}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm" data-version-summary data-versions={on.length}>
-          {on.length ? (
-            <>
-              <span className="font-medium">
-                {on.length} process{on.length === 1 ? "" : "es"} on new versions
-              </span>
-              <ul className="flex flex-wrap gap-1.5">
-                {on.map(({ process, solution }) => (
-                  <li key={process.id} data-version-chip={process.id} className="inline-flex items-center gap-1 rounded-full border border-accent bg-accent/5 py-0.5 pr-1 pl-2.5 text-xs">
-                    <span>
-                      {process.name}: <b className="font-semibold">{solution.name}</b>
-                      {(play.versions[process.id]?.month ?? 0) > 0 ? ` from ${months.short[play.versions[process.id]!.month]}` : ""}
-                    </span>
-                    <button type="button" aria-label={`Back to today's map for ${process.name}`} data-version-remove={process.id} onClick={() => choose(process.id, null)} className="rounded-full px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
-                      ✕
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <Button type="button" variant="outline" size="sm" data-versions-reset onClick={() => setPlay({ ...play, versions: {} })}>
-                Reset to today
-              </Button>
-            </>
-          ) : (
-            <span className="text-muted-foreground">All processes on today&apos;s map. Click a process to load another version.</span>
-          )}
-        </div>
+      <details open className="group/map flex flex-col" data-play-map-section>
+        <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-md outline-none select-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+          <h2 className="inline-flex items-center gap-1.5 text-base font-semibold">
+            <ChevronDown aria-hidden className="size-4 text-muted-foreground -rotate-90 transition-transform group-open/map:rotate-0" />
+            Company map
+          </h2>
+          <span className="text-xs text-muted-foreground">This run playing on every process. Click a process to load another version of it.</span>
+        </summary>
+        <div className="mt-3 flex min-w-0 flex-col gap-3">
+          {header}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm" data-version-summary data-versions={on.length}>
+            {on.length ? (
+              <>
+                <span className="font-medium">
+                  {on.length} process{on.length === 1 ? "" : "es"} on new versions
+                </span>
+                <ul className="flex flex-wrap gap-1.5">
+                  {on.map(({ process, solution }) => (
+                    <li key={process.id} data-version-chip={process.id} className="inline-flex items-center gap-1 rounded-full border border-accent bg-accent/5 py-0.5 pr-1 pl-2.5 text-xs">
+                      <span>
+                        {process.name}: <b className="font-semibold">{solution.name}</b>
+                        {(play.versions[process.id]?.month ?? 0) > 0 ? ` from ${months.short[play.versions[process.id]!.month]}` : ""}
+                      </span>
+                      <button type="button" aria-label={`Back to today's map for ${process.name}`} data-version-remove={process.id} onClick={() => choose(process.id, null)} className="rounded-full px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <Button type="button" variant="outline" size="sm" data-versions-reset onClick={() => setPlay({ ...play, versions: {} })}>
+                  Reset to today
+                </Button>
+              </>
+            ) : (
+              <span className="text-muted-foreground">All processes on today&apos;s map. Click a process to load another version.</span>
+            )}
+          </div>
 
-        {canvas ? canvas({ badges, onProcess }) : <EmptyState>No process has been published yet.</EmptyState>}
-      </SectionCard>
+          {canvas ? canvas({ badges, onProcess }) : <EmptyState>No process has been published yet.</EmptyState>}
+        </div>
+      </details>
 
       {open && pick && (
         <Popover open onOpenChange={(o) => !o && setOpen(null)}>

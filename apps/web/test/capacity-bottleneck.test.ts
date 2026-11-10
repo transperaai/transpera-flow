@@ -36,7 +36,7 @@ describe("bottleneck logic, pinned", () => {
           "PPC campaign setup",
         ],
         "top": "strat",
-        "topEvidence": "Strategist is 84% utilised (range 73–99%): 33.8 h/week of work across 1 person, 54% on the pipeline and 30% on client work. Work queues longest at “Audit & proposal” (avg 1.4 items waiting).",
+        "topEvidence": "Strategist is 84% utilised (range 72–98%): 33.8 h/week of work across 1 person, 54% on the pipeline and 30% on client work. Work queues longest at “Audit & proposal” (avg 1.4 items waiting).",
         "topName": "Strategist",
       }
     `);
@@ -50,14 +50,14 @@ describe("bottleneck logic, pinned", () => {
           "design",
           "strat",
         ],
-        "stepEvidence": "“Turn the request round” has avg 3.7 items waiting (peak 13); each waits avg 3.4 working days before work starts.",
+        "stepEvidence": "“Turn the request round” has avg 3.6 items waiting (peak 12.9); each waits avg 3.4 working days before work starts.",
         "steps": [
           "Turn the request round",
           "Design the assets",
           "Creative concepts",
         ],
         "top": "copy",
-        "topEvidence": "Copywriter is 110% utilised (range 98–125%): 45.7 h/week of work across 1 person, 8% on the pipeline and 113% on client work. Work queues longest at “Content plan & first articles” (avg 1.1 items waiting).",
+        "topEvidence": "Copywriter is 110% utilised (range 96–126%): 45.5 h/week of work across 1 person, 8% on the pipeline and 113% on client work. Work queues longest at “Content plan & first articles” (avg 1.1 items waiting).",
         "topName": "Copywriter",
       }
     `);

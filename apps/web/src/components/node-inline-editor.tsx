@@ -69,7 +69,7 @@ export function NodeInlineEditor({ step, focus }: { step: StepRow; focus: Inline
           </div>
         </>
       )}
-      <p className="text-[10px] text-fg-3">Enter saves · Esc cancels</p>
+      <p className="text-2xs text-fg-3">Enter saves · Esc cancels</p>
     </div>
   );
 }
@@ -158,7 +158,7 @@ function TextInput({ ctx, step, field, label, short }: { ctx: InlineEditing; ste
         input
       )}
       {error && (
-        <p id={errorId} role="alert" className="text-[10px] text-crit">
+        <p id={errorId} role="alert" className="text-2xs text-crit">
           {error}
         </p>
       )}
@@ -207,7 +207,7 @@ function Select({
         {value && !options.some((o) => o.id === value) && <option value={value}>A removed item</option>}
       </select>
       {error && (
-        <p role="alert" className="col-span-2 text-[10px] text-crit">
+        <p role="alert" className="col-span-2 text-2xs text-crit">
           {error}
         </p>
       )}

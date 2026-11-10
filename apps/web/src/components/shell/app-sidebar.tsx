@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Building2,
   ChevronsUpDown,
+  Gauge,
   CircleAlert,
   KeyRound,
   Layers,
@@ -14,8 +14,6 @@ import {
   Network,
   Settings2,
   TrendingUp,
-  Users,
-  UsersRound,
   type LucideIcon,
 } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -45,11 +43,9 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   issues: CircleAlert,
   solutions: Lightbulb,
   library: Layers,
-  people: Users,
+  capacity: Gauge,
   sandbox: TrendingUp,
   settings: Settings2,
-  clients: Building2,
-  team: UsersRound,
 };
 
 const BADGE: Record<CountTone, string> = {

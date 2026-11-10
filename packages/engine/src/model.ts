@@ -6,6 +6,12 @@ import type { ChurnCauses, ChurnReplication, DriverEvents, EngineChurnDriver } f
 import type { EngineMarket } from "./market";
 import type { Loop } from "./loops";
 
+/**
+ * Weeks in a month: twelve months make a 52-week year. The one month length the engine converts monthly rates, fees and
+ * churn to weeks with (cost.ts, demand.ts, market.ts, the capacity inputs and the run itself).
+ */
+export const WEEKS_PER_MONTH = 52 / 12;
+
 /** Times are in working hours. */
 export interface EngineRole {
   name: string;

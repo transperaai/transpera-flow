@@ -85,6 +85,15 @@ describe("headline numbers", () => {
     expect(await recordHeadline(WS, [REV], 26, { ...numbers, processes_attention: 2 })).toEqual({ status: "recorded" });
     expect((await one("select numbers from workspace_headlines where workspace_id = $1", [WS])).numbers.processes_attention).toBe(2);
     expect((await q("select 1 from workspace_headlines where workspace_id = $1", [WS])).rowCount).toBe(1);
+    // Bounded: at most 200 distinct revisions, a horizon of 1 to 104 weeks (the setting's range), sane counts.
+    const many = Array.from({ length: 201 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+    const invalid = { status: "error", message: "That isn't valid." };
+    expect(await recordHeadline(WS, many, 26, numbers)).toEqual(invalid);
+    expect(await recordHeadline(WS, [REV, REV], 26, numbers)).toEqual(invalid);
+    expect(await recordHeadline(WS, [REV], 105, numbers)).toEqual(invalid);
+    expect(await recordHeadline(WS, [REV], 26, { ...numbers, processes_total: 1e12 })).toEqual(invalid);
+    expect(await recordHeadline(WS, [REV], 26, null as never)).toEqual(invalid);
+    expect(await recordHeadline(WS, many.slice(0, 200), 104, numbers)).toEqual({ status: "recorded" });
   });
 });
 
@@ -366,6 +375,13 @@ describe("blocks and runs", () => {
       expect(row.params_snapshot).toBeTypeOf("object");
     }
     expect(await saveRun({ ...input, revisionId: "99999999-9999-4999-8999-999999999999" })).toMatchObject({ status: "error", message: expect.stringMatching(/newer revision/) });
+    // Numbers the browser sends are bounded before anything is written.
+    const before = (await one("select count(*)::int as n from runs")).n;
+    for (const bad of [{ reps: 1001 }, { reps: 0 }, { reps: 1e12 }, { seed: 2 ** 31 }, { seed: -(2 ** 31) - 1 }, { seed: 1.5 }, { durationMs: -1 }, { durationMs: 3_600_001 }, { durationMs: 1e15 }, { durationMs: "12" }]) {
+      expect(await saveRun({ ...input, ...bad }), JSON.stringify(bad)).toEqual({ status: "error", message: "The run's settings aren't valid." });
+    }
+    expect((await one("select count(*)::int as n from runs")).n).toBe(before);
+    expect((await saveRun({ ...input, reps: 1000, seed: 2 ** 31 - 1, durationMs: null })).status).toBe("ok");
   });
 });
 
@@ -443,8 +459,20 @@ describe("processes", () => {
     expect(await discardDraft(P)).toEqual({ status: "ok" });
     expect(await insertProcessRows(rev, [row(step, "Late")], [])).toMatchObject({ status: "error" });
     const again = await openDraft(P);
-    expect(again.status).toBe("ok");
-    const pub = await publishDraft(P, true);
+    if (again.status !== "ok") throw new Error(JSON.stringify(again));
+    // Steps and edges go in together: an edge the database refuses (its step isn't there) leaves the steps out too.
+    const bad = [{ id: "88888888-8888-4888-8888-888888888883", from_step_id: step, to_step_id: "77777777-7777-4777-8777-777777777779", probability: 1, label: null, condition: null }];
+    expect(await insertProcessRows(again.revision.id, [row(step, "Half")], bad)).toMatchObject({ status: "error" });
+    expect((await q("select 1 from steps where revision_id = $1 and id = $2", [again.revision.id, step])).rowCount).toBe(0);
+    // The draft the editor shows was discarded and another opened: publishing names the one it saw, so nothing is published.
+    expect(await discardDraft(P)).toEqual({ status: "ok" });
+    const other = await openDraft(P);
+    if (other.status !== "ok") throw new Error(JSON.stringify(other));
+    const before = await one("select live_revision_id, draft_revision_id from processes where id = $1", [P]);
+    expect(await publishDraft(P, true, again.revision.id)).toEqual({ status: "error", message: expect.stringMatching(/^This draft changed since you opened it/) });
+    expect(await one("select live_revision_id, draft_revision_id from processes where id = $1", [P])).toEqual(before);
+    expect(await publishDraft(P, true, "not-an-id")).toEqual({ status: "error", message: "That change isn't valid." });
+    const pub = await publishDraft(P, true, other.revision.id);
     expect(["published", "unresolved"]).toContain(pub.status);
   });
 
@@ -613,6 +641,19 @@ describe("settings", () => {
     expect(await c.saveClientAssignment(client.id, WS, northbeamRoleIds.strat, null, northbeamPersonIds["Leah Brooks"]!)).toEqual({ status: "conflict", theirs: person });
     expect(await c.saveClientAssignment(client.id, WS, northbeamRoleIds.strat, person, null)).toEqual({ status: "saved", value: null });
     expect((await q("select 1 from client_assignments where client_id = $1", [client.id])).rowCount).toBe(0);
+    // Who looks after the client, moved across roles in one transaction.
+    const leah = northbeamPersonIds["Leah Brooks"]!;
+    const held = async () => (await q("select role_id, person_id from client_assignments where client_id = $1 order by role_id", [client.id])).rows;
+    expect(await setup.saveClientLookedAfter(client.id, WS, null, { roleId: northbeamRoleIds.strat, personId: person })).toEqual({ status: "saved", value: person });
+    await q("insert into client_assignments (client_id, role_id, person_id, workspace_id) values ($1, $2, $3, $4)", [client.id, northbeamRoleIds.am, leah, WS]);
+    // The new role already has someone else: a conflict, and the old role keeps its person (nothing half-moved).
+    expect(await setup.saveClientLookedAfter(client.id, WS, { roleId: northbeamRoleIds.strat, personId: person }, { roleId: northbeamRoleIds.am, personId: person })).toEqual({ status: "conflict", theirs: leah });
+    expect(await held()).toEqual([{ role_id: northbeamRoleIds.strat, person_id: person }, { role_id: northbeamRoleIds.am, person_id: leah }].sort((a, b) => a.role_id.localeCompare(b.role_id)));
+    await q("delete from client_assignments where client_id = $1 and role_id = $2", [client.id, northbeamRoleIds.am]);
+    expect(await setup.saveClientLookedAfter(client.id, WS, { roleId: northbeamRoleIds.strat, personId: person }, { roleId: northbeamRoleIds.am, personId: leah })).toEqual({ status: "saved", value: leah });
+    expect(await held()).toEqual([{ role_id: northbeamRoleIds.am, person_id: leah }]);
+    expect(await setup.saveClientLookedAfter(client.id, WS, { roleId: northbeamRoleIds.am, personId: leah }, null)).toEqual({ status: "saved", value: null });
+    expect(await held()).toEqual([]);
 
     const process = (await one("select id from processes where workspace_id = $1 and kind = 'servicing' and not is_company and not exists (select 1 from service_servicing l where l.process_id = processes.id) limit 1", [WS]))?.id as string | undefined;
     const linkedAlready = await one("select service_id, process_id, id from service_servicing limit 1");

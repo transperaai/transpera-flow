@@ -62,4 +62,25 @@ describe("undo and redo buttons in the editor bar", { timeout: 120_000 }, () => 
     expect(errors).toEqual([]);
     await page.close();
   });
+
+  it("leave the map alone while a dialog is open: mod+z with the tour showing undoes nothing", async () => {
+    const { page, errors } = await open(1440);
+    await page.getByRole("button", { name: "+ Step", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("[data-undo]:not([disabled])"));
+    const count = await page.locator(".react-flow__node").count();
+    await page.getByRole("button", { name: "Take the tour" }).click();
+    await page.locator("[data-tour-card]").waitFor();
+    await page.keyboard.press("ControlOrMeta+z");
+    await page.waitForTimeout(100);
+    expect(await page.locator(".react-flow__node").count()).toBe(count);
+    expect(await undo(page).isDisabled()).toBe(false);
+    // With the tour closed the same keys undo again.
+    await page.keyboard.press("Escape");
+    await page.locator("[data-tour-card]").waitFor({ state: "detached" });
+    await page.locator("[data-process-map]").focus();
+    await page.keyboard.press("ControlOrMeta+z");
+    await page.waitForFunction((n) => document.querySelectorAll(".react-flow__node").length < n, count);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
 });

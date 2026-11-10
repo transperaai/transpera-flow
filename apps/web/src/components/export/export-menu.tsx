@@ -2,28 +2,46 @@
 
 // The Export button (issue #39, B10): a small menu on a map ("Export image": PNG or SVG) and, where a workspace is
 // connected, the whole workspace as a JSON bundle. Everything is made in the browser from what the page already holds,
-// except the bundle, which is a download from the server (as the signed-in user, so only what they can read).
+// except the bundle, which is fetched from the server (as the signed-in user, so only what they can read) and saved under
+// the server's file name; when the server says no, its message shows in the menu (bundle-download.ts).
 import { Download } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { buildMapImage, downloadBlob, exportFileName, readPalette, svgToPng, type MapImageInput } from "@/lib/export/map-image";
+import { downloadBundle, localDate } from "./bundle-download";
 
 export type MapExportInput = Omit<MapImageInput, "palette" | "date">;
 
 /**
  * Export menu for a map. `input` is read when an item is chosen (so it draws the map as it is then); `bundleHref`, when
- * given, adds the workspace JSON bundle (a link to the route, which sends it as a file).
+ * given, adds the workspace JSON bundle (fetched from that route; its error message, if any, shows in the menu).
  */
 export function ExportMenu({ input, name, bundleHref, label = "Export", note }: { input: () => MapExportInput; name: string; bundleHref?: string; label?: string; note?: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [bundleBusy, setBundleBusy] = useState(false);
+  const [bundleNote, setBundleNote] = useState<{ tone: "error" | "warning"; text: string } | null>(null);
+
+  const backup = async (href: string) => {
+    setBundleNote(null);
+    setBundleBusy(true);
+    try {
+      const r = await downloadBundle(href, downloadBlob);
+      if (!r.ok) setBundleNote({ tone: "error", text: r.message });
+      else if (r.warning) setBundleNote({ tone: "warning", text: r.warning });
+      else setOpen(false);
+    } finally {
+      setBundleBusy(false);
+    }
+  };
 
   const run = async (kind: "png" | "svg") => {
     setError(null);
     setBusy(true);
     try {
-      const date = new Date().toISOString().slice(0, 10);
+      const date = localDate();
       const image = buildMapImage({ ...input(), palette: readPalette(), date });
       if (kind === "svg") downloadBlob(new Blob([image.svg], { type: "image/svg+xml;charset=utf-8" }), exportFileName(name, "svg", date));
       else downloadBlob(await svgToPng(image, 2), exportFileName(name, "png", date));
@@ -41,7 +59,13 @@ export function ExportMenu({ input, name, bundleHref, label = "Export", note }: 
           {error}
         </span>
       )}
-      <DropdownMenu>
+      <DropdownMenu
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (next) setBundleNote(null);
+        }}
+      >
         <DropdownMenuTrigger asChild>
           <Button type="button" variant="outline" size="sm" data-export-menu disabled={busy}>
             <Download aria-hidden />
@@ -61,12 +85,22 @@ export function ExportMenu({ input, name, bundleHref, label = "Export", note }: 
             <>
               <DropdownMenuSeparator />
               <DropdownMenuLabel>Whole workspace</DropdownMenuLabel>
-              <DropdownMenuItem asChild data-export="bundle">
-                {/* A plain link: the server sends the file, and signs nobody in who is not already. */}
-                <a href={bundleHref} download>
-                  JSON backup
-                </a>
+              <DropdownMenuItem
+                data-export="bundle"
+                disabled={bundleBusy}
+                onSelect={(e) => {
+                  // Stay open: the menu is where a refusal or a size warning is shown.
+                  e.preventDefault();
+                  void backup(bundleHref);
+                }}
+              >
+                {bundleBusy ? "Preparing the backup…" : "JSON backup"}
               </DropdownMenuItem>
+              {bundleNote && (
+                <p role={bundleNote.tone === "error" ? "alert" : "status"} data-export-bundle-note={bundleNote.tone} className={bundleNote.tone === "error" ? "px-1.5 pb-1 text-xs text-destructive" : "px-1.5 pb-1 text-xs text-fg-2"}>
+                  {bundleNote.tone === "warning" ? `Downloaded. ${bundleNote.text}` : bundleNote.text}
+                </p>
+              )}
               <p className="px-1.5 pb-1 text-xs text-muted-foreground">Every process and version, issues, sources and the company model. Named clients stay hidden but are kept. No emails or tokens.</p>
             </>
           )}

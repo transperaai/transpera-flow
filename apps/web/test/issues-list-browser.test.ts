@@ -9,7 +9,8 @@ vi.setConfig({ testTimeout: 60_000 });
 import { bundleHarness } from "./build-harness";
 
 // The Issues list in a real browser with the app's stylesheet (Q9): no Export CSV, a Step column, a coloured pill for each status, and one
-// toolbar row (search, Status, Owner, Rating, Process, Clear filters, New issue) whose filters live in the URL and that wraps at 400 px.
+// toolbar row (search, Status, Owner, Rating, Process, Clear filters, a count) whose filters live in the URL and that wraps at 400 px, with
+// + New issue at the right of the page's header.
 // With Q9_SHOTS=<dir> it also saves the screenshots (1440 px light and dark, and 400 px).
 
 let browser: Browser;
@@ -112,12 +113,16 @@ describe("the Issues list", () => {
     await page.close();
   });
 
-  it("lays the toolbar out as one row at 1440 px, with the New issue button on the right, and wraps at 400 px without scrolling sideways", async () => {
+  it("puts + New issue at the header's right, lays the toolbar out as one row at 1440 px with a count, and wraps at 400 px without scrolling sideways", async () => {
     const wide = await mount();
     const bar = (await wide.page.locator("[data-list-toolbar]").boundingBox())!;
     expect(bar.height).toBeLessThan(50);
-    const button = (await wide.page.getByRole("button", { name: "+ New issue" }).boundingBox())!;
-    expect(button.x + button.width).toBeGreaterThan(bar.x + bar.width - 80);
+    expect(await wide.page.locator("[data-page-actions]").getByRole("button", { name: "+ New issue" }).count()).toBe(1);
+    expect(await wide.page.locator("[data-list-toolbar]").getByRole("button", { name: "+ New issue" }).count()).toBe(0);
+    const header = (await wide.page.locator("[data-page-header]").boundingBox())!;
+    expect(header.y + header.height).toBeLessThan(bar.y);
+    expect(await wide.page.locator("[data-issue-count]").innerText()).toMatch(/^7 of \d+ issues$/);
+    expect(await wide.page.locator("[data-issues-table] thead").evaluate((e) => getComputedStyle(e).position)).toBe("sticky");
     await wide.page.close();
     const narrow = await mount({}, 400);
     expect(await narrow.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

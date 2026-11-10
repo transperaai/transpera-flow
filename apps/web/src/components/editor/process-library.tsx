@@ -8,6 +8,7 @@
 
 import { useId, useMemo, useState, useTransition, type Dispatch, type SetStateAction } from "react";
 import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS, type ProcessBundle, type ProcessCategory } from "@transpera-flow/db";
+import { PanelHeading } from "@/components/editor/panel-heading";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -107,14 +108,14 @@ export function ProcessLibrary({
 
   return (
     <section aria-label="Process library" data-process-library className="flex flex-col gap-2">
-      <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
+      <PanelHeading>
         Process library
         <Help
           label="Process library"
           description="Your workspace's processes. Tick the ones you want and add them: each appears here as a link to the process. The process itself is never changed or copied, and a process can sit in one place only."
           example="Tick “Sales” and “Onboarding”, press Add, and two linked processes appear in view."
         />
-      </h2>
+      </PanelHeading>
       <label htmlFor={searchId} className="sr-only">
         Search processes by name
       </label>

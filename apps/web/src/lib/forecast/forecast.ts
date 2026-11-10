@@ -14,7 +14,11 @@ import { calendarMonthStarts } from "@transpera-flow/db/sandbox";
 export const DEFAULT_FORECAST_MONTHS = 12;
 
 /** Today, as the ISO date a forecast starts on. */
-export const today = (): string => new Date().toISOString().slice(0, 10);
+/** Today as YYYY-MM-DD in local time (not UTC, which is yesterday in Sydney until 10 or 11am). */
+export const today = (): string => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 /**
  * The company model for a forecast of `months` months from `startDate`: planned hires join on their start date and

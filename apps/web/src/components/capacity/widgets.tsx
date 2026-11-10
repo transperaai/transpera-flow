@@ -179,9 +179,9 @@ export function Section({ title, aside, description, children, className, ...res
 
 export function Kpi({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return (
-    <div className="min-w-0 rounded-token border border-line bg-panel px-3.5 py-3" data-kpi>
+    <div className="min-w-0 rounded-md border border-line bg-panel px-3.5 py-3" data-kpi>
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-0.5 font-mono text-[22px] font-medium tabular-nums">{value}</div>
+      <div className="mt-0.5 font-mono text-2xl font-medium tabular-nums">{value}</div>
       {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
     </div>
   );
@@ -190,21 +190,62 @@ export function Kpi({ label, value, sub }: { label: string; value: ReactNode; su
 /** How a headline figure stands against its goal: the bar colour along the top, and the words in the badge (the words carry it, not the colour). */
 export type KpiStatus = { tone: "good" | "warn"; words: string };
 
-const STATUS_BAR: Record<KpiStatus["tone"], string> = { good: "border-t-good", warn: "border-t-warn" };
+const STATUS_EDGE: Record<KpiStatus["tone"], string> = { good: "shadow-[inset_3px_0_0_var(--good)]", warn: "shadow-[inset_3px_0_0_var(--warn)]" };
 const STATUS_BADGE: Record<KpiStatus["tone"], string> = { good: "bg-good-soft", warn: "bg-warn-soft" };
 const STATUS_DOT: Record<KpiStatus["tone"], string> = { good: "bg-good", warn: "bg-warn" };
 
-/** A page's headline figure, bigger than a `Kpi`: the label, the number large, an optional status against a goal, then the note. */
+/** A page's headline figure, bigger than a `Kpi`: the label, the number large, an optional status against a goal (in words, with a thin edge in its colour), then the note. Flat: a border, no shadow. */
 export function HeroKpi({ label, value, sub, status }: { label: string; value: ReactNode; sub?: ReactNode; status?: KpiStatus }) {
   return (
     <div
-      className={cn("flex min-w-0 flex-col gap-1 rounded-token border border-line bg-panel px-4 pt-3.5 pb-3 shadow-[var(--shadow)]", status ? cn("border-t-4", STATUS_BAR[status.tone]) : "border-t-4 border-t-accent")}
+      className={cn("flex min-w-0 flex-col gap-1 rounded-xl border border-line bg-panel px-4 py-3", status && STATUS_EDGE[status.tone])}
       data-kpi
       data-kpi-status={status?.tone}
     >
       <div className="text-sm font-medium text-fg-2">{label}</div>
       <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
         <span className="font-mono text-4xl leading-none font-semibold tracking-tight text-fg tabular-nums">{value}</span>
+        {status && (
+          <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium text-fg", STATUS_BADGE[status.tone])} data-kpi-badge>
+            <i aria-hidden className={cn("size-2 rounded-full", STATUS_DOT[status.tone])} />
+            {status.words}
+          </span>
+        )}
+      </div>
+      {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
+    </div>
+  );
+}
+
+/**
+ * A flat strip of headline figures (docs/plans/ui-cleanup.md, `KpiTile`): one bordered surface with the tiles side by side, divided by hairlines, and
+ * no card around each. It wraps onto more rows on a narrow screen; the tiles' own top and left hairlines are clipped at the strip's edge.
+ */
+export function KpiStrip({ children, className, ...rest }: { children: ReactNode; className?: string } & Omit<React.HTMLAttributes<HTMLDivElement>, "children">) {
+  return (
+    <div className={cn("grid min-w-0 grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] overflow-hidden rounded-xl border border-line bg-panel", className)} {...rest}>
+      {children}
+    </div>
+  );
+}
+
+const EDGE: Record<"good" | "warn" | "crit", string> = {
+  good: "shadow-[inset_3px_0_0_var(--good)]",
+  warn: "shadow-[inset_3px_0_0_var(--warn)]",
+  crit: "shadow-[inset_3px_0_0_var(--crit)]",
+};
+
+/**
+ * One figure in a `KpiStrip`: the label, the number, an optional status against a goal (in words, with the colour as a stripe at the left edge),
+ * then a note. `data-kpi` (and `data-kpi-status`) are the hooks the tests read.
+ */
+export function KpiTile({ label, value, sub, status, edge, ...rest }: { label: ReactNode; value: ReactNode; sub?: ReactNode; status?: KpiStatus; edge?: "good" | "warn" | "crit" } & Omit<React.HTMLAttributes<HTMLDivElement>, "children">) {
+  const stripe = edge ?? status?.tone;
+  return (
+    <div className={cn("-mt-px -ml-px flex min-w-0 flex-col gap-0.5 border-t border-l border-line px-4 py-3", stripe && EDGE[stripe])} data-kpi data-kpi-status={status?.tone} {...rest}>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-2xl leading-tight font-semibold text-fg tabular-nums">{value}</span>
         {status && (
           <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium text-fg", STATUS_BADGE[status.tone])} data-kpi-badge>
             <i aria-hidden className={cn("size-2 rounded-full", STATUS_DOT[status.tone])} />

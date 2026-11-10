@@ -38,7 +38,7 @@ window.Worker = class extends NativeWorker {
 
 window.mountQ16 = (data, options = {}) =>
   createRoot(document.getElementById("root")!).render(
-    <div className="mx-auto max-w-6xl p-4">
+    <div className="mx-auto p-4">
       <PlayPage
         live={data.live}
         parts={data.parts}

@@ -266,7 +266,7 @@ describe("People & roles", { timeout: 120_000 }, () => {
   it("shows one standard row per person and per role, the shared teams without rates, and no Advanced card", async () => {
     const { page, errors } = await mount({ page: "people", who: "owner" });
     // Every person has the same columns; the heading row names them (with an (i) each).
-    const heads = await page.locator("[data-people-list] [role=columnheader] > span:first-child").allInnerTexts();
+    const heads = await page.locator("[data-people-list] th > span:first-child").allInnerTexts();
     expect(heads.map((h) => h.trim())).toEqual(["Person", "Role", "Department", "Hours a week", "Team time", "Salary a month", "Label"]);
     const karl = page.locator("[data-person='Karl']");
     expect(await karl.innerText()).toContain("SEO Manager");

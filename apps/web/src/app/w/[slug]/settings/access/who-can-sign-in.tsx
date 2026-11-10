@@ -1,12 +1,13 @@
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { SectionCard } from "@/components/page-kit";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { DeploymentAccessView } from "@/lib/deployment-access";
 import { DEPLOYMENT_ROLES, DEPLOYMENT_ROLE_HELP, DEPLOYMENT_ROLE_LABEL, assignableRoles } from "@/lib/deployment-rules";
 import { addDeploymentRule, removeDeploymentRule, setDeploymentRole } from "./actions";
+import { RemoveRule } from "./remove-rule";
 
 function RuleRoleSelect({ value, isOwner }: { value?: string; isOwner: boolean }) {
   return (
@@ -20,25 +21,36 @@ function RuleRoleSelect({ value, isOwner }: { value?: string; isOwner: boolean }
   );
 }
 
-/** The Owner and Agency admins: who may sign in to this deployment at all, and with which of the three roles. Only an Owner changes an Owner. */
-export function WhoCanSignIn({ slug, view }: { slug: string; view: DeploymentAccessView }) {
+/** Whether a rule lets in this email: the same address, or an address on the rule's domain (not its subdomains). */
+export function ruleMatches(rule: { kind: string; value: string }, email: string | null | undefined): boolean {
+  if (!email) return false;
+  const e = email.trim().toLowerCase();
+  const v = rule.value.trim().toLowerCase();
+  return rule.kind === "domain" ? e.endsWith(`@${v}`) : e === v;
+}
+
+/**
+ * The Owner and Agency admins: who may sign in to this deployment at all, and with which of the three roles. Only an Owner changes an
+ * Owner. `myEmail` is the signed-in person's, so removing a rule that lets them in can say so.
+ */
+export function WhoCanSignIn({ slug, view, myEmail, draft }: { slug: string; view: DeploymentAccessView; myEmail?: string | null; /** What the add form held when the server refused it, to fill it in again. */ draft?: { kind?: string; value?: string; role?: string } }) {
   const { rules, environmentAdmins, isOwner } = view;
   return (
-    <Card role="region" aria-labelledby="sign-in-heading">
-      <CardHeader>
-        <h2 id="sign-in-heading" className="flex items-center font-heading text-base font-medium">
-          Who can sign in
-          <Help
-            label="Who can sign in"
-            description="Applies to the whole deployment, not one workspace. Anyone whose verified email is on this list can sign in. A named email beats its domain. Agency admins and Viewers are added to every workspace with that role, and moved to match the list when they next sign in. Everyone else is refused."
-            example="Add northbeam.example as Viewer, then maya@northbeam.example as Agency admin."
-          />
-        </h2>
-        <CardDescription>
-          {DEPLOYMENT_ROLES.map((r) => `${DEPLOYMENT_ROLE_LABEL[r]}: ${DEPLOYMENT_ROLE_HELP[r]}`).join(" ")}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+    <div role="region" aria-labelledby="sign-in-heading">
+      <SectionCard
+        id="sign-in"
+        title={
+          <span className="flex items-center">
+            Who can sign in
+            <Help
+              label="Who can sign in"
+              description="Applies to the whole deployment, not one workspace. Anyone whose verified email is on this list can sign in. A named email beats its domain. Agency admins and Viewers are added to every workspace with that role, and moved to match the list when they next sign in. Everyone else is refused."
+              example="Add northbeam.example as Viewer, then maya@northbeam.example as Agency admin."
+            />
+          </span>
+        }
+        description={DEPLOYMENT_ROLES.map((r) => `${DEPLOYMENT_ROLE_LABEL[r]}: ${DEPLOYMENT_ROLE_HELP[r]}`).join(" ")}
+      >
         <Table>
           <TableHeader>
             <TableRow>
@@ -90,12 +102,14 @@ export function WhoCanSignIn({ slug, view }: { slug: string; view: DeploymentAcc
                     {locked ? (
                       <span className="text-muted-foreground">Only an Owner can change this</span>
                     ) : (
-                      <form action={removeDeploymentRule.bind(null, slug)}>
-                        <input type="hidden" name="id" value={r.id} />
-                        <Button type="submit" variant="ghost" size="sm" className="text-destructive" aria-label={`Remove ${r.value}`}>
-                          Remove
-                        </Button>
-                      </form>
+                      <RemoveRule
+                        action={removeDeploymentRule.bind(null, slug)}
+                        id={r.id}
+                        name={r.kind === "domain" ? `@${r.value}` : r.value}
+                        value={r.value}
+                        // Only when nothing else lets them in: a named email beats its domain, and the deployment's own admins stay in.
+                        locksYouOut={ruleMatches(r, myEmail) && !environmentAdmins.some((a) => a.toLowerCase() === myEmail?.toLowerCase()) && !rules.some((o) => o.id !== r.id && ruleMatches(o, myEmail))}
+                      />
                     )}
                   </TableCell>
                 </TableRow>
@@ -103,8 +117,9 @@ export function WhoCanSignIn({ slug, view }: { slug: string; view: DeploymentAcc
             })}
           </TableBody>
         </Table>
-        <form action={addDeploymentRule.bind(null, slug)} className="flex flex-wrap gap-2">
-          <NativeSelect name="kind" defaultValue="domain" aria-label="Kind" className="w-auto">
+        {/* Keyed on what came back, so a refused add opens with what was typed rather than an empty form. */}
+        <form key={JSON.stringify(draft ?? {})} action={addDeploymentRule.bind(null, slug)} className="flex flex-wrap gap-2">
+          <NativeSelect name="kind" defaultValue={draft?.kind === "email" ? "email" : "domain"} aria-label="Kind" className="w-auto">
             <option value="domain">Domain</option>
             <option value="email">Email</option>
           </NativeSelect>
@@ -114,14 +129,14 @@ export function WhoCanSignIn({ slug, view }: { slug: string; view: DeploymentAcc
             example="Domain acme.com for the whole company; email sam@gmail.com for a contractor."
             className="self-center"
           />
-          <Input name="value" required placeholder="acme.com or name@acme.com" aria-label="Domain or email" className="w-full sm:w-72" />
+          <Input name="value" required defaultValue={draft?.value} placeholder="acme.com or name@acme.com" aria-label="Domain or email" className="w-full sm:w-72" />
           <Help
             label="Domain or email"
             description="The domain (the part after the @) or the full address. Free email providers like gmail.com can only be added as a single email."
             example="northbeam.example, or maya@northbeam.example."
             className="self-center"
           />
-          <RuleRoleSelect isOwner={isOwner} />
+          <RuleRoleSelect value={draft?.role} isOwner={isOwner} />
           <Help
             label="Role"
             description="Owner is for Transpera: everything. Agency admin is for the client's founder and head of CS: edits everything, sees individual pay and manages this list (but not Owners). Viewer reads everything except individual pay."
@@ -130,7 +145,7 @@ export function WhoCanSignIn({ slug, view }: { slug: string; view: DeploymentAcc
           />
           <Button type="submit">Add</Button>
         </form>
-      </CardContent>
-    </Card>
+      </SectionCard>
+    </div>
   );
 }

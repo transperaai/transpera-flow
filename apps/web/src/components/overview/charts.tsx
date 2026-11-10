@@ -140,29 +140,31 @@ export function MrrChart({
           </>
         )}
       </FloatingTip>
-      <table className="sr-only">
-        <caption>Monthly recurring revenue, average and 10 to 90 percent range</caption>
-        <thead>
-          <tr>
-            <th scope="col">When</th>
-            <th scope="col">Average</th>
-            <th scope="col">Low (10%)</th>
-            <th scope="col">High (90%)</th>
-            {compare && <th scope="col">{compareName}</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {points.map((p, i) => (
-            <tr key={p.month}>
-              <th scope="row">{monthLabel(p.month, horizonMonths)}</th>
-              <td>{money(p.mean)}</td>
-              <td>{money(p.lo)}</td>
-              <td>{money(p.hi)}</td>
-              {compare && <td>{compare[i] ? money(compare[i]!.mean) : ""}</td>}
+      <div className="sr-only">
+        <table>
+          <caption>Monthly recurring revenue, average and 10 to 90 percent range</caption>
+          <thead>
+            <tr>
+              <th scope="col">When</th>
+              <th scope="col">Average</th>
+              <th scope="col">Low (10%)</th>
+              <th scope="col">High (90%)</th>
+              {compare && <th scope="col">{compareName}</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {points.map((p, i) => (
+              <tr key={p.month}>
+                <th scope="row">{monthLabel(p.month, horizonMonths)}</th>
+                <td>{money(p.mean)}</td>
+                <td>{money(p.lo)}</td>
+                <td>{money(p.hi)}</td>
+                {compare && <td>{compare[i] ? money(compare[i]!.mean) : ""}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

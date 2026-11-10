@@ -15,7 +15,7 @@ import {
 
 const HPW = 40;
 const MONTH = (52 / 12) * HPW;
-const WEEKS_PER_MONTH = 4.33;
+const WEEKS_PER_MONTH = 52 / 12;
 
 const svc = (extra: Partial<EngineService> = {}): EngineService => ({
   name: "Retainer",
@@ -54,7 +54,7 @@ function group(count: number, drivers: EngineChurnDriver[], extra: Partial<Engin
 const cause = (m: EngineModel, id: string, reps = 4) => simulate(m, reps, 1).churnCauses!.causes.find((c) => c.id === id)!;
 
 describe("review: hits during the warm-up carry into the window (brief Q11)", () => {
-  // An entered chance of 50% a month, a hit lasting 3 months (13 weeks). The weekly chance of a hit is q = 1 - 0.5^(1/4.33) = 0.1479. At any tick
+  // An entered chance of 50% a month, a hit lasting 3 months (13 weeks). The weekly chance of a hit is q = 1 - 0.5^(12/52) = 0.1477. At any tick
   // of a long run a client is under a hit when one of the last 13 ticks hit it (a hit 13 weeks ago has just ended): 1 - (1 - q)^13 = 0.878. With
   // the warm-up's hits that holds at the first tick too; without a warm-up only the tick itself can hit: q.
   const drivers = (): EngineChurnDriver[] => [{ id: "results", weight: 1, enabled: true, value: 5, chance: 0.5, effect: 1, effectMonths: 3 }];
@@ -143,10 +143,11 @@ describe("review: a churn channel on clients worked out together", () => {
 });
 
 describe("review: the overtime limit rounds as it did before channels", () => {
-  it("northbeam's named roster at seed 7: overtime hours P90 is engine 1.11.0's to the last bit", () => {
-    // 1.12.0 multiplied the limit as cap × (capacity × weeks) for everyone; 1.11.0 (and every run without a capacity channel since this fix) as
-    // cap × capacity × weeks, which rounds differently: 39.64915296714574 against 1.11.0's 39.64915296714573.
+  it("northbeam's named roster at seed 7: overtime hours P90 is locked to the last bit", () => {
+    // 1.12.0 multiplied the limit as cap × (capacity × weeks) for everyone and 1.11.0 as cap × capacity × weeks, which rounded
+    // differently. Since 1.18.0 the limit is on each month's capacity-weeks, one path with or without a capacity channel, and the
+    // run's overtime is the months' sum: this locks that path's rounding.
     const r = simulate(northbeamWithClients(), 12, 7);
-    expect(r.kpi.overtimeHours.p90).toBe(39.64915296714573);
+    expect(r.kpi.overtimeHours.p90).toBe(39.499563309163676);
   });
 });

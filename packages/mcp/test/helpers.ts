@@ -33,7 +33,8 @@ export async function startTestDb(testOptions: TestDbOptions = {}, handlerOption
     t,
     pool,
     // The web route re-checks the owner against the sign-in list (apps/web/test covers it); here the lookup's answer stands.
-    options: { pool, claimsFor, checkUser: async (user) => user, ...handlerOptions },
+    // Suites call the simulation tools many times a minute with one token: the 10-a-minute limit has its own test (handler.test.ts).
+    options: { pool, claimsFor, checkUser: async (user) => user, simulationsPerMinute: 120, ...handlerOptions },
     dbAs: (claims) => t.dbAs(claims),
     async close() {
       await pool.end();

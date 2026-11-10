@@ -11,6 +11,8 @@ export interface ToolContext {
   activeWorkspaceId: string | null;
   /** ISO date used when a tool needs "today". */
   today: string;
+  /** Simulation tool calls the token may make a minute (default SIMULATIONS_PER_MINUTE, ./simulation-limit). */
+  simulationsPerMinute?: number;
 }
 
 export interface WorkspaceRef {

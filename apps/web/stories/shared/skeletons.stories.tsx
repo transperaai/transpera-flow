@@ -92,7 +92,7 @@ export const Table: StoryObj = {
   tags: ["visual-phone"],
   render: () => (
     <Shell>
-      <PageSkeleton title="People" eyebrow="Company" width="max-w-6xl">
+      <PageSkeleton title="People" eyebrow="Company">
         <TableSkeleton />
       </PageSkeleton>
     </Shell>
@@ -103,7 +103,7 @@ export const Form: StoryObj = {
   tags: ["visual-phone"],
   render: () => (
     <Shell>
-      <PageSkeleton title="Restore a backup" eyebrow="Workspace" width="max-w-3xl">
+      <PageSkeleton title="Restore a backup" eyebrow="Workspace" variant="narrow">
         <FormSkeleton />
       </PageSkeleton>
     </Shell>
@@ -114,7 +114,7 @@ export const Chart: StoryObj = {
   tags: ["visual-phone"],
   render: () => (
     <Shell>
-      <PageSkeleton title="Forecast" width="max-w-6xl" hideHeader>
+      <PageSkeleton title="Forecast" hideHeader>
         <ChartSkeleton />
       </PageSkeleton>
     </Shell>

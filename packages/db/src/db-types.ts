@@ -43,6 +43,11 @@ export interface ApiTokens {
   rate_window_count: Generated<number>;
   rate_window_start: string | null;
   revoked_at: string | null;
+  /**
+   * Simulation tool calls in the token's current one-minute window (public.mcp_simulation_use).
+   */
+  sim_window_count: Generated<number>;
+  sim_window_start: string | null;
   token_hash: string;
   updated_at: Generated<string>;
   user_id: Generated<string>;

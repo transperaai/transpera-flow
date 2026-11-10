@@ -215,13 +215,15 @@ describe("About this process", () => {
   });
   const header = (props: Partial<Parameters<typeof ProcessHeader>[0]> = {}) =>
     renderToStaticMarkup(createElement(ProcessHeader, { name: "Lead to live", about, actions: createElement("span", null, "actions"), ...props }));
-  it("is the page title with the category and department as pills, and the summary line, with no (i)", () => {
+  it("is the page title with the Live pill and version, the category and department as pills, and the key numbers, with no (i)", () => {
     const html = header({ department: { value: null, options: [], workedOut: "Sales", current: "Performance", chosen: false } });
     expect(html).toContain("<h1");
     expect(html).toContain("Lead to live");
     expect(html).toContain("Sales");
     expect(html).toContain("Performance");
-    expect(html).toContain("6 steps · 3 roles · Version 4");
+    expect(html).toContain("6 steps · 3 roles");
+    expect(html).toMatch(/>Live<\/span>.*Version 4/);
+    expect(header({ about: { ...about, version: null } })).toMatch(/>Draft<\/span>.*not published yet/);
     expect(html).not.toContain("About this process");
     expect(read("components/process-header.tsx")).not.toContain("<Help");
   });
@@ -388,12 +390,15 @@ describe("the time split summary and key-person groups", () => {
 describe("the process page layout", () => {
   const page = read("components/process-page.tsx");
   const at = (s: string) => page.indexOf(s);
-  it("runs the header, Process map, What the process shows (facts, then the supporting panels), Issues and solutions, then Sources", () => {
-    const order = ["<ProcessHeader", 'id="map"', 'id="run"', 'id="facts"', 'id="supporting-data"', "issuesUi.issuesList", "<ProcessSources"].map(at);
+  it("runs the toolbar, the map, then the inspector's tabs: Step, Facts (facts, then the supporting panels), Issues and solutions, then Sources", () => {
+    const order = ["<ProcessHeader", 'id="map"', 'id="inspector"', 'value="step"', 'id="run"', 'id="facts"', 'id="supporting-data"', "issuesUi.issuesList", "<ProcessSources"].map(at);
     expect(order.every((n) => n > 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(page).toContain("Other improvements");
     expect(page).not.toContain('title="Solutions"');
+    // No stack of cards: the map runs edge to edge beside the inspector.
+    expect(page).not.toContain("<Card");
+    expect(page).toContain("stepDetailIn={stepSlot}");
   });
   it("puts the process's notes in Sources with the same editable text as a solution's notes, above the linked sources", () => {
     const sources = page.slice(at("function ProcessSources"));

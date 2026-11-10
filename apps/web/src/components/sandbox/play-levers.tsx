@@ -1,34 +1,35 @@
 "use client";
 
-// The free-play Sandbox's levers, on the left (capacity build P7, brief "The short version"; the prototype's `.levers`). Every change is a new `PlayState`:
-// the page re-runs, debounced, and nothing is saved. Market, Win new clients, Lose clients, Prices (with "Clients react", D36), People and Reset. The levers are business conditions only: an automation or augmentation is part of a process version, picked on the company map (D53).
+// The free-play Sandbox's levers, in the workbench's left pane (capacity build P7, brief "The short version"; the prototype's `.levers`). Every change is a new `PlayState`:
+// the page re-runs, debounced, and nothing is saved. Market, Win new clients, Lose clients, Prices (with "Clients react", D36) and People, each group
+// foldable; Reset is in the toolbar. The levers are business conditions only: an automation or augmentation is part of a process version, picked on the company map (D53).
 
 import { MARKET_PRESETS, type MarketPresetKey } from "@transpera-flow/engine";
-import { PRICE_REACTION, defaultPlay, type CapacitySetup, type PlayMarket, type PlayState, type PriceReaction } from "@transpera-flow/db";
+import { PRICE_REACTION, type CapacitySetup, type PlayMarket, type PlayState, type PriceReaction } from "@transpera-flow/db";
+import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
-import { SectionCard } from "@/components/page-kit";
 import { formatNumber } from "@/lib/format";
 import type { PlayMonths } from "./play-types";
 
 const FIELD = "flex min-w-0 flex-col gap-1 text-xs text-muted-foreground";
 
-function Group({ title, children, id, action }: { title: string; children: React.ReactNode; id: string; action?: React.ReactNode }) {
+/**
+ * A group of levers: a heading that folds the group away (open to begin with), then its fields. A plain section with a hairline above it, not a card
+ * (the levers pane is the one surface).
+ */
+function Group({ title, children, id }: { title: string; children: React.ReactNode; id: string }) {
   return (
-    <div className="border-t border-line pt-4 first:border-t-0 first:pt-0">
-      <fieldset className="flex min-w-0 flex-col gap-2 border-0 p-0" data-lever-group={id}>
-        {action ? (
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <legend className="float-left font-heading text-sm font-semibold">{title}</legend>
-            {action}
-          </div>
-        ) : (
-          <legend className="mb-1 font-heading text-sm font-semibold">{title}</legend>
-        )}
+    <details open className="group/lever border-t border-line first:border-t-0" data-lever-details={id}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 py-3 text-sm font-semibold outline-none select-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        {title}
+        <ChevronDown aria-hidden className="size-4 text-muted-foreground transition-transform group-open/lever:rotate-180" />
+      </summary>
+      <fieldset aria-label={title} className="flex min-w-0 flex-col gap-2 border-0 p-0 pb-4" data-lever-group={id}>
         {children}
       </fieldset>
-    </div>
+    </details>
   );
 }
 
@@ -86,18 +87,12 @@ export function PlayLevers({
   const listDel = (key: "leavers" | "hires" | "lose", i: number) => set({ [key]: (play[key] as unknown[]).filter((_, j) => j !== i) } as Partial<PlayState>);
 
   return (
-    <aside aria-label="Levers" className="min-w-0" data-play-levers>
-      <SectionCard
-        id="play-levers"
-        title="Levers"
-        description="Move one and the results follow."
-        action={
-          <Button type="button" variant="outline" size="sm" onClick={() => setPlay(defaultPlay())} data-play-reset>
-            Reset levers
-          </Button>
-        }
-        contentClassName="gap-4"
-      >
+    <aside aria-label="Levers" className="flex min-w-0 flex-col" data-play-levers>
+      <div className="flex items-baseline justify-between gap-2 pb-1">
+        <h2 className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Levers</h2>
+        <span className="text-xs text-muted-foreground">Move one and the results follow.</span>
+      </div>
+      <div className="flex flex-col">
         <Group title="Market" id="market">
           <div className="grid grid-cols-2 gap-2">
             <label className={FIELD}>
@@ -135,7 +130,7 @@ export function PlayLevers({
               </label>
             ))}
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <MonthSelect value={play.addFrom} months={months} onChange={(m) => set({ addFrom: m })} label="Starting" id="addFrom" />
             <label className={FIELD}>
               For
@@ -200,7 +195,7 @@ export function PlayLevers({
 
         <Group title="Prices" id="price">
           <Slider id="price" label="Price change" value={play.price} min={-20} max={30} step={1} unit="%" onChange={(v) => set({ price: v })} />
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <label className={FIELD}>
               Tiers
               <NativeSelect value={play.priceTier} onChange={(e) => set({ priceTier: e.target.value })} data-lever="priceTier" aria-label="Tiers the price change is for">
@@ -287,7 +282,7 @@ export function PlayLevers({
           </div>
           <p className="text-xs text-muted-foreground">New hires take about {setup.rampDefault.length} months to reach full speed (the ramp in Settings, under People & roles).</p>
         </Group>
-      </SectionCard>
+      </div>
     </aside>
   );
 }

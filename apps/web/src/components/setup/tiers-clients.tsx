@@ -117,23 +117,37 @@ export function TiersAndClients({ setup, data, roster }: Props) {
 function TierControls({ setup }: { setup: CapacitySetup }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string>();
+  // Removing the last tier takes its values and its tier counts with it, so it is asked once first.
+  const [confirming, setConfirming] = useState(false);
   const last = setup.tiers[setup.tiers.length - 1];
   const run = (fn: () => Promise<{ error?: string }>) =>
     start(async () => {
       const r = await fn();
       setError(r.error);
+      setConfirming(false);
     });
   return (
     <div className="flex flex-col gap-2">
       <Toolbar label="Tiers">
         <span className="text-sm text-fg-2">A new tier starts as a copy of the last one. Tiers are shared by both departments.</span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          {setup.canEdit && setup.tiers.length > 3 && last && (
-            <Button type="button" variant="outline" disabled={pending} onClick={() => run(() => removeTierAction(last.id))}>
+          {setup.canEdit && setup.tiers.length > 3 && last && !confirming && (
+            <Button type="button" variant="outline" disabled={pending} onClick={() => setConfirming(true)}>
               Remove {last.key}
             </Button>
           )}
-          {setup.canEdit && (
+          {setup.canEdit && setup.tiers.length > 3 && last && confirming && (
+            <span className="flex flex-wrap items-center gap-2" data-confirm-remove-tier>
+              <span className="text-sm">Remove {last.key} from both departments? This can&apos;t be undone.</span>
+              <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={() => run(() => removeTierAction(last.id))}>
+                {pending ? "Removing…" : "Remove"}
+              </Button>
+              <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => setConfirming(false)}>
+                Cancel
+              </Button>
+            </span>
+          )}
+          {setup.canEdit && !confirming && (
             <Button type="button" disabled={pending} onClick={() => run(() => addTierAction(setup.workspaceId))}>
               + Add a tier
             </Button>

@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundleHarness } from "./build-harness";
 
-// The Processes page's layout in a real browser with the app's stylesheet (Q7): the header's two button groups, the toolbar row above
-// the table, centred columns, a row menu that never wraps, and "Change type" choosing the category. With Q7_SHOTS=<dir> it also saves
+// The Processes page's layout in a real browser with the app's stylesheet (Q7; the ListPage of docs/plans/ui-cleanup.md): one primary
+// action in the header, a toolbar row (search, Type, count, In use / Archived) above one table surface, numbers right-aligned, the
+// company map's buttons on one line, and a row menu that never wraps. With Q7_SHOTS=<dir> it also saves
 // the screenshots (1440 and 400 px, and the Change type dialog).
 
 let browser: Browser;
@@ -50,19 +51,18 @@ async function mount(opts: { canEdit: boolean; published: boolean }, width = 144
 const box = (page: Page, sel: string) => page.locator(sel).first().boundingBox();
 
 describe("layout", () => {
-  it("groups the header buttons: company map on the left, Upload process and New process on the right, one size", async () => {
+  it("has one primary action, New process; Company map, Edit company map, History and Upload process are outline buttons of one size", async () => {
     const { page, errors } = await mount({ canEdit: true, published: true });
     const group = page.getByRole("group", { name: "Company map" });
-    expect(await group.getByRole("link").allInnerTexts()).toEqual(["Company map", "✎ Edit company map", "History"]);
-    const actions = page.locator("[data-page-actions]");
-    expect(await actions.locator("[data-slot=button]").allInnerTexts()).toEqual(["Upload process", "✎ New process"]);
-    const g = (await group.boundingBox())!;
-    const a = (await actions.boundingBox())!;
-    expect(g.x + g.width).toBeLessThanOrEqual(a.x);
-    expect(Math.abs(g.y - a.y)).toBeLessThan(8);
-    const heights = await page.locator("[data-processes-actions] [data-slot=button]").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
+    expect(await group.getByRole("link").allInnerTexts()).toEqual(["Company map", "Edit company map", "History"]);
+    const buttons = page.locator("[data-page-actions] [data-slot=button]");
+    expect(await buttons.allInnerTexts()).toEqual(["Company map", "Edit company map", "History", "Upload process", "New process"]);
+    expect(await buttons.evaluateAll((els) => els.map((e) => e.getAttribute("data-variant")))).toEqual(["outline", "outline", "outline", "outline", "default"]);
+    const heights = await buttons.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().height)));
     expect(new Set(heights).size).toBe(1);
-    expect(await page.locator("[data-edit-company-map]").evaluate((e) => getComputedStyle(e).backgroundColor)).not.toBe(await group.getByRole("link", { name: "History" }).evaluate((e) => getComputedStyle(e).backgroundColor));
+    // Purple only marks the button that opens the Editor; the button itself is not purple.
+    expect(await page.locator("[data-edit-company-map] [data-edit-marker]").count()).toBe(1);
+    expect(await page.locator("[data-edit-company-map]").evaluate((e) => getComputedStyle(e).backgroundColor)).toBe(await group.getByRole("link", { name: "History" }).evaluate((e) => getComputedStyle(e).backgroundColor));
     expect(errors).toEqual([]);
     await page.close();
   });
@@ -70,7 +70,7 @@ describe("layout", () => {
   it("shows Edit only to editors and History only once published", async () => {
     for (const [canEdit, published, links] of [
       [false, true, ["Company map", "History"]],
-      [true, false, ["✎ Edit company map"]],
+      [true, false, ["Edit company map"]],
     ] as const) {
       const { page } = await mount({ canEdit, published });
       expect(await page.getByRole("group", { name: "Company map" }).getByRole("link").allInnerTexts()).toEqual([...links]);
@@ -78,46 +78,80 @@ describe("layout", () => {
     }
   });
 
-  it("keeps the In use / Archived switch and the category filter on one toolbar line at 1440 px, above the table", async () => {
+  it("keeps search, the Type filter, the count and the In use / Archived toggle on one toolbar line at 1440 px, between the header and the table", async () => {
     const { page } = await mount({ canEdit: true, published: true });
-    const view = (await box(page, '[role=group][aria-label="Show"]'))!;
-    const type = (await box(page, '[role=group][aria-label="Type"]'))!;
-    const table = (await box(page, "table"))!;
-    expect(Math.abs(view.y - type.y)).toBeLessThan(4);
-    expect(view.height).toBeCloseTo(type.height, 0);
-    expect(view.x + view.width).toBeLessThan(type.x);
-    expect(type.y + type.height).toBeLessThan(table.y);
-    const header = (await box(page, "header:has(h1)"))!;
-    expect(view.y).toBeGreaterThan(header.y + header.height + 8);
+    const bar = (await box(page, "[data-list-toolbar]"))!;
+    expect(bar.height).toBeLessThan(50);
+    const search = (await box(page, "[data-toolbar-search]"))!;
+    const type = (await box(page, "[data-filter=type]"))!;
+    const view = (await box(page, '[role=radiogroup][aria-label="Show"]'))!;
+    expect(search.x + search.width).toBeLessThan(type.x);
+    expect(type.x + type.width).toBeLessThan(view.x);
+    expect(await page.locator("[data-process-count]").innerText()).toBe("6 processes");
+    const header = (await box(page, "[data-page-header]"))!;
+    const table = (await box(page, "[data-list-surface]"))!;
+    expect(bar.y).toBeGreaterThan(header.y + header.height);
+    expect(bar.y + bar.height).toBeLessThan(table.y);
+    // One bordered surface, not a card around a card.
+    expect(await page.locator("[data-list-surface] [data-slot=card]").count()).toBe(0);
     await page.close();
   });
 
-  it("pins the company map's row at the top (Q16): outside the category filter, with its version, a draft pill, and History, Edit and Open", async () => {
+  it("filters by Type and by search, and says how many show", async () => {
+    const { page } = await mount({ canEdit: true, published: true });
+    await page.locator("[data-filter=type]").click();
+    await page.locator("[data-filter-menu=type] [data-option=sales]").check();
+    await page.keyboard.press("Escape");
+    expect(await page.locator("[data-process]").count()).toBe(1);
+    expect(await page.locator("[data-process-count]").innerText()).toBe("1 of 6 processes");
+    await page.locator("[data-clear-filters]").click();
+    await page.getByRole("searchbox", { name: "Search processes" }).fill("review");
+    expect(await page.locator("[data-process] td:nth-child(2)").allInnerTexts()).toEqual(["Creative review"]);
+    await page.close();
+  });
+
+  it("pins the company map's row at the top (Q16): outside the filters, with its version, a draft pill, and History, Edit and Open on one line", async () => {
     const { page, errors } = await mount({ canEdit: true, published: true });
     expect(await page.locator("tbody tr").first().getAttribute("data-company-row")).not.toBeNull();
     const row = page.locator("[data-company-row]");
     expect(await row.locator("td").nth(1).innerText()).toMatch(/^Company map\s+Draft open$/);
     expect(await row.locator("td").nth(2).innerText()).toBe("Company");
     expect(await row.locator("[data-company-version]").innerText()).toMatch(/^Version 4 · /);
-    expect(await row.locator("[data-company-actions] a").allInnerTexts()).toEqual(["History", "Edit", "Open→"]);
-    await page.getByRole("button", { name: /^Sales/ }).click();
+    const actions = row.locator("[data-company-actions] a");
+    expect((await actions.allInnerTexts()).map((t) => t.trim())).toEqual(["History", "Edit", "Open"]);
+    const tops = await actions.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    expect(new Set(tops).size).toBe(1);
+    await page.locator("[data-filter=type]").click();
+    await page.locator("[data-filter-menu=type] [data-option=sales]").check();
+    await page.keyboard.press("Escape");
     expect(await page.locator("[data-company-row]").count()).toBe(1);
     const reader = await mount({ canEdit: false, published: true });
-    expect(await reader.page.locator("[data-company-row] [data-company-actions] a").allInnerTexts()).toEqual(["History", "Open→"]);
+    expect((await reader.page.locator("[data-company-row] [data-company-actions] a").allInnerTexts()).map((t) => t.trim())).toEqual(["History", "Open"]);
     expect(errors).toEqual([]);
     await page.close();
     await reader.page.close();
   });
 
-  it("centres every column but Process and Type", async () => {
+  it("right-aligns the numbers and keeps the text columns left", async () => {
     const { page } = await mount({ canEdit: true, published: true });
     const heads = await page.locator("thead th").evaluateAll((els) => els.map((e) => [e.textContent!.trim(), getComputedStyle(e).textAlign] as const));
-    for (const [text, align] of heads) expect(align, text || "(blank)").toBe(text.startsWith("Process") || text.startsWith("Type") ? "left" : "center");
-    const row = await page.locator("[data-process]").first().locator("td").evaluateAll((els) => els.map((e) => getComputedStyle(e).textAlign));
-    // chevron, Process, Type, Steps, Open issues, Live version, menu, Open
-    expect(["left", "start"]).toContain(row[1]);
-    expect(row[2]).toBe("left");
-    expect(row.slice(3)).toEqual(["center", "center", "center", "center", "center"]);
+    for (const [text, align] of heads) {
+      if (text.startsWith("Steps") || text.startsWith("Open issues")) expect(align, text).toBe("right");
+      else if (text) expect(align, text).toBe("left");
+    }
+    // The header row sticks under the shell's bar.
+    expect(await page.locator("thead").evaluate((e) => getComputedStyle(e).position)).toBe("sticky");
+    // Every column shows at 1280 px.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    expect(await page.locator("thead th").evaluateAll((els) => els.every((e) => getComputedStyle(e).display !== "none"))).toBe(true);
+    await page.close();
+  });
+
+  it("draws the archived list with the same table", async () => {
+    const { page } = await mount({ canEdit: true, published: true });
+    await page.getByRole("radio", { name: "Archived (1)" }).click();
+    expect(await page.locator("[data-list-surface] table[aria-label='Archived processes'] thead").count()).toBe(1);
+    expect(await page.locator("[data-archived-process]").count()).toBe(1);
     await page.close();
   });
 

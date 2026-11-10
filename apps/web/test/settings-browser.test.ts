@@ -39,11 +39,11 @@ async function mount(options: Parameters<Window["mountSettings"]>[0], width = 14
   return { page, errors };
 }
 
-/** Opens a person's row (a <details>) and returns it. */
+/** Opens a person's row (its name is a button that shows their fields under it) and returns it. */
 async function openPerson(page: Page, name: string): Promise<Locator> {
-  const details = page.locator("details", { hasText: name }).first();
-  await details.locator("summary").click();
-  return details;
+  const row = page.locator(`[data-person-row="${name}"]`);
+  await row.getByRole("button", { name, exact: true }).click();
+  return row;
 }
 /** The page fits its width: nothing makes it scroll sideways. */
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
@@ -159,7 +159,7 @@ describe("Settings: a person's time on each step", { timeout: 120_000 }, () => {
   for (const width of [1440, 400]) {
     it(`a member's own row shows their times read-only, without Remove (${width}px)`, async () => {
       const { page, errors } = await mount({ who: "member", switch: true, factors: [row(JESS, null, 0.9), row(JESS, foreign.id, 1.4), row(larkspurPersonIds.hana!, null, 1.35)] }, width);
-      expect(await page.locator("details").count()).toBe(1);
+      expect(await page.locator("[data-person-row]").count()).toBe(1);
       const jess = await openPerson(page, "Jess Monroe");
       const box = jess.locator("[data-capacity-factors-editor]");
       expect(await field(box, "Every step").inputValue()).toBe("0.9");

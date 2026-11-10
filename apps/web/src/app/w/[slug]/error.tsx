@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useParams } from "next/navigation";
 import { ErrorState } from "@/components/shell/error-state";
+import { pageBodyClass } from "@/components/shell/page";
 import { ShellHeader } from "@/components/shell/shell-header";
 import { reportError } from "@/lib/monitoring/report";
 
@@ -17,7 +18,9 @@ export default function WorkspaceError({ error, retry }: { error: Error & { dige
   return (
     <div>
       <ShellHeader title="Something went wrong" />
-      <ErrorState digest={error.digest} onRetry={retry} homeHref={`/w/${slug}`} />
+      <div className={pageBodyClass()}>
+        <ErrorState digest={error.digest} onRetry={retry} homeHref={`/w/${slug}`} />
+      </div>
     </div>
   );
 }

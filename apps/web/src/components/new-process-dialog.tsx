@@ -1,7 +1,8 @@
 "use client";
 
 import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
-import { useActionState, useState } from "react";
+import { Plus } from "lucide-react";
+import { startTransition, useActionState, useState } from "react";
 import type { CreateProcessResult } from "@/app/w/[slug]/process-actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -10,13 +11,13 @@ import { EDIT_ONLY } from "@/lib/phone";
 
 export type CreateProcess = (prev: CreateProcessResult, form: FormData) => Promise<CreateProcessResult>;
 
-/** The Processes page's "New process" button: asks for a name and the category (which picks the engine kind, D52), then opens the new process in a draft. */
+/** The Processes page's "New process" button (the page's one primary action, teal like every other): asks for a name and the category (which picks the engine kind, D52), then opens the new process in a draft. */
 export function NewProcessButton({ create }: { create: CreateProcess }) {
   const [open, setOpen] = useState(false);
   return (
     <span className={`inline-flex items-center ${EDIT_ONLY}`} data-edit-entry>
-      <Button className="bg-edit text-edit-fg hover:bg-edit/90" onClick={() => setOpen(true)}>
-        ✎ New process
+      <Button onClick={() => setOpen(true)} data-new-process-open>
+        <Plus aria-hidden /> New process
       </Button>
       <NewProcessDialog open={open} onOpenChange={setOpen} create={create} />
     </span>
@@ -40,8 +41,18 @@ export function NewProcessDialog({ open, onOpenChange, create }: { open: boolean
 
 function NewProcessForm({ create, onCancel }: { create: CreateProcess; onCancel: () => void }) {
   const [state, action, pending] = useActionState(create, {});
+  // Submitted through onSubmit, not `action`: React resets a form after its action runs, which would clear the name and the type
+  // whenever the server says no. This way what was typed stays for the person to correct.
   return (
-    <form action={action} className="flex flex-col gap-3" data-new-process>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        const form = new FormData(e.currentTarget);
+        startTransition(() => action(form));
+      }}
+      className="flex flex-col gap-3"
+      data-new-process
+    >
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-muted-foreground uppercase" htmlFor="new-process-name">
           Name
@@ -51,7 +62,7 @@ function NewProcessForm({ create, onCancel }: { create: CreateProcess; onCancel:
       <fieldset className="flex flex-col gap-2">
         <legend className="mb-1 text-xs font-medium text-muted-foreground uppercase">Type</legend>
         {PROCESS_CATEGORIES.map((c) => (
-          <label key={c} className="flex cursor-pointer items-start gap-2 rounded-token border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
+          <label key={c} className="flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
             <input type="radio" name="category" value={c} required className="mt-1 accent-[var(--accent)]" />
             <span>
               <span className="font-semibold">{PROCESS_CATEGORY_LABELS[c]}</span>

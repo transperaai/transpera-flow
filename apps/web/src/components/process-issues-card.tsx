@@ -4,7 +4,8 @@
 // the title, a status pill and its owners, and under it the solutions tried. The row opens the issue page. Issues belong to the process,
 // so a row names no step. Solved issues follow as their solution: the solution that resolved the issue is the row, with "Solved <issue>"
 // under it and the person's verdict, or, resolved with no solution, the issue and how it was resolved. Won't fix is folded at the end.
-// "Other improvements" (solutions for no issue) sit in the same card. The register still owns saving and the New issue dialog.
+// "Other improvements" (solutions for no issue) sit in the same section. The register still owns saving and the New issue dialog.
+// It is the Issues tab of the process page's inspector, so it is a plain section with a heading, not a card of its own.
 
 import { CircleAlert, CircleCheck } from "lucide-react";
 import Link from "next/link";
@@ -12,7 +13,7 @@ import type { ReactNode } from "react";
 import { RATING_LABELS } from "@transpera-flow/engine";
 import type { IssueRow } from "@transpera-flow/db";
 import { Button } from "@/components/ui/button";
-import { EmptyState, SectionCard } from "@/components/page-kit";
+import { EmptyState } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IssueStatusPill } from "@/components/issues/status-pill";
 import { IssueTrackView } from "@/components/issue-track";
@@ -49,21 +50,24 @@ export function IssuesCard(p: IssuesCardProps) {
   const counts = issueCounts(tracked.map((e) => e.issue.status));
   const groups = issueGroups(tracked, (e) => e.issue.status);
   return (
-    <SectionCard
-      id="issues"
-      title="Issues and solutions"
-      description={p.loading && tracked.length === 0 ? "Checking the latest run…" : issueCountsText(counts)}
-      descriptionProps={{ "data-issue-counts": "" }}
-      action={
-        p.canEdit && tracked.length > 0 ? (
-          <Button type="button" size="sm" onClick={p.openNew}>
-            Log an issue
-          </Button>
-        ) : undefined
-      }
-      actionClassName={EDIT_ONLY}
-      actionIsEdit
-    >
+    <section id="issues" aria-labelledby="issues-heading" className="flex min-w-0 scroll-mt-16 flex-col gap-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h2 id="issues-heading" className="text-base font-semibold">
+            Issues and solutions
+          </h2>
+          <p className="text-sm text-muted-foreground" data-issue-counts="">
+            {p.loading && tracked.length === 0 ? "Checking the latest run…" : issueCountsText(counts)}
+          </p>
+        </div>
+        {p.canEdit && tracked.length > 0 && (
+          <div className={`shrink-0 ${EDIT_ONLY}`} data-edit-entry="">
+            <Button type="button" size="sm" onClick={p.openNew}>
+              Log an issue
+            </Button>
+          </div>
+        )}
+      </div>
       {p.error}
       {tracked.length === 0 ? (
         p.loading ? (
@@ -91,7 +95,7 @@ export function IssuesCard(p: IssuesCardProps) {
       ) : (
         <>
           <section className="flex flex-col gap-2" aria-labelledby="issues-current-heading" data-issue-group="current">
-            <h3 id="issues-current-heading" className="text-sm font-bold">
+            <h3 id="issues-current-heading" className="text-sm font-semibold">
               Current issues <span className="font-normal text-fg-3">{groups.current.length}</span>
             </h3>
             {groups.current.length > 0 ? (
@@ -108,7 +112,7 @@ export function IssuesCard(p: IssuesCardProps) {
           </section>
           {groups.solved.length > 0 && (
             <section className="flex flex-col gap-2" aria-labelledby="issues-solved-heading" data-issue-group="solved">
-              <h3 id="issues-solved-heading" className="text-sm font-bold">
+              <h3 id="issues-solved-heading" className="text-sm font-semibold">
                 Solved <span className="font-normal text-fg-3">{groups.solved.length}</span>
               </h3>
               <ul className="flex flex-col gap-2" aria-label="Solved">
@@ -120,7 +124,7 @@ export function IssuesCard(p: IssuesCardProps) {
           )}
           {groups.wontFix.length > 0 && (
             <details className="group flex flex-col gap-2" data-issue-group="wont_fix">
-              <summary className="w-fit cursor-pointer text-sm font-bold hover:underline">
+              <summary className="w-fit cursor-pointer text-sm font-semibold hover:underline">
                 Won&apos;t fix <span className="font-normal text-fg-3">{groups.wontFix.length}</span>
               </summary>
               <ul className="mt-2 flex flex-col gap-2" aria-label="Won't fix">
@@ -138,11 +142,11 @@ export function IssuesCard(p: IssuesCardProps) {
         </Link>
       )}
       <div id="solutions" className="flex scroll-mt-16 flex-col gap-2">
-        <h3 className="text-sm font-bold">Other improvements</h3>
+        <h3 className="text-sm font-semibold">Other improvements</h3>
         <p className="-mt-1.5 text-xs text-fg-3">Solutions that are not for a particular issue.</p>
         {p.other}
       </div>
-    </SectionCard>
+    </section>
   );
 }
 

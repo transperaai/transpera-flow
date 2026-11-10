@@ -8,6 +8,7 @@
 
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { isGroup, type ProcessBundle } from "@transpera-flow/db";
+import { PanelHeading } from "@/components/editor/panel-heading";
 import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import type { Selection } from "@/components/process-canvas";
@@ -86,7 +87,7 @@ export function Palette({
   return (
     <>
       <section aria-label={company ? "Add to the company map" : "Add to the process"} className="flex flex-col gap-2">
-        <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
+        <PanelHeading>
           Add
           {company ? (
             <Help
@@ -101,7 +102,7 @@ export function Palette({
               example="Select “Discovery call”, press + Wait, and a waiting step appears in view, joined in after it."
             />
           )}
-        </h2>
+        </PanelHeading>
         <div className="grid grid-cols-3 gap-1.5">
           {PALETTE.map(({ kind, label }) => (
             <Button key={kind} type="button" variant="outline" size="sm" onClick={() => add(kind)} className="border-dashed hover:border-edit">
@@ -130,14 +131,14 @@ export function Palette({
       {company && libraryOpen && <ProcessLibrary bundle={bundle} editor={editor} setSelection={setSelection} viewRef={viewRef} {...library} />}
 
       <section aria-label="Groups" className="flex flex-col gap-2">
-        <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
+        <PanelHeading>
           Groups
           <Help
             label="Groups"
             description="A group is a box that holds several steps so a big process stays readable. The numbers are the same whether it is open or closed."
             example="Put “Qualify lead” and “Discovery call” in one group called “Sales conversation”."
           />
-        </h2>
+        </PanelHeading>
         <Button type="button" variant="outline" size="sm" disabled={!!groupWhy} title={groupWhy ?? undefined} onClick={group}>
           Group selected steps
         </Button>
@@ -151,14 +152,14 @@ export function Palette({
 
       {!company && (
       <section aria-label="Blocks" className="flex flex-col gap-2">
-        <h2 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
+        <PanelHeading>
           Blocks
           <Help
             label="Blocks"
             description="A block is a saved group of steps you can drop into any process, such as a standard approval or an AI check."
             example="Save your “Client sign-off” group once, then insert it into every onboarding process."
           />
-        </h2>
+        </PanelHeading>
         <p className="text-xs text-muted-foreground">
           Each block has <strong className="font-semibold text-fg-2">Insert</strong>
           <Help

@@ -22,9 +22,6 @@ import { EDIT_ONLY } from "@/lib/phone";
 
 export type DraftView = "draft" | "live";
 
-const button = "rounded-token border border-line bg-panel px-2 py-1 font-semibold hover:bg-panel-2 disabled:cursor-not-allowed disabled:text-fg-3";
-const primary = "rounded-token bg-accent px-2.5 py-1 font-semibold text-accent-fg disabled:cursor-not-allowed disabled:opacity-50";
-const danger = "rounded-token border border-crit px-2 py-1 font-semibold text-crit hover:bg-crit-soft disabled:cursor-not-allowed disabled:opacity-50";
 
 export function DraftBar({
   session,
@@ -148,19 +145,19 @@ export function DraftBar({
           <p className="grow">
             Discard all {plural(changes, "change")} in this draft and go back to live (version {liveNumber})? This can&apos;t be undone.
           </p>
-          <button
+          <Button
             type="button"
             disabled={busy}
             onClick={async () => {
               if (await session.discard()) setConfirming(null);
             }}
-            className={danger}
+            variant="outline" size="sm" className="border-crit text-crit hover:bg-crit-soft hover:text-crit"
           >
             {drafts.busy === "discarding" ? "Discarding…" : "Discard draft"}
-          </button>
-          <button type="button" onClick={() => setConfirming(null)} className={button} autoFocus>
+          </Button>
+          <Button type="button" onClick={() => setConfirming(null)} variant="outline" size="sm" autoFocus>
             Keep editing
-          </button>
+          </Button>
         </div>
       )}
 
@@ -179,9 +176,9 @@ export function DraftBar({
               <ul className="flex flex-wrap gap-1.5">
                 {estimates.map((s) => (
                   <li key={s.id}>
-                    <button type="button" onClick={() => onReview(s.id)} className={button}>
+                    <Button type="button" onClick={() => onReview(s.id)} variant="outline" size="sm">
                       Review {s.name}
-                    </button>
+                    </Button>
                   </li>
                 ))}
               </ul>
@@ -192,31 +189,31 @@ export function DraftBar({
             </p>
           )}
           <div className="flex flex-wrap gap-2">
-            <button
+            <Button
               type="button"
               disabled={busy || !!blocked}
               onClick={async () => {
                 const r = await session.publish(estimates.length > 0);
                 if (r?.status === "published") setConfirming(null);
               }}
-              className={primary}
+              size="sm"
             >
               {drafts.busy === "publishing"
                 ? "Publishing…"
                 : estimates.length
                   ? `Publish, accepting ${plural(estimates.length, "estimate")}`
                   : `Publish version ${draftNumber}`}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
               onClick={() => {
                 setConfirming(null);
                 session.dismiss();
               }}
-              className={button}
+              variant="outline" size="sm"
             >
               Cancel
-            </button>
+            </Button>
           </div>
           {blocked && <p className="text-fg-2">{blocked}</p>}
           {breaks.length > 0 && <BreaksWarning breaks={breaks} />}
@@ -308,7 +305,7 @@ export function ChangesPanel({
                 className="min-w-0 grow text-left disabled:cursor-default"
               >
                 <span
-                  className={`mr-1 inline-block rounded-full border px-1 text-[10px] font-semibold ${
+                  className={`mr-1 inline-block rounded-full border px-1 text-2xs font-semibold ${
                     c.kind === "removed" ? "border-crit text-crit" : c.kind === "added" ? "border-dashed border-accent" : "border-accent"
                   }`}
                 >
@@ -323,17 +320,19 @@ export function ChangesPanel({
                 ))}
               </button>
               {editor && (
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="xs"
                   disabled={!!problem}
                   title={problem ?? undefined}
                   aria-label={`${action}: ${what ?? name}${what ? ` ${name}` : ""}`}
                   onClick={() => editor.run((b) => discardChange(live, b, c.table, c.id))}
                   data-edit-entry
-                  className={`${button} ${EDIT_ONLY}`}
+                  className={EDIT_ONLY}
                 >
                   {action}
-                </button>
+                </Button>
               )}
             </li>
           );

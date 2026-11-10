@@ -39,7 +39,8 @@ export function ClearFilters({ onClick }: { onClick: () => void }) {
 export interface FilterOption {
   value: string;
   label: string;
-  count: number;
+  /** How many rows have it; left out when the list can't count them (rows that load a page at a time). */
+  count?: number;
   /** A colour dot before the label (a CSS colour). */
   dot?: string;
 }
@@ -78,7 +79,7 @@ export function FilterMenu({
             <input type="checkbox" checked={selected.includes(o.value)} onChange={() => toggle(o.value)} data-option={o.value} />
             {o.dot && <i aria-hidden className="size-2 shrink-0 rounded-full" style={{ background: o.dot }} />}
             <span className="min-w-0 flex-1 truncate">{o.label}</span>
-            <span className="text-xs text-muted-foreground tabular-nums">{o.count}</span>
+            {o.count !== undefined && <span className="text-xs text-muted-foreground tabular-nums">{o.count}</span>}
           </label>
         ))}
         {/* After the options, so opening the menu doesn't focus the (i) and pop its text over them. */}

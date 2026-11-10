@@ -49,6 +49,7 @@ import {
 } from "./servicing";
 import { arrivalTimes as drawArrivals } from "./demand";
 import { activeMarket, type MarketFactors } from "./market";
+import { WEEKS_PER_MONTH } from "./model";
 import { EventQueue } from "./event-queue";
 import { exp, log } from "./det-math";
 import { eligible } from "./eligibility";
@@ -102,7 +103,6 @@ const NO_TRACE: TraceSegment[] = [];
 export const DEFAULT_AVAILABILITY_FLOOR = 0.08;
 const DEFAULT_WORK_DIST: Distribution = { kind: "lognormal", cv: 0.35 };
 const DEFAULT_WAIT_DIST: Distribution = { kind: "lognormal", cv: 0.3 };
-const WEEKS_PER_MONTH = 4.33;
 /** Stride between replication seeds. */
 export const SEED_STRIDE = 7919;
 /** Automatic warm-up: at least this many weeks (docs/PRD.md §6.3.1)... */
@@ -143,6 +143,20 @@ interface SimEntity extends TraceEntity {
    * loop's steps how many times (up to 2) the item has visited it in its stay in the loop. Null until it first reaches a step in a loop.
    */
   lp: Uint8Array | null;
+  /** The time of its last step visit, and how many visits in a row it has made at that very time (the zero-time loop guard). */
+  zt: number;
+  zn: number;
+}
+
+/**
+ * Most visits one item may make at the same instant before the run stops with a `ModelError`: a loop of steps with no
+ * hands-on time and no wait that always sends it round (rework 1, or links of chance 1 back) would otherwise never end.
+ */
+const MAX_SAME_TIME_VISITS = 10_000;
+
+/** A model the engine can't run (a negative chance, a loop that takes no time, a horizon of 0 weeks), said in words. */
+export class ModelError extends Error {
+  override name = "ModelError";
 }
 
 /** Bits of `SimEntity.lp`: in the loop's region now; went round at least once on this stay (so it is on a repeat pass). */
@@ -331,6 +345,8 @@ interface StepState {
   wait: (() => number) | null;
   rework: Rng;
   route: Rng;
+  /** The chances on `s.next` added up: a draw is scaled by it, so the edges split in proportion to their chances, as cost.ts reads them. */
+  routeTotal: number;
   /** Edges to choose from per service index, when any edge is condition-tagged; null otherwise. */
   routes: Route[] | null;
   /** Where each of the step's edges (`s.next`) leads. */
@@ -461,7 +477,25 @@ export function routeFor(edges: EngineEdge[], tags: string[]): Route {
   if (tagged.length) return { next: tagged, total: sum(tagged), targets: [], winEdges: null };
   const untagged = edges.filter((n) => n.tag === undefined);
   if (untagged.length) return { next: untagged, total: sum(untagged), targets: [], winEdges: null };
-  return { next: edges, total: 1, targets: [], winEdges: null };
+  return { next: edges, total: sum(edges), targets: [], winEdges: null };
+}
+
+/**
+ * The checks a model passes before it runs, so a bad input is a `ModelError` in words rather than a TypeError, NaN or a
+ * run that never ends: a horizon and a working week of more than 0, leads a week of 0 or more, and no negative chance on
+ * a link (chances that don't add up to 1 are fine: they split in proportion).
+ */
+export function checkModel(model: EngineModel): void {
+  const { horizonWeeks: h, hoursPerWeek: hpw, leadsPerWeek: leads } = model;
+  if (!(h > 0 && Number.isFinite(h))) throw new ModelError(`The horizon has to be more than 0 weeks (it is ${h}).`);
+  if (!(hpw > 0 && Number.isFinite(hpw))) throw new ModelError(`A working week has to have more than 0 hours (it has ${hpw}).`);
+  if (!(leads >= 0 && Number.isFinite(leads))) throw new ModelError(`Leads a week has to be 0 or more (it is ${leads}).`);
+  for (const s of model.steps) {
+    for (const n of s.next) {
+      if (n.p < 0) throw new ModelError(`'${s.name}' has a negative chance (${n.p}) on its link to '${n.to}'. A chance is 0 or more.`);
+      if (!Number.isFinite(n.p)) throw new ModelError(`'${s.name}' has a chance that isn't a number (${n.p}) on its link to '${n.to}'.`);
+    }
+  }
 }
 
 /** What an edge or step can lead to: a won end, a lost end, or both (through different paths). */
@@ -677,12 +711,6 @@ interface PersonState {
   roleOngoingHours: Float64Array;
   roleOngoingHas: Uint8Array;
   clientWeeks: number;
-  /** While overloaded (load above capacity, with an overtime cap): weeks, ongoing hours and pipeline hands-on hours. */
-  overWeeks: number;
-  overOngoing: number;
-  overPipeline: number;
-  /** Capacity-weeks while overloaded (Σ weeks × the capacity then): the overtime limit when a capacity channel changes capacity during the run. */
-  overCapW: number;
   /** Which team's list they were last added to (see `teamFor`). */
   teamMark: number;
   /** Their busy share so far in the measured window, as of the last weekly churn tick (the team-overload driver). */
@@ -864,6 +892,7 @@ export function runOnce(
   // Groups and child processes are only a view: runs see leaf steps (a no-op for flat models).
   // (Team time and ramp become a capacity channel on the run's months: availability.ts.)
   model = withAvailability(withClientGroups(flattenModel(model)), typeof sampleMonthly === "object" ? sampleMonthly : undefined);
+  checkModel(model);
   const streams = new Streams(seed);
   let labels = streamLabels.get(model);
   if (!labels) streamLabels.set(model, (labels = new StreamLabels()));
@@ -918,7 +947,7 @@ export function runOnce(
   // Market conditions (market.ts); null when the model has none or they are all Stable, which leaves every path below as it was.
   const market = activeMarket(model);
   // The month the factors come from is looked up per event, so the checks and the month length are done once here.
-  const monthHours = (52 / 12) * model.hoursPerWeek;
+  const monthHours = WEEKS_PER_MONTH * model.hoursPerWeek;
   const lastMonth = market ? market.months.length - 1 : 0;
   const mkt = (t: number): MarketFactors => market!.months[t < 0 ? 0 : Math.min(Math.floor(t / monthHours), lastMonth)]!;
   for (const sv of services) {
@@ -1000,6 +1029,7 @@ export function runOnce(
             : null,
       rework: streams.get(labels.join("rework", s.id)),
       route: streams.get(labels.join("route", s.id)),
+      routeTotal: s.next.reduce((a, n) => a + n.p, 0),
       routes:
         hasServices && s.next.some((n) => n.tag !== undefined)
           ? services.map((sv) => routeFor(s.next, sv.s.pathTags))
@@ -1108,10 +1138,6 @@ export function runOnce(
     roleOngoingHours: new Float64Array(roleIds.length),
     roleOngoingHas: new Uint8Array(roleIds.length),
     clientWeeks: 0,
-    overWeeks: 0,
-    overOngoing: 0,
-    overPipeline: 0,
-    overCapW: 0,
     teamMark: 0,
     util: 0,
     mgrOnly: null,
@@ -1209,6 +1235,66 @@ export function runOnce(
   // steps by index. Nothing in the run reads them.
   const bounds = sampleMonthly ? monthBounds(H, monthHours, sampleMonthly === true ? undefined : sampleMonthly) : null;
   const nM = bounds ? bounds.length - 1 : 0;
+  // Overtime is worked out month by month, and the run's total is the months' sum, so the two agree (the limit is on each
+  // month's hours, not the run's): the run's months when it keeps them, else 52/12 weeks each. Per person and month, inside
+  // [0, H]: the weeks they are overloaded, their capacity-weeks then (Σ weeks × the capacity then, which a capacity channel
+  // changes), and the ongoing and pipeline hands-on hours worked then.
+  const otBounds = overtimeCap > 0 ? (bounds ?? monthBounds(H, monthHours)) : null;
+  const nO = otBounds ? otBounds.length - 1 : 0;
+  const otWeeks = new Float64Array(people.length * nO);
+  const otCapW = new Float64Array(people.length * nO);
+  const otWork = new Float64Array(people.length * nO);
+  /** The overtime month `t` falls in (0 to nO - 1). */
+  const otMonth = (t: number) => {
+    const b = otBounds!;
+    let lo = 0;
+    let hi = nO - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (b[mid]! <= t) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+  /** Book an overloaded stretch [a, b] (inside [0, H]) of a person carrying `load` hours a week at `capacity`. */
+  const otOngoing = (p: PersonState, a: number, b: number, load: number, capacity: number) => {
+    for (let m = otMonth(a), t = a; t < b && m < nO; m++) {
+      const end = m === nO - 1 ? b : Math.min(b, otBounds![m + 1]!);
+      const weeks = (end - t) / hpw;
+      const i = p.idx * nO + m;
+      otWeeks[i]! += weeks;
+      otCapW[i]! += weeks * capacity;
+      otWork[i]! += load * weeks;
+      t = end;
+    }
+  };
+  /** Book `amount` hands-on hours worked while overloaded, spread evenly over [a, b], keeping the part inside [0, H]. */
+  const otPipeline = (p: PersonState, a: number, b: number, amount: number) => {
+    if (!amount) return;
+    if (!(b > a)) {
+      if (a >= 0 && a < H) otWork[p.idx * nO + otMonth(a)]! += amount;
+      return;
+    }
+    const lo = Math.max(a, 0);
+    const hi = Math.min(b, H);
+    if (!(hi > lo)) return;
+    const rate = amount / (b - a);
+    for (let m = otMonth(lo), t = lo; t < hi && m < nO; m++) {
+      const end = m === nO - 1 ? hi : Math.min(hi, otBounds![m + 1]!);
+      otWork[p.idx * nO + m]! += rate * (end - t);
+      t = end;
+    }
+  };
+  /** A person's overtime hours month by month: the hours worked while overloaded above their capacity-weeks, up to the cap's share of them. */
+  const overtimeMonths = (p: PersonState): number[] => {
+    const out = new Array<number>(nO);
+    for (let m = 0; m < nO; m++) {
+      const i = p.idx * nO + m;
+      const capW = otCapW[i]!;
+      out[m] = otWeeks[i]! > 0 ? Math.min(Math.max(0, otWork[i]! - capW), overtimeCap * capW) : 0;
+    }
+    return out;
+  };
   /** The hour the 1-based month `m` starts at: the run's months when it is asked for them, else 52/12 weeks each; Infinity past the end. */
   const monthStartHour = (m: number): number => (bounds ? (m - 1 < bounds.length - 1 ? bounds[m - 1]! : Infinity) : (m - 1) * monthHours);
   const nR = roleIds.length;
@@ -1241,9 +1327,6 @@ export function runOnce(
         purposePerson: new Float64Array(purposeKeys.length * nP * nM),
         reworkRole: new Float64Array(nR * nM),
         reworkPerson: new Float64Array(nP * nM),
-        overWeeks: new Float64Array(nP * nM),
-        overOngoing: new Float64Array(nP * nM),
-        overPipeline: new Float64Array(nP * nM),
         waitSum: new Float64Array(stepList.length * nM),
         waitN: new Float64Array(stepList.length * nM),
         late: new Float64Array(nM),
@@ -1483,10 +1566,6 @@ export function runOnce(
         sums.roleWork[r * nM + m]! += p.roleLoad[r]! * weeks;
         if (away > 0) sums.personAway[(p.idx * nR + r) * nM + m]! += p.roleLoad[r]! * away;
       }
-      if (overloaded(p)) {
-        sums.overWeeks[p.idx * nM + m]! += weeks;
-        sums.overOngoing[p.idx * nM + m]! += p.load * weeks;
-      }
       t = end;
     }
   };
@@ -1518,11 +1597,7 @@ export function runOnce(
       }
     }
     p.clientWeeks += p.clients * weeks;
-    if (overloaded(p)) {
-      p.overWeeks += weeks;
-      p.overOngoing += p.load * weeks;
-      p.overCapW += weeks * p.person.capacity;
-    }
+    if (overloaded(p)) otOngoing(p, a, b, p.load, p.person.capacity);
   };
   /** Pooled model: every person's share of `active` clients' ongoing hours, by role and capacity. */
   const setPooledLoads = (t: number) => {
@@ -2455,8 +2530,8 @@ export function runOnce(
     const cfArr = plan && plan.churn.any ? keyFactors(plan.churn, rc.svcKey) : null;
     const cf = cfArr ? cfArr[chTick]! : 1;
     const mult = cf === 1 ? multiplier : multiplier * cf;
-    // Not clamped: a monthly rate above 1 means certain churn at the first tick.
-    const weekly = (rc.churnBase * a * mult) / WEEKS_PER_MONTH;
+    // A monthly chance of 1 or more means certain churn at the first tick; below it, the week keeps (1 - c)^(1 / weeks a month).
+    const weekly = 1 - weeklyKeep(rc.churnBase * a * mult);
     rc.extraA = extra;
     rc.lastB = mult;
     // Who this week's chance of leaving is blamed on is added up by `flushRun`, once for each run of clients that are alike.
@@ -2490,7 +2565,7 @@ export function runOnce(
       accruePooled(t);
       const before = active;
       const cfPooled = plan && plan.churn.any ? factorNow(keyFactors(plan.churn, ""), Math.max(0, t - 1e-6)) : 1;
-      active = Math.max(0, active - active * ((model.churnMonthly * cfPooled * churnMarket(t)) / WEEKS_PER_MONTH));
+      active = Math.max(0, active * weeklyKeep(model.churnMonthly * cfPooled * churnMarket(t)));
       if (before > 0) {
         const keep = active / before;
         const feesBefore = pooledMrr;
@@ -2537,7 +2612,7 @@ export function runOnce(
     }
     // Constant pressures this week: entered numbers, and a planned price rise in the weeks after it takes effect.
     ev[SRESULTS] = resultsPressure(drivers[SRESULTS - 1]!.value ?? 8);
-    const priceFrom = (drivers[SPRICE - 1]!.month - 1) * (52 / 12) * hpw;
+    const priceFrom = (drivers[SPRICE - 1]!.month - 1) * WEEKS_PER_MONTH * hpw;
     pricePlanned = t >= priceFrom && t < priceFrom + PRICE_WEIGHT_WEEKS * hpw ? pricePressure(drivers[SPRICE - 1]!.value ?? 0) : 0;
     ev[SPRICE] = pricePlanned;
     // Which drivers are in chance mode this week (a channel can switch a driver over from a month), and their weekly chance of a hit.
@@ -2688,7 +2763,7 @@ export function runOnce(
     if (!l.once) scheduleTask(c, l, t + (l.interval ?? expo(l.rng, l.gap)));
     const sla = l.link.sla;
     const task: Task = { client: c, due: t + sla, deadline: t + 2 * sla, state: "open", adhoc: l.adhoc, scale: l.scale };
-    const e: SimEntity = { id: eid++, t0: t, trace: NO_TRACE, seg: null, svc: l.svc, task, rate: 0, lp: null };
+    const e: SimEntity = { id: eid++, t0: t, trace: NO_TRACE, seg: null, svc: l.svc, task, rate: 0, lp: null, zt: -Infinity, zn: 0 };
     if (keepTrace) {
       e.trace = [];
       e.servicing = { process: l.link.process, client: c.key };
@@ -2883,7 +2958,7 @@ export function runOnce(
     // between them bill keep^1..keep^(n-1), the stub after `last` keep^n.
     const last = Math.ceil(H / hpw - 1) * hpw;
     const n = Math.round((last - first) / hpw) + 1;
-    const keep = Math.max(0, 1 - churnMonthly / WEEKS_PER_MONTH);
+    const keep = weeklyKeep(churnMonthly);
     const keepN = powInt(keep, n);
     const whole = keep === 1 ? n - 1 : (keep - keepN) / (1 - keep);
     return (first - t) / hpw + whole + (keepN * (H - last)) / hpw;
@@ -3100,7 +3175,7 @@ export function runOnce(
         }
       }
       const over = overloaded(p);
-      if (over) p.overPipeline += handsOn;
+      if (over) otPipeline(p, t, t + dur, handsOn);
       // A manager from another role does the step as their own role's work.
       const acc = p.mgrOnly !== null && p.mgrOnly.has(st) ? p.ownAcc : st.acc;
       if (acc) {
@@ -3155,7 +3230,6 @@ export function runOnce(
             mon.purposePerson[(st.pu * nP + p.idx) * nM + m]! += v;
             if (acc) mon.purposeRole[(st.pu * nR + acc.r) * nM + m]! += v;
           }
-          if (over) mon.overPipeline[p.idx * nM + m]! += v;
         } else if (partCount) {
           addParts(mon.personWork, p.idx);
           if (acc) addParts(mon.roleWork, acc.r);
@@ -3166,7 +3240,6 @@ export function runOnce(
             addParts(mon.purposePerson, st.pu * nP + p.idx);
             if (acc) addParts(mon.purposeRole, st.pu * nR + acc.r);
           }
-          if (over) addParts(mon.overPipeline, p.idx);
         }
       }
       const cur = p.cur;
@@ -3225,6 +3298,15 @@ export function runOnce(
   function leave(e: SimEntity, st: StepState, t: number) {
     e.seg!.tL = t;
     const s = st.s;
+    if (t === e.zt) {
+      if (++e.zn > MAX_SAME_TIME_VISITS)
+        throw new ModelError(
+          `'${s.name}' sends items round a loop without any time passing: every step on it has no hands-on time and no wait, and the item always goes round (rework 1, or links of chance 1 back). Give a step on the loop some time, or a way out.`,
+        );
+    } else {
+      e.zt = t;
+      e.zn = 0;
+    }
     st.stat.departures++;
     if (s.sla !== undefined && t - e.seg!.tQ > s.sla) st.stat.slaBreaches++;
     const rw = st.chRework ? st.chRework[chM(t)]! : s.rework;
@@ -3271,6 +3353,9 @@ export function runOnce(
       next = r.next;
       targets = r.targets;
       u *= r.total;
+    } else if (st.routeTotal !== 1 && st.routeTotal > 0) {
+      // Chances that don't add up to 1 split in proportion (0.25 / 0.25 is half each), as `routeFor` and cost.ts read them.
+      u *= st.routeTotal;
     }
     let acc = 0;
     let k = next.length - 1;
@@ -3392,13 +3477,11 @@ export function runOnce(
       p.busyHours = 0;
       p.svcHours = 0;
       p.completed = 0;
-      p.overPipeline = 0;
       const c = p.cur;
       if (!p.busy || !c || c.end <= 0 || c.end <= c.start) continue;
       const share = (c.handsOn * c.end) / (c.end - c.start);
       if (c.svc) p.svcHours += share;
       else p.busyHours += share;
-      if (c.over) p.overPipeline += share;
       if (c.acc) {
         if (c.svc) c.acc.svc += share;
         else c.acc.busy += share;
@@ -3424,7 +3507,7 @@ export function runOnce(
     }
     items.sort((a, b) => a.tQ - b.tQ);
     for (const { st, tQ } of items) {
-      const e: SimEntity = { id: eid++, t0: tQ, trace: [], seg: null, svc: drawService(mix), rate: 0, lp: null };
+      const e: SimEntity = { id: eid++, t0: tQ, trace: [], seg: null, svc: drawService(mix), rate: 0, lp: null, zt: -Infinity, zn: 0 };
       entities.push(e);
       queueAt(e, st, tQ, 0);
     }
@@ -3513,7 +3596,7 @@ export function runOnce(
     if (ev.type === "arrive") {
       scheduleArrival();
       const sv = drawService(ev.t < 0 ? mixWarmup : mix, ev.t);
-      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv, rate: 0, lp: null };
+      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv, rate: 0, lp: null, zt: -Infinity, zn: 0 };
       if (keepTrace) entities.push(e);
       if (ev.t >= 0) {
         services[sv]!.counts.arrivals++;
@@ -3522,7 +3605,7 @@ export function runOnce(
       enterTarget(e, entryTargets[sv]!, ev.t);
     } else if (ev.type === "inject") {
       const sv = injections[nextInject++]!;
-      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv, rate: 0, lp: null, injected: true };
+      const e: SimEntity = { id: eid++, t0: ev.t, trace: keepTrace ? [] : NO_TRACE, seg: null, svc: sv, rate: 0, lp: null, zt: -Infinity, zn: 0, injected: true };
       if (keepTrace) entities.push(e);
       if (injectHead) enterTarget(e, injectHead, ev.t);
       else reachEnd(e, "won", ev.t);
@@ -3674,12 +3757,8 @@ export function runOnce(
       // Hours a week in a month: the person's own, which a capacity channel changes from its month.
       const capM = capPlan ? (m: number) => capacityAt(p, m) : () => p.person.capacity;
       const cap = spans.map(([a, b], m) => Math.max(0, (capM(m) * (b - a - awayHours(p, a, b))) / hpw));
-      const ot = spans.map((_, m) => {
-        const i = p.idx * nM + m;
-        const over = sums.overWeeks[i]!;
-        const c = capM(m);
-        return overtimeCap > 0 ? Math.min(Math.max(0, sums.overOngoing[i]! + sums.overPipeline[i]! - c * over), overtimeCap * c * over) : 0;
-      });
+      // The run's months are the overtime months here, so these add up to the run's overtime.
+      const ot = overtimeCap > 0 ? overtimeMonths(p) : new Array<number>(nM).fill(0);
       personCapacity[p.id] = cap;
       personOvertime[p.id] = ot;
       personWork[p.id] = row(sums.personWork, p.idx);
@@ -3830,7 +3909,7 @@ export function runOnce(
   // Ongoing load is reported from the live client count, integrated over the
   // measured window: the same load that set everyone's availability
   // (docs/PRD.md §6.8 item 2). Overtime: of the hours worked while overloaded
-  // (ongoing plus pipeline hands-on), those beyond capacity, up to the cap.
+  // (ongoing plus pipeline hands-on), those beyond capacity, up to the cap, month by month (`overtimeMonths`).
   const weeks = model.horizonWeeks;
   const peopleOut: Record<string, PersonResult> = {};
   const roleOngoing: Record<string, number> = {};
@@ -3851,10 +3930,9 @@ export function runOnce(
     const paid = varies || paidVaries(p) ? paidOver(p, staffing ? Math.max(0, startsAt(p.person)) : 0, staffing ? Math.min(H, endsAt(p.person)) : H) : null;
     const cap = varies ? paid!.hours : staffing ? c * presentWeeks(p.person) : c * weeks;
     const ong = p.ongoingHours;
-    const overC = varies ? p.overCapW : c * p.overWeeks;
-    // (Without a capacity channel the limit is multiplied in the order it always was, `cap × c × weeks`, so it rounds exactly as before.)
-    const overLimit = varies ? overtimeCap * overC : overtimeCap * c * p.overWeeks;
-    const ot = overtimeCap > 0 ? Math.min(Math.max(0, p.overOngoing + p.overPipeline - overC), overLimit) : 0;
+    // Overtime: the months' sum (each month's limited to the cap's share of that month's capacity-weeks), as the monthly series has it.
+    let ot = 0;
+    if (overtimeCap > 0) for (const h of overtimeMonths(p)) ot += h;
     peopleOut[p.id] = {
       pipeline: cap ? p.busyHours / cap : 0,
       ongoing: cap ? ong / cap : 0,
@@ -4058,7 +4136,7 @@ export function runOnce(
       }
     }
   }
-  const toTrace = ({ seg: _seg, svc, task: _task, rate: _rate, lp: _lp, ...entity }: SimEntity): TraceEntity => {
+  const toTrace = ({ seg: _seg, svc, task: _task, rate: _rate, lp: _lp, zt: _zt, zn: _zn, ...entity }: SimEntity): TraceEntity => {
     const id = services[svc]!.id;
     return id !== null ? { ...entity, service: id } : entity;
   };
@@ -4095,6 +4173,17 @@ export function runOnce(
   };
 }
 
+/**
+ * The share of clients a week keeps when a share `monthly` leave in a month: (1 - c)^(1 / weeks a month), so a month of
+ * weekly ticks keeps 1 - c at any rate (a weekly chance of c / 4.33 kept less than that at high rates). 0 from c = 1 on;
+ * 1 at c = 0 or below. det-math's `log` and `exp`, as the chance-mode hits use.
+ */
+export function weeklyKeep(monthly: number): number {
+  if (!(monthly > 0)) return 1;
+  if (monthly >= 1) return 0;
+  return exp(log(1 - monthly) / WEEKS_PER_MONTH);
+}
+
 /** x^n for a whole n ≥ 0 by repeated squaring (plain multiplication, so identical in every JS engine). */
 function powInt(x: number, n: number): number {
   let result = 1;
@@ -4102,11 +4191,19 @@ function powInt(x: number, n: number): number {
   return result;
 }
 
-/** Value at percentile `p` (0–1) using the prototype's nearest-rank rule. */
+/**
+ * Where percentile `p` (0–1) of `n` sorted values is, by the nearest-rank rule: the ceil(p × n)-th smallest, so P90 of 10
+ * values is the 9th and P10 the 1st (clamped to the first and last; a hair is taken off p × n so 0.1 × 30 is rank 3).
+ */
+function rankIndex(p: number, n: number): number {
+  return Math.min(n - 1, Math.max(0, Math.ceil(p * n - 1e-9) - 1));
+}
+
+/** Value at percentile `p` (0–1) by the nearest-rank rule (`rankIndex`). */
 export function pct(arr: number[], p: number): number {
   if (!arr.length) return 0;
   const a = arr.slice().sort((x, y) => x - y);
-  return a[Math.min(a.length - 1, Math.floor(p * a.length))]!;
+  return a[rankIndex(p, a.length)]!;
 }
 
 /** Mean and 10th–90th percentile band of a set of values (as `pct` gives them, from one sort). */
@@ -4116,8 +4213,8 @@ export function stat(values: number[]): Stat {
   const a = values.slice().sort((x, y) => x - y);
   return {
     mean: values.reduce((a, b) => a + b, 0) / n,
-    p10: a[Math.min(n - 1, Math.floor(0.1 * n))]!,
-    p90: a[Math.min(n - 1, Math.floor(0.9 * n))]!,
+    p10: a[rankIndex(0.1, n)]!,
+    p90: a[rankIndex(0.9, n)]!,
   };
 }
 
@@ -4238,7 +4335,7 @@ function clientResults(model: EngineModel, runs: ReplicationResult[]): Record<st
   return out;
 }
 
-const MONTH_WEEKS = 52 / 12;
+const MONTH_WEEKS = WEEKS_PER_MONTH;
 
 /** The mean of per-run means weighted by the counts behind them (0 when there are none). */
 function weighted(
@@ -4429,13 +4526,15 @@ export function monthBounds(H: number, monthHours: number, starts?: readonly num
 }
 
 export function simulate(model: EngineModel, reps = 30, seed = 1, options: SimulateOptions = {}): SimulationResult {
+  if (!(reps >= 1)) throw new ModelError(`A run needs at least one replication (it was asked for ${reps}).`);
   model = withAvailability(withClientGroups(flattenModel(model)), options.monthly ? options.monthStarts : undefined);
+  checkModel(model);
   const runs: ReplicationResult[] = [];
   let trace: TraceEntity[] | null = null;
   const ch = activeChannels(model);
   if (ch && options.monthly && options.monthStarts) {
     // One meaning of "month": the channels' months are the run's.
-    const inside = monthBounds(model.horizonWeeks * model.hoursPerWeek, (52 / 12) * model.hoursPerWeek, options.monthStarts).slice(1, -1);
+    const inside = monthBounds(model.horizonWeeks * model.hoursPerWeek, WEEKS_PER_MONTH * model.hoursPerWeek, options.monthStarts).slice(1, -1);
     if (inside.length !== ch.starts.length || inside.some((h, i) => h !== ch.starts[i])) throw new Error("The channels' month starts must be the run's month starts");
   }
   const start = options.initialState ?? initialState(model);
@@ -4651,12 +4750,14 @@ function monthlyResult(model: EngineModel, reps: MonthlyReplication[]): MonthlyR
   const purposes = Object.keys(first.purposeRoleWork);
   const nRep = reps.length;
   const sorted = new Float64Array(nRep);
+  const i10 = rankIndex(0.1, nRep);
+  const i90 = rankIndex(0.9, nRep);
   const statOf = (buf: Float64Array): Stat => {
     let sum = 0;
     for (let i = 0; i < nRep; i++) sum += buf[i]!;
     sorted.set(buf);
     sorted.sort();
-    return { mean: sum / nRep, p10: sorted[Math.min(nRep - 1, Math.floor(0.1 * nRep))]!, p90: sorted[Math.min(nRep - 1, Math.floor(0.9 * nRep))]! };
+    return { mean: sum / nRep, p10: sorted[i10]!, p90: sorted[i90]! };
   };
   /** One series per replication (a month's value each). */
   type PerRep = readonly (readonly number[])[];

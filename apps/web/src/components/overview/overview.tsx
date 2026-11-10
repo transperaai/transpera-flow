@@ -1,12 +1,16 @@
 "use client";
 
-// The Overview (issue #173, B15; before it #100, A35; the department figures are capacity build P6): the landing page of a workspace, in
-// three sections, each headed by the question it answers (the Overview options' layout L3), with a row of links to them at the top:
+// The Overview (issue #173, B15; before it #100, A35; the department figures are capacity build P6; laid out as a dashboard by
+// docs/plans/ui-cleanup.md): the landing page of a workspace, full width:
 //
-// 1. Money: the whole business as three hero numbers (WB1), then the departments side by side as status tiles (DS1).
-// 2. People: busiest people (BP1) and team load by role (TL1), then where the time goes (WT1) and what the time achieves (TA1).
-// 3. Processes: the company map, with Play and the horizon (1, 3 or 6 months; the Sandbox goes further), then open issues (OI1) and the
-//    time split by process (TS2). Team load, what the time achieves and the time split follow the horizon picked on the map.
+// 1. The header (the workspace, when the numbers were worked out, how many processes) with Export, History and All processes.
+// 2. One row of headline tiles: the whole business's clients, MRR ÷ people and DLER (WB1), who is over their utilisation threshold
+//    and the open issues.
+// 3. The company map (about two thirds of the width, 60% of the screen's height), with Play and the horizon (1, 3 or 6 months; the
+//    Sandbox goes further), beside a rail of what needs attention: open issues (OI1) and the busiest people (BP1).
+// 4. The charts: team load by role (TL1), where the time goes (WT1), what the time achieves (TA1) and the time split by process (TS2),
+//    two to a row from a wide screen, the last one wide when there is an odd number. Then the departments side by side (DS1).
+//    Team load, what the time achieves and the time split follow the horizon picked on the map.
 //
 // Money's figures and People's busiest people and time read the Capacity page's "Today" run, from the same cache (department-cards.tsx).
 //
@@ -32,9 +36,9 @@ import { resolveMoney, toRatingConfig, type EngineModel, type SimulationResult }
 import { HorizonPicker } from "@/components/horizon-picker";
 import { NO_SELECTION, ProcessCanvas } from "@/components/process-canvas";
 import { EmptyState, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
+import { Eyebrow, pageBodyClass } from "@/components/shell/page";
 import { ShellHeader } from "@/components/shell/shell-header";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { OVERVIEW_HORIZONS, horizonLabel, horizonWeeks, isOverviewHorizon, nearestOverviewHorizon } from "@/lib/horizon";
@@ -60,9 +64,12 @@ import { recordHeadline } from "@/app/w/[slug]/headline-actions";
 import { headlineNumbers } from "@/lib/overview/headline";
 import { useIssues } from "@/lib/issues/use-issues";
 import { capacityBaseModel } from "@/lib/capacity/model";
+import { HeroKpi } from "@/components/capacity/widgets";
 import { BusiestPeople } from "./busiest-people";
+import { OPEN_ISSUES_HOW, TIME_SPLIT_HOW, timeAchievesHow } from "./how-texts";
+import { PanelActions, PanelHow } from "./panel-how";
 import { DepartmentAlerts, DepartmentTiles, StartChecklist, useDepartmentFigures, WholeBusinessHero } from "./department-cards";
-import { TeamLoad } from "./team-load";
+import { TeamLoad, teamLoadHow } from "./team-load";
 import { WhereTimeGoes } from "./where-time-goes";
 import { EDIT_ONLY } from "@/lib/phone";
 
@@ -93,6 +100,8 @@ export interface OverviewProps {
   /** Where each process's page is, by process id. */
   hrefs: Record<string, string>;
   processesHref: string;
+  /** The Issues list, linked from the open issues panel. */
+  issuesHref?: string;
   /** Editors only: the Editor on the company map (its draft, handoff lines and publishing), and its History (B11). */
   companyEditHref?: string;
   companyHistoryHref?: string;
@@ -130,21 +139,6 @@ function useCompanyModel(bundle: ProcessBundle): {
 /** A run is only shown for the model it was made from: the worker's last answer outlives a change of horizon by a moment. */
 const current = (result: SimulationResult | null, model: EngineModel | null): SimulationResult | null => (result && model && Math.abs(result.H - model.horizonWeeks * model.hoursPerWeek) < 1e-6 ? result : null);
 
-/** A section of the Overview, headed by its name and the question it answers; the id is the target of the links at the top. */
-function OverviewSection({ id, title, question, children }: { id: string; title: string; question: string; children: React.ReactNode }) {
-  return (
-    <section id={id} aria-labelledby={`${id}-title`} className="flex min-w-0 scroll-mt-16 flex-col gap-4" data-overview-section={id}>
-      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b-2 border-fg pb-1.5">
-        <h2 id={`${id}-title`} className="font-display text-lg font-bold">
-          {title}
-        </h2>
-        <p className="text-sm text-muted-foreground">{question}</p>
-      </header>
-      {children}
-    </section>
-  );
-}
-
 /** Shown where a chart has nothing to draw until the company can be simulated. */
 const Unavailable = () => <EmptyState data-chart-unavailable>Nothing to show until the company can be simulated.</EmptyState>;
 
@@ -160,6 +154,7 @@ export function Overview({
   startDate,
   hrefs,
   processesHref,
+  issuesHref,
   companyEditHref,
   companyHistoryHref,
   bundleHref,
@@ -347,13 +342,102 @@ export function Overview({
     [now],
   );
 
+  const peopleReady = !!capacity && departmentFigures.rows.length > 0;
+  const overThreshold = departmentFigures.people ? departmentFigures.people.filter((p) => p.over).length : null;
+  const risks = open.byRating.find((r) => r.rating === "risk")?.count ?? 0;
+
+  // The charts under the map, in a grid of two from a wide screen; with an odd number the last runs the full width, so a card
+  // that isn't there never leaves a hole.
+  const charts: { key: string; node: React.ReactNode }[] = [
+    {
+      key: "team-load",
+      node: (
+        <SectionCard
+          id="team-load"
+          section="team-load"
+          level={2}
+          title="Team load by role"
+          description={`When to hire, then how busy each role is month by month over the next ${span}, with planned hires and leave.`}
+          action={<PanelHow {...teamLoadHow(span)} />}
+          className="min-w-0 flex-1"
+        >
+          {teamLoad ? (
+            teamLoad.roles.length ? (
+              <TeamLoad rows={teamLoad.roles} months={teamLoad.months} lines={roleLines} fallbackLine={cutoffs[1]} advice={advice} span={span} sandboxHref={forecastHref} how={false} />
+            ) : (
+              <EmptyState>No role has any work in this run.</EmptyState>
+            )
+          ) : error ? (
+            <Unavailable />
+          ) : (
+            <Skeleton className="h-[160px] w-full" aria-busy="true" />
+          )}
+        </SectionCard>
+      ),
+    },
+    ...(peopleReady
+      ? [
+          {
+            key: "where-time-goes",
+            node: <WhereTimeGoes rows={departmentFigures.rows} failed={!!departmentFigures.failure} className="min-w-0 flex-1" />,
+          },
+        ]
+      : []),
+    {
+      key: "time-achieves",
+      node: (
+        <SectionCard
+          id="time-achieves"
+          section="time-achieves"
+          level={2}
+          title="What the time achieves"
+          description={`Is the team's time going on work clients pay for? Over the next ${span}; change the horizon on the company map.`}
+          action={<PanelHow {...timeAchievesHow(span, purposeCategories)} />}
+          className="min-w-0 flex-1"
+        >
+          {horizonResult?.monthly ? (
+            <TimeAchieves
+              monthly={horizonResult.monthly}
+              hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek}
+              start={start}
+              categories={purposeCategories}
+              sandboxHref={forecastHref}
+              span={span}
+              how={false}
+            />
+          ) : error ? (
+            <Unavailable />
+          ) : (
+            chartLoading()
+          )}
+        </SectionCard>
+      ),
+    },
+    {
+      key: "time-split",
+      node: (
+        <SectionCard
+          id="time-split"
+          section="time-split"
+          level={2}
+          title="Time split by process"
+          description={`Of the time work spends in each process over the next ${span}, the share someone is working on it.`}
+          action={timeSplit ? <PanelHow {...TIME_SPLIT_HOW} /> : undefined}
+          className="min-w-0 flex-1"
+        >
+          {timeSplit ? <TimeSplitChart rows={timeSplit} months={months} how={false} /> : error ? <Unavailable /> : chartLoading()}
+        </SectionCard>
+      ),
+    },
+  ];
+
   return (
     <div>
       <ShellHeader title="Overview" />
-      <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-6 px-4 pb-14 pt-6 sm:px-6">
+      <div className={pageBodyClass()} data-overview>
         <PageHeader
           label="Overview"
-          eyebrow={<span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Overview</span>}
+          eyebrow={<Eyebrow>Overview</Eyebrow>}
           title={workspaceName}
           meta={
             <MetaLine>
@@ -367,8 +451,11 @@ export function Overview({
           actions={
             <>
               {companyEditHref && (
-                <Link href={companyEditHref} data-edit-company-map data-edit-entry className={cn(buttonVariants({ size: "sm" }), "bg-edit text-edit-fg hover:bg-edit/90", EDIT_ONLY)}>
-                  ✎ Edit company map
+                <Link href={companyEditHref} data-edit-company-map data-edit-entry className={cn(buttonVariants({ variant: "outline", size: "sm" }), EDIT_ONLY)}>
+                  <span aria-hidden className="text-edit">
+                    ✎
+                  </span>
+                  Edit company map
                 </Link>
               )}
               <ExportMenu
@@ -405,124 +492,105 @@ export function Overview({
           }
         />
 
-        <nav aria-label="Sections of the Overview" className="-mt-2 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm" data-jump-links>
-          {[...(capacity ? [{ id: "money", label: "Money" }] : []), { id: "people", label: "People" }, { id: "processes", label: "Processes" }].map((l, i) => (
-            <span key={l.id} className="inline-flex items-center gap-1.5">
-              {i > 0 && (
-                <span aria-hidden className="text-fg-3">
-                  ·
-                </span>
-              )}
-              <a href={`#${l.id}`} className="rounded-sm font-medium text-accent outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring">
-                {l.label}
-              </a>
-            </span>
-          ))}
-        </nav>
-
         {error ? (
-          <Card className="px-4 py-3 text-sm" role="alert">
+          <div className="rounded-xl border border-crit bg-crit-soft px-4 py-3 text-sm" role="alert">
             The company can&apos;t be simulated yet: {error}. The map below still works; fix this under{" "}
             <Link href={processesHref} className="underline">
               Processes
             </Link>
             .
-          </Card>
+          </div>
         ) : null}
 
-        {capacity && (
-          <OverviewSection id="money" title="Money" question="Are we making enough from our people?">
-            {departmentFigures.rows.length ? (
-              <>
-                <DepartmentAlerts failure={departmentFigures.failure} />
-                <WholeBusinessHero setup={capacity.setup} base={capacity.base} />
-                <DepartmentTiles figures={departmentFigures} base={capacity.base} currency={capacity.setup.currency} />
-              </>
-            ) : (
-              <StartChecklist setup={capacity.setup} base={capacity.base} />
-            )}
-          </OverviewSection>
-        )}
-
-        <OverviewSection id="people" title="People" question="Is anyone stretched, and when do we hire?">
-          <div className="grid gap-6 lg:grid-cols-2" data-tier="people">
-            {capacity && departmentFigures.rows.length > 0 && (
-              <div data-chart="busiest" className="min-w-0">
-                <BusiestPeople people={departmentFigures.people} failed={!!departmentFigures.failure} capacityHref={`${capacity.base}/capacity`} />
-              </div>
-            )}
-  <div data-chart="team-load" className="min-w-0">
-              <SectionCard
-                id="team-load"
-                section="team-load"
-                level={3}
-                title="Team load by role"
-                description={`When to hire, then how busy each role is month by month over the next ${span}, with planned hires and leave.`}
-                className="min-w-0"
-              >
-                {teamLoad ? (
-                  teamLoad.roles.length ? (
-                    <TeamLoad rows={teamLoad.roles} months={teamLoad.months} lines={roleLines} fallbackLine={cutoffs[1]} advice={advice} span={span} sandboxHref={forecastHref} />
-                  ) : (
-                    <EmptyState>No role has any work in this run.</EmptyState>
-                  )
-                ) : error ? (
-                  <Unavailable />
-                ) : (
-                  <Skeleton className="h-[160px] w-full" aria-busy="true" />
-                )}
-              </SectionCard>
+        {/* The headline tiles: one row, every tile the same width. */}
+        {capacity &&
+          (peopleReady ? (
+            <div className="flex min-w-0 flex-col gap-3" data-kpi-row>
+              <DepartmentAlerts failure={departmentFigures.failure} />
+              <WholeBusinessHero
+                setup={capacity.setup}
+                base={capacity.base}
+                extra={
+                  <>
+                    <HeroKpi
+                      label="Over their utilisation threshold"
+                      value={
+                        overThreshold !== null ? (
+                          <span data-over-threshold>
+                            {overThreshold}
+                            <span className="text-xl text-muted-foreground"> of {departmentFigures.people!.length}</span>
+                          </span>
+                        ) : departmentFigures.failure ? (
+                          "—"
+                        ) : (
+                          <Skeleton className="h-9 w-16" aria-busy="true" aria-label="Who is over their utilisation threshold is being worked out" />
+                        )
+                      }
+                      sub="people, in a simulation of today's clients"
+                    />
+                    <HeroKpi
+                      label="Open issues"
+                      value={<span data-open-issues-total>{open.total}</span>}
+                      sub={
+                        <>
+                          {risks} {risks === 1 ? "operational risk" : "operational risks"}
+                          {issuesHref && (
+                            <>
+                              {" · "}
+                              <Link href={issuesHref} className="font-medium text-accent hover:underline">
+                                Issues →
+                              </Link>
+                            </>
+                          )}
+                        </>
+                      }
+                    />
+                  </>
+                }
+              />
             </div>
-            {capacity && departmentFigures.rows.length > 0 && (
-              <div data-chart="where-time-goes" className="min-w-0">
-                <WhereTimeGoes rows={departmentFigures.rows} failed={!!departmentFigures.failure} />
-              </div>
-            )}
-  <div data-chart="time-achieves" className="min-w-0">
-              <SectionCard
-                id="time-achieves"
-                section="time-achieves"
-                level={3}
-                title="What the time achieves"
-                description={`Is the team's time going on work clients pay for? Over the next ${span}; change the horizon on the company map.`}
-                className="min-w-0"
-              >
-                {horizonResult?.monthly ? (
-                  <TimeAchieves monthly={horizonResult.monthly} hoursPerWeek={horizonModel?.hoursPerWeek ?? hoursPerWeek} start={start} categories={purposeCategories} sandboxHref={forecastHref} span={span} />
-                ) : error ? (
-                  <Unavailable />
-                ) : (
-                  chartLoading()
-                )}
-              </SectionCard>
-            </div>
-          </div>
-        </OverviewSection>
+          ) : (
+            <StartChecklist setup={capacity.setup} base={capacity.base} />
+          ))}
 
-        <OverviewSection id="processes" title="Processes" question="How does work move, and where does it get stuck?">
-          <SectionCard id="company-map" section="company-map" level={3} title="Company map" description="Every process in the business. Press play to watch the work move; expand a process in place, or click it to open its page.">
+        {/* The company map and, beside it, what needs attention. */}
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <section
+            id="company-map"
+            data-section="company-map"
+            data-company-map
+            aria-labelledby="company-map-heading"
+            className="flex h-[60svh] min-h-[32rem] min-w-0 scroll-mt-16 flex-col overflow-hidden rounded-xl border border-line bg-card xl:col-span-8 [&_[data-process-map]]:rounded-none [&_[data-process-map]]:border-0"
+          >
+            <div className="flex flex-none flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-2.5" data-map-controls>
+              <div className="flex items-center gap-1">
+                <h2 id="company-map-heading" className="text-base font-semibold">
+                  Company map
+                </h2>
+                <PanelHow
+                  works="Every process in the business, in a lane for its department. Press play to watch the work move over the horizon picked, with planned hires and leave; expand a process in place, or click it to open its page."
+                  tells="How work moves between the processes, and where it piles up."
+                />
+              </div>
+              <HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} options={OVERVIEW_HORIZONS} />
+              {forecastHref && (
+                <Link href={forecastHref} data-sandbox-link className={buttonVariants({ variant: "link", size: "sm" })}>
+                  Simulate further in the Sandbox
+                </Link>
+              )}
+              <p className="ml-auto text-xs text-muted-foreground" data-horizon-note>
+                {horizonResult ? `Playing ${span} of work, with planned hires and leave.` : error ? "Nothing to play until the company can be simulated." : `Simulating ${span}…`}
+              </p>
+            </div>
             {viewingMapVersion !== null && (
-              <div data-viewing-map-version className="flex flex-wrap items-center gap-2">
+              <div data-viewing-map-version className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-warn bg-warn-soft px-2.5 py-0.5 text-xs font-medium">Viewing version {viewingMapVersion} of the company map · read only</span>
                 <Link href={backToLive} className={buttonVariants({ variant: "outline", size: "sm" })}>
                   Back to live
                 </Link>
               </div>
             )}
-            <div className="overflow-hidden rounded-lg border" data-company-map>
-              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b px-3 py-2" data-map-controls>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} options={OVERVIEW_HORIZONS} />
-                  {forecastHref && (
-                    <Link href={forecastHref} data-sandbox-link className={buttonVariants({ variant: "link", size: "sm" })}>
-                      Simulate further in the Sandbox
-                    </Link>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground" data-horizon-note>
-                  {horizonResult ? `Playing ${span} of work, with planned hires and leave.` : error ? "Nothing to play until the company can be simulated." : `Simulating ${span}…`}
-                </p>
-              </div>
+            <div className="flex min-h-0 flex-1 flex-col">
               {map.bundle.steps.length ? (
                 <ProcessCanvas
                   refitOn={[...expanded].sort().join("|")}
@@ -538,36 +606,58 @@ export function Overview({
                   departmentLanes={departmentLanes}
                   cardTags={cardTags}
                   handoffs
-                  height="auto"
+                  height="fill"
                   stepDetail={false}
                   onStepClick={openProcess}
                   computing={horizonModel !== null && horizonSim.status === "running" && horizonSim.run === null}
                 />
               ) : (
-                <EmptyState>No process has been published yet.</EmptyState>
+                <div className="p-4">
+                  <EmptyState>No process has been published yet.</EmptyState>
+                </div>
               )}
             </div>
-          </SectionCard>
-          <div className="grid gap-6 lg:grid-cols-2" data-tier="trends">
-  <div data-chart="issues" className="min-w-0">
-              <SectionCard id="open-issues" section="issues" title="Open issues" level={3} description="How many are open, how bad, and where." className="min-w-0">
-                <OpenIssuesSummary byRating={open.byRating} byProcess={issuesByProcess ?? []} />
-              </SectionCard>
-            </div>
-  <div data-chart="time-split" className="min-w-0">
+          </section>
+
+          <div className="flex min-w-0 flex-col gap-6 xl:col-span-4" data-rail>
+            <div data-chart="issues" className="min-w-0">
               <SectionCard
-                id="time-split"
-                section="time-split"
-                level={3}
-                title="Time split by process"
-                description={`Of the time work spends in each process over the next ${span}, the share someone is working on it.`}
+                id="open-issues"
+                section="issues"
+                level={2}
+                title="Open issues"
+                description="How many are open, how bad, and where."
+                action={
+                  <PanelActions how={OPEN_ISSUES_HOW}>
+                    {issuesHref && (
+                      <Link href={issuesHref} className="text-xs font-medium text-accent hover:underline" data-issues-link>
+                        Issues →
+                      </Link>
+                    )}
+                  </PanelActions>
+                }
                 className="min-w-0"
               >
-                {timeSplit ? <TimeSplitChart rows={timeSplit} months={months} /> : error ? <Unavailable /> : chartLoading()}
+                <OpenIssuesSummary byRating={open.byRating} byProcess={issuesByProcess ?? []} how={false} />
               </SectionCard>
             </div>
+            {peopleReady && (
+              <div data-chart="busiest" className="min-w-0">
+                <BusiestPeople people={departmentFigures.people} failed={!!departmentFigures.failure} capacityHref={`${capacity!.base}/capacity`} />
+              </div>
+            )}
           </div>
-        </OverviewSection>
+        </div>
+
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2" data-charts>
+          {charts.map((c, i) => (
+            <div key={c.key} data-chart={c.key} className={cn("flex min-w-0 flex-col", charts.length % 2 === 1 && i === charts.length - 1 && "xl:col-span-2")}>
+              {c.node}
+            </div>
+          ))}
+        </div>
+
+        {peopleReady && <DepartmentTiles figures={departmentFigures} base={capacity!.base} currency={capacity!.setup.currency} />}
       </div>
     </div>
   );

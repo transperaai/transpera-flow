@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { generateApiToken, hashApiToken, looksLikeApiToken, TOOL_NAMES } from "../src";
-import { ENDPOINT, connect, createUser, issueToken, post, startTestDb, userClaims, type McpTestDb } from "./helpers";
+import { ENDPOINT, call, connect, createUser, issueToken, post, startTestDb, userClaims, type McpTestDb } from "./helpers";
 
 // The endpoint's own behaviour against a throwaway database: the token check (app code calling public.mcp_token_lookup as
 // `anon`), the status codes, and the claims every query runs under. Data access is covered end to end in end-to-end.test.ts.
@@ -26,6 +26,7 @@ const tokenRow = async (token: string) =>
   (await admin.query("select * from api_tokens where token_hash = $1", [hashApiToken(token)])).rows[0] as {
     last_used_at: Date | null;
     rate_window_count: number;
+    sim_window_count: number;
     revoked_at: Date | null;
   };
 
@@ -91,6 +92,25 @@ describe("handleMcpRequest", () => {
     const res = await post(env.options, { authorization: `Bearer ${token}` });
     expect(res.status).toBe(429);
     expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("limits the simulation tools to 10 calls a minute per token, and leaves the reads alone", async () => {
+    const token = await issueToken(admin, userId);
+    const client = await connect(token, { ...env.options, simulationsPerMinute: undefined });
+    try {
+      // Not rate-limited yet: the call is counted, then fails or succeeds on its own merits.
+      expect((await call(client, "run_scenario", {})).error?.code).not.toBe("rate_limited");
+      expect((await tokenRow(token)).sim_window_count).toBe(1);
+      await admin.query("update api_tokens set sim_window_start = now(), sim_window_count = 10 where token_hash = $1", [hashApiToken(token)]);
+      for (const name of ["run_scenario", "compare_scenarios", "check_robustness", "get_bottlenecks", "get_facts"]) {
+        const r = await call(client, name, name === "run_scenario" || name === "get_bottlenecks" || name === "get_facts" ? {} : { scenario: "x", b: "x" });
+        expect(r, name).toMatchObject({ ok: false, error: { code: "rate_limited", message: expect.stringMatching(/used its 10 simulations for this minute/) } });
+      }
+      expect((await call(client, "list_workspaces")).ok).toBe(true);
+      expect((await call(client, "list_issues", { include_detected: false })).error?.code).not.toBe("rate_limited");
+    } finally {
+      await client.close();
+    }
   });
 
   it("runs queries as the token's owner: authenticated claims that carry the token's id", async () => {

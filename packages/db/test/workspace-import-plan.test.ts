@@ -455,6 +455,15 @@ describe("checkWorkspaceBundle: deep nesting and oversized lists", () => {
 });
 
 describe("planWorkspaceImport", () => {
+  it("restores a rework rate above the 95% cap at 95%, and says so", () => {
+    const { bundle, ids } = makeBundle();
+    const live = (bundle.processes.find((p) => p.id === ids.pC)!.versions as Row[])[0]!;
+    (live.steps as Row[])[0]!.rework_rate = 1;
+    const { plan, warnings } = planOf(bundle);
+    expect(plan.processes.flatMap((p) => p.steps).map((s) => s.rework_rate).filter((r) => r !== undefined)).toEqual([0.95]);
+    expect(warnings).toContain("1 step had a rework rate above 95%; restored at 95%, the most a step may send back.");
+  });
+
   it("keeps the order of ids: placeholders sort as the old ids did", () => {
     const { bundle } = makeBundle();
     const { plan, placeholderOf } = planOf(bundle);

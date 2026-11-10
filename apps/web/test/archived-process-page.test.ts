@@ -21,7 +21,7 @@ describe("an archived process's screens", () => {
   });
 
   it("the Editor goes back to the page, and History offers no Restore or Duplicate", () => {
-    expect(read("components/editor/workspace-editor-page.tsx")).toContain("if (!canEdit || live.process.archived_at) redirect(base);");
+    expect(read("components/editor/workspace-editor-page.tsx")).toContain("if (!canEdit || live.process.archived_at) redirect(`${base}?notice=${live.process.archived_at ? EDIT_NOTICE.archived : EDIT_NOTICE.readOnly}`);");
     expect(read("app/w/[slug]/p/[processId]/history/page.tsx")).toContain("actions={canEdit && !history.archived ?");
   });
 });

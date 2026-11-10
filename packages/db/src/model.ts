@@ -6,6 +6,8 @@ import {
   marketFromSchedule,
   NestingError,
   afterSaleSteps,
+  MAX_REWORK,
+  ModelError,
   type EngineMarket,
   type EngineDemand,
   type Distribution as EngineDistribution,
@@ -60,7 +62,11 @@ export interface ModelOptions {
   purposes?: boolean;
 }
 
-export class ModelError extends Error {}
+/**
+ * A model that can't be run, in words: the engine's own class, so one `instanceof ModelError` catches both what
+ * `toEngineModel` refuses and what the engine's pre-run checks refuse (a negative chance, a loop that takes no time).
+ */
+export { ModelError };
 
 /** The graph of one process revision, resolved for the engine. */
 interface Graph {
@@ -190,7 +196,8 @@ function workingStepOf(step: StepRow, next: EngineStep["next"], parent: { parent
     ...(step.person_id ? { person: step.person_id } : {}),
     work: Number(step.work_hours),
     wait: Number(step.wait_hours),
-    rework: Number(step.rework_rate),
+    // Capped at the engine's 95% (a stored 1, from before the database's cap, would redo an item forever).
+    rework: Math.min(MAX_REWORK, Number(step.rework_rate)),
     ...stepBaseValues(step),
     ...optional("workDist", engineDistribution(step.work_dist, step.work_params, Number(step.work_hours))),
     ...optional("waitDist", engineDistribution(step.wait_dist, step.wait_params, Number(step.wait_hours))),

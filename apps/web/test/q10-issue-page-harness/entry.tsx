@@ -39,7 +39,7 @@ window.mountIssue = ({ number, editor, noSolutions }) => {
   const processId = issue.links.find((l) => l.process_id)?.process_id ?? issue.process_id!;
   createRoot(document.getElementById("root")!).render(
     <SidebarProvider>
-      <div className="mx-auto max-w-6xl p-4">
+      <div className="p-4">
         <IssuePage
           issue={issue}
           issues={d.issues}
@@ -64,7 +64,7 @@ window.mountSolution = ({ id, editor }) => {
   const solution = d.solutions.solutions.find((s) => s.id === id)!;
   createRoot(document.getElementById("root")!).render(
     <SidebarProvider>
-      <div className="mx-auto max-w-6xl p-4">
+      <div className="p-4">
         <SolutionPage
           workspaceId={d.workspaceId}
           solutionId={solution.id}

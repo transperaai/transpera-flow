@@ -49,7 +49,7 @@ window.Worker = class extends NativeWorker {
 const mount = (node: React.ReactNode) =>
   createRoot(document.getElementById("root")!).render(
     <SidebarProvider>
-      <div className="mx-auto w-full min-w-0 max-w-6xl p-4">{node}</div>
+      <div className="mx-auto w-full min-w-0 p-4">{node}</div>
     </SidebarProvider>,
   );
 

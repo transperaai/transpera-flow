@@ -96,18 +96,32 @@ export async function discardDraft(processId: string): Promise<WriteResult> {
   return r.status === "not_found" ? forbidden : { status: "ok" };
 }
 
+const draftChanged = {
+  status: "error",
+  message: "This draft changed since you opened it: someone else published or discarded it, and another draft is open now. Nothing was published. Reload to see it.",
+} as const;
+
 /**
  * Make the draft live. Refused while steps are unconfirmed estimates unless
- * `acceptEstimates`; the choice is written to the audit log.
+ * `acceptEstimates`; the choice is written to the audit log. `draftId` is the
+ * draft the editor shows: if the process's draft is now another one (someone
+ * else published or discarded it, and a new one was opened), nothing is
+ * published. Omitted only by a caller that has no draft id; then whatever draft
+ * is open is published, as before.
  */
-export async function publishDraft(processId: string, acceptEstimates: unknown): Promise<PublishResult> {
-  if (!isId(processId) || typeof acceptEstimates !== "boolean") return invalid;
+export async function publishDraft(processId: string, acceptEstimates: unknown, draftId?: unknown): Promise<PublishResult> {
+  if (!isId(processId) || typeof acceptEstimates !== "boolean" || (draftId !== undefined && !isId(draftId))) return invalid;
   const session = await signedIn();
   if (!session.ok) return session.error;
   let data;
   try {
-    data = await rpc(session.db, "publish_process", { target_process: processId, accept_estimates: acceptEstimates });
+    data = await rpc(session.db, "publish_process", {
+      target_process: processId,
+      accept_estimates: acceptEstimates,
+      ...(draftId !== undefined ? { expected_draft: draftId } : {}),
+    });
   } catch (e) {
+    if (pgCode(e) === "55000" && /^draft changed/.test((e as { message?: string } | null)?.message ?? "")) return draftChanged;
     return failure(e) as PublishResult;
   }
   const r = data as Reply;
@@ -144,19 +158,14 @@ export async function insertProcessRows(revisionId: string, steps: unknown, edge
   if (!access.ok) return access.error;
   const { db, revision } = access;
   const owner = { revision_id: revision.id, workspace_id: revision.workspace_id, process_id: revision.process_id };
-  if (newSteps.length) {
-    try {
-      await db.insertInto("steps").values(newSteps.map((s) => ({ ...s!, ...owner }))).execute();
-    } catch (e) {
-      return failure(e);
-    }
-  }
-  if (newEdges.length) {
-    try {
-      await db.insertInto("edges").values(newEdges.map((e) => ({ ...e!, ...owner }))).execute();
-    } catch (e) {
-      return failure(e);
-    }
+  // One transaction: an edge the database refuses leaves none of the steps behind (undo brings both back together).
+  try {
+    await db.transaction().execute(async (trx) => {
+      if (newSteps.length) await trx.insertInto("steps").values(newSteps.map((s) => ({ ...s!, ...owner }))).execute();
+      if (newEdges.length) await trx.insertInto("edges").values(newEdges.map((e) => ({ ...e!, ...owner }))).execute();
+    });
+  } catch (e) {
+    return failure(e);
   }
   return { status: "ok" };
 }
@@ -169,19 +178,14 @@ export async function deleteProcessRows(revisionId: string, stepIds: unknown, ed
   const access = await editableRevision(revisionId);
   if (!access.ok) return access.error;
   const { db } = access;
-  if (edges.length) {
-    try {
-      await db.deleteFrom("edges").where("revision_id", "=", revisionId).where("id", "in", edges).execute();
-    } catch (e) {
-      return failure(e);
-    }
-  }
-  if (steps.length) {
-    try {
-      await db.deleteFrom("steps").where("revision_id", "=", revisionId).where("id", "in", steps).execute();
-    } catch (e) {
-      return failure(e);
-    }
+  // One transaction, so a refused step delete keeps its edges too.
+  try {
+    await db.transaction().execute(async (trx) => {
+      if (edges.length) await trx.deleteFrom("edges").where("revision_id", "=", revisionId).where("id", "in", edges).execute();
+      if (steps.length) await trx.deleteFrom("steps").where("revision_id", "=", revisionId).where("id", "in", steps).execute();
+    });
+  } catch (e) {
+    return failure(e);
   }
   return { status: "ok" };
 }

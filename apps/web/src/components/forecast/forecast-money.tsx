@@ -16,7 +16,7 @@ import { formatCurrency, formatNumber, formatPercent } from "@/lib/format";
 import { partMonthNote } from "@/lib/forecast/timeline";
 import { CompareChart } from "@/components/sandbox/compare-chart";
 
-const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
+const SECTION_TITLE = "text-base font-semibold";
 
 /** The sentence a Viewer reads where the costs would be. */
 export const COSTS_HIDDEN_NOTE = "Costs and profit are shown to Agency admins and the Owner.";
@@ -105,14 +105,15 @@ export function ForecastMoney({ view, currency, overheadsHref = null, span, cost
         <p className="text-sm text-muted-foreground">Over the next {span}: revenue, what the team and overheads cost, and the profit left, with the 10–90% range from 30 runs.</p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-money-tiles>
+      {/* The money figures as one flat strip above the chart (docs/plans/ui-cleanup.md, KpiTile): no card per tile. */}
+      <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] overflow-hidden rounded-xl border border-line bg-panel" data-money-tiles>
         {view.tiles.map((tile) => (
           <Tile key={tile.id} tile={tile} format={fmt} />
         ))}
         {view.costsHidden ? (
-          <Card className="justify-center gap-1 px-4 py-3 text-sm text-muted-foreground sm:col-span-1 lg:col-span-3" data-money-hidden-note>
+          <p className="-mt-px -ml-px flex min-w-0 items-center border-t border-l border-line px-4 py-3 text-sm text-muted-foreground" data-money-hidden-note>
             {costsNote}
-          </Card>
+          </p>
         ) : null}
       </div>
 
@@ -189,16 +190,16 @@ function Tile({ tile, format: fmt }: { tile: MoneyTile; format: (v: number) => s
   // A plan's tile adds up its months (each month keeps its range in the table); otherwise a figure with no spread is the same in every run.
   const below = range ? `Range ${range}` : !tile.ranged ? "The months added up; each month's range is in the table" : "The same in every run";
   return (
-    <Card className="gap-1 px-4 py-3" data-money-tile={tile.id}>
+    <div className="-mt-px -ml-px flex min-w-0 flex-col gap-1 border-t border-l border-line px-4 py-3" data-money-tile={tile.id}>
       <h3 className="flex items-center text-xs font-medium text-fg-2">
         {tile.label}
         <Help {...TILE_HELP[tile.id]} />
       </h3>
-      <p className="font-heading text-2xl font-semibold tabular-nums" data-money-value>
+      <p className="text-2xl font-semibold tabular-nums" data-money-value>
         {fmt(stat.mean)}
       </p>
       <p className="text-xs text-muted-foreground tabular-nums">{below}</p>
-    </Card>
+    </div>
   );
 }
 

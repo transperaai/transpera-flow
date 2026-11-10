@@ -128,6 +128,21 @@ describe("createSolution with automations (D53)", () => {
     expect(bad).toEqual({ status: "error", message: "Change 6: Adoption is a share from 0% to 100%." });
     expect(await solutions()).toHaveLength(0);
   });
+
+  it("saves the solution and its automations together: when the automations are refused, no solution or link is left behind", async () => {
+    // Stands in for any refusal of the second write (a check, a lost connection).
+    await tdb.client.query(`create function public.test_refuse_step_changes() returns trigger language plpgsql as $$
+      begin if new.step_changes is distinct from old.step_changes then raise exception 'refused' using errcode = '23514'; end if; return new; end $$`);
+    await tdb.client.query("create trigger test_refuse_step_changes before update on public.solutions for each row execute function public.test_refuse_step_changes()");
+    try {
+      const r = await createSolution(WS, { ...input(), stepChanges: [change(7, ids.audit)] });
+      expect(r).toEqual({ status: "error", message: "Some of those values aren't allowed." });
+      expect(await solutions()).toHaveLength(0);
+      expect(await links()).toHaveLength(0);
+    } finally {
+      await tdb.client.query("drop trigger test_refuse_step_changes on public.solutions; drop function public.test_refuse_step_changes()");
+    }
+  });
 });
 
 describe("createSolution", () => {

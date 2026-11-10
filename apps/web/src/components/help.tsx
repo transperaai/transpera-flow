@@ -44,7 +44,7 @@ export function Help({ label, description, example, className }: HelpProps) {
           aria-describedby={textId}
           data-slot="help"
           className={cn(
-            "ml-1 inline-grid size-[18px] shrink-0 cursor-help place-items-center rounded-full border-[1.5px] border-fg-3 bg-panel align-middle font-serif text-[11px] leading-none font-bold text-fg-2 italic",
+            "ml-1 inline-grid size-[18px] shrink-0 cursor-help place-items-center rounded-full border-[1.5px] border-fg-3 bg-panel align-middle font-serif text-2xs leading-none font-bold text-fg-2 italic",
             "outline-none hover:border-accent hover:bg-accent hover:text-accent-fg focus-visible:border-accent focus-visible:bg-accent focus-visible:text-accent-fg focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-accent data-[state=open]:bg-accent data-[state=open]:text-accent-fg",
             className,
           )}
@@ -62,14 +62,14 @@ export function Help({ label, description, example, className }: HelpProps) {
         side="bottom"
         align="center"
         collisionPadding={12}
-        className="w-72 max-w-[calc(100vw-24px)] gap-1.5 text-[13px] leading-snug font-normal tracking-normal normal-case"
+        className="w-72 max-w-[calc(100vw-24px)] gap-1.5 text-sm leading-snug font-normal tracking-normal normal-case"
         onOpenAutoFocus={(e) => e.preventDefault()}
         onCloseAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={on("outside")}
       >
         <span>{description}</span>
         <span className="text-fg-2">
-          <b className="mr-1 text-[10.5px] font-semibold tracking-wider text-accent uppercase">Example</b>
+          <b className="mr-1 text-2xs font-semibold tracking-wider text-accent uppercase">Example</b>
           {example}
         </span>
       </PopoverContent>

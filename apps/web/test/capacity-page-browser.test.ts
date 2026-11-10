@@ -91,8 +91,13 @@ describe("Capacity page", { timeout: 180_000 }, () => {
       for (const s of await page.locator("[data-room-sentence]").allInnerTexts()) expect(s).toMatch(/^Up to \d[\d,]* before .+ reach their utilisation threshold\.$/);
       for (const s of await page.locator("[data-room-next]").allInnerTexts()) expect(s).toMatch(/^Next client goes to: \S/);
       expect(await page.locator("[data-room-bar]").count()).toBe(2);
-      // The per-team ceilings are folded into "How this works".
-      expect(await page.locator("[data-room] details[data-how] [data-room-limits]").count()).toBe(2);
+      // The per-team ceilings are in "How this works", the (?) in each room panel's header.
+      expect(await page.locator("[data-room] [data-how]").count()).toBe(2);
+      for (const i of [0, 1]) {
+        await page.locator("[data-room] [data-how] button").nth(i).click();
+        expect(await page.locator("[data-how-text] [data-room-limits]").count()).toBe(1);
+        await page.keyboard.press("Escape");
+      }
 
       // Client-facing people: one bar per person per department, busiest first, with +N or full; the detail is in each row's title.
       expect(await page.locator("[data-people-table]").count()).toBe(2);
@@ -121,7 +126,9 @@ describe("Capacity page", { timeout: 180_000 }, () => {
         expect(await page.locator("[data-bottleneck] [data-at-risk] [data-stack]").count()).toBe(atRisk.length);
         expect(await page.locator("[data-bottleneck] [data-legend] li").count()).toBeGreaterThan(0);
         // Their biggest steps link to the process page, in "How this works".
-        const href = await page.locator("[data-bottleneck] details[data-how] [data-step-link]").first().getAttribute("href");
+        await page.locator("[data-bottleneck] [data-how] button").click();
+        const href = await page.locator("[data-how-text] [data-step-link]").first().getAttribute("href");
+        await page.keyboard.press("Escape");
         expect(href).toMatch(/^\/w\/example\/p\/[\w-]+\?step=\w+$/);
       }
 
@@ -140,9 +147,9 @@ describe("Capacity page", { timeout: 180_000 }, () => {
       for (const set of byPurpose.values()) expect(set.size).toBe(1);
       expect(new Set([...byPurpose.values()].map((v) => [...v][0])).size).toBe(byPurpose.size);
       expect(await page.locator("[data-named-clients] tbody tr").count()).toBe(13);
-      // Each widget folds its "How this works".
-      expect(await page.locator("details[data-how]").count()).toBeGreaterThanOrEqual(7);
-      expect(await page.locator("details[data-how][open]").count()).toBe(0);
+      // Each widget has its "How this works" behind a (?), closed.
+      expect(await page.locator("[data-how]").count()).toBeGreaterThanOrEqual(7);
+      expect(await page.locator("[data-how-text]").count()).toBe(0);
 
       // The page never scrolls sideways, and the people rows fit their card.
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

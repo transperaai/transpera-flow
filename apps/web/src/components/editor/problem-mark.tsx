@@ -11,7 +11,7 @@ export function ProblemMark({ problems, className = "absolute -top-2 -right-2" }
         role="img"
         tabIndex={0}
         aria-label={`To fix: ${text}`}
-        className="flex size-5 cursor-help items-center justify-center rounded-full border-2 border-panel bg-crit text-[11px] font-bold text-crit-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crit"
+        className="flex size-5 cursor-help items-center justify-center rounded-full border-2 border-panel bg-crit text-2xs font-bold text-crit-fg outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-crit"
       >
         !
       </span>

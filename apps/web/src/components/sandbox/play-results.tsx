@@ -1,10 +1,11 @@
 "use client";
 
-// The free-play Sandbox's results, on the right (D54, after capacity build P7; QA round 2 picks A1, B1, C1): charts, not words. In order: who's
-// overloaded and when (a team-by-month heatmap of the first year with a This scene / Today switch and its worst month named and outlined), then, under
-// one "how far ahead" filter (12 to 60 months), clients, MRR and DLER by department, each on a row of its own with how far this scene is ahead of
-// today's path at the horizon, and where the time goes (Today and This scene as stacked bars by purpose, with what moved). Each card's header carries its
-// one number with the change; on today's path there is no change and no dashed copy. Goal seek and "What matters most" stay hidden (D33).
+// The free-play Sandbox's results, the workbench's main pane (D54, after capacity build P7; QA round 2 picks A1 and C1; the UI cleanup's layout A). In
+// order: the verdict in a sentence and a flat strip of its figures (worst month, clients, profit, DLER, each against today's path), the company map
+// (the page's, folded away on request), then clients, MRR and DLER by department side by side in an auto-fit grid over the horizon picked in the
+// toolbar (12 to 60 months), each with how far this scene is ahead of today's path at the horizon, then who's overloaded and when (a team-by-month
+// heatmap of the first year with a This scene / Today switch and its worst month named and outlined) and where the time goes (Today and This scene as
+// stacked bars by purpose, with what moved). On today's path there is no change and no dashed copy. Goal seek and "What matters most" stay hidden (D33).
 
 import { useMemo, useState, type ReactNode } from "react";
 import { DLER_GOAL, DEFAULT_PURPOSES, type CapacitySetup, type PurposeCategory } from "@transpera-flow/db";
@@ -15,13 +16,15 @@ import { formatCurrency, formatNumber } from "@/lib/format";
 import { PLAY_HELP } from "@/lib/sandbox/play-help";
 import { heatRows, purposeMoves, purposeSlices, signedCount, signedMoney, worstMonth, type WorstMonth } from "@/lib/sandbox/play-results-data";
 import type { PlayRuns } from "@/lib/sandbox/use-play-runs";
-import { cn } from "@/lib/utils";
+import { KpiStrip, KpiTile } from "@/components/capacity/widgets";
 import { Heatmap, type HeatView } from "./play-busy";
-import { PlayChart, type PlayChartSeries } from "./play-chart";
+import { PLAY_SERIES_COLORS as COLORS, PlayChart, type PlayChartSeries } from "./play-chart";
 import { MovedLine, PurposeBar, PurposeLegend } from "./play-donuts";
-import { PLAY_HORIZONS, type PlayHorizon, type PlayMonths } from "./play-types";
+import { Segmented } from "./segmented";
+import type { PlayHorizon, PlayMonths } from "./play-types";
 
-const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
+/** The charts' grid: two or three side by side from about 1440px, one on a phone. */
+const CHART_GRID = "grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(20rem,100%),1fr))] gap-4";
 
 /** The heatmap and its worst month cover the first year, whatever the horizon: past that a column a month is too narrow to read. */
 const HEAT_MONTHS = 12;
@@ -33,7 +36,7 @@ export function PlayResults({
   moved,
   purposes = DEFAULT_PURPOSES,
   horizon = 12,
-  onHorizon,
+  map,
 }: {
   runs: PlayRuns;
   setup: CapacitySetup;
@@ -41,7 +44,8 @@ export function PlayResults({
   moved: boolean;
   purposes?: readonly PurposeCategory[];
   horizon?: PlayHorizon;
-  onHorizon?: (h: PlayHorizon) => void;
+  /** The company map section, drawn after the verdict's figures (and while the first run is still working). */
+  map?: ReactNode;
 }) {
   const { today, changed } = runs;
   const [view, setView] = useState<HeatView>("scene");
@@ -53,29 +57,34 @@ export function PlayResults({
 
   if (runs.status === "error") {
     return (
-      <div role="alert" data-run-error className="rounded-token border border-crit bg-crit-soft p-4 text-sm">
-        The simulation could not run: {runs.error}
+      <div className="flex min-w-0 flex-col gap-6">
+        <div role="alert" data-run-error className="rounded-md border border-crit bg-crit-soft p-4 text-sm">
+          The simulation could not run: {runs.error}
+        </div>
+        {map}
       </div>
     );
   }
   if (!today || !changed) {
     return (
-      <div role="status" aria-busy="true" data-running className="flex min-w-0 flex-col gap-4">
-        <p className="text-sm text-muted-foreground">
-          Working out today&apos;s path over the next {horizon} months…
-        </p>
+      <div className="flex min-w-0 flex-col gap-6">
+        <div role="status" aria-busy="true" data-running className="flex min-w-0 flex-col gap-3">
+          <p className="text-sm text-muted-foreground">Working out today&apos;s path over the next {horizon} months…</p>
+          <Skeleton className="h-[4.5rem] w-full rounded-xl" />
+        </div>
+        {map}
+        <div className={CHART_GRID} aria-hidden>
+          {[0, 1, 2].map((i) => (
+            <SectionCard key={i} id={`play-skeleton-${i}`} title={<Skeleton className="h-5 w-32" />} contentClassName="gap-2">
+              <Skeleton className="h-5 w-2/3" />
+              <Skeleton className="h-40 w-full" />
+            </SectionCard>
+          ))}
+        </div>
         <SectionCard id="play-overloaded" title="Who's overloaded, and when" contentClassName="gap-3">
           <Skeleton className="h-5 w-3/4" />
           <Skeleton className="h-40 w-full" />
         </SectionCard>
-        <div className="grid min-w-0 gap-4 sm:grid-cols-3">
-          {[0, 1, 2].map((i) => (
-            <SectionCard key={i} id={`play-skeleton-${i}`} title="Loading…" contentClassName="gap-2">
-              <Skeleton className="h-5 w-2/3" />
-              <Skeleton className="h-32 w-full" />
-            </SectionCard>
-          ))}
-        </div>
       </div>
     );
   }
@@ -122,66 +131,94 @@ export function PlayResults({
   const order = [...sceneSlices, ...todaySlices].map((s) => s.id).filter((id, i, all) => all.indexOf(id) === i);
   const moves = purposeMoves(todaySlices, sceneSlices);
 
+  // The verdict's figures: the levers' path at the horizon, against today's path once something has moved.
+  const sceneWorst = worstMonth(changed.outcome.people, heatN, teamName);
+  const todayWorst = moved ? worstMonth(today.outcome.people, heatN, teamName) : undefined;
+  const profitOf = (r: typeof changed) => r.run.result.monthly?.money?.profit[last]?.mean ?? null;
+  const profitNow = profitOf(changed);
+  const profitThen = profitOf(today);
+  const monthName = (w: WorstMonth) => months.long[w.month] ?? `month ${w.month + 1}`;
+  const atEnd = months.long[last] ?? `month ${n}`;
+
   return (
-    <div className="@container flex min-w-0 flex-col gap-4" data-play-results aria-busy={busy || undefined}>
-      <div className="flex flex-col gap-1">
-        <p className="text-sm text-muted-foreground" data-run-status>
-          {busy ? `Working it out (${runs.progress[0]} of ${runs.progress[1] || 1})…` : moved ? "This scene against today's path" : "Today's path. Move a lever or swap a block to see a change."}
-        </p>
-        {runs.problems.length > 0 && (
-          <ul className="list-disc pl-5 text-xs text-muted-foreground" data-play-problems>
-            {runs.problems.map((p, i) => (
-              <li key={i}>{p.message}</li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <SectionCard
-        id="play-overloaded"
-        title={
-          <span className="inline-flex items-center">
-            Who&apos;s overloaded, and when
-            <Help {...PLAY_HELP.overloaded} />
-          </span>
-        }
-        action={moved ? <HeatSwitch view={view} onChange={setView} /> : undefined}
-        contentClassName="gap-3"
-      >
-        <WorstLine worst={worst} other={worstOther} months={months.long} otherLabel={showToday ? "this scene" : "today's path"} />
-        <Heatmap rows={rows} months={monthNames.slice(0, heatN)} view={moved ? view : "today"} worst={worst?.month ?? null} />
-        <p className="sr-only" data-heat-shows>
-          Showing {heatLabel}, the next {heatN} months
-        </p>
-      </SectionCard>
-
-      <div className="flex min-w-0 flex-wrap items-center gap-2" data-play-horizon>
-        <span className="text-sm text-muted-foreground" id="play-horizon-label">
-          Show the next
-        </span>
-        <div role="group" aria-labelledby="play-horizon-label" className="inline-flex flex-wrap rounded-lg border border-border bg-muted/40 p-0.5 text-xs">
-          {PLAY_HORIZONS.map((h) => (
-            <button
-              key={h}
-              type="button"
-              aria-pressed={horizon === h}
-              data-play-horizon-option={h}
-              disabled={!onHorizon || busy}
-              onClick={() => onHorizon?.(h)}
-              className={cn(
-                "rounded-md px-2.5 py-1 font-medium tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed",
-                horizon === h ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {h}
-            </button>
-          ))}
+    <div className="@container flex min-w-0 flex-col gap-6" data-play-results aria-busy={busy || undefined}>
+      <section aria-label="Verdict" className="flex min-w-0 flex-col gap-3" data-play-verdict-section>
+        <div className="flex flex-col gap-1">
+          <p className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase" data-run-status>
+            {busy ? `Working it out (${runs.progress[0]} of ${runs.progress[1] || 1})…` : moved ? "This scene against today's path" : "Today's path"}
+          </p>
+          <p className="max-w-prose text-base text-fg [&_b]:font-semibold" data-play-summary>
+            {sceneWorst ? (
+              <>
+                Worst month is <b>{monthName(sceneWorst)}</b>, with {sceneWorst.count} {sceneWorst.count === 1 ? "person" : "people"} over their utilisation threshold
+                {todayWorst !== undefined && <> ({todayWorst ? `${todayWorst.count} in ${monthName(todayWorst)}` : "nobody"} on today&apos;s path)</>}.
+              </>
+            ) : (
+              <>Nobody goes over their utilisation threshold in the next {heatN} months{todayWorst ? ` (${todayWorst.count} in ${monthName(todayWorst)} on today's path)` : ""}.</>
+            )}{" "}
+            By {atEnd}: <b>{formatNumber(clientsNow, 0)} clients</b>
+            {moved && ` (${signedCount(clientsDelta)})`}
+            {profitNow !== null ? (
+              <>
+                {" "}
+                and <b>{money(profitNow)} profit</b> a month{moved && profitThen !== null && ` (${signedMoney(profitNow - profitThen, money)})`}.
+              </>
+            ) : (
+              <>
+                {" "}
+                and <b>{money(retNow)} MRR</b>{moved && ` (${signedMoney(retDelta, money)})`}.
+              </>
+            )}
+            {!moved && <span className="text-muted-foreground"> Move a lever or swap a process version to see a change.</span>}
+          </p>
+          {runs.problems.length > 0 && (
+            <ul className="list-disc pl-5 text-xs text-muted-foreground" data-play-problems>
+              {runs.problems.map((p, i) => (
+                <li key={i}>{p.message}</li>
+              ))}
+            </ul>
+          )}
         </div>
-        <span className="text-sm text-muted-foreground">months</span>
-        <Help {...PLAY_HELP.horizon} />
-      </div>
+        <KpiStrip data-play-kpis>
+          <KpiTile
+            data-play-kpi="worst"
+            label="Worst month"
+            value={sceneWorst ? monthName(sceneWorst) : "None"}
+            edge={sceneWorst ? "crit" : "good"}
+            sub={
+              <>
+                {sceneWorst ? `${sceneWorst.count} over their threshold` : "Nobody over their threshold"}
+                {todayWorst !== undefined && ` · today: ${todayWorst ? monthName(todayWorst) : "none"}`}
+              </>
+            }
+          />
+          <KpiTile data-play-kpi="clients" label={`Clients by ${atEnd}`} value={formatNumber(clientsNow, 0)} sub={moved ? `${signedCount(clientsDelta)} against today's path` : "On today's path"} />
+          {profitNow !== null ? (
+            <KpiTile
+              data-play-kpi="profit"
+              label={`Profit in ${atEnd}`}
+              value={money(profitNow)}
+              edge={profitNow < 0 ? "crit" : undefined}
+              sub={moved && profitThen !== null ? `${signedMoney(profitNow - profitThen, money)} a month against today's path` : "A month, on today's path"}
+            />
+          ) : (
+            <KpiTile data-play-kpi="mrr" label={`MRR in ${atEnd}`} value={money(retNow)} sub={moved ? `${signedMoney(retDelta, money)} against today's path` : "On today's path"} />
+          )}
+          {dlerKnown && (
+            <KpiTile
+              data-play-kpi="dler"
+              label={`DLER by ${atEnd}`}
+              value={dlerNow == null ? "n/a" : formatNumber(dlerNow, 1)}
+              edge={dlerNow == null ? undefined : dlerNow >= DLER_GOAL ? "good" : "warn"}
+              sub={moved && dlerThen != null ? `From ${formatNumber(dlerThen, 1)} today · goal ${formatNumber(DLER_GOAL, 1)}` : `Goal ${formatNumber(DLER_GOAL, 1)}`}
+            />
+          )}
+        </KpiStrip>
+      </section>
 
-      <div className="flex min-w-0 flex-col gap-4" data-play-charts>
+      {map}
+
+      <div className={CHART_GRID} data-play-charts>
         <ChartCard title="Clients by department" help={PLAY_HELP.clients}>
           <Header data-chart-header="clients">
             {formatNumber(clientsNow, 0)} clients {by}
@@ -192,7 +229,6 @@ export function PlayResults({
             months={monthNames}
             series={pair(c.clients, t.clients)}
             format={(v) => formatNumber(v, 0)}
-            full
             tipExtra={(i) => (
               <div className="mt-0.5 border-t border-line pt-1 text-muted-foreground tabular-nums" data-tip-won-lost>
                 Won {formatNumber(c.won[i] ?? 0, 1)} · Lost {formatNumber(c.lost[i] ?? 0, 1)}
@@ -220,7 +256,6 @@ export function PlayResults({
             title="MRR"
             months={monthNames}
             format={money}
-            full
             series={[
               { name: "MRR", values: c.retainers, color: "var(--accent)" },
               ...(moved ? [{ name: "MRR", values: t.retainers, color: "var(--accent)", dashed: true }] : []),
@@ -244,7 +279,7 @@ export function PlayResults({
                 DLER {dlerNow == null ? "n/a" : formatNumber(dlerNow, 1)} {by}
                 {moved && dlerThen != null && <Change> ({formatNumber(dlerThen, 1)} today)</Change>}
               </Header>
-              <PlayChart title="DLER by department" months={monthNames} series={pair(c.dler, t.dler)} format={(v) => formatNumber(v, 1)} goal={{ value: DLER_GOAL, label: `Goal ${formatNumber(DLER_GOAL, 1)}` }} full />
+              <PlayChart title="DLER by department" months={monthNames} series={pair(c.dler, t.dler)} format={(v) => formatNumber(v, 1)} goal={{ value: DLER_GOAL, label: `Goal ${formatNumber(DLER_GOAL, 1)}` }} />
               {moved && (
                 <Payoff data-payoff="dler">
                   Departments at the {formatNumber(DLER_GOAL, 1)} goal at {n} months: <b>{atGoal(c.dler)} of {c.dler.length}</b> ({atGoal(t.dler)} on today&apos;s path).
@@ -256,6 +291,25 @@ export function PlayResults({
           )}
         </ChartCard>
       </div>
+
+      <div className="grid min-w-0 items-start gap-4 2xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <SectionCard
+        id="play-overloaded"
+        title={
+          <span className="inline-flex items-center">
+            Who&apos;s overloaded, and when
+            <Help {...PLAY_HELP.overloaded} />
+          </span>
+        }
+        action={moved ? <HeatSwitch view={view} onChange={setView} /> : undefined}
+        contentClassName="gap-3"
+      >
+        <WorstLine worst={worst} other={worstOther} months={months.long} otherLabel={showToday ? "this scene" : "today's path"} />
+        <Heatmap rows={rows} months={monthNames.slice(0, heatN)} view={moved ? view : "today"} worst={worst?.month ?? null} />
+        <p className="sr-only" data-heat-shows>
+          Showing {heatLabel}, the next {heatN} months
+        </p>
+      </SectionCard>
 
       <SectionCard
         id="play-time"
@@ -278,26 +332,20 @@ export function PlayResults({
         </p>
         {moved && <MovedLine moves={moves} />}
       </SectionCard>
+      </div>
     </div>
   );
 }
 
 function HeatSwitch({ view, onChange }: { view: HeatView; onChange: (v: HeatView) => void }) {
   return (
-    <div role="group" aria-label="Show" data-heat-switch className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-xs">
-      {(["scene", "today"] as const).map((k) => (
-        <button
-          key={k}
-          type="button"
-          aria-pressed={view === k}
-          data-heat-switch-option={k}
-          onClick={() => onChange(k)}
-          className={cn("rounded-md px-2.5 py-1 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring", view === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
-        >
-          {k === "scene" ? "This scene" : "Today"}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      aria-label="Show"
+      data-heat-switch=""
+      value={view}
+      onChange={onChange}
+      options={(["scene", "today"] as const).map((k) => ({ value: k, label: k === "scene" ? "This scene" : "Today", attrs: { "data-heat-switch-option": k } }))}
+    />
   );
 }
 

@@ -21,8 +21,10 @@ import { routeFor } from "./simulate";
 import { servicingStepIds } from "./servicing";
 import { shadowPrice, type ShadowPriceOptions } from "./shadow-price";
 
-/** Weeks in a month, as the rest of the product reads a month (52 / 12). */
-export const WEEKS_PER_MONTH = 52 / 12;
+import { WEEKS_PER_MONTH } from "./model";
+
+/** Weeks in a month, as the rest of the product reads a month (52 / 12; model.ts). */
+export { WEEKS_PER_MONTH };
 
 /** The money settings (docs/analysis-rules.md "Editing the rules"). */
 export interface CostConfig {

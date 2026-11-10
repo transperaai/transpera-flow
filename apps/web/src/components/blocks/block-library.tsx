@@ -13,7 +13,9 @@ import { ChevronRight, Copy, Layers, MoreHorizontal, Pencil, Trash2 } from "luci
 import { isGroup, type BlockRow, type ProcessBundle } from "@transpera-flow/db";
 import { deleteBlock, duplicateBlock, renameBlock, type BlockOpResult } from "@/app/w/[slug]/block-actions";
 import { Help } from "@/components/help";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { EditMarker, ListCount, ListTable, ListTableHeader } from "@/components/processes/list-table";
+import { Button } from "@/components/ui/button";
+import { TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -28,7 +30,6 @@ import { blockListRow, blockUsers, filterBlockRows, formatBlockTime, relativeDat
 import { MAX_NAME } from "@/lib/blocks/save";
 import { EDIT_ONLY } from "@/lib/phone";
 import { solutionHref } from "@/lib/solutions/cards";
-import { cn } from "@/lib/utils";
 import { BlockMap } from "./block-map";
 
 // The map is heavy and only needed once a row is opened (as on the Processes page).
@@ -40,7 +41,6 @@ const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((
 /** The process that lends its roles and people to every block's map: not asked for until a row is opened, then kept for all rows. */
 type Base = { state: "idle" } | { state: "loading" } | { state: "error" } | { state: "none" } | { state: "ready"; bundle: ProcessBundle };
 
-const NEW_BLOCK_LINK = cn(buttonVariants(), "bg-edit text-edit-fg hover:bg-edit/90");
 const MAX_PILLS = 3;
 
 export interface BlockRole {
@@ -170,9 +170,11 @@ export function BlockLibrary({
 
   const newLink = newHref ? (
     <span className={`inline-flex items-center ${EDIT_ONLY}`} data-edit-entry>
-      <Link href={newHref} className={NEW_BLOCK_LINK} data-new-block>
-        + New block
-      </Link>
+      <Button asChild>
+        <Link href={newHref} data-new-block>
+          <EditMarker />+ New block
+        </Link>
+      </Button>
       <Help
         label="New block"
         description="Opens the Editor on an empty map. Build a few steps, name the block, and save it to the library to reuse it."
@@ -195,6 +197,8 @@ export function BlockLibrary({
             {mode === "readonly" ? <span>You can look at the library but not change it. Ask an Agency admin to add blocks.</span> : ""}
           </MetaLine>
         }
+        actions={newLink ?? undefined}
+        actionsLabel="Block library actions"
       />
       {list.length === 0 ? (
         <EmptyState
@@ -203,9 +207,11 @@ export function BlockLibrary({
           action={
             newHref ? (
               <span className={`inline-flex items-center ${EDIT_ONLY}`} data-edit-entry>
-                <Link href={newHref} className={NEW_BLOCK_LINK}>
-                  ✎ New block
-                </Link>
+                <Button asChild>
+                  <Link href={newHref}>
+                    <EditMarker />+ New block
+                  </Link>
+                </Button>
               </span>
             ) : undefined
           }
@@ -218,7 +224,7 @@ export function BlockLibrary({
             <ToolbarSearch value={search} onChange={setSearch} label="Search blocks" placeholder="Search blocks" />
             {roleOptions.length > 0 && <FilterMenu name="Who does it" options={roleOptions} selected={roleIds} onChange={setRoleIds} />}
             {filtering && <ClearFilters onClick={clear} />}
-            {newLink && <div className="ml-auto">{newLink}</div>}
+            <ListCount data-blocks-shown>{shown.length === list.length ? `${list.length} ${list.length === 1 ? "block" : "blocks"}` : `${shown.length} of ${list.length} blocks`}</ListCount>
           </Toolbar>
           <p role="status" aria-live="polite" className={status ? "text-xs text-muted-foreground" : "sr-only"} data-block-status>
             {status}
@@ -228,55 +234,56 @@ export function BlockLibrary({
               No blocks match. Clear the search or the filter to see them all.
             </EmptyState>
           ) : (
-            <div className="overflow-x-auto rounded-token border bg-card">
-              <table className="w-full min-w-0 border-collapse text-sm" aria-label="Blocks">
-                <thead>
-                  <tr className="border-b bg-muted/40 text-center text-xs text-muted-foreground">
-                    <th className="w-8 p-0" aria-label="Open or close" />
-                    <th className="px-2 py-2 text-left font-medium">Block</th>
-                    <th className="hidden px-2 py-2 font-medium md:table-cell">
+            <ListTable aria-label="Blocks">
+              <ListTableHeader>
+                <TableRow>
+                    <TableHead className="w-9 p-0" aria-label="Open or close" />
+                    <TableHead className="px-3">Block</TableHead>
+                    <TableHead className="hidden px-3 text-right md:table-cell">
                       Steps
                       <Help label="Steps" description="How many steps do work in this block. Boxes that only group steps are not counted." example="A block of three steps in one group shows 3." />
-                    </th>
-                    <th className="hidden px-2 py-2 font-medium lg:table-cell">
+                    </TableHead>
+                    <TableHead className="hidden px-3 lg:table-cell">
                       Who does it
                       <Help label="Who does it" description="The roles its steps are given to. Steps with no role aren't listed." example="Account manager, Specialist." />
-                    </th>
-                    <th className="hidden px-2 py-2 font-medium md:table-cell">
+                    </TableHead>
+                    <TableHead className="hidden px-3 text-right md:table-cell">
                       Time per run
                       <Help label="Time per run" description="The hands-on time of its steps added up, using each step's most likely time. Waiting isn't counted." example="Three steps of 30, 15 and 15 minutes show 1 h." />
-                    </th>
-                    <th className="hidden px-2 py-2 font-medium lg:table-cell">
+                    </TableHead>
+                    <TableHead className="hidden px-3 text-right lg:table-cell">
                       Automatable
                       <Help
                         label="Automatable"
                         description="The share of that hands-on time that sits in the steps' automatable part of their work split. A dash when no step has a split."
                         example="A 1 h block where half the time is automatable reads 50%."
                       />
-                    </th>
-                    <th className="px-2 py-2 font-medium">
+                    </TableHead>
+                    <TableHead className="px-3 text-right">
                       Used in
                       <Help
                         label="Used in"
                         description="How many saved solutions have this block in their map. A block put into one solution twice counts once. Click the number to see which."
                         example="Once “Client sign-off” sits in two solutions, this reads “2 solutions”."
                       />
-                    </th>
-                    <th className="hidden px-2 py-2 font-medium sm:table-cell">Updated</th>
-                    <th className="w-36 px-2 py-2 sm:w-44" aria-label="Open, edit or change the block" />
-                  </tr>
-                </thead>
-                <tbody>
+                    </TableHead>
+                    <TableHead className="hidden px-3 sm:table-cell">Updated</TableHead>
+                    <TableHead className="px-3" aria-label="Open, edit or change the block" />
+                </TableRow>
+              </ListTableHeader>
+              <TableBody>
                   {shown.map((r) => {
                     const isOpen = open.has(r.id);
                     const panel = `block-card-${r.id}`;
                     const href = canEdit ? editHref(r.id) : null;
                     return (
                       <Fragment key={r.id}>
-                        <tr data-block={r.id} className={`cursor-pointer border-b transition-colors hover:bg-muted/50 ${isOpen ? "bg-muted/40" : ""}`} onClick={() => toggle(r.id)}>
-                          <td className="p-0 pl-1">
-                            <button
+                        <TableRow data-block={r.id} data-state={isOpen ? "open" : undefined} className="cursor-pointer data-[state=open]:bg-muted/40" onClick={() => toggle(r.id)}>
+                          <TableCell className="p-0 pl-1">
+                            <Button
                               type="button"
+                              variant="ghost"
+                              size="icon-sm"
                               aria-expanded={isOpen}
                               aria-controls={panel}
                               aria-label={`${isOpen ? "Close" : "Open"} ${r.name}`}
@@ -285,12 +292,12 @@ export function BlockLibrary({
                                 e.stopPropagation();
                                 toggle(r.id);
                               }}
-                              className="grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                              className="text-muted-foreground"
                             >
-                              <ChevronRight aria-hidden className={`size-4 transition-transform ${isOpen ? "rotate-90" : ""}`} />
-                            </button>
-                          </td>
-                          <td className="w-full max-w-0 min-w-28 px-2 py-2.5 sm:min-w-44">
+                              <ChevronRight aria-hidden className={`transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                            </Button>
+                          </TableCell>
+                          <TableCell className="w-full max-w-0 min-w-28 px-3 py-2.5 sm:min-w-44">
                             <span className="block min-w-0 truncate font-semibold" data-block-name>
                               {r.name}
                             </span>
@@ -299,61 +306,52 @@ export function BlockLibrary({
                                 {r.line}
                               </span>
                             )}
-                          </td>
-                          <td className="hidden px-2 py-2.5 text-center tabular-nums md:table-cell" data-block-steps-count>
+                          </TableCell>
+                          <TableCell className="hidden px-3 py-2.5 text-right tabular-nums md:table-cell" data-block-steps-count>
                             {r.steps}
-                          </td>
-                          <td className="hidden px-2 py-2.5 text-center lg:table-cell" data-block-roles>
+                          </TableCell>
+                          <TableCell className="hidden px-3 py-2.5 lg:table-cell" data-block-roles>
                             <RolePills ids={r.roleIds} roles={roleName} />
-                          </td>
-                          <td className="hidden px-2 py-2.5 text-center whitespace-nowrap tabular-nums md:table-cell" data-block-time>
+                          </TableCell>
+                          <TableCell className="hidden px-3 py-2.5 text-right whitespace-nowrap tabular-nums md:table-cell" data-block-time>
                             {formatBlockTime(r.hours)}
-                          </td>
-                          <td className="hidden px-2 py-2.5 text-center tabular-nums lg:table-cell" data-block-auto>
+                          </TableCell>
+                          <TableCell className="hidden px-3 py-2.5 text-right tabular-nums lg:table-cell" data-block-auto>
                             {r.automatable === null ? <span className="text-muted-foreground">–</span> : `${Math.round(r.automatable * 100)}%`}
-                          </td>
-                          <td className="px-2 py-2.5 text-center whitespace-nowrap" data-block-used onClick={(e) => e.stopPropagation()}>
+                          </TableCell>
+                          <TableCell className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums" data-block-used onClick={(e) => e.stopPropagation()}>
                             <UsedIn row={r} base={solutionsBase} />
-                          </td>
-                          <td className="hidden px-2 py-2.5 text-center text-xs whitespace-nowrap text-muted-foreground sm:table-cell" data-block-updated>
+                          </TableCell>
+                          <TableCell className="hidden px-3 py-2.5 text-xs whitespace-nowrap text-muted-foreground sm:table-cell" data-block-updated>
                             {relativeDate(r.updatedAt)}
-                          </td>
-                          <td className="px-2 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                          </TableCell>
+                          <TableCell className="px-3 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                             <span className="inline-flex items-center gap-1">
-                              <button
+                              <Button
                                 type="button"
+                                variant="outline"
+                                size="sm"
                                 aria-expanded={isOpen}
                                 aria-controls={panel}
                                 aria-label={`Open ${r.name}`}
                                 data-block-open
                                 onClick={() => toggle(r.id)}
-                                className="inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium whitespace-nowrap hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                               >
                                 {isOpen ? "Close" : "Open"}
-                              </button>
+                              </Button>
                               {href && (
-                                <Link
-                                  href={href}
-                                  aria-label={`Edit ${r.name}`}
-                                  data-block-edit
-                                  data-edit-entry
-                                  className={`inline-flex h-7 items-center rounded-md border border-edit/60 px-2 text-xs font-medium whitespace-nowrap text-edit hover:bg-edit/10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none ${EDIT_ONLY}`}
-                                >
-                                  Edit
-                                </Link>
+                                <Button variant="outline" size="sm" asChild className={EDIT_ONLY}>
+                                  <Link href={href} aria-label={`Edit ${r.name}`} data-block-edit data-edit-entry>
+                                    <EditMarker /> Edit
+                                  </Link>
+                                </Button>
                               )}
                               {canEdit && (
                                 <DropdownMenu>
                                   <DropdownMenuTrigger asChild>
-                                    <button
-                                      type="button"
-                                      aria-label={`Change ${r.name}`}
-                                      data-block-menu={r.name}
-                                      data-edit-entry
-                                      className={`grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring ${EDIT_ONLY}`}
-                                    >
-                                      <MoreHorizontal aria-hidden className="size-4" />
-                                    </button>
+                                    <Button type="button" variant="ghost" size="icon-sm" aria-label={`Change ${r.name}`} data-block-menu={r.name} data-edit-entry className={`text-muted-foreground ${EDIT_ONLY}`}>
+                                      <MoreHorizontal aria-hidden />
+                                    </Button>
                                   </DropdownMenuTrigger>
                                   <DropdownMenuContent align="end" className="w-auto min-w-44">
                                     <DropdownMenuItem onSelect={() => setDialog({ mode: "rename", row: r })} className="whitespace-nowrap">
@@ -369,21 +367,20 @@ export function BlockLibrary({
                                 </DropdownMenu>
                               )}
                             </span>
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                         {isOpen && (
-                          <tr id={panel} className="border-b bg-muted/20" data-block-panel={r.id}>
-                            <td colSpan={9} className="p-3 sm:p-4">
+                          <TableRow id={panel} className="bg-muted/20 hover:bg-muted/20" data-block-panel={r.id}>
+                            <TableCell colSpan={9} className="p-3 sm:p-4">
                               <BlockCard block={list.find((b) => b.id === r.id)!} base={wantsBase ? base : { state: "none" }} />
-                            </td>
-                          </tr>
+                            </TableCell>
+                          </TableRow>
                         )}
                       </Fragment>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+              </TableBody>
+            </ListTable>
           )}
         </div>
       )}
@@ -398,7 +395,7 @@ function RolePills({ ids, roles }: { ids: string[]; roles: Map<string, BlockRole
   if (!known.length) return <span className="text-muted-foreground">–</span>;
   const extra = known.length - MAX_PILLS;
   return (
-    <span className="inline-flex flex-wrap items-center justify-center gap-1">
+    <span className="inline-flex flex-wrap items-center gap-1">
       {known.slice(0, MAX_PILLS).map((r) => (
         <span key={r.id} className="inline-flex items-center gap-1 rounded-full border bg-card px-2 py-0.5 text-xs whitespace-nowrap" data-role-pill>
           {r.color && <i aria-hidden className="size-1.5 rounded-full" style={{ background: r.color }} />}
@@ -450,7 +447,7 @@ function BlockCard({ block, base }: { block: BlockRow; base: Base }) {
     <div className="flex min-w-0 flex-col gap-3">
       {bundle.steps.length === 0 || base.state === "none" ? (
         // No steps to draw, or no process to draw them on: the small picture (which says "No steps in this block yet.").
-        <div className="overflow-x-auto rounded-token border bg-card p-2">
+        <div className="overflow-x-auto rounded-lg border border-line bg-card p-2">
           <BlockMap block={bundle} label={`Map of ${block.name}: ${steps} ${steps === 1 ? "step" : "steps"}`} />
         </div>
       ) : base.state === "error" ? (
@@ -458,7 +455,7 @@ function BlockCard({ block, base }: { block: BlockRow; base: Base }) {
           Couldn&apos;t load the map. Close the row and open it again.
         </p>
       ) : map ? (
-        <div className="min-w-0 overflow-hidden rounded-token border bg-card" data-block-canvas>
+        <div className="min-w-0 overflow-hidden rounded-lg border border-line bg-card" data-block-canvas>
           <ProcessCanvas bundle={map} showPlayback={false} showLanes={false} height="auto" legend zoomControls />
         </div>
       ) : (

@@ -95,6 +95,19 @@ describe("sign-in settings", () => {
     expect(authEnv({ ...SETTINGS, APP_DATABASE_URL: "" })?.appDatabaseUrl).toBe(SETTINGS.DATABASE_URL);
   });
 
+  it("in production, refuses to query as the owner: APP_DATABASE_URL must be set and differ from DATABASE_URL", () => {
+    for (const prod of [{ NODE_ENV: "production" }, { VERCEL_ENV: "production" }]) {
+      expect(() => authEnv({ ...SETTINGS, ...prod })).toThrow(/APP_DATABASE_URL is not set/);
+      expect(() => authEnv({ ...SETTINGS, ...prod, APP_DATABASE_URL: "  " })).toThrow(/APP_DATABASE_URL is not set/);
+      expect(() => authEnv({ ...SETTINGS, ...prod, APP_DATABASE_URL: ` ${SETTINGS.DATABASE_URL} ` })).toThrow(/APP_DATABASE_URL is the same as DATABASE_URL/);
+      expect(authEnv({ ...SETTINGS, ...prod, APP_DATABASE_URL: "postgres://authenticator@x/y" })?.appDatabaseUrl).toBe("postgres://authenticator@x/y");
+    }
+    // Demo mode (no database) stays demo mode, and development and tests still fall back.
+    expect(authEnv({ NODE_ENV: "production" })).toBeNull();
+    expect(authEnv({ ...SETTINGS, NODE_ENV: "development" })?.appDatabaseUrl).toBe(SETTINGS.DATABASE_URL);
+    expect(authEnv({ ...SETTINGS, NODE_ENV: "test", VERCEL_ENV: "preview" })?.appDatabaseUrl).toBe(SETTINGS.DATABASE_URL);
+  });
+
   it("defaults to Google and reads AUTH_PROVIDERS", () => {
     expect(parseProviders(undefined)).toEqual(["google"]);
     expect(parseProviders("")).toEqual(["google"]);

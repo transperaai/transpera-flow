@@ -10,14 +10,15 @@ import { createProcess } from "@/app/w/[slug]/process-actions";
 import { PageHeader } from "@/components/page-kit";
 import { NotPublished } from "@/components/shell/not-published";
 import { Page } from "@/components/shell/page";
+import { ShellHeader } from "@/components/shell/shell-header";
 import { SourceLinkingScope } from "@/components/sources/linking-scope";
 import { canEditWorkspace } from "@/lib/access-data";
 import { isId } from "@/lib/sources/validate";
 import { loadLiveProcess, loadPublishState, loadWorkspaceIssues, loadWorkspaceSandboxScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /**
- * The Sandbox (capacity build P7, D38): free play. The company map on top (click a process to load another version of it), the levers on
- * the left and the results on the right: a verdict and four charts against today's path. Nothing is saved; the levers reset when you leave. Everyone who
+ * The Sandbox (capacity build P7, D38): free play, as a workbench. A toolbar, the levers on the left and the results on the right: a verdict, the
+ * company map (click a process to load another version of it) and the charts against today's path. Nothing is saved; the levers reset when you leave. Everyone who
  * can read the workspace plays; Stored scenarios stay in the database, and
  * the old scenario page is behind SANDBOX_SCENARIOS_SHOWN.
  */
@@ -31,7 +32,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
     if (!state) notFound();
     const canEdit = await canEditWorkspace(state.workspace.id);
     return (
-      <Page title="Sandbox" width="max-w-6xl" hideHeader>
+      <Page title="Sandbox" hideHeader>
         <PageHeader label="Sandbox" eyebrow={<span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Company</span>} title="Sandbox" />
         <NotPublished
           what="The Sandbox runs the published processes forward month by month to show who gets too busy, and when, and lets you try changes before you make them."
@@ -61,10 +62,13 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
     const chosen = typeof companyParam === "string" ? (companyParam === "draft" ? companyRevisions.find((r) => r.status === "draft") : companyRevisions.find((r) => r.id === companyParam)) : undefined;
     const company = chosen && !chosen.live ? ((await loadCompanyRevision(ws, chosen.id)) ?? liveCompany) : liveCompany;
     const companyRevisionId = chosen && company !== liveCompany ? chosen.id : (companyRevisions.find((r) => r.live)?.id ?? null);
+    // A workbench (docs/plans/ui-cleanup.md): from `lg` up it fills the viewport under the shell's bar and its panes scroll on their own; on a
+    // phone it is one column and the page scrolls.
     return (
-      <Page title="Sandbox" width="max-w-6xl" hideHeader>
+      <div className="flex min-w-0 flex-col lg:h-svh">
+        <ShellHeader title="Sandbox" />
         <PlayPage live={live} parts={parts} company={company} setup={setup} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} laneInput={laneInput} companyRevisions={companyRevisions} companyRevisionId={companyRevisionId} initialSolutionId={typeof solutionParam === "string" && isId(solutionParam) ? solutionParam : null} />
-      </Page>
+      </div>
     );
   }
   const [issues, sources, canEdit, scenarios, solutions] = await Promise.all([
@@ -76,7 +80,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
   ]);
   const base = `/w/${slug}`;
   return (
-    <Page title="Sandbox" width="max-w-6xl" hideHeader>
+    <Page title="Sandbox" hideHeader>
       <SourceLinkingScope workspaceId={ws} sources={sources} canEdit={canEdit}>
         <SandboxView
           live={live}

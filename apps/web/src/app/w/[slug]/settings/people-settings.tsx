@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { DEFAULT_AVAILABILITY_FLOOR } from "@transpera-flow/engine";
-import { ChecklistField, DateField, NumberField, TextField, ToggleField } from "@/components/fields";
+import { ChecklistField, DateField, FieldRows, NumberField, TextField, ToggleField } from "@/components/fields";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
+import { useAddForm } from "@/components/settings/use-add-form";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -43,7 +44,7 @@ export function SimulationSettings({ data }: { data: WorkspaceSettingsData }) {
   const ownersOnly = canManage ? undefined : "Only Agency admins can change this.";
   return (
     <SettingsSection id="simulation" title="Simulation" description="Limits on how the simulation treats people's time.">
-      <div className="grid gap-4 sm:grid-cols-2">
+      <FieldRows>
         <ToggleField
           label="Per-person times"
           value={workspace.settings.capacity_factor_enabled === true}
@@ -94,7 +95,7 @@ export function SimulationSettings({ data }: { data: WorkspaceSettingsData }) {
             example: "At 10%, someone with a 40-hour week can work up to 4 hours extra before they count as overloaded.",
           }}
         />
-      </div>
+      </FieldRows>
     </SettingsSection>
   );
 }
@@ -103,12 +104,9 @@ const NOT_SENT: ActionResult = {};
 
 /** `onAdded` runs once a person has been added (the Set up page closes its dialog); `className` replaces the form's spacing. */
 export function AddPerson({ data, onAdded, className }: { data: WorkspaceSettingsData; onAdded?: () => void; className?: string }) {
-  const [state, action, pending] = useActionState<ActionResult, FormData>(createPerson.bind(null, data.workspace.id), NOT_SENT);
-  useEffect(() => {
-    if (state !== NOT_SENT && !state.error) onAdded?.();
-  }, [state, onAdded]);
+  const { state, pending, onSubmit } = useAddForm<ActionResult>(createPerson.bind(null, data.workspace.id), NOT_SENT, onAdded);
   return (
-    <form action={action} className={cn("flex flex-wrap items-end gap-2", className ?? "mb-4")}>
+    <form onSubmit={onSubmit} className={cn("flex flex-wrap items-end gap-2", className ?? "mb-4")}>
       <label className="flex flex-col gap-1">
         <HelpLabel label="Name" description="The person's name, as it appears across the app." example="Maya Collins" />
         <Input name="name" required maxLength={200} />
@@ -277,8 +275,7 @@ function Leave({
   leave: WorkspaceSettingsData["personLeave"];
   disabled: boolean;
 }) {
-  const [state, action, pending] = useActionState<ActionResult, FormData>(addLeave.bind(null, personId, workspaceId), {});
-  const [removing, startRemoving] = useTransition();
+  const { state, pending, onSubmit } = useAddForm<ActionResult>(addLeave.bind(null, personId, workspaceId), {});
   const [removeError, setRemoveError] = useState<string>();
   return (
     <fieldset>
@@ -300,20 +297,7 @@ function Leave({
                 {l.start_date === l.end_date ? l.start_date : `${l.start_date} to ${l.end_date}`}
               </span>
               {l.note && <span className="text-fg-2">{l.note}</span>}
-              {!disabled && (
-                <Button variant="link" size="xs" className="h-auto p-0 text-muted-foreground underline hover:text-destructive"
-                  type="button"
-                  disabled={removing}
-                  onClick={() =>
-                    startRemoving(async () => {
-                      const r = await removeLeave(l.id);
-                      setRemoveError(r.error);
-                    })
-                  }
-                >
-                  Remove
-                </Button>
-              )}
+              {!disabled && <RemoveLeave id={l.id} when={l.start_date === l.end_date ? l.start_date : `${l.start_date} to ${l.end_date}`} onDone={setRemoveError} />}
             </li>
           ))}
         </ul>
@@ -324,7 +308,7 @@ function Leave({
         </p>
       )}
       {!disabled && (
-        <form action={action} className="mt-2 flex flex-wrap items-end gap-2">
+        <form onSubmit={onSubmit} className="mt-2 flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1">
             <HelpLabel label="First day" description="The first day of the leave." example="Monday 14 July." />
             <Input type="date" name="start_date" required />
@@ -351,5 +335,41 @@ function Leave({
         </form>
       )}
     </fieldset>
+  );
+}
+
+/** Remove for one booking of leave, asked once first ("Remove leave 4 to 15 August?"), as a role's Remove is. */
+function RemoveLeave({ id, when, onDone }: { id: string; when: string; onDone: (error: string | undefined) => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [removing, start] = useTransition();
+  if (!confirming) {
+    return (
+      <Button variant="link" size="xs" className="h-auto p-0 text-muted-foreground underline hover:text-destructive" type="button" onClick={() => setConfirming(true)}>
+        Remove
+      </Button>
+    );
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-2" data-confirm-remove-leave>
+      <span>Remove leave {when}?</span>
+      <Button
+        variant="destructive"
+        size="xs"
+        type="button"
+        disabled={removing}
+        onClick={() =>
+          start(async () => {
+            const r = await removeLeave(id);
+            onDone(r.error);
+            if (r.error) setConfirming(false);
+          })
+        }
+      >
+        {removing ? "Removing…" : "Remove"}
+      </Button>
+      <Button variant="outline" size="xs" type="button" disabled={removing} onClick={() => setConfirming(false)}>
+        Cancel
+      </Button>
+    </span>
   );
 }

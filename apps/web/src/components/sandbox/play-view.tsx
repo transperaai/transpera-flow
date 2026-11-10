@@ -1,19 +1,23 @@
 "use client";
 
-// The free-play Sandbox (capacity build P7, docs/plans/capacity/p7-sandbox-brief.md; decisions D28 to D38; Q16): the company map on top (click a process to
-// load another version of it), the levers on the left, the results on the right. Nothing is saved: the levers are this component's state and reset
+// The free-play Sandbox (capacity build P7, docs/plans/capacity/p7-sandbox-brief.md; decisions D28 to D38; Q16), as a workbench: a toolbar (version,
+// horizon, Reset, Export), the levers on the left, the results on the right (the verdict and its figures, the company map, where a click on a process
+// loads another version of it, then the charts). Nothing is saved: the levers are this component's state and reset
 // when you leave the page. Every lever change re-runs in the worker (debounced), against today's path, and the result charts follow.
 
 import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { defaultPlay, monthKey, monthShort, playIsDefault, type CapacitySetup, type PlayState, type PurposeCategory } from "@transpera-flow/db";
 import type { PreparedPlay } from "@transpera-flow/db/sandbox";
-import { MetaLine, PageHeader } from "@/components/page-kit";
+import { Help } from "@/components/help";
+import { Button } from "@/components/ui/button";
+import { PLAY_HELP } from "@/lib/sandbox/play-help";
 import { usePlayRuns, type PlayRuns } from "@/lib/sandbox/use-play-runs";
 import { PlayLevers } from "./play-levers";
 import { PlayMapCard, type PlayMapApi } from "./play-map";
 import { PlayResults } from "./play-results";
-import type { PlayHorizon, PlayMonths, PlayProcess } from "./play-types";
+import { Segmented } from "./segmented";
+import { PLAY_HORIZONS, type PlayHorizon, type PlayMonths, type PlayProcess } from "./play-types";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -43,8 +47,10 @@ export interface PlayViewProps {
   prepare: (play: PlayState) => PreparedPlay;
   /** The company map, drawn by the page: the run playing on it, the new-version badges and a click on a process (which opens its version popover). */
   map?: (runs: PlayRuns, api: PlayMapApi) => ReactNode;
-  /** Above the map card's summary line: the "Company map" version select. */
+  /** In the map section, above its summary line: what the company map version runs with (its notes). */
   mapHeader?: ReactNode;
+  /** In the toolbar: the "Company map" version select. */
+  versionSelect?: ReactNode;
   /** The Export menu for the run on screen. */
   exportSlot?: (state: { runs: PlayRuns; play: PlayState }) => ReactNode;
   /** `/w/<slug>`, for the link to Set up. */
@@ -72,51 +78,73 @@ export function PlayView(props: PlayViewProps) {
   const leverMonths = useMemo(() => (horizon === 12 ? months : playMonths(startDate)), [horizon, months, startDate]);
   const moved = !playIsDefault(play) || mapKey !== null;
   const expectedWins = runs.today ? runs.today.run.result.kpi.won.mean / horizon : null;
+  const busy = runs.status === "running";
 
+  const map = <PlayMapCard play={play} setPlay={setPlay} processes={processes} months={leverMonths} header={props.mapHeader} canvas={props.map ? (api) => props.map!(runs, api) : undefined} />;
+
+  // A workbench (docs/plans/ui-cleanup.md, WorkbenchPage): a one-row toolbar, then the levers pane and the results pane, each scrolling on its own from
+  // `lg` up (the page around it gives it the viewport's height). On a phone the panes stack and the page scrolls.
   return (
-    <div className="flex min-w-0 flex-col gap-6" data-sandbox-play data-moved={moved ? "true" : "false"} data-run-ms={runs.changed ? Math.round(runs.changed.ms) : undefined}>
-      <PageHeader
-        label="Sandbox"
-        eyebrow={<span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Company</span>}
-        title="Sandbox"
-        meta={
-          <MetaLine>
-            <span data-play-note>Load another map for a process (an automation is part of a version of it) and pull the levers, then watch the months ahead change. Nothing here is saved and nothing touches live data: the levers reset when you leave.</span>
-          </MetaLine>
-        }
-        actionsLabel="Sandbox actions"
-        actions={props.exportSlot?.({ runs, play })}
-      />
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-hidden"
+      data-sandbox-play
+      data-moved={moved ? "true" : "false"}
+      data-run-ms={runs.changed ? Math.round(runs.changed.ms) : undefined}
+    >
+      <div role="toolbar" aria-label="Sandbox actions" className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-panel px-4 py-2 sm:px-6" data-play-toolbar>
+        <h1 className="inline-flex items-center text-base font-semibold">
+          Sandbox
+          <Help label="Sandbox" description={NOTE} example="Load the automated version of Reporting from March, add two clients a month and see whether the team copes." />
+        </h1>
+        {props.versionSelect}
+        <div className="flex items-center gap-2" data-play-horizon>
+          <span className="text-xs text-muted-foreground" id="play-horizon-label">
+            Months ahead
+          </span>
+          <Segmented
+            aria-labelledby="play-horizon-label"
+            value={horizon}
+            disabled={!onHorizon || busy}
+            onChange={(h) => onHorizon?.(h)}
+            options={PLAY_HORIZONS.map((h) => ({ value: h, label: h, attrs: { "data-play-horizon-option": h } }))}
+          />
+          <Help {...PLAY_HELP.horizon} />
+        </div>
+        <span className="flex-1" />
+        <Button type="button" variant="outline" size="sm" onClick={() => setPlay(defaultPlay())} data-play-reset>
+          Reset levers
+        </Button>
+        {props.exportSlot?.({ runs, play })}
+      </div>
       {modelError && (
-        <div role="alert" data-model-error className="rounded-token border border-crit bg-crit-soft p-3 text-sm">
+        <div role="alert" data-model-error className="shrink-0 border-b border-crit bg-crit-soft px-4 py-2 text-sm sm:px-6">
           The company can&apos;t be simulated yet: {modelError}
         </div>
       )}
-      <PlayMapCard play={play} setPlay={setPlay} processes={processes} months={leverMonths} header={props.mapHeader} canvas={props.map ? (api) => props.map!(runs, api) : undefined} />
 
-      <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[22rem_minmax(0,1fr)]">
-        <div className="min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto" data-play-levers-column>
-          <PlayLevers
-            play={play}
-            setPlay={setPlay}
-            setup={setup}
-            months={leverMonths}
-            expectedWinsPerMonth={expectedWins}
-          />
+      <div className="grid min-h-0 min-w-0 flex-1 lg:grid-cols-[20rem_minmax(0,1fr)]">
+        <div className="min-h-0 min-w-0 border-b border-line bg-panel px-4 pt-3 pb-6 sm:px-6 lg:overflow-y-auto lg:border-r lg:border-b-0 lg:px-4" data-play-levers-column>
+          <PlayLevers play={play} setPlay={setPlay} setup={setup} months={leverMonths} expectedWinsPerMonth={expectedWins} />
+          {props.base && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Baselines, tiers, salaries and utilisation thresholds are set in{" "}
+              <Link href={`${props.base}/settings/people`} className="font-medium text-accent hover:underline">
+                Settings
+              </Link>
+              . Every baseline there is a lever here.
+            </p>
+          )}
         </div>
-        <PlayResults runs={runs} setup={setup} months={months} moved={moved} purposes={props.purposes} horizon={horizon} onHorizon={onHorizon} />
+        <div className="min-h-0 min-w-0 lg:overflow-y-auto" data-play-main>
+          <div className="flex min-w-0 flex-col gap-6 px-4 pt-5 pb-12 sm:px-6 lg:px-8">
+            <PlayResults runs={runs} setup={setup} months={months} moved={moved} purposes={props.purposes} horizon={horizon} map={map} />
+          </div>
+        </div>
       </div>
-
-      {props.base && (
-        <p className="text-xs text-muted-foreground">
-          Baselines, tiers, salaries and utilisation thresholds are set in{" "}
-          <Link href={`${props.base}/settings/people`} className="font-medium text-accent hover:underline">
-            Settings
-          </Link>
-          . Every baseline there is a lever here.
-        </p>
-      )}
-
     </div>
   );
 }
+
+/** What the Sandbox is, behind the (i) in the toolbar. */
+const NOTE =
+  "Load another map for a process (an automation is part of a version of it) and pull the levers on the left, then watch the months ahead change on the right. Nothing here is saved and nothing touches live data: the levers reset when you leave.";

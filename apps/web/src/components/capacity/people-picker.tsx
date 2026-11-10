@@ -96,7 +96,7 @@ export function PeoplePicker({ groups, value, onChange, label }: { groups: Picke
         <button
           ref={button}
           type="button"
-          className="flex min-h-10 min-w-0 flex-1 items-center justify-between gap-2 rounded-token border border-line-2 bg-panel px-3 py-2 text-left text-sm font-medium shadow-xs outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-h-10 min-w-0 flex-1 items-center justify-between gap-2 rounded-md border border-line-2 bg-panel px-3 py-2 text-left text-sm font-medium shadow-xs outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-ring"
           aria-haspopup="true"
           aria-expanded={open}
           aria-controls={`${id}-list`}
@@ -116,7 +116,7 @@ export function PeoplePicker({ groups, value, onChange, label }: { groups: Picke
         {value.length > 0 && (
           <button
             type="button"
-            className="rounded-token border border-line px-3 text-sm text-fg-2 outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-ring"
+            className="rounded-md border border-line px-3 text-sm text-fg-2 outline-none hover:bg-panel-2 focus-visible:ring-2 focus-visible:ring-ring"
             onClick={() => {
               onChange([]);
               button.current?.focus();
@@ -133,7 +133,7 @@ export function PeoplePicker({ groups, value, onChange, label }: { groups: Picke
           id={`${id}-list`}
           role="group"
           aria-label={label}
-          className="absolute inset-x-0 top-full z-20 mt-1 max-h-80 overflow-y-auto rounded-token border border-line-2 bg-panel p-1.5 shadow-[var(--shadow)]"
+          className="absolute inset-x-0 top-full z-20 mt-1 max-h-80 overflow-y-auto rounded-md border border-line-2 bg-panel p-1.5 shadow-[var(--shadow)]"
           onKeyDown={onListKey}
           data-leaver-options
         >

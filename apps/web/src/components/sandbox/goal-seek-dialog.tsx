@@ -160,7 +160,7 @@ function GoalSeekPanel(p: GoalSeekDialogProps) {
   const add = () => {
     if (!outcome || !used || outcome.answer.kind !== "boundary" || !sentence) return;
     const change = goalChange(used.choice, outcome.answer.x);
-    p.onAdd({ lever: change.lever, target: change.target ?? "", ...(change.from ? { month: change.from } : {}), op: change.op, value: change.value, note: goalNote(sentence, new Date().toISOString().slice(0, 10)) });
+    p.onAdd({ lever: change.lever, target: change.target ?? "", ...(change.from ? { month: change.from } : {}), op: change.op, value: change.value, note: goalNote(sentence, localToday()) });
     p.onClose();
   };
   const { options, none } = optionsFor();
@@ -357,4 +357,10 @@ function GoalSeekPanel(p: GoalSeekDialogProps) {
       </DialogContent>
     </Dialog>
   );
+}
+
+/** Today's date where the person is (YYYY-MM-DD), not in UTC: late in the evening west of Greenwich, or early in the morning east of it, UTC is another day. */
+function localToday(now = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }

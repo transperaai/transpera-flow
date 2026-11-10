@@ -64,7 +64,7 @@ export function LinkChips({
 /** The warning on a source that is linked to nothing (the prototype's words). */
 export function UnlinkedWarning() {
   return (
-    <p role="note" data-unlinked className="flex items-start gap-1 rounded-lg bg-warn-soft px-3 py-2 text-[13px]">
+    <p role="note" data-unlinked className="flex items-start gap-1 rounded-lg bg-warn-soft px-3 py-2 text-sm">
       <span>Not linked to anything yet. Link it, or it won&apos;t count as evidence.</span>
       <Help {...LINK_HELP.unlinked} />
     </p>

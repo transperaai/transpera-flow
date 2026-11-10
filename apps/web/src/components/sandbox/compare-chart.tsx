@@ -5,34 +5,22 @@
 // difference from the first, and the same numbers as a table for a screen reader. Drawn by hand in SVG from the theme's tokens, as the
 // timeline is, and sized from its container so it works at phone width.
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { Stat } from "@transpera-flow/engine";
 import { FloatingTip } from "@/components/ui/floating-tip";
 import { labelIndexes, niceTicks } from "@/lib/overview/axis";
 import type { TimelineMonth } from "@/lib/forecast/timeline";
+import { useElementWidth } from "@/lib/use-element-width";
 
 const HEIGHT = 190;
 
-function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
-  const ref = useRef<T>(null);
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    setWidth(el.clientWidth);
-    const observer = new ResizeObserver(([entry]) => entry && setWidth(Math.round(entry.contentRect.width)));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width];
-}
 
-/** How each column is drawn, in order: "No changes" first. The legend uses the same. */
+/** How each column is drawn, in order: "No changes" first, in the accent, then the chart palette (chart-2, -5 and -1, the ones furthest from the accent, each with its own dash; never `--edit`, which means the Editor). The legend uses the same. */
 export const SERIES_STYLES = [
   { color: "var(--accent)", dash: undefined, swatch: "bg-accent" },
-  { color: "var(--edit)", dash: "6 3", swatch: "bg-edit" },
-  { color: "var(--chart-3)", dash: "2 3", swatch: "bg-chart-3" },
-  { color: "var(--chart-4)", dash: "8 3 2 3", swatch: "bg-chart-4" },
+  { color: "var(--chart-2)", dash: "6 3", swatch: "bg-chart-2" },
+  { color: "var(--chart-5)", dash: "2 3", swatch: "bg-chart-5" },
+  { color: "var(--chart-1)", dash: "8 3 2 3", swatch: "bg-chart-1" },
 ] as const;
 
 export interface CompareSeries {
@@ -58,7 +46,7 @@ export interface CompareChartProps {
 }
 
 export function CompareChart({ title, months, series, format, formatDiff = (v) => format(v), reference, minTop = 0, fixedWidth }: CompareChartProps) {
-  const [ref, measured] = useWidth<HTMLDivElement>();
+  const [ref, measured] = useElementWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const [tipAt, setTipAt] = useState<{ x: number; y: number } | null>(null);
   const width = fixedWidth ?? (measured || 560);
@@ -133,14 +121,14 @@ export function CompareChart({ title, months, series, format, formatDiff = (v) =
         {ticks.map((t) => (
           <g key={t}>
             <line x1={m.l} x2={width - m.r} y1={y(t)} y2={y(t)} stroke="var(--line)" strokeWidth={1} />
-            <text x={m.l - 8} y={y(t) + 4} textAnchor="end" className="fill-fg-3 text-[11px] tabular-nums">
+            <text x={m.l - 8} y={y(t) + 4} textAnchor="end" className="fill-fg-3 text-2xs tabular-nums">
               {format(t)}
             </text>
           </g>
         ))}
         {months.map((mo, i) =>
           labelled.has(i) ? (
-            <text key={mo.index} x={x(i)} y={HEIGHT - 8} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} className="fill-fg-3 text-[11px]">
+            <text key={mo.index} x={x(i)} y={HEIGHT - 8} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} className="fill-fg-3 text-2xs">
               {mo.short}
               {mo.partial ? "*" : ""}
             </text>
@@ -179,29 +167,31 @@ export function CompareChart({ title, months, series, format, formatDiff = (v) =
           </>
         ) : null}
       </FloatingTip>
-      <table className="sr-only">
-        <caption>{title}, average and 10 to 90 percent range, for each column</caption>
-        <thead>
-          <tr>
-            <th scope="col">Month</th>
-            {series.map((s, k) => (
-              <th key={k} scope="col">
-                {s.name}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {months.map((mo, i) => (
-            <tr key={mo.index}>
-              <th scope="row">{mo.label}</th>
+      <div className="sr-only">
+        <table>
+          <caption>{title}, average and 10 to 90 percent range, for each column</caption>
+          <thead>
+            <tr>
+              <th scope="col">Month</th>
               {series.map((s, k) => (
-                <td key={k}>{s.values[i] ? `${format(s.values[i]!.mean)} (${format(s.values[i]!.p10)} to ${format(s.values[i]!.p90)})` : "not there"}</td>
+                <th key={k} scope="col">
+                  {s.name}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {months.map((mo, i) => (
+              <tr key={mo.index}>
+                <th scope="row">{mo.label}</th>
+                {series.map((s, k) => (
+                  <td key={k}>{s.values[i] ? `${format(s.values[i]!.mean)} (${format(s.values[i]!.p10)} to ${format(s.values[i]!.p90)})` : "not there"}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

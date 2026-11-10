@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 
 export function TagPill({ tag, className }: { tag: string; className?: string }) {
   return (
-    <span data-process-tag className={cn("inline-block max-w-full truncate rounded-full border border-line bg-panel px-2 text-[10.5px] leading-4 font-medium text-fg-2", className)}>
+    <span data-process-tag className={cn("inline-block max-w-full truncate rounded-full border border-line bg-panel px-2 text-2xs leading-4 font-medium text-fg-2", className)}>
       {tag}
     </span>
   );

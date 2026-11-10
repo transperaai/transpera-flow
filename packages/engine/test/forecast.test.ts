@@ -391,7 +391,7 @@ describe("monthly recurring revenue and clients at risk (B7)", () => {
     expect(run.revenue.hourly).toBeCloseTo(hours * 90, 6);
     expect(run.monthly!.revenueHourly.reduce((a, b) => a + b, 0)).toBeCloseTo(hours * 90, 6);
     // Pooled recurring revenue is the interim clients' fees: it includes them, where `billed` does not.
-    expect(run.revenue.recurring).toBeCloseTo((m.activeClients * fee * m.horizonWeeks) / 4.33, 6);
+    expect(run.revenue.recurring).toBeCloseTo((m.activeClients * fee * m.horizonWeeks) / (52 / 12), 6);
     expect(run.billed).toBe(0);
   });
 

@@ -177,6 +177,23 @@ describe("a draft session", () => {
     expect(await session.publish(false)).toMatchObject({ status: "published", revision: { number: 3 } });
   });
 
+  it("publishes the draft it shows: one that was swapped for another underneath is refused, and nothing goes live", async () => {
+    const { backend, session, editor } = setup();
+    const seen: string[] = [];
+    const publish = backend.publish.bind(backend);
+    backend.publish = (accept, draftId) => (seen.push(String(draftId)), publish(accept, draftId));
+    editor.run((b) => updateStep(b, ids.audit, { name: "Mine" }));
+    await editor.settled();
+    const mine = session.getState().draft!.id;
+    // Someone else discards it and opens another.
+    await backend.discard();
+    await backend.open();
+    expect(await session.publish(true)).toEqual({ status: "error", message: expect.stringMatching(/^This draft changed since you opened it/) });
+    expect(seen).toEqual([mine]);
+    expect(backend.liveRevisionInfo().number).toBe(1);
+    expect(session.getState().error).toMatch(/Reload to see it/);
+  });
+
   it("discards the whole draft and goes back to live", async () => {
     const { live, backend, session, editor, now } = setup();
     editor.run((b) => updateStep(b, ids.audit, { name: "Audit" }));

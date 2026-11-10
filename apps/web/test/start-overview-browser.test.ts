@@ -18,7 +18,7 @@ afterAll(async () => {
   await browser?.close();
 });
 
-async function mount(width: number, canEdit = true): Promise<{ page: Page; errors: string[] }> {
+async function mount(width: number, canEdit = true, canRestore = false): Promise<{ page: Page; errors: string[] }> {
   const page = await browser.newPage({ viewport: { width, height: 900 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -27,7 +27,7 @@ async function mount(width: number, canEdit = true): Promise<{ page: Page; error
   // The harness loads no app stylesheet. `max-sm:hidden` (EDIT_ONLY) is the one rule the phone check needs, written as Tailwind emits it.
   await page.addStyleTag({ content: "@media (max-width: 639px) { .max-sm\\:hidden { display: none; } }" });
   await page.addScriptTag({ content: script });
-  await page.evaluate((o) => window.mountStart(o), { canEdit });
+  await page.evaluate((o) => window.mountStart(o), { canEdit, canRestore });
   await page.waitForSelector("[data-start-overview]");
   return { page, errors };
 }
@@ -64,6 +64,17 @@ describe("the start page at 1280px", () => {
       ["process", false],
       ["publish", false],
     ]);
+    await page.close();
+  }, 60_000);
+});
+
+describe("the restore card", () => {
+  it("says plainly that a backup only goes into an empty workspace", async () => {
+    const { page, errors } = await mount(1280, true, true);
+    const card = page.locator("[data-restore-card]");
+    expect(await card.locator("[data-restore-only-empty]").innerText()).toMatch(/^Only into an empty workspace\. Restore before you add anything: the first role/);
+    expect(await card.getByRole("link", { name: "Choose a backup file" }).getAttribute("href")).toBe("/w/acme/restore");
+    expect(errors).toEqual([]);
     await page.close();
   }, 60_000);
 });

@@ -1,11 +1,12 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppSidebar, type ShellProps } from "./app-sidebar";
 import { isEditorPath } from "@/lib/editor/modes";
+import { EditNotice } from "./edit-notice";
 import { MapPanelRequestProvider } from "./map-panel-request";
 
 /** The frame around every page of a workspace (issue #93): the sidebar, and the page as its `<main>`. */
@@ -18,7 +19,12 @@ export function WorkspaceShell({ defaultOpen, children, ...sidebar }: ShellProps
       <TooltipProvider delayDuration={300}>
         <MapPanelRequestProvider>
           <AppSidebar {...sidebar} />
-          <SidebarInset className="min-w-0">{children}</SidebarInset>
+          <SidebarInset className="min-w-0">
+            <Suspense fallback={null}>
+              <EditNotice />
+            </Suspense>
+            {children}
+          </SidebarInset>
         </MapPanelRequestProvider>
       </TooltipProvider>
       {/* The sidebar's Sign out submits this. */}

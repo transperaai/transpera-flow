@@ -88,7 +88,7 @@ export function LinkedSources({
     <section aria-label={heading} data-linked-sources={targetValue(target)} className={className ?? "flex flex-col gap-1.5"}>
       <div className={hideTitle ? "flex items-center justify-end gap-2" : "flex items-center justify-between gap-2"}>
         {!hideTitle && (
-          <h4 className="flex items-center text-[11px] font-semibold tracking-wide text-fg-3 uppercase">
+          <h4 className="flex items-center text-2xs font-semibold tracking-wide text-fg-3 uppercase">
             {heading}
             {help && <Help {...LINKED_SOURCES_HELP.sources} />}
           </h4>

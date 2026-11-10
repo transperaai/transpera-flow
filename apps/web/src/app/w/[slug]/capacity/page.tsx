@@ -24,7 +24,7 @@ export default async function WorkspaceCapacityPage(props: PageProps<"/w/[slug]/
     if (!state) notFound();
     const canEdit = await canEditWorkspace(state.workspace.id);
     return (
-      <Page title="Capacity" width="max-w-6xl" hideHeader>
+      <Page title="Capacity" hideHeader>
         <CapacityHeader />
         <NotPublished
           what="Capacity, and who has room for more clients, comes from a simulation of a published process."
@@ -46,7 +46,7 @@ export default async function WorkspaceCapacityPage(props: PageProps<"/w/[slug]/
   const setup = await loadCapacitySetup(await getDb(), bundle.workspace.id);
   if (!setup) notFound();
   return (
-    <Page title="Capacity" width="max-w-6xl" hideHeader>
+    <Page title="Capacity" hideHeader>
       <CapacityPage bundle={bundle} setup={setup} base={base} />
     </Page>
   );

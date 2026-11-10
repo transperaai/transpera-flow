@@ -211,7 +211,8 @@ describe("overtime and the floor (decision D7)", () => {
     expect(r.kpi.overtimeHours.mean).toBeCloseTo(4 * m.horizonWeeks, 8);
     // Ann's cost rate is her role's: 50 an hour.
     expect(r.kpi.overtimeCost!.mean).toBeCloseTo(4 * m.horizonWeeks * 50, 6);
-    expect(r.kpi.overtimeCost!.p10).toBeLessThanOrEqual(r.kpi.overtimeCost!.mean);
+    // (The three runs agree to rounding: the mean of three equal values may be a hair below them.)
+    expect(r.kpi.overtimeCost!.p10).toBeLessThanOrEqual(r.kpi.overtimeCost!.mean * (1 + 1e-12));
   });
 
   it("a person's own cost rate prices their overtime", () => {
@@ -282,7 +283,9 @@ describe("overtime and the floor (decision D7)", () => {
     const ann = r.people.ann!;
     expect(ann.overtimeHours).toBeGreaterThan(4);
     expect(ann.overtimeHours).toBeLessThanOrEqual(8 + 1e-9);
-    expect(ann.util).toBeLessThanOrEqual(1 + 1e-9);
+    // Overtime is limited month by month (engine 1.18.0), so a month whose pipeline work runs past its own limit shows as a
+    // hair over 100%, where the run-wide limit used to average it away.
+    expect(ann.util).toBeLessThanOrEqual(1.001);
   });
 
   it("client work over capacity raises a critical capacity issue; within the cap, an overtime finding instead", () => {

@@ -61,7 +61,7 @@ window.mountShots = () => {
     .map((r) => ({ id: r.id, name: r.name, series: monthly.roles[r.id]!, markers: [] }));
   const advice = hiringAdvice(setup, result, (m) => hiringDelayAt(horizon.market, m));
   createRoot(document.getElementById("root")!).render(
-    <div className="mx-auto flex max-w-6xl flex-col gap-8 p-4">
+    <div className="mx-auto flex flex-col gap-8 p-4">
       <Departments setup={setup} model={model} purposeNames={Object.fromEntries(EXAMPLE_PURPOSES.map((p) => [p.key, p.name]))} />
       <section className="flex flex-col gap-2 rounded-lg border p-4" data-shot="achieves">
         <h3 className="text-sm font-semibold">What the time achieves</h3>

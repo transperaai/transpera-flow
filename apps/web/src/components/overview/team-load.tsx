@@ -32,6 +32,12 @@ export function hiringCalls(advice: readonly Pick<HiringAdvice, "name" | "overFr
     }));
 }
 
+/** "How this works" for the team load: in its panel's header on the Overview. */
+export const teamLoadHow = (span: string) => ({
+  works: `How busy each role is, month by month over the next ${span}, in a simulation with planned hires and leave, against the role's own utilisation threshold. When a role goes over, the hire is due that month less the time it takes to hire (the Capacity page's hiring advice): "Start hiring now" when that is already here.`,
+  tells: "Which team runs out of room first, and when to start hiring so the new person arrives in time.",
+});
+
 /** What a cell looks like at each tone: the percentage on a soft colour, a warning ringed, over in solid red. */
 const CELL: Record<Tone, string> = {
   ok: "bg-good-soft text-fg",
@@ -47,6 +53,7 @@ export function TeamLoad({
   advice,
   span,
   sandboxHref,
+  how = true,
 }: {
   rows: readonly TimelineRow[];
   months: readonly TimelineMonth[];
@@ -57,6 +64,8 @@ export function TeamLoad({
   advice: readonly HiringAdvice[] | null;
   span: string;
   sandboxHref?: string;
+  /** "How this works" under the chart; false when the panel shows it in its header. */
+  how?: boolean;
 }) {
   const lineOf = (id: string) => lines[id] ?? fallbackLine;
   const derived = rows.map((r) => {
@@ -146,10 +155,7 @@ export function TeamLoad({
           </Link>
         )}
       </p>
-      <How
-        works={`How busy each role is, month by month over the next ${span}, in a simulation with planned hires and leave, against the role's own utilisation threshold. When a role goes over, the hire is due that month less the time it takes to hire (the Capacity page's hiring advice): "Start hiring now" when that is already here.`}
-        tells="Which team runs out of room first, and when to start hiring so the new person arrives in time."
-      />
+      {how && <How {...teamLoadHow(span)} />}
     </div>
   );
 }

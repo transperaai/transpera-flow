@@ -85,17 +85,28 @@ export const tourVariant = (company: boolean): TourVariant => (company ? "compan
 /** The tour's steps for a variant, in order. */
 export const tourSteps = (variant: TourVariant): TourStep[] => ORDER[variant].map((k) => STEPS[k]!);
 
-/** The first selector of a step that matches something, and what it matched; null when the step points at nothing. */
-export function resolveTarget(step: TourStep, root: Pick<ParentNode, "querySelector">): Element | null {
+/** Where the tour looks: the page, or a stand-in that may only answer `querySelector`. */
+export type TourRoot = Pick<ParentNode, "querySelector"> & { querySelectorAll?: ParentNode["querySelectorAll"] };
+
+/** Drawn on the screen: an element hidden with `display: none` (History folded into the bar's "More" under 1280px) has no boxes. */
+const drawn = (el: Element) => typeof el.getClientRects !== "function" || el.getClientRects().length > 0;
+
+/**
+ * The first selector of a step that matches something drawn, and what it matched; null when the step points at nothing. Of
+ * several matches the first drawn one wins, so a step can name the same thing in two places (a bar button and the menu it
+ * folds into) and the tour finds whichever is showing.
+ */
+export function resolveTarget(step: TourStep, root: TourRoot): Element | null {
   for (const selector of step.target) {
-    const found = root.querySelector(selector);
-    if (found) return found;
+    const found = root.querySelectorAll ? [...root.querySelectorAll(selector)] : [root.querySelector(selector)];
+    const shown = found.find((el): el is Element => !!el && drawn(el));
+    if (shown) return shown;
   }
   return null;
 }
 
 /** The steps that point at something on the screen now. */
-export const presentSteps = (variant: TourVariant, root: Pick<ParentNode, "querySelector">): TourStep[] => tourSteps(variant).filter((s) => resolveTarget(s, root));
+export const presentSteps = (variant: TourVariant, root: TourRoot): TourStep[] => tourSteps(variant).filter((s) => resolveTarget(s, root));
 
 /** The slice of `Storage` the tour uses. */
 export type TourStorage = Pick<Storage, "getItem" | "setItem">;

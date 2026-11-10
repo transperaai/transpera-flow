@@ -4,7 +4,7 @@
 import { createRoot } from "react-dom/client";
 import type { CapacitySetup, SetupClient, SetupPerson, SetupRole, SetupService, SetupTier } from "@transpera-flow/db";
 import type { ClientAssignmentRow, ClientRow, ClientServiceRow } from "@transpera-flow/db";
-import { PeopleAndRoles, PeopleHeaderActions } from "@/components/setup/people-roles";
+import { PeopleAndRoles } from "@/components/setup/people-roles";
 import { TiersAndClients } from "@/components/setup/tiers-clients";
 import type { WorkspaceSettingsData } from "@/lib/data";
 
@@ -149,6 +149,6 @@ export function build(who: "owner" | "viewer", extraTiers: number, scenario?: Sc
 window.mountSetup = ({ page, who, extraTiers = 0, scenario }) => {
   const { setup, data, roster } = build(who, extraTiers, scenario);
   createRoot(document.getElementById("root")!).render(
-    <div className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-6 px-4 py-4">{page === "clients" ? <TiersAndClients setup={setup} data={data} roster={roster} /> : <><div data-test-header className="flex gap-2 pb-4"><PeopleHeaderActions setup={setup} data={data} /></div><PeopleAndRoles setup={setup} data={data} /></>}</div>,
+    <div className="flex w-full min-w-0 max-w-240 flex-col gap-6 px-4 py-4">{page === "clients" ? <TiersAndClients setup={setup} data={data} roster={roster} /> : <PeopleAndRoles setup={setup} data={data} />}</div>,
   );
 };

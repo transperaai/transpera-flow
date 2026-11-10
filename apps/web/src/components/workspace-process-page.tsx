@@ -73,8 +73,11 @@ export async function WorkspaceProcessPage({ slug, processId, version }: { slug:
       historyHref={`${base}/p/${live.process.id}/history`}
       solutions={{ data: solutions, base, viewerId, memberNames }}
       inside={processes.filter((p) => p.parentId === live.process.id).map((p) => ({ id: p.id, name: p.name, href: hrefs[p.id]! }))}
+      // The workbench puts the breadcrumbs in its top bar and the switcher, the page's one title, in its toolbar.
+      processCrumbs={<ProcessNav part="crumbs" processes={processes} current={live.process.id} hrefs={hrefs} processesHref={`${base}/processes`} companyMapHref={base} />}
       processPicker={
         <ProcessNav
+          part="title"
           processes={processes}
           current={live.process.id}
           hrefs={hrefs}

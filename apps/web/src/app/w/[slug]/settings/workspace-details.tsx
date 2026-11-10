@@ -1,6 +1,6 @@
 "use client";
 
-import { NumberField, SelectField, TextField } from "@/components/fields";
+import { FieldRows, NumberField, SelectField, TextField } from "@/components/fields";
 import { SettingsSection } from "./section";
 import type { saveWorkspaceCurrency, saveWorkspaceName } from "./workspace-actions";
 import type { saveOverheadMonthly } from "./actions";
@@ -45,8 +45,8 @@ export function WorkspaceDetails({
 }) {
   const options = CURRENCIES.some((c) => c.value === currency) ? CURRENCIES : [{ value: currency, label: currency }, ...CURRENCIES];
   return (
-    <SettingsSection id="workspace" title="Workspace">
-      <div className="grid gap-4 sm:grid-cols-2">
+    <SettingsSection id="workspace" title="Workspace" description="The company's name, the money amounts are shown in, and its fixed costs.">
+      <FieldRows>
         <TextField
           label="Name"
           value={name}
@@ -81,7 +81,7 @@ export function WorkspaceDetails({
             example: "18,000 a month is 216,000 over a 12-month forecast.",
           }}
         />
-      </div>
+      </FieldRows>
     </SettingsSection>
   );
 }

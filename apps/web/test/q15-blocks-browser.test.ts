@@ -119,8 +119,8 @@ describe("Block library list", () => {
     expect(await row.locator("td[data-block-used]").innerText()).toBe("1 solution");
     expect(await rowOf(page, "Monthly report").locator("td[data-block-used]").innerText()).toBe("0 solutions");
     expect(await row.locator("[data-block-updated]").innerText()).toMatch(/today|ago|yesterday/);
-    // Centred columns, but not the Block column.
-    expect(await row.locator("[data-block-steps-count]").evaluate((e) => getComputedStyle(e).textAlign)).toBe("center");
+    // Numbers right-aligned; the Block column is not.
+    expect(await row.locator("[data-block-steps-count]").evaluate((e) => getComputedStyle(e).textAlign)).toBe("right");
     expect(await row.locator("[data-block-name]").evaluate((e) => getComputedStyle(e.closest("td")!).textAlign)).not.toBe("center");
     // Dropped: the type, the creator, the long description and the step list.
     expect(await page.locator("li[data-block], [data-block-steps], [data-block-step]").count()).toBe(0);

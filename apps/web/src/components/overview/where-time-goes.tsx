@@ -5,18 +5,24 @@
 // Hover a segment for its hours; the bar's label reads them all out.
 
 import { useMemo, useState } from "react";
-import { How } from "@/components/capacity/widgets";
 import { SectionCard } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
 import { purposeColours } from "@/lib/capacity/purposes";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DepartmentFigure } from "./department-cards";
+import { PanelActions } from "./panel-how";
 
 type By = "process" | "purpose";
 const f0 = (v: number) => formatNumber(v, 0);
 
-export function WhereTimeGoes({ rows, failed }: { rows: readonly DepartmentFigure[]; failed: boolean }) {
+const WHERE_HOW = {
+  works:
+    "Every hour each department's people spend on steps in a simulation of today's clients, a month, grouped by the process the step is in or by what it achieves (its purpose). Hand-holding is its own part. A name keeps its colour in every bar; hover a segment for its hours.",
+  tells: "What each department's hours are spent on, and how the departments compare.",
+};
+
+export function WhereTimeGoes({ rows, failed, className }: { rows: readonly DepartmentFigure[]; failed: boolean; className?: string }) {
   const [by, setBy] = useState<By>("process");
   const ready = rows.length > 0 && rows.every((r) => r.run);
   const bars = useMemo(() => (ready ? rows.map((r) => ({ id: r.id, name: r.name, ...r.run!.time[by] })) : []), [ready, rows, by]);
@@ -29,10 +35,12 @@ export function WhereTimeGoes({ rows, failed }: { rows: readonly DepartmentFigur
     <SectionCard
       id="where-time-goes"
       section="where-time-goes"
-      level={3}
+      level={2}
       title="Where the time goes"
+      className={className}
       description={ready ? (answer ? `${answer}.` : "No hours in the run.") : failed ? "Can't be worked out until the simulation runs." : "Working out where the time goes, from a simulation of today's clients…"}
       action={
+        <PanelActions how={ready ? WHERE_HOW : undefined}>
         <div role="group" aria-label="Group the time" className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-xs" data-time-by>
           {(["process", "purpose"] as const).map((k) => (
             <button
@@ -49,6 +57,7 @@ export function WhereTimeGoes({ rows, failed }: { rows: readonly DepartmentFigur
             </button>
           ))}
         </div>
+        </PanelActions>
       }
     >
       {ready ? (
@@ -93,10 +102,6 @@ export function WhereTimeGoes({ rows, failed }: { rows: readonly DepartmentFigur
               </li>
             ))}
           </ul>
-          <How
-            works="Every hour each department's people spend on steps in a simulation of today's clients, a month, grouped by the process the step is in or by what it achieves (its purpose). Hand-holding is its own part. A name keeps its colour in every bar; hover a segment for its hours."
-            tells="What each department's hours are spent on, and how the departments compare."
-          />
         </div>
       ) : failed ? null : (
         <Skeleton className="h-24 w-full" aria-busy="true" />

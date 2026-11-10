@@ -40,7 +40,7 @@ const page = (over: Record<string, unknown> = {}) =>
     }),
   );
 /** The markup of one source's row in the library table. */
-const row = (html: string, title: string) => new RegExp(`<tr data-source-row="[^"]*"[^>]*>(?:(?!</tr>)[\\s\\S])*?aria-label="Open ${title}"[\\s\\S]*?</tr>`).exec(html)![0];
+const row = (html: string, title: string) => new RegExp(`<tr[^>]*data-source-row="[^"]*"[^>]*>(?:(?!</tr>)[\\s\\S])*?aria-label="Open ${title}"[\\s\\S]*?</tr>`).exec(html)![0];
 const text = (html: string) => html.replace(/<[^>]*>/g, " ").replace(/&#x27;|&apos;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 
 // What a person sees once a row is open (the full text, chips, "Link to…", the quotes) needs a browser: see
@@ -68,8 +68,9 @@ describe("the Sources page", () => {
 
   it("has the search, the kind and process filters, Not linked only and the sort above the table, and + Add source", () => {
     expect(html).toContain('aria-label="Search sources"');
-    expect(html).toContain('aria-label="Filter by kind"');
-    expect(html).toContain('aria-label="Filter by process"');
+    // Kind and Process are the list pages' filter menus (their (i) is inside the menu).
+    expect(html).toContain('data-filter="kind"');
+    expect(html).toContain('data-filter="process"');
     expect(html).toContain('aria-label="Sort sources"');
     expect(text(html)).toContain("Not linked only");
     expect(html).toContain("+ Add source");
@@ -108,8 +109,8 @@ describe("the Sources page", () => {
     expect(text(page({ memory: [], links: [], citations: {} }))).toContain("No sources yet. Add the audit's transcripts and notes and link each one");
   });
 
-  it("gives the search, each filter, the sort and the 'Not linked only' toggle their (i)", () => {
-    for (const help of Object.values(LIBRARY_HELP)) expect(html).toContain(`About ${help.label}`);
+  it("gives the search, the sort and the 'Not linked only' toggle their (i) on the page; a filter's sits in its menu", () => {
+    for (const help of [LIBRARY_HELP.search, LIBRARY_HELP.sort, LIBRARY_HELP.unlinked]) expect(html).toContain(`About ${help.label}`);
   });
 });
 

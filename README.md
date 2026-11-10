@@ -61,7 +61,7 @@ request sees (`packages/db/src/client.ts`, ADR [0019](docs/adr/0019-neon-and-bet
 | Variable | What |
 |---|---|
 | `DATABASE_URL` | The database owner's connection string. Migrations, Better Auth and the sign-in access functions use it. |
-| `APP_DATABASE_URL` | The `authenticator` login the app's queries use. Optional locally (falls back to `DATABASE_URL`). |
+| `APP_DATABASE_URL` | The `authenticator` login the app's queries use. Optional locally (falls back to `DATABASE_URL`); required in production (`NODE_ENV` or `VERCEL_ENV` production), where it must differ from `DATABASE_URL`, or every request that needs the database fails with an error naming it. |
 | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `OAUTH_PROXY_SECRET`, `PREVIEW_ALIAS_URL` | Better Auth's secret, the deployment's URL, the preview-alias proxy secret, and the stable preview alias previews sign in through. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google sign-in. `AUTH_PROVIDERS` also accepts `microsoft`, which needs `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` and `MICROSOFT_TENANT_ID`. |
 | `ACCESS_ADMIN_EMAILS` | Addresses that sign in as Admin, so a new deployment's first admin can get in. |

@@ -1,12 +1,13 @@
 import Link from "next/link";
+import { TransperaMark } from "@/components/shell/transpera-mark";
 import { Button, buttonVariants } from "@/components/ui/button";
 
 /** The bar above the pages that sit outside a workspace (the workspace list, API tokens). */
 export function AppHeader({ workspace, signedIn }: { workspace?: string; signedIn: boolean }) {
   return (
-    <header className="flex items-center gap-2 border-b py-3">
-      <Link href="/" className="flex items-center gap-2.5 font-display text-lg font-bold tracking-tight">
-        <span aria-hidden className="size-[22px] rounded-md bg-[conic-gradient(from_200deg,var(--accent),var(--chart-1),var(--chart-5),var(--accent))]" />
+    <header className="flex h-12 items-center gap-2 border-b">
+      <Link href="/" className="flex items-center gap-2.5 font-display text-base font-semibold tracking-tight">
+        <TransperaMark />
         Transpera Flow
       </Link>
       {workspace && <span className="text-muted-foreground">{workspace}</span>}

@@ -206,10 +206,43 @@ export async function saveClientLookedAfter(
   if (!isId(clientId) || !isId(workspaceId) || !ok(from) || !ok(to)) return invalid;
   if (!(await signedIn())) return signedOut;
   if (from && to && from.roleId === to.roleId) return saveClientAssignment(clientId, workspaceId, to.roleId, from.personId, to.personId);
-  if (from) {
-    const cleared = await saveClientAssignment(clientId, workspaceId, from.roleId, from.personId, null);
-    if (cleared.status !== "saved") return cleared;
+  if (!from && !to) return { status: "saved", value: null };
+  // Two rows (the old role's and the new role's) change in one transaction: a conflict or refusal on either leaves both as they were.
+  const db = await getDb();
+  const stop = (outcome: SaveOutcome<string | null>) => Object.assign(new Error("stop"), { outcome });
+  const storedFor = async (trx: typeof db, roleId: string) =>
+    (
+      await trx
+        .selectFrom("client_assignments")
+        .select("person_id")
+        .where("client_id", "=", clientId)
+        .where("role_id", "=", roleId)
+        .where("workspace_id", "=", workspaceId)
+        .forUpdate()
+        .executeTakeFirst()
+    )?.person_id ?? null;
+  try {
+    await db.transaction().execute(async (trx) => {
+      if (from) {
+        const stored = await storedFor(trx, from.roleId);
+        // Already nobody's in that role: nothing to clear.
+        if (stored !== null && stored !== from.personId) throw stop({ status: "conflict", theirs: stored });
+        if (stored !== null) await trx.deleteFrom("client_assignments").where("client_id", "=", clientId).where("role_id", "=", from.roleId).where("person_id", "=", from.personId).execute();
+      }
+      if (to) {
+        const stored = await storedFor(trx, to.roleId);
+        if (stored === to.personId) return;
+        if (stored !== null) throw stop({ status: "conflict", theirs: stored });
+        await trx.insertInto("client_assignments").values({ client_id: clientId, role_id: to.roleId, person_id: to.personId, workspace_id: workspaceId }).execute();
+      }
+    });
+  } catch (e) {
+    const outcome = (e as { outcome?: SaveOutcome<string | null> }).outcome;
+    if (outcome) return outcome;
+    const code = pgCode(e);
+    if (code === "42501") return { status: "error", message: "You don't have permission to change this." };
+    if (code === "23505") return { status: "error", message: "Someone just changed this. Reload to see it." };
+    return { status: "error", message: "Couldn't save. Try again." };
   }
-  if (to) return saveClientAssignment(clientId, workspaceId, to.roleId, null, to.personId);
-  return { status: "saved", value: null };
+  return { status: "saved", value: to ? to.personId : null };
 }

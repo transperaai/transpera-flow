@@ -12,10 +12,11 @@
 // The prototype (docs/prototypes/client-capacity-app.PROTOTYPE.html: `availH`, `activeChanges`, `parts`, `freqOf`) is the
 // reference for the arithmetic. Where the engine's model of time can't agree with it, the ADR says so.
 
+import { WEEKS_PER_MONTH } from "./model";
 import type { DeliverableKey, EngineClient, EngineModel, EnginePerson, EngineStep, EngineStepChange, Recurrence, ServiceAdhoc, TierDeliverables } from "./model";
 
 /** Weeks in a month for the capacity inputs (52 / 12), as demand.ts and market.ts read a month. */
-export const CAPACITY_WEEKS_PER_MONTH = 52 / 12;
+export const CAPACITY_WEEKS_PER_MONTH = WEEKS_PER_MONTH;
 
 /** Every deliverable key, in the order the app lists them. */
 export const DELIVERABLE_KEYS: readonly DeliverableKey[] = ["words", "links", "techHours", "meetings", "builds", "creativeSets", "channels"];

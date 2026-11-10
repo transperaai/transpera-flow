@@ -1,10 +1,11 @@
 "use client";
 
-import { useActionState, useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import type { RoleRow } from "@transpera-flow/db";
 import { TextField, ToggleField } from "@/components/fields";
 import { HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
+import { useAddForm } from "@/components/settings/use-add-form";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
@@ -25,12 +26,9 @@ const NOT_SENT: ActionResult = {};
 
 /** `onAdded` runs once a role has been added (the Set up page closes its dialog); `className` replaces the form's spacing. */
 export function AddRole({ workspaceId, onAdded, className }: { workspaceId: string; onAdded?: () => void; className?: string }) {
-  const [state, action, pending] = useActionState<ActionResult, FormData>(createRole.bind(null, workspaceId), NOT_SENT);
-  useEffect(() => {
-    if (state !== NOT_SENT && !state.error) onAdded?.();
-  }, [state, onAdded]);
+  const { state, pending, onSubmit } = useAddForm<ActionResult>(createRole.bind(null, workspaceId), NOT_SENT, onAdded);
   return (
-    <form action={action} className={cn("flex flex-wrap items-end gap-2", className ?? "mb-4")}>
+    <form onSubmit={onSubmit} className={cn("flex flex-wrap items-end gap-2", className ?? "mb-4")}>
       <label className="flex min-w-0 flex-col gap-1">
         <HelpLabel label="Name" description="The kind of work, as your team says it. Steps, people and clients name roles." example="Strategist" />
         <Input name="name" required maxLength={200} />

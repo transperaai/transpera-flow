@@ -7,7 +7,13 @@ import { Streams } from "../src/random";
 
 const HPW = 40;
 const MONTH = (52 / 12) * HPW; // 173.33 hours: three months fill the 13-week runs below
-const WEEKS_PER_MONTH = 4.33;
+const WEEKS_PER_MONTH = 52 / 12;
+/** Fallback loads are still read at 4.33 weeks a month (clients.ts). */
+const LOAD_WEEKS = 4.33;
+/** A monthly fee that bills 1,000 a week. */
+const FEE = 1000 * WEEKS_PER_MONTH;
+/** The weekly chance of leaving for a monthly chance `c`: a week keeps (1 - c)^(12/52) (engine 1.18.0). */
+const weekly = (c: number) => 1 - (1 - c) ** (1 / WEEKS_PER_MONTH);
 
 const svc = (pricingModel: EngineService["pricingModel"], price: number, extra: Partial<EngineService> = {}): EngineService => ({
   name: pricingModel,
@@ -40,12 +46,12 @@ function tiny(extra: Partial<EngineModel> = {}): EngineModel {
   };
 }
 
-/** A hundred unnamed clients of one retainer service, each churning at 0.0433 a month (0.01 a week), no servicing, no market, no leads. */
+/** A hundred unnamed clients of one retainer service, each churning at 0.0433 a month (about 0.01 a week), no servicing, no market, no leads. */
 function group(extra: Partial<EngineModel> = {}): EngineModel {
   return tiny({
     horizonWeeks: 1,
-    services: { ret: svc("retainer", 4330, { churnMonthly: 0.0433 }) },
-    clientGroups: { ret: { count: 100, fee: 4330, churnMonthly: 0.0433, stayMonths: 12, health: 80 } },
+    services: { ret: svc("retainer", FEE, { churnMonthly: 0.0433 }) },
+    clientGroups: { ret: { count: 100, fee: FEE, churnMonthly: 0.0433, stayMonths: 12, health: 80 } },
     churnDrivers: [{ id: "results", weight: 1, enabled: true, value: 6 }],
     ...extra,
   });
@@ -54,14 +60,16 @@ function group(extra: Partial<EngineModel> = {}): EngineModel {
 const cause = (m: EngineModel, id: string, reps = 4) => simulate(m, reps, 1).churnCauses!.causes.find((c) => c.id === id)!;
 
 describe("hand-checked: churn drivers as chances", () => {
-  it("weight mode: a rating of 6 is pressure 0.5, so a weekly chance of 0.01 × 1.5 = 0.015 for 100 clients", () => {
+  it("weight mode: a rating of 6 is pressure 0.5, so a monthly chance of 0.0433 × 1.5 for 100 clients, split 2 : 1", () => {
     const r = simulate(group(), 4, 1).churnCauses!;
-    // One weekly tick: expected clients lost = 100 × 0.015, of which 100 × 0.01 normal churn and 100 × 0.005 the rating.
-    expect(r.clients).toBeCloseTo(1.5, 9);
-    expect(r.normal.clients).toBeCloseTo(1, 9);
+    // One weekly tick: expected clients lost = 100 × the week's chance at 0.065 a month (about 0.0154), of which two thirds normal
+    // churn and a third the rating.
+    const lost = 100 * weekly(0.0433 * 1.5);
+    expect(r.clients).toBeCloseTo(lost, 9);
+    expect(r.normal.clients).toBeCloseTo(lost / 1.5, 9);
     const results = r.causes.find((c) => c.id === "results")!;
     expect(results.pressure).toBe(0.5);
-    expect(results.clients).toBeCloseTo(0.5, 9);
+    expect(results.clients).toBeCloseTo((lost * 0.5) / 1.5, 9);
     expect(results.mode).toBe("weight");
     expect(results.exposure).toBe(0);
     expect(results.effect).toBeNull();
@@ -82,13 +90,14 @@ describe("hand-checked: churn drivers as chances", () => {
     expect(c.exposure).toBe(1);
   });
 
-  it("an entered chance of 1 with effect 1 doubles the weekly chance while hit: 100 × 0.02 clients in the first week", () => {
+  it("an entered chance of 1 with effect 1 doubles the monthly chance while hit: 100 × the week's chance at 0.0866 in the first week, half each", () => {
     const m = group({ churnDrivers: [{ id: "results", weight: 1, enabled: true, value: 6, chance: 1, effect: 1, effectMonths: 1 }] });
     const r = simulate(m, 4, 1).churnCauses!;
-    expect(r.clients).toBeCloseTo(2, 9);
-    expect(r.normal.clients).toBeCloseTo(1, 9);
+    const lost = 100 * weekly(0.0433 * 2);
+    expect(r.clients).toBeCloseTo(lost, 9);
+    expect(r.normal.clients).toBeCloseTo(lost / 2, 9);
     const c = r.causes.find((x) => x.id === "results")!;
-    expect(c.clients).toBeCloseTo(1, 9);
+    expect(c.clients).toBeCloseTo(lost / 2, 9);
     expect(c.chance).toBe(1);
     expect(c.exposure).toBe(1);
     expect(c.pressure).toBe(1);
@@ -105,7 +114,7 @@ describe("hand-checked: churn drivers as chances", () => {
     expect(zero.churnCauses!.causes.find((c) => c.id === "results")!.exposure).toBe(0);
   });
 
-  it("a chance between 0 and 1 draws once a tick for each client from its own stream, and a hit is at the weekly chance 1 - (1 - c)^(1/4.33)", () => {
+  it("a chance between 0 and 1 draws once a tick for each client from its own stream, and a hit is at the weekly chance 1 - (1 - c)^(12/52)", () => {
     const get = vi.spyOn(Streams.prototype, "get");
     const m = group({ horizonWeeks: 13, churnDrivers: [{ id: "results", weight: 1, enabled: true, value: 6, chance: 0.5, effect: 0.5, effectMonths: 1 }] });
     const r = simulate(m, 4, 1);
@@ -128,7 +137,7 @@ describe("hand-checked: churn drivers as chances", () => {
       starts: [MONTH, 2 * MONTH],
       drivers: { results: [{ chance: 1, effect: 1, months: 2 }, { chance: 0, effect: 1, months: 2 }, { chance: 0, effect: 1, months: 2 }] },
     };
-    const m = group({ horizonWeeks: 13, churnMonthly: 0, services: { ret: svc("retainer", 4330) }, clientGroups: { ret: { count: 100, fee: 4330, churnMonthly: 0, stayMonths: 12, health: 80 } }, channels });
+    const m = group({ horizonWeeks: 13, churnMonthly: 0, services: { ret: svc("retainer", FEE) }, clientGroups: { ret: { count: 100, fee: FEE, churnMonthly: 0, stayMonths: 12, health: 80 } }, channels });
     const c = simulate(m, 2, 1).churnCauses!.causes.find((x) => x.id === "results")!;
     expect(c.mode).toBe("chance");
     expect(c.exposure).toBeCloseTo(12 / 13, 12);
@@ -138,8 +147,8 @@ describe("hand-checked: churn drivers as chances", () => {
     // Ann carries one client's 35 hours a week of ongoing work: 87.5% busy, above the 85% line, at every tick.
     const m = tiny({
       horizonWeeks: 13,
-      services: { ret: svc("retainer", 4330, { fallbackOngoing: { r: 35 * WEEKS_PER_MONTH } }) },
-      clients: { c: { name: "Acme", services: ["ret"], mrr: 4330, assignments: { r: "ann" } } },
+      services: { ret: svc("retainer", FEE, { fallbackOngoing: { r: 35 * LOAD_WEEKS } }) },
+      clients: { c: { name: "Acme", services: ["ret"], mrr: FEE, assignments: { r: "ann" } } },
       churnDrivers: [{ id: "load", weight: 1, enabled: true, chance: null, effect: 1, effectMonths: 2 }],
     });
     const get = vi.spyOn(Streams.prototype, "get");
@@ -155,8 +164,8 @@ describe("hand-checked: churn drivers as chances", () => {
   it("measured chances are counted in weight mode too, so Settings can show them before anyone switches", () => {
     const m = tiny({
       horizonWeeks: 13,
-      services: { ret: svc("retainer", 4330, { fallbackOngoing: { r: 35 * WEEKS_PER_MONTH } }) },
-      clients: { c: { name: "Acme", services: ["ret"], mrr: 4330, assignments: { r: "ann" } } },
+      services: { ret: svc("retainer", FEE, { fallbackOngoing: { r: 35 * LOAD_WEEKS } }) },
+      clients: { c: { name: "Acme", services: ["ret"], mrr: FEE, assignments: { r: "ann" } } },
       churnDrivers: [{ id: "load", weight: 1, enabled: true }],
     });
     const c = simulate(m, 2, 1).churnCauses!.causes.find((x) => x.id === "load")!;
@@ -177,8 +186,8 @@ describe("hand-checked: price rises", () => {
   // One named client, fee 4,330 a month = 1,000 a week, 13 weeks. Months are 52/12 weeks, so the third starts at week 8.667.
   const named = (extra: Partial<EngineModel> = {}) =>
     tiny({
-      services: { ret: svc("retainer", 4330) },
-      clients: { c: { name: "Acme", services: ["ret"], mrr: 4330, assignments: { r: "ann" } } },
+      services: { ret: svc("retainer", FEE) },
+      clients: { c: { name: "Acme", services: ["ret"], mrr: FEE, assignments: { r: "ann" } } },
       ...extra,
     });
   const rise: EngineChannels = { starts: [MONTH, 2 * MONTH], fee: { "*": [1, 1, 1.1] } };
@@ -201,7 +210,7 @@ describe("hand-checked: price rises", () => {
     expect(mo.revenue.total[1]!.mean).toBeCloseTo(1000 * wk, 6);
     expect(mo.revenue.total[2]!.mean).toBeCloseTo(1100 * wk, 6);
     expect(mo.revenue.rise.map((s) => s.mean)).toEqual([0, 0, expect.closeTo(100 * wk, 6)]);
-    expect(mo.mrr[2]!.mean).toBeCloseTo(4330 * 1.1, 6);
+    expect(mo.mrr[2]!.mean).toBeCloseTo(FEE * 1.1, 6);
   });
 
   it("with the price driver in weight mode the rise (10%) adds pressure 2 × 0.1 = 0.2 for the weeks after it only: 5 of the 13 ticks", () => {
@@ -278,15 +287,15 @@ describe("hand-checked: fee ranges", () => {
   });
 
   it("a retainer won with a range bills the drawn fee for life, and a client already there keeps its entered fee", () => {
-    // Five clients won at t = 1 … 5, each paying a drawn fee from 4,330 to 8,660 around 4,330 (mean 5,773.3) for the rest of the 13 weeks.
+    // Five clients won at t = 1 … 5, each paying a drawn fee from 4,333 to 8,667 around 4,333 (mean 5,778) for the rest of the 13 weeks.
     const m = tiny({
-      services: { ret: svc("retainer", 4330, { priceRange: { low: 4330, high: 8660 } }) },
-      clients: { c: { name: "Acme", services: ["ret"], mrr: 4330, assignments: { r: "ann" } } },
+      services: { ret: svc("retainer", FEE, { priceRange: { low: FEE, high: 2 * FEE } }) },
+      clients: { c: { name: "Acme", services: ["ret"], mrr: FEE, assignments: { r: "ann" } } },
     });
     m.steps = [{ ...m.steps[0]!, currentWip: 5 }];
     const res = simulate(m, 30, 1);
     const fromNew = res.kpi.revenue.mean - 13_000;
-    // 5 clients × ~13 weeks × (mean fee 5,773 ÷ 4.33 a week) ≈ 5 × 12.99 × 1,333.3.
+    // 5 clients × ~13 weeks × (mean fee 5,778 ÷ 52/12 a week) ≈ 5 × 12.99 × 1,333.3.
     expect(fromNew).toBeGreaterThan(80_000);
     expect(fromNew).toBeLessThan(92_000);
     expect(res.kpi.revenue.mean).toBeGreaterThan(13_000 + 5 * 12.99 * 1000);

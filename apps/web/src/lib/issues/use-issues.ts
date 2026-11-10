@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import type { IssueEventRow, IssueRow, ResolveHow } from "@transpera-flow/db";
-import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
+import { SAVE_FAILED_MESSAGE, type SaveOutcome, type Saver } from "@/lib/fields/field-controller";
 import type { ScreenMode } from "@/lib/mode";
 import { liveIssueStore } from "./live-store";
 import { MemoryIssueStore, type IssueStore, type SaveIssueResult } from "./store";
@@ -72,7 +72,15 @@ export function useIssues(
   const saver = useCallback(
     (id: string, field: IssueField): Saver<Scalar> =>
       async (base, next) => {
-        const outcome: SaveOutcome<Scalar> = await store.saveField(id, field, base, next);
+        // A failed request (the network, a crashed action) comes back as an error outcome, as FieldController.run does, so callers
+        // can say so on the page instead of leaving an unhandled rejection and the old value showing.
+        let outcome: SaveOutcome<Scalar>;
+        try {
+          outcome = await store.saveField(id, field, base, next);
+        } catch {
+          // Network failure, or a server error whose details stay on the server.
+          return { status: "error", message: SAVE_FAILED_MESSAGE };
+        }
         if (outcome.status === "saved") {
           setIssues((list) => list.map((i) => (i.id === id ? ({ ...i, [field]: outcome.value, updated_at: new Date().toISOString() } as IssueRow) : i)));
         }

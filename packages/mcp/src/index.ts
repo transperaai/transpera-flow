@@ -7,3 +7,4 @@ export { applyOverrides, createMcpServer, DEFAULT_REPS, DEFAULT_SEED, summarizeR
 export { ANALYSIS_TOOL_NAMES, DEFAULT_ROBUSTNESS_SECONDS, MAX_ROBUSTNESS_SECONDS } from "./analysis-tools";
 export { bottleneckReport, checkScenarioRobustness, compareScenarios, matchNamed, robustnessParameters, stackPatches, type NamedScenario } from "./analysis";
 export { FACT_TOOL_NAMES } from "./facts-tools";
+export { SIMULATION_TOOL_NAMES, SIMULATIONS_PER_MINUTE } from "./simulation-limit";

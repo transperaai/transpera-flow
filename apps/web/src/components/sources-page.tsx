@@ -5,7 +5,7 @@
 // that quote it, so any inferred number can be traced to what someone said. A source linked to nothing is flagged: it doesn't
 // count as evidence.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   EVIDENCE_LABELS,
@@ -21,11 +21,12 @@ import { DateField, SelectField, TextField } from "@/components/fields";
 import { LinkChips, LinkedToLabel, UnlinkedWarning } from "@/components/sources/link-chips";
 import { SourceDialog, type SourceSubmission } from "@/components/sources/source-dialog";
 import { SourcesLibrary } from "@/components/sources/sources-library";
+import type { LibraryCounts } from "@/components/sources/library-filters";
 import { DEFAULT_QUERY, PAGE_SIZE, excerptOf, filterSources, toListRow, type LibraryQuery } from "@/lib/sources/library";
 import { liveLibraryBackend, memoryLibraryBackend, type LibraryBackend } from "@/lib/sources/library-backend";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { FileText } from "lucide-react";
-import { EmptyState, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
+import { EmptyState, MetaLine, PageHeader } from "@/components/page-kit";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { Saver } from "@/lib/fields/field-controller";
 import { useDemoSolutions } from "@/lib/solutions/demo";
@@ -131,6 +132,17 @@ export function SourcesPage({
   const unlinkedCount = Math.max(totalAll - linkedIds.size, 0);
   // The demo's solutions live in the tab; a workspace's come with the page.
   const targets = mode === "demo" ? { ...initialTargets, solutions: demoSolutions.map((s) => ({ id: s.id, name: s.name })) } : initialTargets;
+  // How many sources each filter choice shows. A process counts the sources linked to it or one of its steps. A kind is counted only where
+  // every source is in the tab (the demo); a workspace's library comes a page at a time, so its kinds go without a number.
+  const counts = useMemo<LibraryCounts>(() => {
+    const byProcess = new Map<string, Set<string>>();
+    for (const l of links) if (l.process_id && (l.kind === "process" || l.kind === "step")) byProcess.set(l.process_id, (byProcess.get(l.process_id) ?? new Set()).add(l.source_id));
+    const all = held?.snapshot().sources ?? null;
+    const kinds = all ? Object.fromEntries(SOURCE_KINDS.map((k) => [k, all.filter((x) => x.kind === k).length])) : null;
+    return { kinds, processes: Object.fromEntries([...byProcess].map(([id, set]) => [id, set.size])) };
+    // `totalAll` changes when a source is added or deleted, which is when the held sources change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [links, held, totalAll]);
   // The sidebar's count comes from the server: ask for it again after a change.
   const changed = (message: string) => {
     setStatus(message);
@@ -231,7 +243,7 @@ export function SourcesPage({
   };
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       <PageHeader
         label="Sources"
         testId="sources-header"
@@ -274,10 +286,11 @@ export function SourcesPage({
           </button>
         </p>
       )}
-      <SectionCard id="library" section="library" title="Library">
+      {/* The library sits flat on the page: a toolbar and one table, no card around it. */}
+      <div id="library" data-section="library" className="flex min-w-0 scroll-mt-16 flex-col gap-3">
         {totalAll === 0 ? (
           <EmptyState icon={FileText} data-no-sources>
-            No sources yet. Add the audit&apos;s transcripts and notes and link each one to what it is evidence for (a process, a step, an insight, an issue or a solution), or let Claude add them through the MCP server, so every number can be traced to what someone said.
+            No sources yet. Add the audit&apos;s transcripts and notes and link each one to what it is evidence for (a process, a step, an insight, an issue or a solution), so every number can be traced to what someone said.
           </EmptyState>
         ) : (
           <SourcesLibrary
@@ -290,12 +303,13 @@ export function SourcesPage({
             onMore={() => void run(query, rows.length)}
             links={links}
             targets={targets}
+            counts={counts}
             citations={Object.fromEntries(Object.entries(citations).map(([id, list]) => [id, list.length]))}
             openId={opened?.row.id ?? null}
             onOpen={(id) => void open(id)}
           />
         )}
-      </SectionCard>
+      </div>
       <Sheet open={opened !== null} onOpenChange={(o) => !o && setOpened(null)}>
         <SheetContent side="right" className="gap-0 overflow-y-auto p-0 data-[side=right]:w-full data-[side=right]:sm:max-w-xl" aria-describedby={undefined} data-source-panel>
           {opened && (
@@ -380,7 +394,7 @@ function SourcePanel({
         <SheetTitle className="text-base font-bold">{s.title}</SheetTitle>
         <SheetDescription asChild>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="rounded-full border border-line px-1.5 text-[11px] font-semibold text-fg-2">{SOURCE_KIND_LABELS[s.kind]}</span>
+            <span className="rounded-full border border-line px-1.5 text-2xs font-semibold text-fg-2">{SOURCE_KIND_LABELS[s.kind]}</span>
             {s.recorded_at && <span className="text-fg-3 tabular-nums">{s.recorded_at}</span>}
             {s.speakers.length > 0 && <span className="text-fg-2">{s.speakers.join(", ")}</span>}
             <span className="text-fg-3">{citations.length ? `Cited by ${citations.length} value${citations.length === 1 ? "" : "s"}` : "Not cited yet"}</span>
@@ -501,7 +515,7 @@ function Citations({ citations, processBase }: { citations: SourceCitation[]; pr
                 <span className="font-semibold">{what}</span>
               )}
               {value && <span className="tabular-nums text-fg-2">says {value}</span>}
-              {c.revision === "draft" && <span className="rounded-full border border-dashed border-accent px-1 text-[10px]">draft only</span>}
+              {c.revision === "draft" && <span className="rounded-full border border-dashed border-accent px-1 text-2xs">draft only</span>}
             </p>
             <blockquote className="mt-0.5 text-fg-2">
               “{c.quote}”{c.speaker ? <span className="text-fg-3"> · {c.speaker}</span> : null}

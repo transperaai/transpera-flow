@@ -19,9 +19,9 @@ export default async function SettingsClientsPage(props: PageProps<"/w/[slug]/se
   return (
     <SettingsPage
       title="Tiers & clients"
-      eyebrow="Settings"
+      slug={slug}
+      canManage={data.canManage}
       description="Where tiers, tier counts and named clients are keyed in. A named client starts from its tier's values; anything filled in replaces them. Agency admins and the Owner can change this; everyone can read it."
-      width="max-w-6xl"
     >
       <PhoneNotice />
       <p className="px-1 text-sm text-fg-2" data-unique-clients>

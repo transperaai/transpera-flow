@@ -127,6 +127,14 @@ export interface ProcessFileCheck {
 // The schema and the worked example
 // ---------------------------------------------------------------------------
 
+/**
+ * The most a step's rework rate may be: the engine's `MAX_REWORK` (at 1 an item would be redone forever) and the database's
+ * `steps_rework_rate_check`. A file may say up to 1 (the schema's maximum); the checker sets more than this to it, with a
+ * warning. Kept here rather than imported, so the upload dialog doesn't pull the engine into its bundle (process-file.test.ts
+ * checks the two agree).
+ */
+const MAX_REWORK = 0.95;
+
 /** The JSON Schema of the format (draft 2020-12). Unknown fields are allowed here: the checker warns about them. */
 export const PROCESS_FILE_SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -374,7 +382,12 @@ export function checkProcessFile(input: unknown): ProcessFileCheck {
       };
       const hands = num("hands_on_hours", MAX_HOURS, "hours, like 0.25");
       const wait = num("wait_hours", MAX_WAIT_HOURS, "hours, like 24");
-      const rework = num("rework_rate", 1, "a share from 0 to 1, like 0.1");
+      let rework = num("rework_rate", 1, "a share from 0 to 1, like 0.1");
+      if (rework !== undefined && rework > MAX_REWORK) {
+        // The engine (and the database) stop at 95%: at 1 an item would be sent back forever.
+        warnings.push(`${label}: rework_rate is ${rework}, but the most Transpera runs is ${MAX_REWORK} (at 1 an item would be sent back forever). It was set to ${MAX_REWORK}.`);
+        rework = MAX_REWORK;
+      }
       let x: number | undefined;
       let y: number | undefined;
       if (raw.x !== undefined || raw.y !== undefined) {

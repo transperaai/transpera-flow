@@ -4,6 +4,7 @@
 // outlines in red with their groups open, and the issue's target, which the automatic verdict is checked against.
 
 import type { StepRow } from "@transpera-flow/db";
+import { PanelHeading } from "@/components/editor/panel-heading";
 import { Help } from "@/components/help";
 import type { SolutionIssue } from "@/lib/solutions/area";
 
@@ -23,14 +24,14 @@ export function IssueArea({
   const names = new Map(steps.map((s) => [s.id, s.name]));
   return (
     <div className="flex flex-col gap-2" data-testid="issue-area">
-      <span className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
+      <PanelHeading as="span">
         Issue area
         <Help
           label="Issue area"
           description="The steps of the issue this solution is for, outlined in red on the map. Click one to select it. The solution is tested against the issue's target."
           example="Issue: “Website leads wait too long”. The area is Check fit and Enrich lead, and the target is first contact under 4 hours."
         />
-      </span>
+      </PanelHeading>
       {!issue ? (
         <p className="text-xs text-muted-foreground">Not linked to an issue yet. Save it, then link it to the issues it solves.</p>
       ) : (

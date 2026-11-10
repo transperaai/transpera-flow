@@ -442,7 +442,7 @@ function ChecklistEntry({
     <div className={`flex flex-col gap-1 rounded-token border p-1.5 ${conflict ? "border-crit" : "border-warn"}`}>
       <p className="flex flex-wrap items-baseline gap-1">
         <span
-          className={`rounded-full border px-1 text-[10px] font-semibold ${conflict ? "border-crit bg-crit-soft" : "border-warn bg-warn-soft"}`}
+          className={`rounded-full border px-1 text-2xs font-semibold ${conflict ? "border-crit bg-crit-soft" : "border-warn bg-warn-soft"}`}
         >
           {conflict ? "Conflict" : "Assumption"}
         </span>

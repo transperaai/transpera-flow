@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { NORTHBEAM_WORKSPACE_ID } from "../src";
+import pg from "pg";
+import { NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, NORTHBEAM_WORKSPACE_ID } from "../src";
 import { createTestDb, createUser, type TestDb } from "./harness";
 
 // The block library (issue #116): a saved bundle of steps per workspace. Every member reads, owners and editors write,
@@ -136,5 +137,55 @@ describe("blocks: checks", () => {
     await add(db.client, id);
     await db.client.query("delete from workspaces where id = $1", [id]);
     expect((await db.client.query("select 1 from blocks where workspace_id = $1", [id])).rowCount).toBe(0);
+  });
+});
+
+describe("blocks: a block a solution holds a copy of can't be deleted (20270203000100)", () => {
+  const copyOf = (block: string) => JSON.stringify({ steps: [{ id: "s1", name: "From the block", provenance: { block } }, { id: "s2", name: "Own", provenance: {} }], edges: [], entry_step_id: null });
+  const solution = (c: { query: TestDb["client"]["query"] }, block: string, name = "Uses it") =>
+    c.query("insert into solutions (workspace_id, process_id, base_revision_id, name, steps) values ($1, $2, $3, $4, $5::jsonb) returning id", [
+      ws, NORTHBEAM_PROCESS_ID, NORTHBEAM_REVISION_ID, name, copyOf(block),
+    ]);
+
+  it("refuses the delete while a solution holds a copy, naming it, and allows it once none does", async () => {
+    const block = (await add(db.client, ws, "Held")).rows[0].id as string;
+    const sol = (await solution(db.client, block)).rows[0].id as string;
+    await db.as(users.editor!.claims, async (c) => {
+      await expect(c.query("delete from blocks where id = $1", [block])).rejects.toMatchObject({ code: "23503", message: "block is used by a solution: Uses it" });
+    });
+    await db.client.query("delete from solutions where id = $1", [sol]);
+    await db.as(users.editor!.claims, async (c) => expect((await c.query("delete from blocks where id = $1", [block])).rowCount).toBe(1));
+    await db.client.query("delete from blocks where id = $1", [block]);
+  });
+
+  it("orders a solution saved during the delete: the delete waits for it, then refuses", async () => {
+    const block = (await add(db.client, ws, "Raced")).rows[0].id as string;
+    const a = new pg.Client({ connectionString: db.url });
+    const b = new pg.Client({ connectionString: db.url });
+    await Promise.all([a.connect(), b.connect()]);
+    try {
+      // A saves a solution with a copy of the block and hasn't committed; B's delete runs meanwhile.
+      await a.query("begin");
+      await solution(a, block, "Saved meanwhile");
+      const deleting = b.query("delete from blocks where id = $1", [block]).then(() => "deleted", (e: { code?: string }) => e.code);
+      await new Promise((r) => setTimeout(r, 150));
+      await a.query("commit");
+      expect(await deleting).toBe("23503");
+      expect((await db.client.query("select 1 from blocks where id = $1", [block])).rowCount).toBe(1);
+    } finally {
+      await Promise.all([a.end(), b.end()]);
+      await db.client.query("delete from solutions where name = 'Saved meanwhile'");
+      await db.client.query("delete from blocks where id = $1", [block]);
+    }
+  });
+
+  it("doesn't stop a workspace being deleted with its blocks and solutions", async () => {
+    const id = (await db.client.query("insert into workspaces (name, slug) values ('Gone 2', 'gone-blocks-2') returning id")).rows[0].id;
+    const block = (await add(db.client, id)).rows[0].id as string;
+    const proc = (await db.client.query("insert into processes (workspace_id, name) values ($1, 'P') returning id", [id])).rows[0].id;
+    const rev = (await db.client.query("insert into process_revisions (workspace_id, process_id, number, status) values ($1, $2, 1, 'published') returning id", [id, proc])).rows[0].id;
+    await db.client.query("insert into solutions (workspace_id, process_id, base_revision_id, name, steps) values ($1, $2, $3, 'S', $4::jsonb)", [id, proc, rev, copyOf(block)]);
+    await db.client.query("delete from workspaces where id = $1", [id]);
+    expect((await db.client.query("select 1 from blocks where id = $1", [block])).rowCount).toBe(0);
   });
 });
