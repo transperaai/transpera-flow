@@ -32,7 +32,7 @@ window.mountQ3Shots = (what) => {
   if (what === "processes") {
     root.render(
       <SidebarProvider>
-        <main className="mx-auto w-full max-w-6xl p-4">
+        <main className="mx-auto w-full p-4">
           <ProcessesPage rows={rows} hrefs={Object.fromEntries(rows.map((r) => [r.id, `/w/example/p/${r.id}`]))} loadCard={async () => null} />
         </main>
       </SidebarProvider>,

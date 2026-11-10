@@ -47,7 +47,7 @@ window.q15MountLibrary = ({ editor, empty, base = "ok" }) => {
   };
   createRoot(document.getElementById("root")!).render(
     <SidebarProvider>
-      <div className="mx-auto w-full min-w-0 max-w-6xl p-4">
+      <div className="mx-auto w-full min-w-0 p-4">
         <BlockLibrary
           blocks={empty ? [] : d.blocks}
           mode={editor ? "live" : "readonly"}
