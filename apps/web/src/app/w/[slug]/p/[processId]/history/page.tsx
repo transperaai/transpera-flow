@@ -34,6 +34,7 @@ export default async function ProcessHistoryPage(props: PageProps<"/w/[slug]/p/[
           </nav>
         ) : (
           <ProcessNav
+            heading={false}
             processes={processes}
             current={process.id}
             hrefs={Object.fromEntries(processes.map((p) => [p.id, `${base}/p/${p.id}/history`]))}
