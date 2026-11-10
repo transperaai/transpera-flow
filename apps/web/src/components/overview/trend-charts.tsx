@@ -68,7 +68,30 @@ const swatch = (background: string, extra?: string) => <i aria-hidden className=
 /** How many processes "Most in" names before "and N more". */
 export const TOP_PROCESSES = 3;
 
-export function OpenIssuesSummary({ byRating, byProcess }: { byRating: { rating: Rating; count: number }[]; byProcess: { id: string; name: string; count: number; href?: string }[] }) {
+/** "How this works" for the open issues: in its panel's header on the Overview. */
+export const OPEN_ISSUES_HOW = {
+  works:
+    "Every issue that is open or being tested, from the Issues list: insights someone acknowledged and issues logged by hand. The bar counts them by rating, worst first; the processes with the most open issues are named, each linked to its page.",
+  tells: "How many problems are open, how bad they are, and where to look first.",
+};
+
+/** "How this works" for the time split by process: in its panel's header on the Overview. */
+export const TIME_SPLIT_HOW = {
+  works:
+    "For each process, the time a piece of work spends in it from the simulation, split three ways: someone working on it (hands-on), waiting for one of our people who is busy elsewhere, and waiting on the client or others (a fixed wait). The share at the right is the hands-on part. Slowest first.",
+  tells: "Where work stands still, and whether the fix is our people's time or the wait on the client.",
+};
+
+export function OpenIssuesSummary({
+  byRating,
+  byProcess,
+  how = true,
+}: {
+  byRating: { rating: Rating; count: number }[];
+  byProcess: { id: string; name: string; count: number; href?: string }[];
+  /** "How this works" under the chart; false when the panel shows it in its header. */
+  how?: boolean;
+}) {
   const total = byRating.reduce((a, c) => a + c.count, 0);
   if (total === 0) return <p className="text-sm text-muted-foreground" data-empty>No open issues. Acknowledged insights and issues logged by hand show here while they are open.</p>;
   const risks = byRating.find((r) => r.rating === "risk")?.count ?? 0;
@@ -121,10 +144,7 @@ export function OpenIssuesSummary({ byRating, byProcess }: { byRating: { rating:
           {more > 0 && <span className="text-muted-foreground"> and {more} more</span>}
         </p>
       )}
-      <How
-        works="Every issue that is open or being tested, from the Issues list: insights someone acknowledged and issues logged by hand. The bar counts them by rating, worst first; the processes with the most open issues are named, each linked to its page."
-        tells="How many problems are open, how bad they are, and where to look first."
-      />
+      {how && <How {...OPEN_ISSUES_HOW} />}
       <table className="sr-only">
         <caption>Open issues by rating and by process</caption>
         <tbody>
@@ -159,7 +179,17 @@ export const TIME_SPLIT_LEGEND = [
 /** Slowest first: the smallest hands-on share (most of the time waiting) at the top. */
 export const slowestFirst = <R extends { share: number }>(rows: readonly R[]): R[] => [...rows].sort((a, b) => a.share - b.share);
 
-export function TimeSplitChart({ rows: given, months }: { rows: ProcessTimeSplit[]; /** The run's length in months, for hours a month in the tooltip. */ months: number }) {
+export function TimeSplitChart({
+  rows: given,
+  months,
+  how = true,
+}: {
+  rows: ProcessTimeSplit[];
+  /** The run's length in months, for hours a month in the tooltip. */
+  months: number;
+  /** "How this works" under the chart; false when the panel shows it in its header. */
+  how?: boolean;
+}) {
   const [tip, showTip, hideTip] = useTip();
   if (!given.length) return <p className="text-sm text-muted-foreground" data-empty>No work went through any process in this run.</p>;
   const rows = slowestFirst(given);
@@ -210,10 +240,7 @@ export function TimeSplitChart({ rows: given, months }: { rows: ProcessTimeSplit
           );
         })}
       </ul>
-      <How
-        works="For each process, the time a piece of work spends in it from the simulation, split three ways: someone working on it (hands-on), waiting for one of our people who is busy elsewhere, and waiting on the client or others (a fixed wait). The share at the right is the hands-on part. Slowest first."
-        tells="Where work stands still, and whether the fix is our people's time or the wait on the client."
-      />
+      {how && <How {...TIME_SPLIT_HOW} />}
       <Tip tip={tip} />
       <table className="sr-only">
         <caption>Hands-on against waiting, by process, in hours a month</caption>

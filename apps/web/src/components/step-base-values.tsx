@@ -51,7 +51,7 @@ export function SourcePill({ label }: { label: string | null }) {
   if (!option) return null;
   const tone = option.value === "measured" ? "border-good bg-good-soft" : option.value === "estimate" ? "border-warn bg-warn-soft" : "border-line bg-panel-2";
   return (
-    <span data-source-pill={option.value} className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${tone}`}>
+    <span data-source-pill={option.value} className={`inline-flex rounded-full border px-2 py-0.5 text-2xs font-semibold ${tone}`}>
       {option.confidence}
     </span>
   );
@@ -164,7 +164,7 @@ export function StepBaseValues({
               })}
             </ul>
           )}
-          <p className="text-[11px] text-fg-3">
+          <p className="text-2xs text-fg-3">
             Set on the servicing link in {settingsHref ? <a className="underline" href={settingsHref}>Settings</a> : "Settings"}; the Editor shows it here but does not change it.
           </p>
         </div>

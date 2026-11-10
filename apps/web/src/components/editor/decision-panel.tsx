@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { EdgeRow, ProcessBundle, StepRow } from "@transpera-flow/db";
+import { PanelHeading } from "@/components/editor/panel-heading";
 import { Help } from "@/components/help";
 import { NumberField, TextField } from "@/components/fields";
 import { Button } from "@/components/ui/button";
@@ -55,14 +56,14 @@ export function DecisionPanel({
 
   return (
     <section aria-label={`Branches of ${decision.name}`} data-decision-panel className="flex flex-col gap-2 border-t border-line pt-3">
-      <h3 className="flex items-center text-[11px] font-semibold tracking-wider text-fg-2 uppercase">
+      <PanelHeading as="h3">
         Branches
         <Help
           label="Branches"
           description="Each branch is a way the work can go after this question, with the share of items that take it. The shares always add up to 100%: change one and the others make room in proportion to what they had."
           example="“Signs” 60% goes on to Kickoff; “Walks away” 40% ends as Lost."
         />
-      </h3>
+      </PanelHeading>
       <ul className="flex flex-col gap-2">
         {branches.map((edge, i) => (
           <li key={edge.id}>
@@ -204,9 +205,9 @@ function BranchFields({
         help={{ description: "An optional note on when this branch applies. It is a label for people reading the map; it does not change the numbers.", example: "“Client is on the Pro plan”." }}
       />
       {count > 1 && (
-        <button type="button" data-remove-branch onClick={onRemove} className="self-start rounded-token border border-line px-2 py-0.5 text-xs hover:bg-panel-2">
+        <Button type="button" variant="outline" size="xs" data-remove-branch onClick={onRemove} className="self-start">
           Remove this branch
-        </button>
+        </Button>
       )}
     </fieldset>
   );

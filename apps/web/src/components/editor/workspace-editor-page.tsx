@@ -13,6 +13,12 @@ import { exitHref, parseEditorMode, parseHorizon, parseIssueParam } from "@/lib/
 import { issueAboutProcess, solutionIssueOf } from "@/lib/solutions/area";
 
 /**
+ * The `?notice=` the Editor sends a person back with when it can't open: `read-only` (they may only view this workspace)
+ * or `archived` (the process is archived). The read-only page shows "You can't edit this process" for either.
+ */
+export const EDIT_NOTICE = { readOnly: "read-only", archived: "archived" } as const;
+
+/**
  * The Editor for a process of the workspace (issue #104): `/w/[slug]/p/[processId]/edit`. Full screen, outside the
  * sidebar. Someone who can't edit goes back to the map, which they can still read.
  */
@@ -44,8 +50,9 @@ export async function WorkspaceEditorPage({
   // The company map is read at the Overview, not at a process page of its own.
   const base = company ? `/w/${slug}` : `/w/${slug}/p/${processId}`;
   const canEdit = await canEditWorkspace(live.workspace.id);
-  // An archived process (issue #182) is read only until it is restored: its page says so.
-  if (!canEdit || live.process.archived_at) redirect(base);
+  // An archived process (issue #182) is read only until it is restored. Either way the read-only page is told why it was
+  // opened instead (`?notice=`), so it can say "You can't edit this process" rather than leave the person guessing.
+  if (!canEdit || live.process.archived_at) redirect(`${base}?notice=${live.process.archived_at ? EDIT_NOTICE.archived : EDIT_NOTICE.readOnly}`);
   const [scenarios, blocks, sources, viewer, tours, tierSetup, laneInput] = await Promise.all([
     loadWorkspaceScenarios(live.workspace.id),
     loadWorkspaceBlocks(live.workspace.id),

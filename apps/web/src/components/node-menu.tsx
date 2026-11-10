@@ -308,10 +308,10 @@ function Item({
           </span>
         )}
         <span className="flex-1">{children}</span>
-        {shortcut && <span className="font-mono text-[10px] text-fg-3">{shortcut}</span>}
+        {shortcut && <span className="font-mono text-2xs text-fg-3">{shortcut}</span>}
         {submenu && <span aria-hidden className="text-fg-3">›</span>}
       </span>
-      {(note || disabled) && <span className={`text-[10px] text-fg-3 ${checked !== undefined ? "pl-5" : ""}`}>{disabled ?? note}</span>}
+      {(note || disabled) && <span className={`text-2xs text-fg-3 ${checked !== undefined ? "pl-5" : ""}`}>{disabled ?? note}</span>}
     </button>
   );
 }

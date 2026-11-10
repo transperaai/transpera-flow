@@ -4,10 +4,11 @@
 // folded away. The same busy bar and threshold tick as the Capacity page; the full list lives there.
 
 import Link from "next/link";
-import { BusyBar, How } from "@/components/capacity/widgets";
+import { BusyBar } from "@/components/capacity/widgets";
 import { SectionCard } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { BusyPerson } from "./department-cards";
+import { PanelActions } from "./panel-how";
 
 /**
  * How close under their own utilisation threshold someone has to be to show here: 10 percentage points. It matches the Capacity page's
@@ -43,7 +44,12 @@ function PersonRow({ p }: { p: BusyPerson }) {
   );
 }
 
-export function BusiestPeople({ people, failed, capacityHref }: { people: readonly BusyPerson[] | null; failed: boolean; capacityHref: string }) {
+const BUSIEST_HOW = {
+  works: `Each person's busy share from a simulation of today's clients, against their own role's utilisation threshold (the tick on the bar). People over it, or within ${MARGIN_POINTS} points under it, show here; everyone else is folded away. The Capacity page lists everyone.`,
+  tells: "Who is stretched now, before they become the reason work waits.",
+};
+
+export function BusiestPeople({ people, failed, capacityHref, className }: { people: readonly BusyPerson[] | null; failed: boolean; capacityHref: string; className?: string }) {
   const split = people ? closeToThreshold(people) : null;
   return (
     <SectionCard
@@ -51,11 +57,14 @@ export function BusiestPeople({ people, failed, capacityHref }: { people: readon
       section="busiest"
       level={3}
       title="Busiest people"
+      className={className}
       description={split ? busiestAnswer(split.close) : failed ? "Can't be worked out until the simulation runs." : "Working out who is busiest, from a simulation of today's clients…"}
       action={
-        <Link href={capacityHref} className="text-xs font-medium text-accent hover:underline">
-          Capacity →
-        </Link>
+        <PanelActions how={split ? BUSIEST_HOW : undefined}>
+          <Link href={capacityHref} className="text-xs font-medium text-accent hover:underline">
+            Capacity →
+          </Link>
+        </PanelActions>
       }
     >
       {split ? (
@@ -80,10 +89,6 @@ export function BusiestPeople({ people, failed, capacityHref }: { people: readon
             </details>
           )}
           {!people!.length && <p className="text-sm text-muted-foreground">Nobody is in the simulation yet.</p>}
-          <How
-            works={`Each person's busy share from a simulation of today's clients, against their own role's utilisation threshold (the tick on the bar). People over it, or within ${MARGIN_POINTS} points under it, show here; everyone else is folded away. The Capacity page lists everyone.`}
-            tells="Who is stretched now, before they become the reason work waits."
-          />
         </div>
       ) : failed ? null : (
         <Skeleton className="h-24 w-full" aria-busy="true" data-running />

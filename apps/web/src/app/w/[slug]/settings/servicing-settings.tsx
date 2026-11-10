@@ -26,7 +26,10 @@ export function ServicingLinks({ service: sv, data }: { service: ServiceRow; dat
   const unlinked = servicing.filter((p) => !links.some((l) => l.process_id === p.id));
   const hoursPerDay = data.workspace.settings.hours_per_week / 5;
   const disabled = !data.canEdit;
-  const [adding, setAdding] = useState(unlinked[0]?.id ?? "");
+  // The choice the person made, kept only while it is still on offer: after a link or an unlink the list changes, and a stale id
+  // (one just linked) would otherwise stay selected and link nothing.
+  const [picked, setAdding] = useState<string>();
+  const adding = picked && unlinked.some((p) => p.id === picked) ? picked : (unlinked[0]?.id ?? "");
   const [pending, start] = useTransition();
   const [error, setError] = useState<string>();
   const run = (f: () => Promise<{ error?: string }>) =>

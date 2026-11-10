@@ -6,6 +6,7 @@
 
 import { useMemo, useState, type Dispatch, type ReactNode, type SetStateAction } from "react";
 import { isGroup, UPKEEP_PURPOSE, workspacePurposes, type EvidenceStamp, type ProcessBundle, type PurposeCategory, type StepRow } from "@transpera-flow/db";
+import { PanelHeading } from "@/components/editor/panel-heading";
 import { Help } from "@/components/help";
 import { LinkedSources } from "@/components/sources/linking-context";
 import { Button } from "@/components/ui/button";
@@ -100,7 +101,7 @@ export function Inspector({
         </>
       ) : (
         <section aria-label="Inspector" className="flex flex-col gap-2">
-          <h2 className="text-[11px] font-semibold tracking-wider text-fg-2 uppercase">Inspector</h2>
+          <PanelHeading>Inspector</PanelHeading>
           <p className="text-xs text-muted-foreground">
             {selected.steps.length > 1
               ? `${selected.steps.length} steps selected. Group them from the left, or press Delete to remove them.`

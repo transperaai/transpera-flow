@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { NewProcessButton, type CreateProcess } from "@/components/new-process-dialog";
 import { EmptyState } from "@/components/shell/empty-state";
+import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { buttonVariants } from "@/components/ui/button";
 import { EDIT_ONLY } from "@/lib/phone";
 import { cn } from "@/lib/utils";
@@ -53,6 +54,12 @@ export function NotPublished({
       }
     >
       {what} {canEdit ? "Publish a process and this page fills in." : "An Agency admin publishes a process first, then this page fills in."}
+      {/* Opening the Editor and New process are hidden on a phone (EDIT_ONLY); this says why. Spaced only when the line is there. */}
+      {canEdit && (firstDraft || create) && (
+        <div className="has-[[data-phone-notice]]:mt-3">
+          <PhoneNotice />
+        </div>
+      )}
     </EmptyState>
   );
 }

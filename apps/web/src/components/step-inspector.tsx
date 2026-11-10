@@ -18,6 +18,7 @@ import {
   type StepKind,
   type StepRow,
 } from "@transpera-flow/db";
+import { Button } from "@/components/ui/button";
 import { DecisionPanel } from "@/components/editor/decision-panel";
 import { NewPurpose, type PurposeAdder } from "@/components/editor/new-purpose";
 import { TYPE_CHOICES, TYPE_LABELS } from "@/lib/editor/node-types";
@@ -205,13 +206,9 @@ export function StepInspector({
             <strong>Estimate.</strong> This step&apos;s values haven&apos;t been confirmed. Check them, then confirm; a draft
             can&apos;t be published with estimates unless they are accepted as such.
           </p>
-          <button
-            type="button"
-            onClick={() => editor.run((b) => updateStep(b, id, { assumption: false }))}
-            className="self-start rounded-token bg-accent px-2 py-0.5 font-semibold text-accent-fg"
-          >
+          <Button type="button" size="xs" onClick={() => editor.run((b) => updateStep(b, id, { assumption: false }))} className="self-start">
             Confirm values
-          </button>
+          </Button>
         </div>
       )}
       {decision ? (
@@ -377,9 +374,9 @@ export function StepInspector({
         />
         {placed ? (
           <>
-            <button type="button" onClick={onDelete} aria-describedby="placed-delete-note" data-remove-from-map className="self-start rounded-token border border-line px-2.5 py-1 hover:bg-panel-2">
+            <Button type="button" variant="outline" size="sm" onClick={onDelete} aria-describedby="placed-delete-note" data-remove-from-map className="self-start">
               Remove from this map
-            </button>
+            </Button>
             <p id="placed-delete-note" className="text-xs text-muted-foreground">
               {PLACED_REMOVE_NOTE}
             </p>
@@ -387,9 +384,9 @@ export function StepInspector({
         ) : step.kind === "start" ? (
           <p className="text-xs text-muted-foreground">The start can&apos;t be deleted.</p>
         ) : (
-          <button type="button" onClick={onDelete} className="self-start rounded-token border border-crit px-2.5 py-1 text-crit hover:bg-crit-soft">
+          <Button type="button" variant="outline" size="sm" onClick={onDelete} className="self-start border-crit text-crit hover:bg-crit-soft hover:text-crit">
             {decision ? "Delete decision" : wait ? "Delete wait" : "Delete step"}
-          </button>
+          </Button>
         )}
       </div>
     </aside>
@@ -408,14 +405,13 @@ export interface DraftInfo {
 
 /** What the draft changed on this step, old → new, each with Revert. */
 function DraftChanges({ info, change }: { info: DraftInfo; change: StepChange }) {
-  const buttonClass = "rounded-token border border-line bg-panel px-1.5 py-0.5 font-semibold hover:bg-panel-2";
   if (change.kind === "added") {
     return (
       <div className="flex items-center justify-between gap-2 rounded-token border border-dashed border-accent bg-accent-soft p-2 text-xs">
         <p>New in this draft.</p>
-        <button type="button" onClick={info.onDiscard} className={buttonClass}>
+        <Button type="button" variant="outline" size="xs" onClick={info.onDiscard}>
           Discard step
-        </button>
+        </Button>
       </div>
     );
   }
@@ -426,9 +422,9 @@ function DraftChanges({ info, change }: { info: DraftInfo; change: StepChange })
     <section aria-label="Changed in this draft" className="flex flex-col gap-1.5 rounded-token border border-accent bg-accent-soft p-2 text-xs">
       <div className="flex items-center justify-between gap-2">
         <p className="font-semibold">Changed in this draft</p>
-        <button type="button" onClick={info.onDiscard} className={buttonClass}>
+        <Button type="button" variant="outline" size="xs" onClick={info.onDiscard}>
           Revert all
-        </button>
+        </Button>
       </div>
       <ul className="flex flex-col gap-1">
         {fields.map((f) => (
@@ -437,17 +433,17 @@ function DraftChanges({ info, change }: { info: DraftInfo; change: StepChange })
               {fieldLabel(f.field)}: <s className="text-fg-3">{describeValue(f.field, f.live, info.names)}</s>{" "}
               <span aria-label="changed to">→</span> <strong>{describeValue(f.field, f.draft, info.names)}</strong>
             </span>
-            <button type="button" onClick={() => info.onRevert(f.field)} className={buttonClass} aria-label={`Revert ${fieldLabel(f.field)}`}>
+            <Button type="button" variant="outline" size="xs" onClick={() => info.onRevert(f.field)} aria-label={`Revert ${fieldLabel(f.field)}`}>
               Revert
-            </button>
+            </Button>
           </li>
         ))}
         {change.moved && (
           <li className="flex items-center justify-between gap-2">
             <span>Moved on the map</span>
-            <button type="button" onClick={() => info.onRevert(POSITION)} className={buttonClass} aria-label="Revert position">
+            <Button type="button" variant="outline" size="xs" onClick={() => info.onRevert(POSITION)} aria-label="Revert position">
               Revert
-            </button>
+            </Button>
           </li>
         )}
       </ul>

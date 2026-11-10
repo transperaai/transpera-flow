@@ -40,7 +40,38 @@ function Sparkline({ values, label }: { values: readonly number[]; label: string
   );
 }
 
-export function TimeAchieves({ monthly, hoursPerWeek, start, categories, sandboxHref, span }: { monthly: MonthlyResult; hoursPerWeek: number; start: string; categories: readonly PurposeCategory[]; sandboxHref?: string; span: string }) {
+/** "How this works" for what the time achieves: in its panel's header on the Overview. */
+export function timeAchievesHow(span: string, categories: readonly PurposeCategory[]) {
+  const names = CLIENT_WORK_PURPOSES.map((k) => categories.find((c) => c.key === k)?.name ?? k);
+  return {
+    works: (
+      <>
+        The team&apos;s working time in the simulation over the next {span}, by what each step achieves, as a share of the hours available. Client work is
+        &ldquo;{names[0]}&rdquo; plus &ldquo;{names[1]}&rdquo;; the line shows its share month by month. Hover a part of the bar for its hours.
+      </>
+    ),
+    tells: "Whether the team's time goes on the work clients pay for, or on everything around it.",
+  };
+}
+
+export function TimeAchieves({
+  monthly,
+  hoursPerWeek,
+  start,
+  categories,
+  sandboxHref,
+  span,
+  how = true,
+}: {
+  monthly: MonthlyResult;
+  hoursPerWeek: number;
+  start: string;
+  categories: readonly PurposeCategory[];
+  sandboxHref?: string;
+  span: string;
+  /** "How this works" under the chart; false when the panel shows it in its header. */
+  how?: boolean;
+}) {
   // Categories biggest first (so the biggest leads the bar and the legend), then Idle, then work nobody was there for.
   const view = useMemo(() => {
     const v = timeView(monthly, timelineMonths(start, monthly.months, hoursPerWeek), categories, { kind: "team" });
@@ -52,7 +83,6 @@ export function TimeAchieves({ monthly, hoursPerWeek, start, categories, sandbox
   const client = view.rows.filter((r) => r.kind === "category" && CLIENT_WORK_PURPOSES.includes(r.id));
   const period = client.reduce((a, r) => a + r.runShare, 0);
   const byMonth = view.months.map((_, m) => client.reduce((a, r) => a + (r.share[m] ?? 0), 0));
-  const names = CLIENT_WORK_PURPOSES.map((k) => categories.find((c) => c.key === k)?.name ?? k);
   const inBar = view.rows.filter((r) => r.kind !== "uncovered" && r.runShare > 0);
   return (
     <div className="flex flex-col gap-3" data-time-achieves>
@@ -80,12 +110,7 @@ export function TimeAchieves({ monthly, hoursPerWeek, start, categories, sandbox
         ))}
       </div>
       <TimeLegend rows={view.rows} shares />
-      <How
-        works={
-          <>
-            The team&apos;s working time in the simulation over the next {span}, by what each step achieves, as a share of the hours available. Client work is
-            &ldquo;{names[0]}&rdquo; plus &ldquo;{names[1]}&rdquo;; the line shows its share month by month. Hover a part of the bar for its hours.
-          </>
+      {how && <How {...timeAchievesHow(span, categories)} />}
         }
         tells="Whether the team's time goes on the work clients pay for, or on everything around it."
       />

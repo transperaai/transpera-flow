@@ -4,7 +4,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundleHarness } from "./build-harness";
 
 // The screen a page shows when it fails (issue #44), in a real browser: the real ErrorState bundled with esbuild (see
-// ./build-harness.ts). It shows Next's reference for a server error, retries on "Try again", and links out to somewhere safe.
+// ./build-harness.ts). It shows Next's reference for a server error, retries on "Try again", and links out to somewhere safe (but not to the
+// page that just failed).
 
 let browser: Browser;
 let script: string;
@@ -44,10 +45,20 @@ describe("ErrorState in a browser", () => {
   });
 
   it("shows no reference without a digest, and links home by default", async () => {
-    const { page } = await mount();
+    const { page } = await mount({ withRetry: false });
     await page.getByRole("alert").waitFor();
     expect(await page.getByRole("alert").textContent()).not.toContain("Reference");
     expect(await page.getByRole("link", { name: "Go to your workspaces" }).getAttribute("href")).toBe("/");
+    await page.close();
+  });
+
+  it("on the home page itself offers Try again, not a link that reloads the failing page", async () => {
+    // The harness's next/navigation stand-in says the page is "/".
+    const { page } = await mount();
+    await page.getByRole("alert").waitFor();
+    expect(await page.getByRole("link", { name: "Go to your workspaces" }).count()).toBe(0);
+    await page.getByRole("button", { name: "Try again" }).click();
+    expect(await page.evaluate(() => window.retries)).toBe(1);
     await page.close();
   });
 

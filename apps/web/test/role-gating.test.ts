@@ -89,7 +89,7 @@ describe("screens whose controls come in as props that are undefined without can
 
 describe("the Editor and the Settings", () => {
   it("the Editor sends everyone without canEdit back to the page", () => {
-    expect(read("components/editor/workspace-editor-page.tsx")).toContain("if (!canEdit || live.process.archived_at) redirect(base);");
+    expect(read("components/editor/workspace-editor-page.tsx")).toContain("if (!canEdit || live.process.archived_at) redirect(`${base}?notice=${live.process.archived_at ? EDIT_NOTICE.archived : EDIT_NOTICE.readOnly}`);");
   });
 
   it("Settings: the details are owner-only (canManage), everything else follows canEdit", () => {
