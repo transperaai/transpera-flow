@@ -110,21 +110,22 @@ function withSolution() {
 const card = (page: Page, processId: string) => page.locator(`[data-company-map] .react-flow__node-group[data-id="${processId}"]`);
 
 describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
-  it("shows the company map on top, with lanes and tags, and the levers and results under it", async () => {
+  it("shows the company map in the results pane, with lanes and tags, beside the levers", async () => {
     const { page, errors } = await mount();
     expect(await page.locator("[data-play-map] [data-lane]").count()).toBeGreaterThan(1);
     expect(await page.locator("[data-play-map] [data-process-tag]").count()).toBeGreaterThan(1);
-    expect(await page.locator("[data-play-map] [role=heading]").first().innerText()).toBe("Company map");
+    expect(await page.locator("[data-play-map] h2").first().innerText()).toContain("Company map");
     expect(await page.locator("[data-version-summary]").innerText()).toBe("All processes on today's map. Click a process to load another version.");
     expect(await page.locator("[data-play-processes], [data-step-row], [data-block], [data-version]").count()).toBe(0);
     const body = await page.locator("body").innerText();
     expect(body).not.toMatch(/No solutions for this process|No blocks yet/);
     const order = await page.evaluate(() => {
       const top = (s: string) => document.querySelector(s)!.getBoundingClientRect().top;
-      return [top("[data-play-map]"), top("[data-play-levers]"), top("[data-play-results]")];
+      return [top("[data-play-map]"), top("[data-play-levers-column]"), top("[data-play-results]")];
     });
-    expect(order[0]).toBeLessThan(order[1]!);
-    expect(Math.abs(order[1]! - order[2]!)).toBeLessThan(5);
+    // Layout A's workbench: the levers pane and the results pane start side by side; the map sits in the results pane, under the verdict.
+    expect(Math.abs(order[1]! - order[2]!)).toBeLessThan(40);
+    expect(order[0]).toBeGreaterThan(order[2]!);
     expect(errors).toEqual([]);
     await page.close();
   });
