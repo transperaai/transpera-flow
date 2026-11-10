@@ -445,7 +445,9 @@ describe("stable keys", () => {
 
   it("keys name the subject, not the numbers: another seed gives the same keys", () => {
     const m = northbeamModel();
-    m.leadsPerWeek *= 1.8;
+    // Busy enough for a dozen issues, and away from a cut-off (at 1.8 the SEO role sits on the 65% line since engine 1.18.0,
+    // so one seed flags the role and the other its three people).
+    m.leadsPerWeek *= 1.7;
     expect(keys(detectIssues(m, simulate(m, 30, 99))).sort()).toEqual(keys(detectIssues(m, simulate(m, 30, 1))).sort());
   });
 

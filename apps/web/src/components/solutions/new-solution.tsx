@@ -74,7 +74,7 @@ export function NewSolutionButton({
   const processName = useMemo(() => (i: IssueRow) => names.get(issueProcessId(i) ?? "") ?? "A process", [names]);
   const issue = startable.find((i) => i.id === picked);
   const href = issue ? startSolutionHref(base, issue, from ?? solutionsListHref(base)) : null;
-  const style = cn(buttonVariants(), "bg-edit text-edit-fg hover:bg-edit/90");
+  const style = buttonVariants();
   if (!processes.length) return null;
   return (
     <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
@@ -100,13 +100,13 @@ export function NewSolutionButton({
                 Cancel
               </Button>
               {href ? (
-                <Button asChild className="bg-edit text-edit-fg hover:bg-edit/90">
+                <Button asChild>
                   <Link href={href} data-start-in-editor>
                     ✎ Start in the Editor
                   </Link>
                 </Button>
               ) : (
-                <Button type="button" disabled className="bg-edit text-edit-fg" data-start-in-editor>
+                <Button type="button" disabled data-start-in-editor>
                   ✎ Start in the Editor
                 </Button>
               )}

@@ -36,7 +36,4 @@ export function ListCount({ children, ...rest }: { children: ReactNode } & Recor
   );
 }
 
-/** The small purple dot on a button that opens the Editor (the only purple outside the Editor's own chrome). */
-export function EditMarker() {
-  return <span aria-hidden data-edit-marker className="size-2 shrink-0 rounded-full bg-edit" />;
-}
+export { EditMarker } from "@/components/page-kit/edit-marker";

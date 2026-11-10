@@ -102,7 +102,4 @@ export function ActionsHelp({ label, items }: { label: string; items: { help: Pi
   );
 }
 
-/** The small purple dot on a button that opens the Editor: the one place the Editor's colour shows outside the Editor. */
-export function EditMarker() {
-  return <span aria-hidden data-edit-marker className="size-2 shrink-0 rounded-full bg-edit" />;
-}
+export { EditMarker } from "@/components/page-kit/edit-marker";

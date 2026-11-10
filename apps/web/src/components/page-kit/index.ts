@@ -9,3 +9,4 @@ export { MetaLine } from "./meta-line";
 export { EditableText } from "./editable-text";
 export { Timeline, type TimelineEntry } from "./timeline";
 export { ListRow } from "./list-row";
+export { EditMarker } from "./edit-marker";

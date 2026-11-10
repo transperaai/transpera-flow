@@ -68,7 +68,7 @@ export function LibraryFilters({
   set: (patch: Partial<LibraryQuery>) => void;
   onClear: () => void;
 }) {
-  const kindOptions: FilterOption[] = SOURCE_KINDS.map((k) => ({ value: k, label: SOURCE_KIND_LABELS[k], count: counts.kinds?.[k] ?? (undefined as unknown as number) }));
+  const kindOptions: FilterOption[] = SOURCE_KINDS.map((k) => ({ value: k, label: SOURCE_KIND_LABELS[k], count: counts.kinds?.[k] }));
   const processOptions: FilterOption[] = targets.processes.map((p) => ({ value: p.id, label: p.name, count: counts.processes[p.id] ?? 0 }));
   return (
     <Toolbar label="Filter sources">
