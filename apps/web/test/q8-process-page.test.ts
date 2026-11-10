@@ -114,10 +114,10 @@ describe("the process page as a workbench", () => {
     expect(await pop.locator("select[data-process-category] option").count()).toBe(5);
     expect(await pop.innerText()).toContain("Department");
     await page.keyboard.press("Escape");
-    // The map: its label, Swimlanes, Fit, the Key popover, and the playback bar docked under it. It fills the page under the toolbar.
+    // The map: its label, Swimlanes, the Key popover, Fit on the map itself, and the playback bar docked under it. It fills the page under the toolbar.
     const map = page.locator("#map");
     expect(await map.getByRole("heading", { name: "Process map" }).count()).toBe(1);
-    for (const name of ["Swimlanes", "Fit", "Key"]) expect(await map.getByRole("button", { name }).count()).toBe(1);
+    for (const name of ["Swimlanes", "Key", "Fit the map to view"]) expect(await map.getByRole("button", { name, exact: true }).count()).toBe(1);
     expect(await map.locator("[data-playback-strip] [role=group][aria-label=Playback]").count()).toBe(1);
     await map.getByRole("button", { name: "Key" }).click();
     expect(await page.locator("[data-slot=popover-content][data-state=open]").innerText()).toContain("Operational risk");

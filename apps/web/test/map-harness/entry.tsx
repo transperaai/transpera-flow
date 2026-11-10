@@ -53,6 +53,10 @@ export interface HarnessOptions {
   baseValues?: boolean;
   /** Every connection's middle moved by this much, as if dragged and saved (`center_dx`, `center_dy`). */
   bend?: { dx: number; dy: number };
+  /** The playback bar floats over the foot of the map (off by default here). */
+  playback?: boolean;
+  /** The zoom buttons on the map; default on, as in the app. */
+  zoomControls?: boolean;
 }
 
 declare global {
@@ -211,7 +215,8 @@ function Harness({ options }: { options: HarnessOptions }) {
         expanded={options.controlled ? open : undefined}
         onExpandedChange={options.controlled ? setOpen : undefined}
         result={result}
-        showPlayback={false}
+        showPlayback={options.playback ?? false}
+        zoomControls={options.zoomControls ?? true}
         handoffs={options.company}
         departmentLanes={departmentLanes}
         hideAdd={options.palette}

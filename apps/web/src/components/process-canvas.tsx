@@ -43,6 +43,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type Dispatch,
   type KeyboardEvent,
   type MouseEvent,
@@ -98,8 +99,10 @@ import { CARD_SIZE, GROUP_CARD, TERMINAL_SIZE, groupIds, openGroupSize } from "@
 import { groupsToOpen, litIds, withHighlightOpen } from "@/lib/map/highlight";
 import { ratingOfRank } from "@/lib/map/rating";
 import { ISSUE_PILL_CLASS, tileColours, tileHeadline } from "@/lib/map/tile";
-import { MAX_ZOOM, MIN_ZOOM, autoPanelHeight, fitViewport, stepZoom, type Padding } from "@/lib/map/zoom";
-import { MapKey, MapLegend, ZoomControls } from "./map/map-controls";
+import { MIN_ZOOM, autoPanelHeight, fitViewport, stepZoom, type Padding } from "@/lib/map/zoom";
+import { countRender } from "@/lib/map/render-count";
+import { useStableHandler } from "@/lib/use-stable-handler";
+import { MapKey, MapLegend, MapViewControls } from "./map/map-controls";
 import { TagPill } from "./tag-pill";
 import { ProblemMark } from "./editor/problem-mark";
 import type { NodeProblems } from "@/lib/editor/problems";
@@ -610,6 +613,7 @@ function BranchShare({ decisionId, row, editor }: { decisionId: string; row: Bra
 
 /** The end of a decision's branch that goes back to an earlier step: "Go back to X". Clicking it selects the branch. */
 function GoBackNode({ data, selected }: NodeProps<GoBackFlowNode>) {
+  countRender("tile");
   return (
     <div
       data-tile="goback"
@@ -627,6 +631,7 @@ function GoBackNode({ data, selected }: NodeProps<GoBackFlowNode>) {
 }
 
 function StepNode(props: NodeProps<StepFlowNode>) {
+  countRender("tile");
   const { data, selected } = props;
   if (data.branches && !data.editing && !data.ghost) return <DecisionCard {...props} />;
   const { step, role, person, bottleneck, problems, editable, editing, pulse, ghost } = data;
@@ -709,6 +714,7 @@ function VersionBadge({ text, className }: { text: string; className?: string })
 }
 
 function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
+  countRender("tile");
   const { step, open, expandable, roll, problems, editable } = data;
   const { toggleGroup, handoffs, turnInto } = useContext(CanvasContext);
   const toggle = expandable && (
@@ -814,6 +820,7 @@ function GroupNode({ data, selected }: NodeProps<GroupFlowNode>) {
 }
 
 function TerminalNode({ data, selected }: NodeProps<TerminalFlowNode>) {
+  countRender("tile");
   const { step, problems, editing, ghost } = data;
   const editable = data.editable && !ghost;
   const tone =
@@ -854,8 +861,8 @@ function TerminalNode({ data, selected }: NodeProps<TerminalFlowNode>) {
 /** A branch: its probability (and condition tag) as a label, edited inline when selected. */
 function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
   const { id, data, selected, markerEnd, style } = props;
+  countRender("edge");
   const { editor, handoffs } = useContext(CanvasContext);
-  const zoom = useStore((s) => s.transform[2]);
   // While the grab handle is dragged, the offset under the pointer (saved once, on release).
   const [dragged, setDragged] = useState<{ x: number; y: number } | null>(null);
   const offset = dragged ?? data?.bend ?? null;
@@ -869,7 +876,6 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
           editor={editor}
           edgeId={id}
           at={{ x: labelX, y: labelY }}
-          zoom={zoom}
           offset={offset}
           // Where the centre sits automatically: the saved offset is measured from here.
           autoAt={{ x: auto[1], y: auto[2] }}
@@ -908,21 +914,13 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
         </EdgeLabelRenderer>
         {editing && (
           <EdgeLabelRenderer>
-            <div
-              className="nodrag nopan absolute"
-              style={{
-                transform: `translate(${labelX}px, ${labelY + 14}px) scale(${1 / zoom}) translate(-50%, 0)`,
-                transformOrigin: "0 0",
-                zIndex: 1002,
-                pointerEvents: "all",
-              }}
-            >
+            <Unzoomed x={labelX} y={labelY + 14} shift="-50%, 0">
               {handoffs ? (
                 <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} bent={!!data?.bend} />
               ) : (
                 <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} bent={!!data?.bend} />
               )}
-            </div>
+            </Unzoomed>
           </EdgeLabelRenderer>
         )}
         {grab}
@@ -933,44 +931,58 @@ function BranchEdge(props: EdgeProps<BranchFlowEdge>) {
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} interactionWidth={18} />
       {grab}
-      {(editing || text || problems.length > 0) && (
+      {editing ? (
         <EdgeLabelRenderer>
-          <div
-            className="nodrag nopan absolute"
-            style={{
-              // The editor stays readable at any zoom and sits above the nodes.
-              // Read-only, the label sits just above the line at its start, in the gap beside the card, not on one at the middle of a short link.
-              transform: editing
-                ? grab
-                  ? // Just below the grab handle on the line's middle, so both can be used.
-                    `translate(${labelX}px, ${labelY}px) scale(${1 / zoom}) translate(-50%, 12px)`
-                  : `translate(${labelX}px, ${labelY}px) scale(${1 / zoom}) translate(-50%, -50%)`
-                : data?.branch
+          {/* The editor stays readable at any zoom and sits above the nodes; just below the grab handle on the line's middle while it shows, so both can be used. */}
+          <Unzoomed x={labelX} y={labelY} shift={grab ? "-50%, 12px" : "-50%, -50%"}>
+            {handoffs ? (
+              <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} bent={!!data?.bend} />
+            ) : (
+              <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} bent={!!data?.bend} />
+            )}
+          </Unzoomed>
+        </EdgeLabelRenderer>
+      ) : (
+        (text || problems.length > 0) && (
+          <EdgeLabelRenderer>
+            <div
+              className="nodrag nopan absolute"
+              style={{
+                // Read-only, the label sits just above the line at its start, in the gap beside the card, not on one at the middle of a short link.
+                transform: data?.branch
                   ? // A branch of a decision: its name and share on the line itself, where the lines out of one decision have drawn apart
                     // (just above the grab handle while it shows).
                     `translate(${labelX}px, ${labelY}px) translate(-50%, ${grab ? "calc(-100% - 8px)" : "-50%"})`
                   : `translate(${props.sourceX + 4}px, ${props.sourceY - 2}px) translate(0, -100%)`,
-              transformOrigin: "0 0",
-              zIndex: editing ? 1002 : undefined,
-              pointerEvents: "all",
-            }}
-          >
-            {editing ? (
-              handoffs ? (
-                <HandoffEditor key={id} editor={editor} edgeId={id} label={data?.label ?? null} bent={!!data?.bend} />
-              ) : (
-                <BranchEditor key={id} editor={editor} edgeId={id} probability={p} tag={tag} bent={!!data?.bend} />
-              )
-            ) : (
+                transformOrigin: "0 0",
+                pointerEvents: "all",
+              }}
+            >
               <span className="flex items-center">
                 {text && <span title={text} className={`block truncate rounded-token bg-panel px-1 text-[11px] text-fg-2 ${handoffs ? "max-w-[9rem] font-sans" : data?.branch ? "max-w-[8rem] font-sans" : "max-w-[5.5rem] font-mono tabular-nums"}`}>{text}</span>}
                 <ProblemMark problems={problems} className="relative ml-0.5" />
               </span>
-            )}
-          </div>
-        </EdgeLabelRenderer>
+            </div>
+          </EdgeLabelRenderer>
+        )
       )}
     </>
+  );
+}
+
+/**
+ * A line's editor, scaled against the zoom so it stays readable at any zoom, above the nodes. Only this (and the grab handle) reads
+ * the zoom, and only while a line is selected: the lines themselves don't, so zooming re-renders none of them (issue #249).
+ */
+function Unzoomed({ x, y, shift, children }: { x: number; y: number; shift: string; children: ReactNode }) {
+  const zoom = useStore((s) => s.transform[2]);
+  return (
+    <div
+      className="nodrag nopan absolute"
+      style={{ transform: `translate(${x}px, ${y}px) scale(${1 / zoom}) translate(${shift})`, transformOrigin: "0 0", zIndex: 1002, pointerEvents: "all" }}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -1008,7 +1020,6 @@ function BendHandle({
   edgeId,
   at,
   autoAt,
-  zoom,
   offset,
   onDrag,
 }: {
@@ -1016,11 +1027,12 @@ function BendHandle({
   edgeId: string;
   at: { x: number; y: number };
   autoAt: { x: number; y: number };
-  zoom: number;
   offset: { x: number; y: number } | null;
   onDrag: (offset: { x: number; y: number } | null) => void;
 }) {
   const { screenToFlowPosition } = useReactFlow();
+  // Scaled against the zoom, like a line's editor (see Unzoomed).
+  const zoom = useStore((s) => s.transform[2]);
   // Where the pointer went down (map units) and the offset then; null when not dragging.
   const start = useRef<{ x: number; y: number; from: { x: number; y: number } } | null>(null);
   const save = (next: { x: number; y: number } | null) => editor.run((b) => bendEdge(b, edgeId, next));
@@ -1261,9 +1273,29 @@ function BranchEditor({
 
 const nodeTypes = { step: StepNode, terminal: TerminalNode, group: GroupNode, goback: GoBackNode };
 const edgeTypes = { branch: BranchEdge };
+/** Hoisted, like the node and edge types: a new object on each render makes React Flow do needless work. */
+const PRO_OPTIONS = { hideAttribution: true };
 
-/** Room around the steps when framing them: the toolbar sits top left, playback along the foot, lane names on the left. */
-const fitPadding = (lanes: boolean, toolbar: boolean, playback: boolean): Padding => ({ top: toolbar ? 64 : 24, right: 24, bottom: playback ? 64 : 24, left: lanes ? 150 : 24 });
+/**
+ * Room around the steps when framing them: the toolbar sits top left, playback along the foot, lane names on the left, and the
+ * buttons on the map (32 px wide and a 10 px margin) down the right, so a fitted map never ends under them.
+ */
+const fitPadding = (lanes: boolean, toolbar: boolean, playback: boolean, controls: boolean): Padding => ({
+  top: toolbar ? 64 : 24,
+  right: controls ? 60 : 24,
+  bottom: playback ? 64 : 24,
+  left: lanes ? 150 : 24,
+});
+
+// Full screen, for a read-only map: offered only where the browser has it for an element (an iPhone doesn't), and known only in
+// the browser, so the server and hydration leave the button out.
+const noSubscribe = () => () => undefined;
+const fullscreenEnabled = () => !!document.fullscreenEnabled;
+const serverFalse = () => false;
+const onFullscreenChange = (notify: () => void) => {
+  document.addEventListener("fullscreenchange", notify);
+  return () => document.removeEventListener("fullscreenchange", notify);
+};
 
 const noop = () => undefined;
 
@@ -1370,7 +1402,7 @@ interface CanvasProps {
    * Steps that aren't drawn (inside a closed group) are ignored; with none drawn the whole map is framed.
    */
   focus?: readonly string[] | null;
-  /** Show the -, Fit and + buttons in the bar above the map. Default true. */
+  /** Show the zoom in, zoom out and fit buttons (and, read-only, full screen) on the map's bottom-right corner. Default true. */
   zoomControls?: boolean;
   /** Show the playback bar over the foot of the map. Default true; embedded maps turn it off. */
   showPlayback?: boolean;
@@ -2210,8 +2242,13 @@ function Canvas({
   // maps) the panel changing size. Adding a step, opening a group by hand or a highlight never moves the view.
   const width = useStore((st) => st.width);
   const height = useStore((st) => st.height);
-  const zoom = useStore((st) => st.transform[2]);
-  const heightMode = heightProp ?? (editable ? "fill" : "auto");
+  // The zoom itself is read only by the buttons on the map (MapViewControls) and a selected line's editor: a canvas that followed
+  // it would re-render every tile and line on each frame of a zoom or fit (issue #249).
+  // Full screen (read-only maps): the map fills the screen and is framed afresh, centred in it.
+  const canFullscreen = useSyncExternalStore(noSubscribe, fullscreenEnabled, serverFalse);
+  const fullscreen = useSyncExternalStore(onFullscreenChange, () => document.fullscreenElement !== null && document.fullscreenElement === wrapper.current, serverFalse);
+  const heightMode = fullscreen ? "fill" : (heightProp ?? (editable ? "fill" : "auto"));
+  const controls = zoomControls && !nothingToDraw;
   const handZoomed = useRef(false);
   const framed = useRef(false);
   const sizeRef = useRef({ width: 0, height: 0 });
@@ -2252,17 +2289,17 @@ function Canvas({
         bounds = { x: left, y: top, width: right - left, height: bottom - top };
       }
       // A bar in its own strip above takes no room off the map.
-      const pad = fitPadding(lanes && !bands.length, editable, showPlayback && !playbackAbove && !card);
+      const pad = fitPadding(lanes && !bands.length, editable, showPlayback && !playbackAbove && !card, controls);
       let panelHeight = panel.height;
       if (heightMode === "auto") {
         panelHeight = autoPanelHeight(bounds, panel.width, pad, minZoom);
         setAutoHeight(panelHeight);
       }
       if (!panelHeight) return;
-      void flow.setViewport(fitViewport(bounds, { width: panel.width, height: panelHeight }, pad, minZoom), animate ? { duration: 200 } : undefined);
+      void flow.setViewport(fitViewport(bounds, { width: panel.width, height: panelHeight }, pad, minZoom, fullscreen), animate ? { duration: 200 } : undefined);
       setTimeout(measureOverflow, animate ? 260 : 20);
     },
-    [flow, lanes, editable, showPlayback, playbackAbove, card, heightMode, measureOverflow, focus],
+    [flow, lanes, editable, showPlayback, playbackAbove, card, controls, heightMode, fullscreen, measureOverflow, focus],
   );
   const fitRef = useRef(fit);
   useEffect(() => {
@@ -2304,12 +2341,34 @@ function Canvas({
   }, [refitKey]);
   const zoomBy = (direction: "in" | "out") => {
     handZoomed.current = true;
-    void flow.zoomTo(stepZoom(zoom, direction), { duration: 150 });
+    void flow.zoomTo(stepZoom(flow.getViewport().zoom, direction), { duration: 150 });
   };
   const fitByHand = () => {
     handZoomed.current = false;
     fit(true, true);
   };
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    else void wrapper.current?.requestFullscreen().catch(() => undefined);
+  };
+  // Entering or leaving the full screen changes the panel completely: frame the map afresh, even if it was moved by hand.
+  const wasFullscreen = useRef(fullscreen);
+  useEffect(() => {
+    if (wasFullscreen.current === fullscreen) return;
+    wasFullscreen.current = fullscreen;
+    requestFit();
+  }, [fullscreen]);
+  // The playback bar floats over the foot of the map: the buttons sit above it, however tall it wraps.
+  const floatingPlayback = showPlayback && !playbackAbove && !card;
+  const footRef = useRef<HTMLDivElement>(null);
+  const [footHeight, setFootHeight] = useState(0);
+  useEffect(() => {
+    const el = footRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setFootHeight(el.offsetHeight));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [floatingPlayback]);
 
   // Highlighted steps scroll into view when they are off screen.
   useEffect(() => {
@@ -2354,8 +2413,60 @@ function Canvas({
   useEffect(() => {
     detailChanged.current?.(shownDetailId);
   }, [shownDetailId]);
-  const docked = stepDetailIn !== undefined;
+  // On the full screen the page's inspector is out of sight: the step's detail floats over the map instead.
+  const docked = stepDetailIn !== undefined && !fullscreen;
   const compact = !!card?.compact;
+
+  // What React Flow is handed keeps its identity across renders (issue #249): a new handler on each render made it wake every
+  // handle and edge on each drag move. Each calls the latest closure.
+  const flowHandlers = {
+    onNodesChange: useStableHandler(onNodesChange),
+    onEdgesChange: useStableHandler(onEdgesChange),
+    onConnect: useStableHandler(onConnect),
+    isValidConnection: useStableHandler((c: Edge | Connection) => !connectionProblem(bundle, c.source, c.target)),
+    onReconnect: useStableHandler((old: Edge, c: Connection) => {
+      editor?.run((b) => reconnectEdge(b, old.id, c.source, c.target));
+    }),
+    onNodeDoubleClick: useStableHandler((e: MouseEvent, node: FlowNode) => {
+      if (!(e.target instanceof Element) || e.target.closest("input, select, .nokey")) return;
+      const field = e.target.closest("[data-field]")?.getAttribute("data-field") as InlineField | null;
+      startEditing(node.id, field ?? "name");
+    }),
+    onNodeContextMenu: useStableHandler((e: MouseEvent, node: FlowNode) => {
+      if (!editable) return;
+      e.preventDefault();
+      if (isGoBackNodeId(node.id) || menuFor.current === node.id) return;
+      const rect = wrapper.current!.getBoundingClientRect();
+      // A context-menu key press arrives without a pointer position.
+      if (e.clientX === 0 && e.clientY === 0 && e.currentTarget instanceof Element) openMenuBelow(e.currentTarget, node.id);
+      else openMenu(node.id, e.clientX - rect.left, e.clientY - rect.top);
+    }),
+    onSelectionContextMenu: useStableHandler((e: MouseEvent, picked: FlowNode[]) => {
+      if (!editable || !picked.length) return;
+      e.preventDefault();
+      const rect = wrapper.current!.getBoundingClientRect();
+      openMenu(
+        picked[0]!.id,
+        e.clientX - rect.left,
+        e.clientY - rect.top,
+        picked.map((n) => n.id),
+      );
+    }),
+    // The menu belongs where it was opened; moving the map closes it.
+    onMoveStart: useStableHandler((event: globalThis.MouseEvent | globalThis.TouchEvent | null) => {
+      // A drag, the wheel or a pinch moves the view by hand; the map stops following its panel.
+      if (event) handZoomed.current = true;
+      if (menuFor.current) closeMenu(false);
+    }),
+    onMoveEnd: useStableHandler(() => measureOverflow()),
+    onNodeClick: useStableHandler((e: MouseEvent, node: FlowNode) => {
+      // The group toggle and the issue badge are buttons of their own.
+      if (e.target instanceof Element && e.target.closest("button")) return;
+      if (!node.id.startsWith("ghost:")) onStepClick?.(node.id);
+      if (!editable && stepDetail) setDetailId(node.id);
+    }),
+    onPaneClick: useStableHandler(() => setDetailId(null)),
+  };
 
   return (
     <CanvasContext.Provider value={canvasContext}>
@@ -2366,12 +2477,13 @@ function Canvas({
           tabIndex={-1}
           onDoubleClick={onDoubleClick}
           onKeyDownCapture={onKeyDownCapture}
-          className={`relative isolate flex min-w-0 flex-col ${card ? "" : "rounded-lg border bg-card"} ${heightMode === "fill" ? "min-h-[24rem] flex-1" : "h-fit"}`}
+          className={`relative isolate flex min-w-0 flex-col ${card ? "" : "rounded-lg border"} ${card && !fullscreen ? "" : "bg-card"} ${heightMode === "fill" ? "min-h-[24rem] flex-1" : "h-fit"}`}
+          data-fullscreen={fullscreen ? "" : undefined}
           role="region"
           aria-label={`${bundle.process.name} process map`}
         >
-          {/* Above the map in the page, so Tab reaches these first: open or close every group, zoom, and what the colours mean. */}
-          {(card || zoomControls || legend || allGroups.length > 0 || (showLanes && !hasGroups) || (departmentLanes && !departmentLanes.always)) && (
+          {/* Above the map in the page, so Tab reaches these first: open or close every group, and what the colours mean. */}
+          {(card || legend || allGroups.length > 0 || (showLanes && !hasGroups) || (departmentLanes && !departmentLanes.always)) && (
             <div
               className={
                 compact
@@ -2402,9 +2514,6 @@ function Canvas({
                   {showLanes && !hasGroups && !departmentLanes && <LaneToggle lanes={lanes} onToggle={toggleLanes} />}
                   {allGroups.length > 0 && <GroupControls allOpen={allGroups.every((id) => expanded.has(id))} onToggle={toggleAllGroups} />}
                 </div>
-              )}
-              {zoomControls && (
-                <ZoomControls zoom={zoom} onOut={() => zoomBy("out")} onFit={fitByHand} onIn={() => zoomBy("in")} canOut={zoom > MIN_ZOOM + 0.001} canIn={zoom < MAX_ZOOM - 0.001} />
               )}
               {legend && (card ? <MapKey badge={!!openIssues} /> : <MapLegend badge={!!openIssues} />)}
               {card?.action}
@@ -2453,8 +2562,8 @@ function Canvas({
             </p>
           )}
           {/* Playback of the run (issue #14), over the foot of the map; before it in the page, for Tab. */}
-          {showPlayback && !playbackAbove && !card && (
-            <div className="absolute right-2.5 bottom-2.5 left-2.5 z-10">
+          {floatingPlayback && (
+            <div ref={footRef} className="absolute right-2.5 bottom-2.5 left-2.5 z-10">
               <PlaybackBar
                 clock={playback.clock}
                 H={playback.index?.H ?? null}
@@ -2464,42 +2573,30 @@ function Canvas({
               />
             </div>
           )}
+          {/* Zoom in, zoom out, fit and full screen, in the map's bottom-right corner (above a floating playback bar); before the map in the page, for Tab. */}
+          {controls && (
+            <MapViewControls
+              onOut={() => zoomBy("out")}
+              onFit={fitByHand}
+              onIn={() => zoomBy("in")}
+              fullscreen={!editable && canFullscreen ? { on: fullscreen, toggle: toggleFullscreen } : null}
+              style={floatingPlayback && footHeight ? { bottom: footHeight + 10 } : undefined}
+            />
+          )}
           <div className="absolute inset-0">
           <ReactFlow
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={editable ? onConnect : undefined}
-            isValidConnection={(c) => !connectionProblem(bundle, c.source, c.target)}
-            onReconnect={editable ? (old, c) => editor.run((b) => reconnectEdge(b, old.id, c.source, c.target)) : undefined}
-            onNodeDoubleClick={(e, node) => {
-              if (!(e.target instanceof Element) || e.target.closest("input, select, .nokey")) return;
-              const field = e.target.closest("[data-field]")?.getAttribute("data-field") as InlineField | null;
-              startEditing(node.id, field ?? "name");
-            }}
-            onNodeContextMenu={(e, node) => {
-              if (!editable) return;
-              e.preventDefault();
-              if (isGoBackNodeId(node.id) || menuFor.current === node.id) return;
-              const rect = wrapper.current!.getBoundingClientRect();
-              // A context-menu key press arrives without a pointer position.
-              if (e.clientX === 0 && e.clientY === 0 && e.currentTarget instanceof Element) openMenuBelow(e.currentTarget, node.id);
-              else openMenu(node.id, e.clientX - rect.left, e.clientY - rect.top);
-            }}
-            onSelectionContextMenu={(e, picked) => {
-              if (!editable || !picked.length) return;
-              e.preventDefault();
-              const rect = wrapper.current!.getBoundingClientRect();
-              openMenu(
-                picked[0]!.id,
-                e.clientX - rect.left,
-                e.clientY - rect.top,
-                picked.map((n) => n.id),
-              );
-            }}
+            onNodesChange={flowHandlers.onNodesChange}
+            onEdgesChange={flowHandlers.onEdgesChange}
+            onConnect={editable ? flowHandlers.onConnect : undefined}
+            isValidConnection={flowHandlers.isValidConnection}
+            onReconnect={editable ? flowHandlers.onReconnect : undefined}
+            onNodeDoubleClick={flowHandlers.onNodeDoubleClick}
+            onNodeContextMenu={flowHandlers.onNodeContextMenu}
+            onSelectionContextMenu={flowHandlers.onSelectionContextMenu}
             edgesReconnectable={editable}
             nodesDraggable={editable}
             nodesConnectable={editable}
@@ -2512,27 +2609,17 @@ function Canvas({
             multiSelectionKeyCode={["Shift", "Meta", "Control"]}
             selectionMode={SelectionMode.Partial}
             zoomOnDoubleClick={false}
-            // The menu belongs where it was opened; moving the map closes it.
-            onMoveStart={(event) => {
-              // A drag, the wheel or a pinch moves the view by hand; the map stops following its panel.
-              if (event) handZoomed.current = true;
-              if (menuFor.current) closeMenu(false);
-            }}
-            onMoveEnd={measureOverflow}
+            onMoveStart={flowHandlers.onMoveStart}
+            onMoveEnd={flowHandlers.onMoveEnd}
             ariaLabelConfig={editable ? EDIT_ARIA : READ_ARIA}
-            onNodeClick={(e, node) => {
-              // The group toggle and the issue badge are buttons of their own.
-              if (e.target instanceof Element && e.target.closest("button")) return;
-              if (!node.id.startsWith("ghost:")) onStepClick?.(node.id);
-              if (!editable && stepDetail) setDetailId(node.id);
-            }}
-            onPaneClick={() => setDetailId(null)}
+            onNodeClick={flowHandlers.onNodeClick}
+            onPaneClick={flowHandlers.onPaneClick}
             // A read-only map sits in a page that scrolls: the wheel scrolls the page, and the map is dragged or zoomed with its buttons.
             zoomOnScroll={wheelZoom ?? editable}
             preventScrolling={wheelZoom ?? editable}
             minZoom={0.3}
             maxZoom={1.8}
-            proOptions={{ hideAttribution: true }}
+            proOptions={PRO_OPTIONS}
           >
             <Background color="var(--line)" gap={24} />
             {layout && <LaneLayer lanes={layout.lanes} />}
