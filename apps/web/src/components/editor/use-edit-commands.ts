@@ -12,6 +12,9 @@ import { PASTE_OFFSET, copySteps, deleteSelection, duplicateSteps, pasteSteps, t
 import type { ProcessEditor } from "@/lib/editor/editor";
 import { splitStep } from "@/lib/editor/split";
 
+// Radix takes a closed dialog out of the page and the tour card is only there while it runs, so any match is an open one.
+const DIALOG = "[role=dialog], [role=alertdialog]";
+
 export function useEditCommands({
   editor,
   bundle,
@@ -83,7 +86,11 @@ export function useEditCommands({
       setSelection({ steps: made, edges: [] });
     };
     const onKey = (e: KeyboardEvent) => {
+      // Someone else (a dialog, the tour, a field) already handled the key.
+      if (e.defaultPrevented) return;
       const target = e.target instanceof Element ? e.target : null;
+      // An open dialog (publish or discard confirm, the tour) owns the keyboard: undo must not change the map behind it.
+      if (target?.closest(DIALOG) || document.querySelector(DIALOG)) return;
       // Text fields keep their own undo, copy and delete keys.
       if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
       // Map keys work from the map (not its buttons or menu) or from nowhere in particular.
