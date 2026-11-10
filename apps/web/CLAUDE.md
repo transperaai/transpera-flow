@@ -5,7 +5,7 @@ Neon database. Queries run through Kysely and a `pg` pool as `anon` or `authenti
 security decides what each request sees (`src/lib/db/pool.ts`, `src/lib/db/claims.ts`, `getDb()` in `src/lib/auth/session.ts`).
 
 Environment (see `.env.example`): `DATABASE_URL` (the owner: Better Auth, migrations, sign-in access), `APP_DATABASE_URL` (the
-`authenticator` login the app's queries use; falls back to `DATABASE_URL`), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
+`authenticator` login the app's queries use; falls back to `DATABASE_URL` in dev and tests only: production and Preview refuse to start without a separate one), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`,
 `OAUTH_PROXY_SECRET`, `PREVIEW_ALIAS_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_PROVIDERS`, `ACCESS_ADMIN_EMAILS`. Without `DATABASE_URL` and
 `BETTER_AUTH_SECRET` the home and sign-in pages answer 404 (the `/demo` pages are gone).
 
