@@ -213,7 +213,6 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
           expanded={expanded}
           onExpandedChange={setExpanded}
           playbackRollUp
-          playbackAbove
           showLanes={false}
           departmentLanes={departmentLanes}
           cardTags={cardTags}

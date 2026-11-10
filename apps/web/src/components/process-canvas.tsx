@@ -2541,7 +2541,7 @@ function Canvas({
                   {legend && <MapKey badge={!!openIssues} note={showPlayback && playback.index ? `Playback shows run 1 of ${result?.reps ?? 1}; the figures average all ${result?.reps ?? 1} runs.` : undefined} />}
                   {card?.action}
                   {showPlayback ? (
-                    <div className="flex min-w-0 flex-auto" data-playback-strip>
+                    <div className="flex max-w-full flex-auto" data-playback-strip>
                       <PlaybackBar
                         inline
                         clock={playback.clock}

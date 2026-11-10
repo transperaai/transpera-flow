@@ -116,7 +116,7 @@ export function MapKey({ badge, note }: { badge: boolean; note?: ReactNode }) {
           Key
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-60">
+      <PopoverContent align="start" className="w-60">
         <p className="font-medium">What the colours mean</p>
         <MapLegend badge={badge} column />
         {note && (

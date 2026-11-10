@@ -120,6 +120,14 @@ describe("the Overview's layout: a dashboard (docs/plans/ui-cleanup.md)", () => 
       // The map runs the full width of the page (the QA ask: no two-thirds map with a rail beside it).
       expect(Math.abs(map.width - main.width)).toBeLessThanOrEqual(1);
       if (width >= 1280) {
+        // The map's controls in one slim row above it: Key and playback inline, no strip of their own, no bordered box round playback.
+        const bar = await box("[data-company-map] [data-map-toolbar]");
+        expect(bar.height).toBeLessThanOrEqual(48);
+        const playbackBox = await box("[data-company-map] [data-map-toolbar] [role=group][aria-label=Playback]");
+        expect(playbackBox.height).toBeLessThanOrEqual(36);
+        expect(await page.locator("[data-company-map] [data-map-toolbar] [data-map-key]").count()).toBe(1);
+        expect(await page.locator("[data-company-map] [data-playback-strip]").evaluateAll((els) => els.every((e) => !!e.closest("[data-map-toolbar]")))).toBe(true);
+        expect(await page.locator("[data-company-map] [role=group][aria-label=Playback]").evaluate((e) => getComputedStyle(e).borderTopWidth)).toBe("0px");
         // The five headline tiles on one line.
         const tiles = await page.locator("[data-kpi-row] [data-whole-business] > [data-kpi]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
         expect(new Set(tiles).size).toBe(1);

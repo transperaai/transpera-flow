@@ -119,12 +119,14 @@ describe("the buttons on the map", () => {
     // The old -, Fit and + in the bar above the map are gone: one set of buttons, on the map.
     expect(await page.getByRole("button", { name: "Fit", exact: true }).count()).toBe(0);
     expect(await page.locator("[role=group][aria-label=Zoom]").count()).toBe(0);
-    // Bottom right, above the playback bar that floats over the foot of the map.
+    // Bottom right of the map. A read-only map's playback is in the toolbar row above the map, never over it.
     const box = (await controls.boundingBox())!;
     const area = (await page.locator(".react-flow").boundingBox())!;
     const bar = (await page.locator("[role=group][aria-label=Playback]").first().boundingBox())!;
     expect(area.x + area.width - (box.x + box.width)).toBeLessThan(20);
-    expect(box.y + box.height).toBeLessThanOrEqual(bar.y);
+    expect(area.y + area.height - (box.y + box.height)).toBeLessThan(20);
+    expect(bar.y + bar.height).toBeLessThanOrEqual(area.y);
+    expect(await page.locator("[data-map-toolbar] [role=group][aria-label=Playback]").count()).toBe(1);
     // The zoom under them.
     expect(await page.locator("[data-map-zoom-level]").textContent()).toMatch(/^\d+%$/);
     await page.close();

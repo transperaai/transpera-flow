@@ -112,7 +112,7 @@ export function PlaybackBar({ docked = false, inline = false, clock, H, hoursPer
   const runTitle = `Playback shows one simulated run of ${Math.round((H ?? 0) / hoursPerWeek)} weeks; the figures above average all ${reps ?? 1}.`;
   if (inline)
     return (
-      <div role="group" aria-label="Playback" onKeyDown={onKeyDown} className="flex flex-1 items-center gap-1.5 text-xs">
+      <div role="group" aria-label="Playback" onKeyDown={onKeyDown} className="flex flex-1 items-center gap-x-1.5 gap-y-1 text-xs max-sm:flex-wrap">
         <Button
           type="button"
           variant="outline"

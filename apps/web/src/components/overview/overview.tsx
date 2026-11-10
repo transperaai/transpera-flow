@@ -431,6 +431,29 @@ export function Overview({
     },
   ];
 
+  const mapToolbar = (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1" data-map-controls title={horizonResult ? `Playing ${span} of work, with planned hires and leave.` : error ? "Nothing to play until the company can be simulated." : `Simulating ${span}…`}>
+      <div className="flex items-center gap-1">
+        <h2 id="company-map-heading" className="text-sm font-semibold">
+          Company map
+        </h2>
+        <PanelHow
+          works="Every process in the business, in a lane for its department. Press play to watch the work move over the horizon picked, with planned hires and leave; expand a process in place, or click it to open its page."
+          tells="How work moves between the processes, and where it piles up."
+        />
+      </div>
+      <HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} options={OVERVIEW_HORIZONS} />
+      {forecastHref && (
+        <Link href={forecastHref} data-sandbox-link className={buttonVariants({ variant: "link", size: "sm" })}>
+          Simulate further in the Sandbox
+        </Link>
+      )}
+      {/* What is playing: read out to a screen reader and shown on hover, not a second line in the bar. */}
+      <span className="sr-only" data-horizon-note>
+        {horizonResult ? `Playing ${span} of work, with planned hires and leave.` : error ? "Nothing to play until the company can be simulated." : `Simulating ${span}…`}
+      </span>
+    </div>
+  );
   // The cards under the map: open issues, the busiest people (when capacity is set up), then the charts.
   const cardOffset = peopleReady ? 2 : 1;
   const cardCount = cardOffset + charts.length;
@@ -564,26 +587,6 @@ export function Overview({
             aria-labelledby="company-map-heading"
             className="flex h-[65svh] min-h-[28rem] min-w-0 scroll-mt-16 flex-col overflow-hidden rounded-xl border border-line bg-card [&_[data-process-map]]:rounded-none [&_[data-process-map]]:border-0"
           >
-            <div className="flex flex-none flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-2.5" data-map-controls>
-              <div className="flex items-center gap-1">
-                <h2 id="company-map-heading" className="text-base font-semibold">
-                  Company map
-                </h2>
-                <PanelHow
-                  works="Every process in the business, in a lane for its department. Press play to watch the work move over the horizon picked, with planned hires and leave; expand a process in place, or click it to open its page."
-                  tells="How work moves between the processes, and where it piles up."
-                />
-              </div>
-              <HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} options={OVERVIEW_HORIZONS} />
-              {forecastHref && (
-                <Link href={forecastHref} data-sandbox-link className={buttonVariants({ variant: "link", size: "sm" })}>
-                  Simulate further in the Sandbox
-                </Link>
-              )}
-              <p className="ml-auto text-xs text-muted-foreground" data-horizon-note>
-                {horizonResult ? `Playing ${span} of work, with planned hires and leave.` : error ? "Nothing to play until the company can be simulated." : `Simulating ${span}…`}
-              </p>
-            </div>
             {viewingMapVersion !== null && (
               <div data-viewing-map-version className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-warn bg-warn-soft px-2.5 py-0.5 text-xs font-medium">Viewing version {viewingMapVersion} of the company map · read only</span>
@@ -603,7 +606,7 @@ export function Overview({
                   expanded={expanded}
                   onExpandedChange={setExpanded}
                   playbackRollUp
-                  playbackAbove
+                  toolbarStart={mapToolbar}
                   showLanes={false}
                   departmentLanes={departmentLanes}
                   cardTags={cardTags}
