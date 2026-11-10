@@ -454,9 +454,6 @@ export function Overview({
       </span>
     </div>
   );
-  // The cards under the map: open issues, the busiest people (when capacity is set up), then the charts.
-  const cardOffset = peopleReady ? 2 : 1;
-  const cardCount = cardOffset + charts.length;
   return (
     <div>
       <ShellHeader title="Overview" />
@@ -624,9 +621,9 @@ export function Overview({
             </div>
           </section>
 
-        {/* Under the map, three cards a row: what needs attention first (open issues, the busiest people, team load), then the time charts. */}
-        <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-2 xl:grid-cols-3" data-cards data-rail>
-            <div data-chart="issues" className="flex min-w-0 flex-col [&>*]:flex-1">
+        {/* Under the map, cards sized by what they hold: open issues beside the busiest people, team load the full width, where the time goes beside what it achieves, then the time split the full width. */}
+        <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-2" data-cards data-rail>
+            <div data-chart="issues" className={cn("flex min-w-0 flex-col [&>*]:flex-1", !peopleReady && "lg:col-span-2")}>
               <SectionCard
                 id="open-issues"
                 section="issues"
@@ -653,7 +650,7 @@ export function Overview({
               </div>
             )}
           {charts.map((c, i) => (
-            <div key={c.key} data-chart={c.key} className={cn("flex min-w-0 flex-col", lastSpan(cardCount, cardOffset + i))}>
+            <div key={c.key} data-chart={c.key} className={cn("@container flex min-w-0 flex-col", spanFor(c.key, peopleReady))}>
               {c.node}
             </div>
           ))}
@@ -665,10 +662,13 @@ export function Overview({
   );
 }
 
-/** The last card under the map spans what is left of its row, so a row never ends in a hole (two a row from `lg`, three from `xl`). */
-function lastSpan(count: number, position: number): string | false {
-  if (position !== count - 1) return false;
-  const lg = count % 2 === 1 ? "lg:col-span-2" : "";
-  const xl = count % 3 === 1 ? "xl:col-span-3" : count % 3 === 2 ? "xl:col-span-2" : "xl:col-span-1";
-  return `${lg} ${xl}`;
+/**
+ * How wide each card under the map is, from what it holds (two columns from `lg`): the month-by-month team load and the per-process time split
+ * are wide tables, so they take the full width; open issues and the busiest people, and where the time goes and what it achieves, sit in pairs.
+ * A pair whose partner isn't shown (no capacity set up) takes the full width, so no row ends in a hole.
+ */
+function spanFor(key: string, peopleReady: boolean): string | false {
+  if (key === "team-load" || key === "time-split") return "lg:col-span-2";
+  if (key === "time-achieves" && !peopleReady) return "lg:col-span-2";
+  return false;
 }

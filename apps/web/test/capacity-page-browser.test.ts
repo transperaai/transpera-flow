@@ -183,7 +183,8 @@ describe("Capacity page", { timeout: 180_000 }, () => {
     await page.waitForSelector("[data-leaver-options]");
     await page.keyboard.press(" ");
     expect(await page.locator("[data-leaver-options] input:checked").count()).toBe(0);
-    expect(await text(page, "[data-leaver-sentence]")).toBe("Choose one or more people to see who takes their work.");
+    // The sentence follows the untick on the next render: wait for it rather than read it on the same frame (it raced under load).
+    await expect.poll(() => text(page, "[data-leaver-sentence]")).toBe("Choose one or more people to see who takes their work.");
 
     // Two people: Zach and Laura (both Organic) leave together; neither is handed the other's clients.
     await page.locator('[data-leaver-option="Zach"] input').check();

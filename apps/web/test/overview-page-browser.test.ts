@@ -95,7 +95,7 @@ describe("the Overview's layout: a dashboard (docs/plans/ui-cleanup.md)", () => 
   };
 
   for (const width of [1300, 1600, 400]) {
-    it(`the headline tiles in one row, the company map the full width, then the cards three a row and the departments (${width}px)`, async () => {
+    it(`the headline tiles in one row, the company map the full width, then the cards sized by what they hold and the departments (${width}px)`, async () => {
       const { page, errors } = await mount({ width, capacity: true, styled: true });
       await ready(page);
       // No jump links and no section rules any more: the panels follow one another in a fixed order.
@@ -131,12 +131,14 @@ describe("the Overview's layout: a dashboard (docs/plans/ui-cleanup.md)", () => 
         // The five headline tiles on one line.
         const tiles = await page.locator("[data-kpi-row] [data-whole-business] > [data-kpi]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
         expect(new Set(tiles).size).toBe(1);
-        // Three cards a row, each row's cards the same height.
-        expect(cards[0]!.top).toBe(cards[2]!.top);
-        expect(cards[3]!.top).toBe(cards[5]!.top);
-        expect(cards[3]!.top).toBeGreaterThan(cards[0]!.bottom - 1);
+        // Open issues beside the busiest people (the same height), team load the full width, where the time goes beside what it
+        // achieves, then the time split the full width: no tall narrow towers.
+        expect(cards[0]!.top).toBe(cards[1]!.top);
         expect(cards[0]!.height).toBe(cards[1]!.height);
-        expect(cards[1]!.height).toBe(cards[2]!.height);
+        expect(cards[2]!.top).toBeGreaterThan(cards[0]!.bottom - 1);
+        expect(Math.abs(cards[2]!.width - map.width)).toBeLessThanOrEqual(1);
+        expect(cards[3]!.top).toBe(cards[4]!.top);
+        expect(Math.abs(cards[5]!.width - map.width)).toBeLessThanOrEqual(1);
       } else {
         for (let i = 1; i < cards.length; i++) expect(cards[i]!.top).toBeGreaterThan(cards[i - 1]!.bottom - 1);
       }
