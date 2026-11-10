@@ -52,18 +52,20 @@ export function PurposeBar({ title, slices, order, strong = false }: { title: st
           </div>
         </FloatingTip>
       )}
-      <table className="sr-only">
-        <caption>{title}: hours a month by purpose</caption>
-        <tbody>
-          {sorted.map((s) => (
-            <tr key={s.id}>
-              <th scope="row">{s.name}</th>
-              <td>{formatNumber(s.hours, 0)} hours a month</td>
-              <td>{formatPercent(s.hours / (total || 1))}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="sr-only">
+        <table>
+          <caption>{title}: hours a month by purpose</caption>
+          <tbody>
+            {sorted.map((s) => (
+              <tr key={s.id}>
+                <th scope="row">{s.name}</th>
+                <td>{formatNumber(s.hours, 0)} hours a month</td>
+                <td>{formatPercent(s.hours / (total || 1))}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </figure>
   );
 }

@@ -132,23 +132,25 @@ export function OpenIssuesSummary({
         </p>
       )}
       {how && <How {...OPEN_ISSUES_HOW} />}
-      <table className="sr-only">
-        <caption>Open issues by rating and by process</caption>
-        <tbody>
-          {byRating.map((s) => (
-            <tr key={s.rating}>
-              <th scope="row">{RATING_LABELS[s.rating]}</th>
-              <td>{s.count}</td>
-            </tr>
-          ))}
-          {ranked.map((p) => (
-            <tr key={p.id}>
-              <th scope="row">{p.name}</th>
-              <td>{p.count}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="sr-only">
+        <table>
+          <caption>Open issues by rating and by process</caption>
+          <tbody>
+            {byRating.map((s) => (
+              <tr key={s.rating}>
+                <th scope="row">{RATING_LABELS[s.rating]}</th>
+                <td>{s.count}</td>
+              </tr>
+            ))}
+            {ranked.map((p) => (
+              <tr key={p.id}>
+                <th scope="row">{p.name}</th>
+                <td>{p.count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -229,29 +231,31 @@ export function TimeSplitChart({
       </ul>
       {how && <How {...TIME_SPLIT_HOW} />}
       <Tip tip={tip} />
-      <table className="sr-only">
-        <caption>Hands-on against waiting, by process, in hours a month</caption>
-        <thead>
-          <tr>
-            <th scope="col">Process</th>
-            <th scope="col">Hands-on share</th>
-            <th scope="col">Hands-on</th>
-            <th scope="col">Waiting for one of our people</th>
-            <th scope="col">Waiting on the client or others</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <th scope="row">{r.name}</th>
-              <td>{formatPercent(r.share)}</td>
-              <td>{perMonth(r.handsOn)}</td>
-              <td>{perMonth(r.waitingForPerson)}</td>
-              <td>{perMonth(r.waitingOnOthers)}</td>
+      <div className="sr-only">
+        <table>
+          <caption>Hands-on against waiting, by process, in hours a month</caption>
+          <thead>
+            <tr>
+              <th scope="col">Process</th>
+              <th scope="col">Hands-on share</th>
+              <th scope="col">Hands-on</th>
+              <th scope="col">Waiting for one of our people</th>
+              <th scope="col">Waiting on the client or others</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <th scope="row">{r.name}</th>
+                <td>{formatPercent(r.share)}</td>
+                <td>{perMonth(r.handsOn)}</td>
+                <td>{perMonth(r.waitingForPerson)}</td>
+                <td>{perMonth(r.waitingOnOthers)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

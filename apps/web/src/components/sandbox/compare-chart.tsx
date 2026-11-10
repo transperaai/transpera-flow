@@ -167,29 +167,31 @@ export function CompareChart({ title, months, series, format, formatDiff = (v) =
           </>
         ) : null}
       </FloatingTip>
-      <table className="sr-only">
-        <caption>{title}, average and 10 to 90 percent range, for each column</caption>
-        <thead>
-          <tr>
-            <th scope="col">Month</th>
-            {series.map((s, k) => (
-              <th key={k} scope="col">
-                {s.name}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {months.map((mo, i) => (
-            <tr key={mo.index}>
-              <th scope="row">{mo.label}</th>
+      <div className="sr-only">
+        <table>
+          <caption>{title}, average and 10 to 90 percent range, for each column</caption>
+          <thead>
+            <tr>
+              <th scope="col">Month</th>
               {series.map((s, k) => (
-                <td key={k}>{s.values[i] ? `${format(s.values[i]!.mean)} (${format(s.values[i]!.p10)} to ${format(s.values[i]!.p90)})` : "not there"}</td>
+                <th key={k} scope="col">
+                  {s.name}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {months.map((mo, i) => (
+              <tr key={mo.index}>
+                <th scope="row">{mo.label}</th>
+                {series.map((s, k) => (
+                  <td key={k}>{s.values[i] ? `${format(s.values[i]!.mean)} (${format(s.values[i]!.p10)} to ${format(s.values[i]!.p90)})` : "not there"}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

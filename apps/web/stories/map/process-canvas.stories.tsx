@@ -132,6 +132,39 @@ export const Editable: StoryObj = {
   render: () => <EditableMap />,
 };
 
+/** Northbeam's decision with a third branch that goes back to Audit: the Editor's branch rows and a "Go back to" node. */
+function GoBackMap() {
+  const base = useMemo(() => {
+    const b = demoBundle();
+    const decision = b.steps.find((st) => st.kind === "decision")!;
+    const from = b.edges.find((e) => e.from_step_id === decision.id)!;
+    const back = { ...from, id: "00000000-0000-4000-8000-00000000b0c1", to_step_id: northbeamStepIds.audit, label: "Rework", probability: 0.1 };
+    return { ...b, edges: [...b.edges, back] };
+  }, []);
+  const editor = useMemo(() => new ProcessEditor(base, new MemoryStore(base)), [base]);
+  const state = useSyncExternalStore(editor.subscribe, editor.getState, editor.getState);
+  const [selection, setSelection] = useState<Selection>(NO_SELECTION);
+  return (
+    <div style={{ width: "100%", maxWidth: 1200, height: 560, display: "flex" }}>
+      <ProcessCanvas
+        bundle={state.bundle}
+        editor={editor}
+        editorState={state}
+        selection={selection}
+        onSelectionChange={setSelection}
+        height="fill"
+        branchNodes
+        showPlayback={false}
+      />
+    </div>
+  );
+}
+
+/** The Editor's map with branch rows on a decision, one of them going back to an earlier step. */
+export const GoBack: StoryObj = {
+  render: () => <GoBackMap />,
+};
+
 /**
  * Waits for the map to frame itself and hold still (the viewport unchanged for 30 frames, as `HighlightMap` does), and for
  * every selector in `needs` to exist, then calls `ready`.

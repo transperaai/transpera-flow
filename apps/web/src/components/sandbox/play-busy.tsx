@@ -90,29 +90,31 @@ export function Heatmap({ rows, months, view, worst = null }: { rows: HeatRow[];
           </div>
         </FloatingTip>
       )}
-      <table className="sr-only">
-        <caption>Busy share by team and month</caption>
-        <thead>
-          <tr>
-            <th scope="col">Team</th>
-            {months.map((m, i) => (
-              <th key={i} scope="col">
-                {m}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.id}>
-              <th scope="row">{r.name}</th>
-              {r.busy.map((v, m) => (
-                <td key={m}>{v === null ? "" : `${formatPercent(v)} (${WORDS[busyTone(v, r.line)]})`}</td>
+      <div className="sr-only">
+        <table>
+          <caption>Busy share by team and month</caption>
+          <thead>
+            <tr>
+              <th scope="col">Team</th>
+              {months.map((m, i) => (
+                <th key={i} scope="col">
+                  {m}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id}>
+                <th scope="row">{r.name}</th>
+                {r.busy.map((v, m) => (
+                  <td key={m}>{v === null ? "" : `${formatPercent(v)} (${WORDS[busyTone(v, r.line)]})`}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

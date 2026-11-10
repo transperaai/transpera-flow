@@ -174,30 +174,32 @@ export function PlayChart({ title, months, series, format, goal, min, todayLabel
           </span>
         )}
       </figcaption>
-      <table className="sr-only">
-        <caption>{title}</caption>
-        <thead>
-          <tr>
-            <th scope="col">Month</th>
-            {series.map((s, i) => (
-              <th scope="col" key={i}>
-                {s.name}
-                {s.dashed ? ` (${todayLabel.toLowerCase()})` : ""}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {months.map((m, i) => (
-            <tr key={m + i}>
-              <th scope="row">{m}</th>
-              {series.map((s, j) => (
-                <td key={j}>{s.values[i] == null ? "" : format(s.values[i]!)}</td>
+      <div className="sr-only">
+        <table>
+          <caption>{title}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Month</th>
+              {series.map((s, i) => (
+                <th scope="col" key={i}>
+                  {s.name}
+                  {s.dashed ? ` (${todayLabel.toLowerCase()})` : ""}
+                </th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {months.map((m, i) => (
+              <tr key={m + i}>
+                <th scope="row">{m}</th>
+                {series.map((s, j) => (
+                  <td key={j}>{s.values[i] == null ? "" : format(s.values[i]!)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </figure>
   );
 }

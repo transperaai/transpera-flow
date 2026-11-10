@@ -107,6 +107,8 @@ export const TornadoIdle: StoryObj = {
 };
 
 export const GoalSeek: StoryObj = {
+  // A dialog: it renders in a portal, so the shot is the whole page.
+  tags: ["visual-page"],
   render: () => {
     const p = pair();
     return (

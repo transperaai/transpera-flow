@@ -647,54 +647,56 @@ function TimelineTable({ data, busy, cutoffs, plan }: { data: TimelineData; busy
         : "not there";
   const count = (s: Stat) => formatNumber(s.mean, 0);
   return (
-    <table className="sr-only">
-      <caption>How busy each is per month, average and 10 to 90 percent range, and active clients by service</caption>
-      <thead>
-        <tr>
-          <th scope="col">Month</th>
-          {busy.map((r) => (
-            <th key={r.id} scope="col">
-              {r.name}
-            </th>
-          ))}
-          {data.clients.map((c) => (
-            <th key={c.id || "all"} scope="col">
-              {c.name} clients
-            </th>
-          ))}
-          <th scope="col">Market</th>
-          <th scope="col">Planned</th>
-          {plan ? <th scope="col">This scenario</th> : null}
-        </tr>
-      </thead>
-      <tbody>
-        {data.months.map((mo, i) => (
-          <tr key={mo.index}>
-            <th scope="row">{mo.label}</th>
+    <div className="sr-only">
+      <table>
+        <caption>How busy each is per month, average and 10 to 90 percent range, and active clients by service</caption>
+        <thead>
+          <tr>
+            <th scope="col">Month</th>
             {busy.map((r) => (
-              <td key={r.id}>{cell(r.series[i] ?? null, r.uncovered?.[i] ?? null)}</td>
+              <th key={r.id} scope="col">
+                {r.name}
+              </th>
             ))}
             {data.clients.map((c) => (
-              <td key={c.id || "all"}>{count(c.series[i]!)}</td>
+              <th key={c.id || "all"} scope="col">
+                {c.name} clients
+              </th>
             ))}
-            <td>{data.market.find((b) => i >= b.from && i <= b.to)?.name ?? "Stable"}</td>
-            <td>
-              {data.markers
-                .filter((mk) => i >= mk.from && i <= mk.to)
-                .map((mk) => `${mk.label}, ${mk.when}`)
-                .join("; ")}
-            </td>
-            {plan ? (
+            <th scope="col">Market</th>
+            <th scope="col">Planned</th>
+            {plan ? <th scope="col">This scenario</th> : null}
+          </tr>
+        </thead>
+        <tbody>
+          {data.months.map((mo, i) => (
+            <tr key={mo.index}>
+              <th scope="row">{mo.label}</th>
+              {busy.map((r) => (
+                <td key={r.id}>{cell(r.series[i] ?? null, r.uncovered?.[i] ?? null)}</td>
+              ))}
+              {data.clients.map((c) => (
+                <td key={c.id || "all"}>{count(c.series[i]!)}</td>
+              ))}
+              <td>{data.market.find((b) => i >= b.from && i <= b.to)?.name ?? "Stable"}</td>
               <td>
-                {plan.markers
-                  .filter((mk) => planMonth(mk) === i)
+                {data.markers
+                  .filter((mk) => i >= mk.from && i <= mk.to)
                   .map((mk) => `${mk.label}, ${mk.when}`)
                   .join("; ")}
               </td>
-            ) : null}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+              {plan ? (
+                <td>
+                  {plan.markers
+                    .filter((mk) => planMonth(mk) === i)
+                    .map((mk) => `${mk.label}, ${mk.when}`)
+                    .join("; ")}
+                </td>
+              ) : null}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
