@@ -161,10 +161,12 @@ describe("client health and churn (issue #79)", () => {
 
   it("on Northbeam with servicing, reports them among the sensitive inputs where client servicing decides the answer", () => {
     // Losing an account manager: check-ins and reports run late, health falls, and
-    // clients churn, which frees the team for the pipeline. Over three quarters
-    // how fast that happens is among what moves the answer most.
+    // clients churn, which frees the team for the pipeline. Over a year how fast
+    // that happens is among what moves the answer most (over three quarters it
+    // ranked seventh, just out of the verdict's five, once weekly churn kept
+    // (1 - c)^(12/52) in engine 1.18.0).
     const m = northbeamWithServicing();
-    m.horizonWeeks = 39;
+    m.horizonWeeks = 52;
     const r = robustness(m, [{ path: "roles.am.headcount", op: "add", value: -1 }]);
     expect(r.complete).toBe(true);
     const screened = r.sensitivities.filter((s) => HEALTH.includes(s.path) || CHURN.includes(s.path));

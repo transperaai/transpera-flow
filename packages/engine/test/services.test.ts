@@ -13,7 +13,9 @@ import {
 // Services, end-step outcomes and revenue (docs/PRD.md §6.4 revenue rules,
 // §13 metric definitions, decision D8).
 
-const WEEKS_PER_MONTH = 4.33;
+const WEEKS_PER_MONTH = 52 / 12;
+/** A monthly churn that keeps 90% a week: a week keeps (1 - c)^(12/52) (engine 1.18.0). */
+const TEN_PERCENT_A_WEEK = 1 - 0.9 ** WEEKS_PER_MONTH;
 
 function service(overrides: Partial<EngineService> = {}): EngineService {
   return {
@@ -108,9 +110,9 @@ describe("revenue KPIs match the §13 definitions (hand-checked)", () => {
   });
 
   it("billed in horizon is net of churn: survival drops at each weekly tick", () => {
-    // 0.433 a month is 0.1 a week: the three weeks after the win bill 1, 0.9 and 0.81.
+    // 1 - 0.9^(52/12) a month (36.7%) is 0.1 a week: the three weeks after the win bill 1, 0.9 and 0.81.
     const model = decision([{ to: "won", p: 1 }], {
-      services: { seo: service({ churnMonthly: 0.433 }) },
+      services: { seo: service({ churnMonthly: TEN_PERCENT_A_WEEK }) },
     });
     const res = simulate(model, 1, 1);
     expect(res.kpi.billed.mean).toBeCloseTo(((10 * 1000) / WEEKS_PER_MONTH) * (1 + 0.9 + 0.81), 6);
@@ -123,7 +125,7 @@ describe("revenue KPIs match the §13 definitions (hand-checked)", () => {
     // 3.5 weeks: won at t = 40, billed for weeks [40, 80), [80, 120) and half of [120, 160).
     const model = decision([{ to: "won", p: 1 }], {
       horizonWeeks: 3.5,
-      services: { seo: service({ churnMonthly: 0.433 }) },
+      services: { seo: service({ churnMonthly: TEN_PERCENT_A_WEEK }) },
     });
     expect(simulate(model, 1, 1).kpi.billed.mean).toBeCloseTo(
       ((10 * 1000) / WEEKS_PER_MONTH) * (1 + 0.9 + 0.81 / 2),

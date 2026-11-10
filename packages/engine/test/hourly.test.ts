@@ -130,7 +130,7 @@ describe("hourly billing for clients won in the run", () => {
     // Only the ten won clients' hours: the existing client's tasks are not among them.
     const solo = runOnce(model({ weeks: 10 }), 1, false);
     expect(won.hours).toBeGreaterThanOrEqual(solo.hourly.svc!.hours - 1e-6);
-    const fee = (4330 / 4.33) * 10;
+    const fee = (4330 / (52 / 12)) * 10;
     expect(r.revenue.recurring).toBeCloseTo(fee, 6);
   });
 
@@ -138,7 +138,7 @@ describe("hourly billing for clients won in the run", () => {
     const m: EngineModel = { ...model({ weeks: 10 }), clients: undefined, clientGroups: { svc: { count: 4, fee: 4330, churnMonthly: 0, stayMonths: 12, health: 80 } } };
     const r = runOnce(m, 1, true);
     // 4 clients × 4330 a month for 10 weeks, billed as the fee entered (no churn).
-    expect(r.revenue.recurring).toBeCloseTo(4 * (4330 / 4.33) * 10, 6);
+    expect(r.revenue.recurring).toBeCloseTo(4 * (4330 / (52 / 12)) * 10, 6);
     expect(r.revenue.recurring).toBeCloseTo(r.billed, 6);
     // Their weekly tasks are worked but not billed: the hours are the won clients' alone (onboarding and their own tasks).
     const H = m.horizonWeeks * HPW;

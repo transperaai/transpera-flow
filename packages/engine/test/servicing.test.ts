@@ -25,7 +25,7 @@ const HPW = 40;
 const service = (servicing: EngineServicingLink[] = [], extra: Partial<EngineService> = {}): EngineService => ({
   name: "Retainer",
   pricingModel: "retainer",
-  price: 4330,
+  price: 1000 * (52 / 12),
   margin: 0.5,
   tenureMonths: 12,
   churnMonthly: 0,
@@ -38,7 +38,7 @@ const service = (servicing: EngineServicingLink[] = [], extra: Partial<EngineSer
 const client = (assignments: Record<string, string> = {}, extra: Partial<EngineClient> = {}): EngineClient => ({
   name: "Client",
   services: ["svc"],
-  mrr: 4330,
+  mrr: 1000 * (52 / 12),
   assignments,
   ...extra,
 });
@@ -255,7 +255,8 @@ describe("churn (docs/PRD.md §6.3.5)", () => {
     expect(c.churnMonthly).toBeCloseTo(churnProbability(0.02, 3, c.health.at(-1)!), 12);
   });
 
-  it("clients churn at the formula's weekly rate (monthly / 4.33), on their own streams", () => {
+  it("clients churn at the formula's weekly rate (a week keeps (1 - monthly)^(12/52)), on their own streams", () => {
+    const weekly = (c: number) => 1 - (1 - c) ** (12 / 52);
     const share = (sensitivity: number) => {
       const m = model({ c1: client({}, { health: 20 }) }, { weeks: 1, svc: { churnMonthly: 0.5, churnSensitivity: sensitivity, servicing: [] } });
       let churned = 0;
@@ -263,13 +264,13 @@ describe("churn (docs/PRD.md §6.3.5)", () => {
       for (let seed = 1; seed <= n; seed++) churned += runOnce(m, seed, false).clientsChurned!;
       return churned / n;
     };
-    expect(share(1)).toBeCloseTo((0.5 * (1 + 0.8)) / 4.33, 1);
-    expect(Math.abs(share(1) - (0.5 * 1.8) / 4.33)).toBeLessThan(0.02);
-    expect(Math.abs(share(0) - 0.5 / 4.33)).toBeLessThan(0.02);
+    expect(share(1)).toBeCloseTo(weekly(0.5 * (1 + 0.8)), 1);
+    expect(Math.abs(share(1) - weekly(0.5 * 1.8))).toBeLessThan(0.02);
+    expect(Math.abs(share(0) - weekly(0.5))).toBeLessThan(0.02);
   });
 
   it("churned clients stop billing; the roster bills at its MRR while active", () => {
-    // 4,330 a month is 1,000 a week.
+    // 1,000 × 52/12 a month is 1,000 a week.
     const stay = runOnce(model({ c1: client() }, { svc: { servicing: [] } }), 1, false);
     expect(stay.billed).toBeCloseTo(10_000, 6);
     const gone = runOnce(model({ c1: client() }, { svc: { servicing: [], churnMonthly: 5 } }), 1, false);

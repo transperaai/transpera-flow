@@ -1,11 +1,10 @@
-import { Page } from "@/components/shell/page";
-import { SourcesLibrarySkeleton } from "@/components/sources/sources-library";
+import { ListSkeleton, PageSkeleton } from "@/components/shell/skeletons";
 
-/** Shown while the library's sources load. */
+/** Shown while the library's sources load: the same header, toolbar and table as the page. */
 export default function LoadingSources() {
   return (
-    <Page title="Sources" eyebrow="Company" description="Loading the sources…">
-      <SourcesLibrarySkeleton />
-    </Page>
+    <PageSkeleton title="Sources" eyebrow="Company">
+      <ListSkeleton />
+    </PageSkeleton>
   );
 }

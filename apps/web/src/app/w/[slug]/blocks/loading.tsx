@@ -1,10 +1,10 @@
-import { CardGridSkeleton, PageSkeleton } from "@/components/shell/skeletons";
+import { ListSkeleton, PageSkeleton } from "@/components/shell/skeletons";
 
 /** Shown while the block library loads. */
 export default function LoadingBlocks() {
   return (
     <PageSkeleton title="Block library" eyebrow="Improve">
-      <CardGridSkeleton />
+      <ListSkeleton />
     </PageSkeleton>
   );
 }
