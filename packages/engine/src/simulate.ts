@@ -3909,7 +3909,7 @@ export function runOnce(
   // Ongoing load is reported from the live client count, integrated over the
   // measured window: the same load that set everyone's availability
   // (docs/PRD.md §6.8 item 2). Overtime: of the hours worked while overloaded
-  // (ongoing plus pipeline hands-on), those beyond capacity, up to the cap.
+  // (ongoing plus pipeline hands-on), those beyond capacity, up to the cap, month by month (`overtimeMonths`).
   const weeks = model.horizonWeeks;
   const peopleOut: Record<string, PersonResult> = {};
   const roleOngoing: Record<string, number> = {};

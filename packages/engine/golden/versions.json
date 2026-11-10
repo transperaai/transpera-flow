@@ -106,5 +106,11 @@
     "date": "2026-10-31",
     "note": "least-busy placement counts tier multipliers and changes",
     "digest": "sha256:0870ac2e961b076c29af03c23387e98f572e9e6c678516a91d717a5e43b3aa68"
+  },
+  {
+    "version": "1.18.0",
+    "date": "2026-11-10",
+    "note": "Engine review fixes: weekly churn keeps (1 - c)^(12/52) instead of c / 4.33, and fees bill at 52/12 weeks a month (one month length); overtime is limited month by month and the run's total is the months' sum; P10/P90 are true nearest-rank (ceil(p n)); branch chances that don't add to 1 split in proportion. Also: a zero-time loop, a negative chance, 0 replications, a 0-week horizon or week and negative leads are a ModelError.",
+    "digest": "sha256:44192661e53bdea2750402e8dc04a21b41b5faf2dc78600c41ea53652b56986d"
   }
 ]
