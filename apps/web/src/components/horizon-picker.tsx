@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import { Help } from "@/components/help";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { HORIZON_MONTHS, horizonLabel, horizonWeeks } from "@/lib/horizon";
 import { cn } from "@/lib/utils";
 
@@ -46,24 +47,32 @@ export function HorizonPicker({
           />
         )}
       </span>
-      <div role="group" aria-label="Time horizon" className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5">
+      <ToggleGroup
+        type="single"
+        variant="outline"
+        size="sm"
+        spacing={0}
+        role="group"
+        aria-label="Time horizon"
+        value={selected === null ? "" : String(selected)}
+        onValueChange={(v) => v && onChange(Number(v))}
+      >
         {options.map((m) => (
-          <button
+          <ToggleGroupItem
             key={m}
-            type="button"
+            value={String(m)}
+            // A plain toggle button to assistive tech (and the tests): the pressed one is the horizon.
+            role="button"
+            aria-checked={undefined}
             aria-pressed={selected === m}
             aria-label={horizonLabel(m)}
             title={`${horizonLabel(m)} (${horizonWeeks(m)} weeks)`}
-            onClick={() => onChange(m)}
-            className={cn(
-              "rounded-md px-2.5 py-1 font-medium tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              selected === m ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
+            className="text-xs tabular-nums aria-pressed:text-foreground"
           >
             {m}m
-          </button>
+          </ToggleGroupItem>
         ))}
-      </div>
+      </ToggleGroup>
       {custom ? (
         <label className="flex items-center gap-1 text-muted-foreground">
           Custom
@@ -90,7 +99,7 @@ export function HorizonPicker({
               setTyped(null);
               setRefused(false);
             }}
-            className="h-7 w-16 rounded-md border border-border bg-background px-1.5 text-foreground tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[invalid]:border-destructive"
+            className="h-7 w-16 rounded-md border border-input bg-background px-1.5 text-foreground tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring aria-[invalid]:border-destructive"
           />
           {refused ? (
             <span role="alert" className="text-destructive" data-horizon-refused>

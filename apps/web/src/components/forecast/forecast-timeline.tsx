@@ -17,20 +17,8 @@ import { labelIndexes } from "@/lib/overview/axis";
 import type { TimelineData, TimelineMarker, TimelineRow } from "@/lib/forecast/timeline";
 import { longDate, shortDate, type PlanLaneMarker } from "@/lib/sandbox/lane";
 import { addDays, dateAtPosition, monthIndexOfDate, positionOfDate, stepDate } from "@transpera-flow/db/sandbox";
+import { useElementWidth } from "@/lib/use-element-width";
 
-function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
-  const ref = useRef<T>(null);
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    setWidth(el.clientWidth);
-    const observer = new ResizeObserver(([entry]) => entry && setWidth(Math.round(entry.contentRect.width)));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width];
-}
 
 const ROW = 52;
 const ROW_GAP = 12;
@@ -153,7 +141,7 @@ export function ForecastTimeline({
   plan?: PlanLane;
 }) {
   const busyLine = cutoffs[1];
-  const [ref, measured] = useWidth<HTMLDivElement>();
+  const [ref, measured] = useElementWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const [tipAt, setTipAt] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);

@@ -74,6 +74,7 @@ export async function WorkspaceOverview({ slug, mapVersion = null }: { slug: str
       solutions={solutions}
       hrefs={Object.fromEntries(parts.map((p) => [p.process.id, `${base}/p/${p.process.id}`]))}
       processesHref={`${base}/processes`}
+      issuesHref={`${base}/issues`}
       companyEditHref={view.canEdit && company ? `${base}/p/${company.process.id}/edit?from=${encodeURIComponent(base)}` : undefined}
       companyHistoryHref={company ? `${base}/p/${company.process.id}/history` : undefined}
       bundleHref={canEdit ? `${base}/export/bundle` : undefined}

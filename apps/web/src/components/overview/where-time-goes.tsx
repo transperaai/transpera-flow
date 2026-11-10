@@ -35,7 +35,7 @@ export function WhereTimeGoes({ rows, failed, className }: { rows: readonly Depa
     <SectionCard
       id="where-time-goes"
       section="where-time-goes"
-      level={3}
+      level={2}
       title="Where the time goes"
       className={className}
       description={ready ? (answer ? `${answer}.` : "No hours in the run.") : failed ? "Can't be worked out until the simulation runs." : "Working out where the time goes, from a simulation of today's clients…"}

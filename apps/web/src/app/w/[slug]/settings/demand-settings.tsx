@@ -1,10 +1,13 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
-import { seasonalityCurve, type LeadSourceRow, type ProvenanceMap } from "@transpera-flow/db";
-import { NumberField, TextField } from "@/components/fields";
+import { useState, useTransition } from "react";
+import { seasonalityCurve, type LeadSourceRow } from "@transpera-flow/db";
+import { FieldRows, NumberField, TextField } from "@/components/fields";
+import { ProvenanceBadge } from "@/components/provenance-badge";
+import { SettingsSubheading } from "@/components/settings/settings-page";
 import { Help, HelpLabel } from "@/components/help";
 import { Button } from "@/components/ui/button";
+import { useAddForm } from "@/components/settings/use-add-form";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/page-kit";
 import { SettingsSection } from "./section";
@@ -16,7 +19,6 @@ import {
   MAX_VOLUME_WEEK,
   MIN_GROWTH,
   MONTH_NAMES,
-  provenanceOf,
   type LeadSourceField,
 } from "@/lib/demand";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
@@ -40,35 +42,13 @@ const sourceSaver =
     saveLeadSourceField(sourceId, field, base, next) as Promise<SaveOutcome<T>>;
 
 
-const PROVENANCE_LABEL = { estimated: "Estimated", entered: "Entered" } as const;
-const PROVENANCE_CLASS = {
-  estimated: "border-warn bg-warn-soft",
-  entered: "border-line bg-panel-2",
-} as const;
-
-/** Where a value came from: estimated (an assumption to confirm), or entered by a person. */
-function ProvenanceBadge({ provenance, field }: { provenance: ProvenanceMap | null | undefined; field: string }) {
-  const source = provenanceOf(provenance, field);
-  const entry = provenance?.[field];
-  const when = entry?.at ? new Date(entry.at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : null;
-  const title = [PROVENANCE_LABEL[source], when && `on ${when}`, entry?.note].filter(Boolean).join(" · ");
-  return (
-    <span
-      title={title}
-      className={`inline-block rounded-lg border px-1.5 text-[11px] leading-4 text-fg-2 ${PROVENANCE_CLASS[source]}`}
-    >
-      {PROVENANCE_LABEL[source]}
-    </span>
-  );
-}
-
 export function DemandSettings({ data }: { data: WorkspaceSettingsData }) {
   const { leadSources, canEdit } = data;
   const summary = demandSummary(leadSources, data.services, data.workspace.settings.leads_per_week);
   return (
     <SettingsSection id="demand" title="Demand" description={<>Where leads come from and how demand moves through the year. The app uses these to work out how many new leads to expect.</>}>
 
-      <p className="mb-4 rounded-lg bg-panel-2 p-2" aria-live="polite">
+      <p className="max-w-prose rounded-lg bg-panel-2 p-3 text-sm" aria-live="polite">
         <strong className="tabular-nums">{formatNumber(summary.perWeek, 2)}</strong> qualified leads a week
         {summary.fromSources === null
           ? " (the workspace's interim figure: add a lead source to replace it)"
@@ -82,17 +62,18 @@ export function DemandSettings({ data }: { data: WorkspaceSettingsData }) {
         . Seasonality and growth then raise or lower it month by month.
       </p>
 
-      {!canEdit && <p className="mb-3 text-fg-2">You can view demand here; Agency admins can change it.</p>}
+      {!canEdit && <p className="text-sm text-fg-2">You can view demand here; Agency admins can change it.</p>}
 
-      <h3 className="mb-2 font-semibold">Lead sources</h3>
+      <section className="flex flex-col gap-3" aria-labelledby="lead-sources-heading">
+      <SettingsSubheading id="lead-sources-heading">Lead sources</SettingsSubheading>
       {canEdit && <AddLeadSource workspaceId={data.workspace.id} />}
       {leadSources.length === 0 ? (
-        <EmptyState className="mb-6">
+        <EmptyState>
           No lead sources yet. Until you add one, simulations use {formatNumber(data.workspace.settings.leads_per_week, 2)}{" "}
           leads a week.
         </EmptyState>
       ) : (
-        <ul className="mb-6 flex flex-col divide-y divide-line border-y border-line">
+        <ul className="flex flex-col divide-y divide-line border-y border-line">
           {leadSources.map((src) => (
             <li key={src.id}>
               <LeadSourceItem source={src} disabled={!canEdit} />
@@ -100,6 +81,7 @@ export function DemandSettings({ data }: { data: WorkspaceSettingsData }) {
           ))}
         </ul>
       )}
+      </section>
 
       <Seasonality data={data} />
       <Growth data={data} />
@@ -108,10 +90,10 @@ export function DemandSettings({ data }: { data: WorkspaceSettingsData }) {
 }
 
 function AddLeadSource({ workspaceId }: { workspaceId: string }) {
-  const [state, action, pending] = useActionState<ActionResult, FormData>(createLeadSource.bind(null, workspaceId), {});
+  const { state, pending, onSubmit } = useAddForm<ActionResult>(createLeadSource.bind(null, workspaceId), {});
   return (
-    <form action={action} className="mb-4 flex flex-wrap items-end gap-2">
-      <label className="flex min-w-0 flex-col gap-1">
+    <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-2">
+      <label className="flex w-full max-w-md min-w-0 flex-col gap-1 sm:w-auto sm:flex-1">
         <HelpLabel label="Name" description="Where these leads come from." example="Website enquiries" />
         <Input name="name" required maxLength={200} placeholder="e.g. Website enquiries" />
       </label>
@@ -150,7 +132,7 @@ function AddLeadSource({ workspaceId }: { workspaceId: string }) {
 function LeadSourceItem({ source: src, disabled }: { source: LeadSourceRow; disabled: boolean }) {
   const qualified = Number(src.volume_week) * Number(src.conversion_to_qualified);
   return (
-    <div className="grid items-start gap-4 px-1 py-3 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr_auto]">
+    <div className="grid items-start gap-4 px-1 py-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,28rem)_8rem_8rem_auto]">
       <TextField label="Name" value={src.name} save={sourceSaver(src.id, "name")} disabled={disabled} help={{ description: "Where these leads come from.", example: "Website enquiries" }} />
       <NumberField
         label="Leads a week"
@@ -160,7 +142,8 @@ function LeadSourceItem({ source: src, disabled }: { source: LeadSourceRow; disa
         max={MAX_VOLUME_WEEK}
         step={1}
         disabled={disabled}
-        hint={<ProvenanceBadge provenance={src.provenance} field="volume_week" />} help={{ description: "How many new leads this source brings in a typical week. The app assumes about this many a week.", example: "6 means about 6 new leads a week from this source." }} />
+        hint={<ProvenanceBadge provenance={src.provenance} field="volume_week" />}
+        help={{ description: "How many new leads this source brings in a typical week. The app assumes about this many a week.", example: "6 means about 6 new leads a week from this source." }} />
       <NumberField
         label="Become qualified"
         value={Number(src.conversion_to_qualified)}
@@ -231,22 +214,22 @@ function Seasonality({ data }: { data: WorkspaceSettingsData }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string>();
   return (
-    <div className="mb-6">
-      <div className="mb-2 flex flex-wrap items-baseline gap-x-3">
-        <h3 className="flex items-center font-semibold">
+    <section className="flex flex-col gap-3" aria-labelledby="seasonality-heading">
+      <div className="flex flex-col gap-0.5">
+        <SettingsSubheading id="seasonality-heading">
           Seasonality
           <Help
             label="Seasonality"
             description="How busy each calendar month is compared with a normal one. 1 is normal, 1.3 is 30% busier, 0 means no leads."
             example="Set December to 0.5 if you only get half the usual enquiries over the holidays."
           />
-        </h3>
-        <p className="text-fg-3">
+        </SettingsSubheading>
+        <p className="max-w-prose text-sm text-fg-2">
           How busy each calendar month is compared with a normal one: 1 is normal, 1.3 is 30% busier, 0 is no leads.
         </p>
       </div>
       {/* The saved curve at a glance; the dashed line is a normal month. */}
-      <div aria-hidden className="relative mb-3 flex h-16 items-end gap-1 border-b border-line">
+      <div aria-hidden className="relative flex h-16 items-end gap-1 border-b border-line">
         <div className="absolute inset-x-0 border-t border-dashed border-fg-3" style={{ bottom: `${(1 / peak) * 100}%` }} />
         {curve.map((m, i) => (
           <div key={MONTH_NAMES[i]} className="flex h-full flex-1 flex-col justify-end">
@@ -275,7 +258,7 @@ function Seasonality({ data }: { data: WorkspaceSettingsData }) {
         })}
       </div>
       {canEdit && seasonality.length > 0 && (
-        <div className="mt-2 flex items-center gap-2">
+        <div className="flex items-center gap-2">
           <Button variant="link" size="xs" className="h-auto p-0 text-muted-foreground underline hover:text-destructive"
             type="button"
             disabled={pending}
@@ -295,7 +278,7 @@ function Seasonality({ data }: { data: WorkspaceSettingsData }) {
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -303,9 +286,9 @@ function Growth({ data }: { data: WorkspaceSettingsData }) {
   const { demand, canEdit } = data;
   const workspaceId = data.workspace.id;
   return (
-    <div>
-      <h3 className="mb-2 flex items-center font-semibold">Growth</h3>
-      <div className="max-w-sm">
+    <section className="flex flex-col gap-3" aria-labelledby="growth-heading">
+      <SettingsSubheading id="growth-heading">Growth</SettingsSubheading>
+      <FieldRows>
         <NumberField
           label="Monthly growth in leads"
           value={demand ? Number(demand.growth_monthly) : 0}
@@ -321,8 +304,10 @@ function Growth({ data }: { data: WorkspaceSettingsData }) {
               <ProvenanceBadge provenance={demand?.provenance} field="growth_monthly" />
               Compounds each calendar month from the start of a run; negative for a decline.
             </span>
-          } help={{ description: "How much lead volume grows each month, compounding from the start of a run. Use a negative number for a decline.", example: "At 1% a month, 6 leads a week becomes about 6.8 after a year." }} />
-      </div>
-    </div>
+          }
+          help={{ description: "How much lead volume grows each month, compounding from the start of a run. Use a negative number for a decline.", example: "At 1% a month, 6 leads a week becomes about 6.8 after a year." }}
+        />
+      </FieldRows>
+    </section>
   );
 }

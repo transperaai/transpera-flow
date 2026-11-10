@@ -11,6 +11,10 @@ import type { Stamp } from "@/lib/editor/provenance";
 import { MemoryStore, type ProcessStore, type WriteResult } from "@/lib/editor/store";
 import { unresolvedSteps } from "./diff";
 
+/** Publish named a draft that is no longer the process's draft (someone else published or discarded it, and a new one opened). */
+export const DRAFT_CHANGED =
+  "This draft changed since you opened it: someone else published or discarded it, and another draft is open now. Nothing was published. Reload to see it.";
+
 export interface RevisionInfo {
   id: string;
   number: number;
@@ -29,7 +33,8 @@ export interface DraftBackend {
   /** The process's draft, opened from live if there is none. Idempotent. */
   open(): Promise<OpenResult>;
   discard(): Promise<WriteResult>;
-  publish(acceptEstimates: boolean): Promise<PublishResult>;
+  /** Publish `draftId`, the draft the editor shows; refused if the process's draft is now another one. */
+  publish(acceptEstimates: boolean, draftId: string): Promise<PublishResult>;
   /** Saves into a draft revision. */
   store(revisionId: string): ProcessStore;
 }
@@ -153,7 +158,7 @@ export class DraftSession {
     }
     let r: PublishResult;
     try {
-      r = await this.backend.publish(acceptEstimates);
+      r = await this.backend.publish(acceptEstimates, this.state.draft.id);
     } catch {
       r = { status: "error", message: "Couldn't publish. Check your connection and try again." };
     }
@@ -261,8 +266,9 @@ export class MemoryDraftBackend implements DraftBackend {
     return { status: "ok" };
   }
 
-  async publish(acceptEstimates: boolean): Promise<PublishResult> {
+  async publish(acceptEstimates: boolean, draftId?: string): Promise<PublishResult> {
     if (!this.draft) return { status: "error", message: "There is no draft to publish." };
+    if (draftId !== undefined && draftId !== this.draft.revision.id) return { status: "error", message: DRAFT_CHANGED };
     const rows = this.draft.store.snapshot();
     const estimates = unresolvedSteps(rows).map((s) => ({ id: s.id, name: s.name }));
     if (estimates.length && !acceptEstimates) return { status: "unresolved", steps: estimates };

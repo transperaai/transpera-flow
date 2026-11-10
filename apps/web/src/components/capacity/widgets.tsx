@@ -216,3 +216,44 @@ export function HeroKpi({ label, value, sub, status }: { label: string; value: R
     </div>
   );
 }
+
+/**
+ * A flat strip of headline figures (docs/plans/ui-cleanup.md, `KpiTile`): one bordered surface with the tiles side by side, divided by hairlines, and
+ * no card around each. It wraps onto more rows on a narrow screen; the tiles' own top and left hairlines are clipped at the strip's edge.
+ */
+export function KpiStrip({ children, className, ...rest }: { children: ReactNode; className?: string } & Omit<React.HTMLAttributes<HTMLDivElement>, "children">) {
+  return (
+    <div className={cn("grid min-w-0 grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] overflow-hidden rounded-xl border border-line bg-panel", className)} {...rest}>
+      {children}
+    </div>
+  );
+}
+
+const EDGE: Record<"good" | "warn" | "crit", string> = {
+  good: "shadow-[inset_3px_0_0_var(--good)]",
+  warn: "shadow-[inset_3px_0_0_var(--warn)]",
+  crit: "shadow-[inset_3px_0_0_var(--crit)]",
+};
+
+/**
+ * One figure in a `KpiStrip`: the label, the number, an optional status against a goal (in words, with the colour as a stripe at the left edge),
+ * then a note. `data-kpi` (and `data-kpi-status`) are the hooks the tests read.
+ */
+export function KpiTile({ label, value, sub, status, edge, ...rest }: { label: ReactNode; value: ReactNode; sub?: ReactNode; status?: KpiStatus; edge?: "good" | "warn" | "crit" } & Omit<React.HTMLAttributes<HTMLDivElement>, "children">) {
+  const stripe = edge ?? status?.tone;
+  return (
+    <div className={cn("-mt-px -ml-px flex min-w-0 flex-col gap-0.5 border-t border-l border-line px-4 py-3", stripe && EDGE[stripe])} data-kpi data-kpi-status={status?.tone} {...rest}>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-2xl leading-tight font-semibold text-fg tabular-nums">{value}</span>
+        {status && (
+          <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium text-fg", STATUS_BADGE[status.tone])} data-kpi-badge>
+            <i aria-hidden className={cn("size-2 rounded-full", STATUS_DOT[status.tone])} />
+            {status.words}
+          </span>
+        )}
+      </div>
+      {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
+    </div>
+  );
+}

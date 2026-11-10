@@ -49,6 +49,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import { createPortal } from "react-dom";
 import { Clock, Flag, Play, Split, Undo2 } from "lucide-react";
 import { RATING_LABELS, type Rating, type SimulationResult } from "@transpera-flow/engine";
 import {
@@ -1424,11 +1425,31 @@ interface CanvasProps {
   /** What to do about a read-only map with no steps (the process page offers the Editor); shown under the sentence. */
   emptyAction?: ReactNode;
   /**
+   * Where a read-only map's step detail goes instead of floating over the map's corner: it is drawn into this element, docked, with no
+   * float or shadow of its own (the process page's inspector, Step tab). Null while that element isn't mounted yet: nothing is drawn.
+   * Omitted: over the map, as before.
+   */
+  stepDetailIn?: HTMLElement | null;
+  /** The step whose detail is open changed: its id, or null when the detail closed (a read-only map). */
+  onStepDetailChange?: (stepId: string | null) => void;
+  /** The wheel zooms the map. Default: on an editable map only (a read-only map usually sits in a page that scrolls). */
+  wheelZoom?: boolean;
+  /**
    * The map as the body of a card that is not its own (Q8, the process page): no border or rounding of its own, the bar above it
    * becomes the card's header (the title, the lane and zoom controls, a "Key" button that opens the colour legend, then `action`),
    * and the playback bar docks along the card's bottom edge instead of floating over the map.
+   * `compact`: a slim bar for a map that runs edge to edge (the process page's workbench): the title as a small panel label, a rule under
+   * the bar, and `below` capped in height so it never squeezes the map away.
    */
-  card?: { title: string; action?: ReactNode; /** The (i) beside the title. */ help?: { label: string; description: string; example: string }; /** Under the header, above the map: the process page's "Missing for simulation" alert. */ below?: ReactNode };
+  card?: {
+    title: string;
+    action?: ReactNode;
+    /** The (i) beside the title. */
+    help?: { label: string; description: string; example: string };
+    /** Under the header, above the map: the process page's "Missing for simulation" alert. */
+    below?: ReactNode;
+    compact?: boolean;
+  };
 }
 
 export function ProcessCanvas(props: CanvasProps) {
@@ -1491,6 +1512,9 @@ function Canvas({
   computing = false,
   refitOn,
   emptyAction,
+  stepDetailIn,
+  onStepDetailChange,
+  wheelZoom,
   card,
 }: CanvasProps) {
   const editable = editor !== null;
@@ -2321,6 +2345,17 @@ function Canvas({
     setDetailId(null);
     if (id) focusStep(id);
   };
+  // Tell the page which step's detail is open (it shows its Step tab), only when that changes.
+  const detailChanged = useRef(onStepDetailChange);
+  useEffect(() => {
+    detailChanged.current = onStepDetailChange;
+  }, [onStepDetailChange]);
+  const shownDetailId = detailStep?.id ?? null;
+  useEffect(() => {
+    detailChanged.current?.(shownDetailId);
+  }, [shownDetailId]);
+  const docked = stepDetailIn !== undefined;
+  const compact = !!card?.compact;
 
   return (
     <CanvasContext.Provider value={canvasContext}>
@@ -2337,10 +2372,18 @@ function Canvas({
         >
           {/* Above the map in the page, so Tab reaches these first: open or close every group, zoom, and what the colours mean. */}
           {(card || zoomControls || legend || allGroups.length > 0 || (showLanes && !hasGroups) || (departmentLanes && !departmentLanes.always)) && (
-            <div className={card ? "flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3" : "flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2"}>
+            <div
+              className={
+                compact
+                  ? "flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-1.5"
+                  : card
+                    ? "flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3"
+                    : "flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2"
+              }
+            >
               {card && (
                 <div className="mr-auto flex items-center">
-                  <h2 id="map-heading" className="font-display text-base leading-snug font-bold">
+                  <h2 id="map-heading" className={compact ? "text-2xs font-semibold tracking-wider text-muted-foreground uppercase" : "font-display text-base leading-snug font-bold"}>
                     {card.title}
                   </h2>
                   {card.help && <Help {...card.help} />}
@@ -2372,7 +2415,7 @@ function Canvas({
               )}
             </div>
           )}
-          {card?.below && <div className="flex flex-col gap-2 px-4 pb-3">{card.below}</div>}
+          {card?.below && <div className={compact ? "flex max-h-48 shrink-0 flex-col gap-2 overflow-y-auto border-b border-line px-3 py-2" : "flex flex-col gap-2 px-4 pb-3"}>{card.below}</div>}
           {showPlayback && playbackAbove && !card && (
             <div className="border-b border-line px-2.5 py-2" data-playback-strip>
               <PlaybackBar
@@ -2485,8 +2528,8 @@ function Canvas({
             }}
             onPaneClick={() => setDetailId(null)}
             // A read-only map sits in a page that scrolls: the wheel scrolls the page, and the map is dragged or zoomed with its buttons.
-            zoomOnScroll={editable}
-            preventScrolling={editable}
+            zoomOnScroll={wheelZoom ?? editable}
+            preventScrolling={wheelZoom ?? editable}
             minZoom={0.3}
             maxZoom={1.8}
             proOptions={{ hideAttribution: true }}
@@ -2504,18 +2547,25 @@ function Canvas({
             )}
           </ReactFlow>
           </div>
-          {detailStep && (
-            <StepDetail
-              step={detailStep}
-              who={(detailStep.person_id ? namedForViewer(viewerOf(bundle), bundle.people).find((x) => x.id === detailStep.person_id)?.name : null) ?? bundle.roles.find((x) => x.id === detailStep.role_id)?.name ?? null}
-              rating={ratingOfRank(rating?.(detailStep.id)?.rank ?? -1)}
-              reworkTo={reworkToOf(bundle.steps, detailStep)}
-              extras={stepExtras?.(detailStep.id) ?? NO_EXTRAS}
-              sources={sourcesOf(detailStep, sourceTitles)}
-              baseValues={stepBaseValues?.(detailStep)}
-              onClose={closeDetail}
-            />
-          )}
+          {detailStep &&
+            (() => {
+              const detail = (
+                <StepDetail
+                  step={detailStep}
+                  who={(detailStep.person_id ? namedForViewer(viewerOf(bundle), bundle.people).find((x) => x.id === detailStep.person_id)?.name : null) ?? bundle.roles.find((x) => x.id === detailStep.role_id)?.name ?? null}
+                  rating={ratingOfRank(rating?.(detailStep.id)?.rank ?? -1)}
+                  reworkTo={reworkToOf(bundle.steps, detailStep)}
+                  extras={stepExtras?.(detailStep.id) ?? NO_EXTRAS}
+                  sources={sourcesOf(detailStep, sourceTitles)}
+                  baseValues={stepBaseValues?.(detailStep)}
+                  onClose={closeDetail}
+                  docked={docked}
+                />
+              );
+              // Docked in the page's inspector; nothing while that isn't mounted yet.
+              if (docked) return stepDetailIn ? createPortal(detail, stepDetailIn) : null;
+              return detail;
+            })()}
           {menu && editor && commands && (
             <NodeMenu
               key={menu.id}

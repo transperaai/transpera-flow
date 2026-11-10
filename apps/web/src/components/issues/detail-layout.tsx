@@ -48,7 +48,7 @@ export function DetailLayout({
   /** The metadata rail: a `MetaRail`. */
   rail?: ReactNode;
   /** The main column's sections. */
-  children: ReactNode;
+  children?: ReactNode;
   className?: string;
 } & Record<`data-${string}`, string | number | undefined>) {
   return (
@@ -56,10 +56,12 @@ export function DetailLayout({
       {breadcrumb}
       {header}
       {notices}
-      <div className={cn("grid min-w-0 items-start gap-6", rail && "xl:grid-cols-[minmax(0,1fr)_20rem]")}>
-        <div className="flex min-w-0 flex-col gap-6">{children}</div>
-        {rail}
-      </div>
+      {(children || rail) && (
+        <div className={cn("grid min-w-0 items-start gap-6", rail && "xl:grid-cols-[minmax(0,1fr)_20rem]")}>
+          <div className="flex min-w-0 flex-col gap-6">{children}</div>
+          {rail}
+        </div>
+      )}
     </div>
   );
 }
@@ -98,4 +100,9 @@ export function ActionsHelp({ label, items }: { label: string; items: { help: Pi
       example={items.map(({ help }) => help.example).join(" ")}
     />
   );
+}
+
+/** The small purple dot on a button that opens the Editor: the one place the Editor's colour shows outside the Editor. */
+export function EditMarker() {
+  return <span aria-hidden data-edit-marker className="size-2 shrink-0 rounded-full bg-edit" />;
 }

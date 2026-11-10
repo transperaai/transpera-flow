@@ -8,7 +8,7 @@ type Story = StoryObj<typeof ErrorState>;
 
 export const Default: Story = {
   tags: ["visual-phone"],
-  args: { onRetry: () => undefined, homeHref: "/" },
+  args: { onRetry: () => undefined, homeHref: "/w/northbeam" },
 };
 
 export const WithReference: Story = {

@@ -1,12 +1,17 @@
 "use client";
 
-// One of the free-play Sandbox's four charts (capacity build P7; the prototype's `lineChart`): a few lines month by month, today's path dashed in
+// One of the free-play Sandbox's charts (capacity build P7; the prototype's `lineChart`): a few lines month by month, today's path dashed in
 // the colour of the line it is the path of, an optional goal line, and a legend with an entry for today's path. Drawn by hand in SVG from the theme's
-// tokens (so light and dark follow), sized by its viewBox so it fits a phone, with the same numbers as a table for a screen reader.
+// tokens (so light and dark follow), drawn at the width of its container (the shared `useElementWidth`) so its text stays at its real size in a
+// grid column or on a phone, with the same numbers as a table for a screen reader.
 
 import { useState, type ReactNode } from "react";
 import { FloatingTip } from "@/components/ui/floating-tip";
 import { labelIndexes, niceTicks } from "@/lib/overview/axis";
+import { useElementWidth } from "@/lib/use-element-width";
+
+/** The series colours of every Sandbox chart, in order: the chart palette, the shades furthest apart first. A single line (MRR) is the accent. */
+export const PLAY_SERIES_COLORS = ["var(--chart-2)", "var(--chart-5)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)"] as const;
 
 export interface PlayChartSeries {
   name: string;
@@ -30,20 +35,18 @@ export interface PlayChartProps {
   min?: number;
   /** Name for the dashed lines in the legend. */
   todayLabel?: string;
-  /** Three of these sit in a row: a narrower drawing, so the text stays readable when it is scaled down. */
-  narrow?: boolean;
-  /** A chart on a row of its own (QA round 2, option B1): a wide, taller drawing with a month label for every month up to a year, then every quarter. */
-  full?: boolean;
+  /** A taller drawing (a chart on a row of its own). The width always follows the container. */
+  tall?: boolean;
   /** Extra lines under a month's values in the tooltip (clients won and lost). */
   tipExtra?: (month: number) => ReactNode;
 }
 
-const WIDE = { W: 520, H: 230, M: { l: 62, r: 14, t: 14, b: 28 } };
-const NARROW = { W: 300, H: 220, M: { l: 52, r: 10, t: 14, b: 28 } };
-const FULL = { W: 860, H: 280, M: { l: 64, r: 16, t: 14, b: 28 } };
-
-export function PlayChart({ title, months, series, format, goal, min, todayLabel = "Today's path", narrow = false, full = false, tipExtra }: PlayChartProps) {
-  const { W, H, M } = full ? FULL : narrow ? NARROW : WIDE;
+export function PlayChart({ title, months, series, format, goal, min, todayLabel = "Today's path", tall = false, tipExtra }: PlayChartProps) {
+  const [ref, measured] = useElementWidth<HTMLElement>();
+  const W = Math.max(240, measured || 520);
+  const compact = W < 420;
+  const H = tall ? 280 : compact ? 200 : 220;
+  const M = { l: compact ? 50 : 60, r: compact ? 10 : 14, t: 14, b: 28 };
   const [tip, setTip] = useState<{ i: number; at: { x: number; y: number } } | null>(null);
   const n = months.length;
   const values = series.flatMap((s) => s.values).filter((v): v is number => v !== null);
@@ -80,8 +83,8 @@ export function PlayChart({ title, months, series, format, goal, min, todayLabel
   };
   const hasToday = series.some((s) => s.dashed);
   const legend = series.filter((s) => !s.dashed && !s.hideFromLegend);
-  // A full-width chart names every month of a year; past that, about a dozen labels (every quarter, or every half year at five years).
-  const label = labelIndexes(n, full ? (n <= 12 ? n : 13) : narrow ? 3 : 4);
+  // As many month labels as fit about 56px apart: every month of a year on a wide chart, fewer in a grid column or on a phone.
+  const label = labelIndexes(n, Math.max(2, Math.min(n, Math.floor((W - M.l - M.r) / 56) + 1)));
   const nearest = (e: React.PointerEvent<SVGSVGElement>) => {
     const box = e.currentTarget.getBoundingClientRect();
     const px = ((e.clientX - box.left) / box.width) * W;
@@ -90,12 +93,14 @@ export function PlayChart({ title, months, series, format, goal, min, todayLabel
   };
   const today = (name: string) => series.find((s) => s.dashed && s.name === name);
   return (
-    <figure className="m-0 flex flex-col gap-2" data-play-chart={title}>
+    <figure ref={ref} className="m-0 flex min-w-0 flex-col gap-2" data-play-chart={title}>
       <svg
         viewBox={`0 0 ${W} ${H}`}
+        width={W}
+        height={H}
         role="img"
         aria-label={`${title}, month by month`}
-        className="h-auto w-full touch-pan-y overflow-visible text-[11px]"
+        className="h-auto max-w-full touch-pan-y overflow-visible text-2xs"
         onPointerMove={nearest}
         onPointerDown={nearest}
         onPointerLeave={() => setTip(null)}

@@ -12,6 +12,7 @@ import { useMemo } from "react";
 import type { MonthlyResult } from "@transpera-flow/engine";
 import { CLIENT_JOB_PURPOSE, UPKEEP_PURPOSE, type PurposeCategory } from "@transpera-flow/db";
 import { How } from "@/components/capacity/widgets";
+import { timeAchievesHow } from "./how-texts";
 import { purposeColor, TimeLegend } from "@/components/sandbox/time-chart";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { timelineMonths } from "@/lib/forecast/timeline";
@@ -38,20 +39,6 @@ function Sparkline({ values, label }: { values: readonly number[]; label: string
       ))}
     </svg>
   );
-}
-
-/** "How this works" for what the time achieves: in its panel's header on the Overview. */
-export function timeAchievesHow(span: string, categories: readonly PurposeCategory[]) {
-  const names = CLIENT_WORK_PURPOSES.map((k) => categories.find((c) => c.key === k)?.name ?? k);
-  return {
-    works: (
-      <>
-        The team&apos;s working time in the simulation over the next {span}, by what each step achieves, as a share of the hours available. Client work is
-        &ldquo;{names[0]}&rdquo; plus &ldquo;{names[1]}&rdquo;; the line shows its share month by month. Hover a part of the bar for its hours.
-      </>
-    ),
-    tells: "Whether the team's time goes on the work clients pay for, or on everything around it.",
-  };
 }
 
 export function TimeAchieves({
@@ -111,9 +98,6 @@ export function TimeAchieves({
       </div>
       <TimeLegend rows={view.rows} shares />
       {how && <How {...timeAchievesHow(span, categories)} />}
-        }
-        tells="Whether the team's time goes on the work clients pay for, or on everything around it."
-      />
       {sandboxHref ? (
         <p className="text-xs text-muted-foreground">
           <Link href={sandboxHref} className="underline">

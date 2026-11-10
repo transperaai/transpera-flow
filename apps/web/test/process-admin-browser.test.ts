@@ -119,11 +119,12 @@ describe("process admin", () => {
     const { page, errors } = await mount({ canEdit: true });
     const types = () => page.locator("[data-process] td:nth-child(3)").allInnerTexts();
     expect(await types()).toEqual(["Sales", "Onboarding", "Routine client work", "Ad hoc"]);
-    const filter = page.getByRole("group", { name: "Type" });
-    expect(await filter.getByRole("button").allInnerTexts()).toEqual(["All", "Sales (1)", "Onboarding (1)", "Routine client work (1)", "Ad hoc (1)"]);
-    await filter.getByRole("button", { name: /^Onboarding/ }).click();
+    await page.locator("[data-filter=type]").click();
+    const menu = page.locator("[data-filter-menu=type]");
+    expect((await menu.locator("label").allInnerTexts()).map((t) => t.replace(/\s+/g, ""))).toEqual(["Sales1", "Onboarding1", "Routineclientwork1", "Adhoc1"]);
+    await menu.locator("[data-option=onboarding]").check();
     expect(await names(page)).toEqual(["Onboarding"]);
-    await filter.getByRole("button", { name: "All" }).click();
+    await menu.locator("[data-option=onboarding]").uncheck();
     expect((await names(page)).length).toBe(4);
     expect(errors).toEqual([]);
     await page.close();
@@ -135,12 +136,12 @@ describe("process admin", () => {
     expect(await dialog(page).innerText()).toContain("Nothing is deleted");
     await dialog(page).getByRole("button", { name: "Archive" }).click();
     await expect.poll(() => names(page)).not.toContain("Monthly reporting");
-    expect(await page.getByRole("button", { name: "Archived (2)" }).isVisible()).toBe(true);
-    await page.getByRole("button", { name: "Archived (2)" }).click();
+    expect(await page.getByRole("radio", { name: "Archived (2)" }).isVisible()).toBe(true);
+    await page.getByRole("radio", { name: "Archived (2)" }).click();
     expect(await page.locator("[data-archived-process]").evaluateAll((els) => els.map((e) => e.getAttribute("data-archived-process")))).toEqual(["Monthly reporting", "Old audit"]);
     await page.getByRole("button", { name: "Restore Monthly reporting" }).click();
     await expect.poll(() => page.locator("[data-archived-process]").count()).toBe(1);
-    await page.getByRole("button", { name: /^In use/ }).click();
+    await page.getByRole("radio", { name: /^In use/ }).click();
     expect(await names(page)).toContain("Monthly reporting");
     expect(await calls(page)).toEqual([
       ["archive", "50000000-0000-4000-8000-000000000003"],
@@ -172,7 +173,7 @@ describe("process admin", () => {
     const { page, errors } = await mount({ canEdit: false });
     expect(await page.getByRole("button", { name: /^Change / }).count()).toBe(0);
     expect(await page.getByRole("button", { name: "New process" }).count()).toBe(0);
-    await page.getByRole("button", { name: "Archived (1)" }).click();
+    await page.getByRole("radio", { name: "Archived (1)" }).click();
     expect(await page.locator("[data-archived-process]").count()).toBe(1);
     expect(await page.getByRole("button", { name: /Restore/ }).count()).toBe(0);
     expect(errors).toEqual([]);

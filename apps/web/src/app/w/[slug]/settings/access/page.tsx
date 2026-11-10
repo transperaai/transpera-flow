@@ -63,7 +63,8 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
   return (
     <SettingsPage
       title="Access"
-      eyebrow="Settings"
+      slug={slug}
+      canManage
       description="People get in by signing in with Google. Nobody is emailed. Changes apply on their next page load."
     >
       <PhoneReadOnly>
@@ -78,10 +79,10 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
           </Alert>
         )}
 
-        {signInView && <WhoCanSignIn slug={slug} view={signInView} />}
+        {signInView && <WhoCanSignIn slug={slug} view={signInView} myEmail={members.find((m) => m.userId === userId)?.email ?? null} />}
 
         <div role="region" aria-labelledby="members-heading">
-        <SectionCard
+          <SectionCard
           id="members"
           title="People in this workspace"
           description="Everyone who can sign in is added to every workspace, as an Agency admin or a Viewer, the next time they sign in. Change who can sign in, and as what, in the list above."

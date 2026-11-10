@@ -4,11 +4,12 @@
 // with work nobody was there to do as a hatched cap above the 100%. Plain SVG, as the Overview's charts are, and a list of bars per month on
 // a phone. The same chart serves the Sandbox, its compare and the Overview.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { FloatingTip } from "@/components/ui/floating-tip";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { niceTicks } from "@/lib/overview/axis";
 import { IDLE, NOT_SET, UNCOVERED, type TimeRow, type TimeView } from "@/lib/sandbox/time";
+import { useElementWidth } from "@/lib/use-element-width";
 
 /** A fixed colour per default category, so a rename or a reorder never recolours it; categories the workspace added take the spare ones by their key. */
 const FIXED: Record<string, string> = {
@@ -35,19 +36,6 @@ export function purposeColor(key: string): string {
 const fillOf = (r: TimeRow) => (r.kind === "uncovered" ? "url(#time-hatch)" : purposeColor(r.id));
 const hours = (h: number) => `${formatNumber(h, h < 10 ? 1 : 0)} h`;
 
-function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
-  const ref = useRef<T>(null);
-  const [width, setWidth] = useState(0);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    setWidth(el.clientWidth);
-    const observer = new ResizeObserver(([entry]) => entry && setWidth(Math.round(entry.contentRect.width)));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-  return [ref, width];
-}
 
 export function TimeLegend({ rows, shares = false }: { rows: TimeRow[]; /** Say each row's share of the run after its name. */ shares?: boolean }) {
   return (
@@ -91,7 +79,7 @@ const HEIGHT = 240;
 
 /** The chart: one 100% bar per month. `label` is the alt text. */
 export function TimeChart({ view, label }: { view: TimeView; label: string }) {
-  const [ref, measured] = useWidth<HTMLDivElement>();
+  const [ref, measured] = useElementWidth<HTMLDivElement>();
   const [tip, setTip] = useState<{ x: number; y: number; m: number } | null>(null);
   const width = measured || 640;
   const n = view.months.length;

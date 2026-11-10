@@ -14,6 +14,7 @@ import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ConfirmDialog } from "@/components/sandbox/scenario-bar";
 import {
@@ -289,8 +290,19 @@ export function ChurnDriversSettings({
         </div>
       </div>
 
-      <div className="rounded-lg border border-line">
-        <ul className="flex flex-col" aria-label="Churn drivers" aria-busy={sim.status === "running"}>
+      {/* One row a driver; below md each row stacks its cells. */}
+      <div className="overflow-hidden rounded-lg border border-line">
+        <Table aria-label="Churn drivers" aria-busy={sim.status === "running"} className="max-md:block">
+          <TableHeader className="sr-only">
+            <TableRow>
+              <TableHead>Use</TableHead>
+              <TableHead>Driver</TableHead>
+              <TableHead>Weight</TableHead>
+              <TableHead>Contribution</TableHead>
+              <TableHead>Delete</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody className="max-md:block">
           {shown.map((d) => (
             <DriverRow
               key={d.key}
@@ -304,17 +316,22 @@ export function ChurnDriversSettings({
               onDelete={() => askDelete(d)}
             />
           ))}
-          <li className="grid items-center gap-3 border-t border-line px-4 py-3 md:grid-cols-[3.5rem_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_4rem]">
-            <span />
-            <span className="flex items-center text-sm font-medium">
-              Normal churn
-              <Help label="Normal churn" {...CONTROL_HELP.normal} />
-            </span>
-            <span />
-            <Contribution share={projection ? projection.normalShare : null} tone="plain" label="Normal churn" />
-            <span />
-          </li>
-        </ul>
+          <TableRow className={cn(ROW, "border-t border-line")}>
+            <TableCell className={cn(CELL, "max-md:hidden")} />
+            <TableCell className={CELL}>
+              <span className="flex items-center text-sm font-medium">
+                Normal churn
+                <Help label="Normal churn" {...CONTROL_HELP.normal} />
+              </span>
+            </TableCell>
+            <TableCell className={cn(CELL, "max-md:hidden")} />
+            <TableCell className={CELL}>
+              <Contribution share={projection ? projection.normalShare : null} tone="plain" label="Normal churn" />
+            </TableCell>
+            <TableCell className={cn(CELL, "max-md:hidden")} />
+          </TableRow>
+          </TableBody>
+        </Table>
       </div>
       {confirm && (
         <ConfirmDialog
@@ -349,6 +366,10 @@ function SaveStatus({ state }: { state: SaveState }) {
   );
 }
 
+/** A driver's row: a table row from md up, its cells stacked below. */
+const ROW = "hover:bg-transparent max-md:grid max-md:gap-3 max-md:px-4 max-md:py-3";
+const CELL = "px-4 py-3 align-middle whitespace-normal max-md:block max-md:p-0";
+
 function DriverRow({
   d,
   cause,
@@ -372,12 +393,15 @@ function DriverRow({
   const range = d.builtin ? CHURN_DRIVER_SPECS[d.builtin].valueRange : { min: CUSTOM_DRIVER_VALUE.min, max: CUSTOM_DRIVER_VALUE.max };
   const help = d.builtin ? DRIVER_HELP[d.builtin] : { description: d.description || "Your own cause of clients leaving.", example: d.example || "Add an example below." };
   return (
-    <li className={cn("grid gap-3 border-t border-line px-4 py-3 first:border-t-0 md:grid-cols-[3.5rem_minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_4rem] md:items-center", !d.enabled && "[&>*:not([data-delete-cell])]:opacity-60")}>
-      <span className="flex items-center">
-        <Switch checked={d.enabled} disabled={!canEdit} onCheckedChange={(on) => onChange({ enabled: on })} aria-label={`Use ${d.name}`} />
-        <Help label={`Use ${d.name}`} {...CONTROL_HELP.switch} />
-      </span>
+    <TableRow className={cn(ROW, "border-t border-line first:border-t-0", !d.enabled && "[&>*:not([data-delete-cell])]:opacity-60")}>
+      <TableCell className={cn(CELL, "w-20")}>
+        <span className="flex items-center">
+          <Switch checked={d.enabled} disabled={!canEdit} onCheckedChange={(on) => onChange({ enabled: on })} aria-label={`Use ${d.name}`} />
+          <Help label={`Use ${d.name}`} {...CONTROL_HELP.switch} />
+        </span>
+      </TableCell>
 
+      <TableCell className={CELL}>
       <div className="flex min-w-0 flex-col gap-1.5">
         {d.builtin ? (
           <span className="flex items-center">
@@ -423,7 +447,9 @@ function DriverRow({
           </div>
         )}
       </div>
+      </TableCell>
 
+      <TableCell className={cn(CELL, "md:w-56")}>
       <label className={cn("flex flex-col gap-1 text-xs text-muted-foreground", d.effect !== null && "opacity-50")}>
         <span className="flex items-center">
           Weight
@@ -442,16 +468,21 @@ function DriverRow({
           className="w-full accent-[var(--accent)] disabled:opacity-50"
         />
       </label>
+      </TableCell>
 
-      <Contribution share={d.enabled ? share : 0} tone="accent" label={d.name} hint={CONTROL_HELP.contribution} />
+      <TableCell className={cn(CELL, "md:w-56")}>
+        <Contribution share={d.enabled ? share : 0} tone="accent" label={d.name} hint={CONTROL_HELP.contribution} />
+      </TableCell>
 
-      <span className="flex items-center justify-end" data-delete-cell>
+      <TableCell className={cn(CELL, "md:w-20")} data-delete-cell>
+      <span className="flex items-center justify-end">
         <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" disabled={!canEdit} onClick={onDelete} aria-label={`Delete ${d.name}`}>
           <Trash2 aria-hidden />
         </Button>
         <Help label={`Delete ${d.name}`} {...(d.builtin ? CONTROL_HELP.removeBuiltin : CONTROL_HELP.remove)} />
       </span>
-    </li>
+      </TableCell>
+    </TableRow>
   );
 }
 

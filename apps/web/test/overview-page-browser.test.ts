@@ -86,7 +86,7 @@ describe("the Overview page's runs", () => {
   }, 240_000);
 });
 
-describe("the Overview's layout: sections by question (L3)", () => {
+describe("the Overview's layout: a dashboard (docs/plans/ui-cleanup.md)", () => {
   const ready = async (page: Page) => {
     await page.waitForSelector("[data-busiest]", { timeout: 120_000 });
     await page.waitForSelector("[data-team-load]", { timeout: 120_000 });
@@ -94,24 +94,41 @@ describe("the Overview's layout: sections by question (L3)", () => {
     await page.waitForSelector("[data-time-split]", { timeout: 120_000 });
   };
 
-  for (const width of [1300, 400]) {
-    it(`Money, People, then Processes, each with its question and its widgets, the company map at the top of Processes (${width}px)`, async () => {
+  for (const width of [1300, 1600, 400]) {
+    it(`the headline tiles, then the company map beside open issues and the busiest people, then the charts and the departments (${width}px)`, async () => {
       const { page, errors } = await mount({ width, capacity: true, styled: true });
       await ready(page);
-      const sections = await page.locator("[data-overview-section]").evaluateAll((els) => els.map((e) => e.getAttribute("data-overview-section")));
-      expect(sections).toEqual(["money", "people", "processes"]);
-      expect(await page.locator("[data-jump-links] a").evaluateAll((as) => as.map((a) => [a.textContent, a.getAttribute("href")]))).toEqual([
-        ["Money", "#money"],
-        ["People", "#people"],
-        ["Processes", "#processes"],
-      ]);
-      const inSection = (id: string) => page.locator(`[data-overview-section=${id}] [data-section]`).evaluateAll((els) => els.map((e) => e.getAttribute("data-section")));
-      expect(await page.locator("[data-overview-section=money] [data-whole-business]").count()).toBe(1);
-      expect(await inSection("money")).toEqual(["departments"]);
-      expect(await inSection("people")).toEqual(["busiest", "team-load", "where-time-goes", "time-achieves"]);
-      expect(await inSection("processes")).toEqual(["company-map", "issues", "time-split"]);
-      // The company map is the same component as before, with its controls.
-      expect(await page.locator("[data-overview-section=processes] [data-company-map] [data-map-controls]").count()).toBe(1);
+      // No jump links and no section rules any more: the panels follow one another in a fixed order.
+      expect(await page.locator("[data-jump-links]").count()).toBe(0);
+      expect(await page.locator("[data-overview-section]").count()).toBe(0);
+      const order = await page.locator("[data-section]").evaluateAll((els) => els.map((e) => e.getAttribute("data-section")));
+      expect(order).toEqual(["company-map", "issues", "busiest", "team-load", "where-time-goes", "time-achieves", "time-split", "departments"]);
+      // One row of headline tiles before the map: the whole business's three, people over their threshold and open issues.
+      expect(await page.locator("[data-kpi-row] [data-whole-business] > [data-kpi]").count()).toBe(5);
+      expect(await page.evaluate(() => !!(document.querySelector("[data-kpi-row]")!.compareDocumentPosition(document.querySelector("[data-company-map]")!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+      // The company map is the same component as before, with its controls, in one surface (no card inside a card).
+      expect(await page.locator("[data-company-map] [data-map-controls]").count()).toBe(1);
+      expect(await page.locator("[data-company-map] [data-process-map]").count()).toBe(1);
+      expect(await page.locator("[data-company-map] [data-slot=card]").count()).toBe(0);
+      const box = (sel: string) => page.locator(sel).first().evaluate((e) => e.getBoundingClientRect().toJSON() as DOMRect);
+      const map = await box("[data-company-map]");
+      const rail = await box("[data-rail]");
+      if (width >= 1280) {
+        // About two thirds of the width, with the rail beside it.
+        expect(rail.left).toBeGreaterThan(map.right - 1);
+        expect(Math.abs(rail.top - map.top)).toBeLessThanOrEqual(1);
+        expect(map.width / (map.width + rail.width)).toBeGreaterThan(0.6);
+        // The charts two to a row, the odd one out (there are four here) never leaving a hole.
+        const charts = await page.locator("[data-charts] > [data-chart]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
+        expect(charts.length).toBe(4);
+        expect(charts[0]).toBe(charts[1]);
+        expect(charts[2]).toBe(charts[3]);
+      } else {
+        expect(rail.top).toBeGreaterThan(map.bottom - 1);
+      }
+      // "How this works" is a small (?) in each panel's header, not a line under every chart.
+      expect(await page.locator("details[data-how]").count()).toBe(0);
+      expect(await page.locator("[data-how] button").count()).toBeGreaterThanOrEqual(6);
       // No sideways scroll on a phone or a laptop.
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
       const shots = process.env.OVERVIEW_SHOTS;

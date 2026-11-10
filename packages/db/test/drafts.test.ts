@@ -219,6 +219,26 @@ describe("draft mode", () => {
     expect(await commitAs(users.editor!.claims, (c) => rpc(c, "publish_process", proc, false))).toEqual({ status: "no_draft" });
   });
 
+  it("refuses to publish a draft other than the one the caller names, and writes nothing", async () => {
+    // The editor saw draft `seen`; someone discarded it and opened another, `other`, with a change the editor never saw.
+    const seen = (await commitAs(users.editor!.claims, (c) => rpc(c, "open_draft", proc))).revision_id as string;
+    await commitAs(users.other!.claims, (c) => rpc(c, "discard_draft", proc));
+    const other = (await commitAs(users.other!.claims, (c) => rpc(c, "open_draft", proc))).revision_id as string;
+    expect(other).not.toBe(seen);
+    const before = await processRow();
+    await expect(commitAs(users.editor!.claims, (c) => rpc(c, "publish_process", proc, true, seen))).rejects.toMatchObject({
+      code: "55000",
+      message: expect.stringMatching(/^draft changed/),
+    });
+    expect(await processRow()).toEqual(before);
+    expect((await db.client.query("select status from process_revisions where id = $1", [other])).rows[0].status).toBe("draft");
+    // Naming the draft that is open publishes it (rolled back here).
+    await db.as(users.other!.claims, async (c) => {
+      expect(await rpc(c, "publish_process", proc, true, other)).toMatchObject({ status: "published", revision_id: other });
+    });
+    await commitAs(users.other!.claims, (c) => rpc(c, "discard_draft", proc));
+  });
+
   it("two editors opening a draft at once end up in the same one", async () => {
     const a = new pg.Client({ connectionString: db.url });
     const b = new pg.Client({ connectionString: db.url });

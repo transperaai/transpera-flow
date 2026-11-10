@@ -2,7 +2,7 @@
 // active item is unit-tested; the sidebar component only renders what this returns. Order and grouping follow the
 // prototype's `sidebar()` (apps/web/prototype/app-flow.html).
 
-export type NavIcon = "clients" | "team" | "overview" | "processes" | "issues" | "solutions" | "library" | "people" | "sandbox" | "settings";
+export type NavIcon = "overview" | "processes" | "issues" | "solutions" | "library" | "capacity" | "sandbox" | "settings";
 
 /** How a count badge looks: plain, or a warning. */
 export type CountTone = "plain" | "warn";
@@ -54,7 +54,7 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
     return { ...fields, href: `${base}${path}`, active: active ?? matches(rest, path) };
   };
   const company: NavItem[] = [
-    item({ key: "capacity", label: "Capacity", path: "/capacity", icon: "people" }),
+    item({ key: "capacity", label: "Capacity", path: "/capacity", icon: "capacity" }),
     // Who gets too busy, and when (issue #35).
     item({ key: "sandbox", label: "Sandbox", path: "/sandbox", icon: "sandbox" }),
   ];

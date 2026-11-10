@@ -15,13 +15,14 @@ import { PURPOSE_PALETTE } from "@/lib/capacity/purposes";
 import { keyPersonGroups, timeSplitSummary, type KeyPersonGroups, type KeyPersonRow, type TimeSplitRow } from "@/lib/process-page/supporting";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
-const card = "flex h-full min-w-0 flex-col rounded-lg bg-muted/40 p-4";
+// A plain section with a rule above it, not a card: the panels sit in the process page's inspector (its Facts tab), one surface already.
+const card = "flex min-w-0 flex-col border-t border-line pt-4";
 
-/** A titled panel with a one-line description, the same on every part of the "What the process shows" card (Q8). */
+/** A titled panel with a one-line description, the same on every part of the "What the process shows" content (Q8). */
 export function Panel({ id, title, note, children }: { id: string; title: string; note: string; children: ReactNode }) {
   return (
     <section aria-labelledby={`${id}-heading`} className={card} data-panel={id}>
-      <h3 id={`${id}-heading`} className="text-sm font-bold">
+      <h3 id={`${id}-heading`} className="text-sm font-semibold">
         {title}
       </h3>
       <p className="mb-3 text-xs text-fg-3">{note}</p>
@@ -49,7 +50,7 @@ const hoursMonth = (h: number) => `${h < 10 ? h.toLocaleString("en-GB", { maximu
 /** The answer first: what this process takes, how much of its department's time that is, and how much of it could be automated. */
 export function SupportingHeadline({ headline, result }: { headline: ProcessHeadline | null; result: SimulationResult | null }) {
   return (
-    <p className="font-display text-xl leading-snug font-semibold text-balance sm:text-2xl" data-supporting-headline>
+    <p className="font-display text-lg leading-snug font-semibold text-balance" data-supporting-headline>
       {headline ? headlineText(headline) : <span className="text-sm font-normal text-fg-2">{result ? "No work reached a step in this run." : "Simulating…"}</span>}
     </p>
   );
@@ -122,7 +123,7 @@ export function HoursByRole({ hours, result, viewer }: { hours: ProcessHours | n
           <p className="mb-2 text-sm font-semibold tabular-nums" data-hours-total>
             {hoursMonth(hours.total)} a month
           </p>
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
+          <div className="flex flex-col items-center gap-4 @sm:flex-row @sm:items-start">
             <HoursDonut slices={slices} total={hours.total} />
             <ul className="flex w-full min-w-0 flex-col gap-1.5" aria-label="Hours a month by role">
               {slices.map((s, i) => (
@@ -241,7 +242,7 @@ export function HeaviestSteps({ hours, result }: { hours: ProcessHours | null; r
               );
             })}
           </div>
-          <ul className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2" aria-label="Hours a month by step">
+          <ul className="mt-3 grid gap-x-6 gap-y-1.5 @md:grid-cols-2" aria-label="Hours a month by step">
             {strip.segments.map((s, i) => {
               const row = (
                 <>

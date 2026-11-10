@@ -17,6 +17,10 @@ import { EDIT_ONLY } from "@/lib/phone";
  * inside) and the process switcher, which is the title itself. The name opens every process of the workspace,
  * indented by how deep it sits with "All processes" at the foot. Editors can start a
  * new servicing process from it.
+ *
+ * `part` splits it for the process page's workbench, which puts the breadcrumbs in its top bar and the switcher in its toolbar (one
+ * title, not two): `crumbs` draws the breadcrumbs ending with the process's name as plain text, `title` the switcher alone. Default
+ * `all`: both, as the History page draws them.
  */
 export function ProcessNav({
   processes,
@@ -25,6 +29,7 @@ export function ProcessNav({
   create,
   processesHref,
   companyMapHref,
+  part = "all",
 }: {
   processes: ProcessListing[];
   current: string;
@@ -36,6 +41,7 @@ export function ProcessNav({
   processesHref?: string;
   /** The company map, the same place as the Processes page's Company map button. */
   companyMapHref?: string;
+  part?: "all" | "crumbs" | "title";
 }) {
   const [adding, setAdding] = useState(false);
   // The company map's order: top-level processes, each followed by the child processes inside it (issue #102).
@@ -45,7 +51,7 @@ export function ProcessNav({
   const byId = new Map(processes.map((p) => [p.id, { id: p.id, name: p.name, parentId: p.parentId ?? null }]));
   const trail = here ? trailOf({ id: here.id, parentId: here.parentId ?? null }, byId) : [];
   const crumbs = (
-    <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+    <nav aria-label="Breadcrumb" className={`flex min-w-0 items-center gap-x-1 text-xs text-muted-foreground ${part === "crumbs" ? "shrink overflow-hidden whitespace-nowrap" : "flex-wrap"}`}>
       {processesHref && (
         <Link href={processesHref} className="hover:text-accent hover:underline">
           Processes
@@ -62,7 +68,18 @@ export function ProcessNav({
       {(processesHref || trail.length > 0) && <ChevronRight aria-hidden className="size-3 shrink-0" />}
     </nav>
   );
+  if (part === "crumbs") {
+    return (
+      <div className="flex min-w-0 items-center gap-x-1 overflow-hidden text-xs">
+        {crumbs}
+        <span aria-current="page" className="min-w-0 truncate font-medium text-foreground">
+          {name}
+        </span>
+      </div>
+    );
+  }
   if (processes.length <= 1 && !create) {
+    if (part === "title") return <h1 className="min-w-0 truncate font-display text-base font-semibold">{name}</h1>;
     return (
       <div className="flex min-w-0 flex-wrap items-center gap-x-1">
         {crumbs}
@@ -70,14 +87,11 @@ export function ProcessNav({
       </div>
     );
   }
-  return (
-    <>
-      <div className="flex min-w-0 flex-wrap items-center gap-x-1">
-        {crumbs}
+  const title = (
         <h1 className="min-w-0 text-base">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="max-w-full gap-1.5 px-2 font-display text-base font-bold" aria-label={`Process: ${name}. Switch process`}>
+              <Button variant="ghost" className={`max-w-full gap-1.5 px-2 font-display text-base ${part === "title" ? "-ml-2 h-8 font-semibold" : "font-bold"}`} aria-label={`Process: ${name}. Switch process`}>
                 <span className="truncate">{name}</span>
                 <ChevronsUpDown className="text-muted-foreground" />
               </Button>
@@ -121,7 +135,17 @@ export function ProcessNav({
             </DropdownMenuContent>
           </DropdownMenu>
         </h1>
-      </div>
+  );
+  return (
+    <>
+      {part === "title" ? (
+        title
+      ) : (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1">
+          {crumbs}
+          {title}
+        </div>
+      )}
       {create && <NewProcessDialog open={adding} onOpenChange={setAdding} create={create} />}
     </>
   );

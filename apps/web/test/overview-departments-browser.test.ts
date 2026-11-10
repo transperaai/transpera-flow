@@ -101,7 +101,7 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
       }
       const tiles = page.locator("[data-section=departments]");
       expect(await tiles.locator("[data-capacity-link]").getAttribute("href")).toBe("/w/example/capacity");
-      await tiles.locator("[data-how] summary").click();
+      await tiles.locator("[data-how] button").click();
       expect(await tiles.locator("[data-how]").innerText()).toContain("a rough guide from the simulation, not a promise");
 
       // Busiest people: only those over or within 10 points of their own threshold, busiest first; everyone else folded away.

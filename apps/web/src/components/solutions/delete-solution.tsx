@@ -39,7 +39,7 @@ export function DeleteSolution({
   };
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)} data-delete-solution>
+      <Button type="button" variant="outline" onClick={() => setOpen(true)} data-delete-solution>
         Delete solution
       </Button>
       <Dialog open={open} onOpenChange={(o) => !busy && setOpen(o)}>

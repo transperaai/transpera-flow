@@ -7,7 +7,7 @@ export function serverDraftBackend(processId: string): DraftBackend {
   return {
     open: () => openDraft(processId),
     discard: () => discardDraft(processId),
-    publish: (acceptEstimates) => publishDraft(processId, acceptEstimates),
+    publish: (acceptEstimates, draftId) => publishDraft(processId, acceptEstimates, draftId),
     store: (revisionId) => liveStore(revisionId),
   };
 }

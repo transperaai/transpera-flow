@@ -2,14 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { workspacePurposes } from "@transpera-flow/db";
 import { PurposesSettings } from "@/components/purposes/purposes-settings";
-import { LinkRows } from "@/components/settings/link-rows";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { loadLiveProcess, loadPurposeUse, loadStoredPurposes, loadWorkspaceSettings } from "@/lib/data";
 import { ChurnDriversSettings } from "./churn-drivers-settings";
 import { DemandSettings } from "./demand-settings";
 import { SimulationSettings } from "./people-settings";
-import { SettingsSection } from "./section";
 import { saveOverheadMonthly, savePurposes } from "./actions";
 import { saveWorkspaceCurrency, saveWorkspaceName } from "./workspace-actions";
 import { WorkspaceDetails } from "./workspace-details";
@@ -24,22 +22,12 @@ export default async function WorkspaceSettingsPage(props: PageProps<"/w/[slug]/
   const [purposes, purposeUse] = await Promise.all([loadStoredPurposes(data.workspace.id), loadPurposeUse(data.workspace.id)]);
   return (
     <SettingsPage
-      title="Settings"
-      eyebrow="Company"
-      description="Changes save as you go. If someone else changes the same field at the same time, you'll be asked which value to keep."
+      title="Workspace settings"
+      slug={slug}
+      canManage={data.canManage}
+      description="Fields save as you go: each says Saved once it has. If someone else changes the same field at the same time, you'll be asked which value to keep."
     >
       <PhoneNotice />
-      <SettingsSection id="services" title="Clients, team and access" description="Tiers and clients, people and roles, and who can sign in have a page each.">
-        <LinkRows
-          label="Settings pages"
-          items={[
-            { href: `/w/${slug}/settings/clients`, title: "Tiers & clients", description: "Tiers (pricing, entry process, servicing steps, path tags), tier client counts and optional named clients." },
-            { href: `/w/${slug}/settings/people`, title: "People & roles", description: "Roles, shared teams, people (hours, leave, skills, dates, per-person times), salaries and portfolios." },
-            // Access is for whoever manages the workspace (its page answers 404 to anyone else).
-            ...(data.canManage ? [{ href: `/w/${slug}/settings/access`, title: "Access", description: "Who can sign in, their role, and which person in the team each sign-in is." }] : []),
-          ]}
-        />
-      </SettingsSection>
       <WorkspaceDetails
         workspaceId={data.workspace.id}
         name={data.workspace.name}

@@ -7,7 +7,7 @@
 //
 // - `useDepartmentFigures`: the one Today run and every department's figures, for the Money and People sections alike.
 // - `WholeBusinessHero` (WB1): three hero numbers, only DLER coloured, against its goal.
-// - `DepartmentTiles` (DS1): the departments side by side, a status tile for each figure.
+// - `DepartmentTiles` (DS1): the departments side by side in one section, a figure for each, its status on a coloured edge.
 
 import Link from "next/link";
 import { useMemo, type ReactNode } from "react";
@@ -34,12 +34,13 @@ import {
   type RoomPulse,
 } from "@transpera-flow/db";
 import type { EngineModel } from "@transpera-flow/engine";
-import { HeroKpi, How, Section, type KpiStatus } from "@/components/capacity/widgets";
+import { HeroKpi, Section, type KpiStatus } from "@/components/capacity/widgets";
 import { SectionCard } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatNumber, formatWholeCurrency } from "@/lib/format";
 import { useCapacityRuns } from "@/lib/sim/use-capacity-runs";
 import { cn } from "@/lib/utils";
+import { PanelActions } from "./panel-how";
 
 const f0 = (v: number) => formatNumber(v, 0);
 const f1 = (v: number) => formatNumber(v, 1);
@@ -268,14 +269,17 @@ function SalariesMissing({ base }: { base: string }) {
   );
 }
 
-/** WB1: clients, MRR ÷ N people and DLER as three hero numbers. Only DLER has a goal, so only DLER is coloured. */
-export function WholeBusinessHero({ setup, base }: { setup: CapacitySetup; base: string }) {
+/**
+ * WB1: clients, MRR ÷ N people and DLER as three hero numbers. Only DLER has a goal, so only DLER is coloured. `extra`: more tiles in the
+ * same row (the Overview's people over their threshold and open issues), so the row is one strip of equal tiles.
+ */
+export function WholeBusinessHero({ setup, base, extra }: { setup: CapacitySetup; base: string; extra?: ReactNode }) {
   const w = useMemo(() => wholeBusiness(setup), [setup]);
   const mrr = useMemo(() => setup.departments.reduce((a, d) => a + departmentRetainers(setup, d.id), 0), [setup]);
   const money = (v: number) => formatWholeCurrency(v, setup.currency);
   const status = dlerStatus(w.dler);
   return (
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(13rem,100%),1fr))] gap-3" data-whole-business>
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(13rem,100%),1fr))] gap-4" data-whole-business>
       <HeroKpi label="Clients" value={f0(w.unique)} sub={`${w.byDepartment.map((d) => `${f0(d.clients)} ${d.name}`).join(" + ")} − ${f0(w.both)} taking both`} />
       <HeroKpi label={`MRR ÷ ${w.employees} people`} value={w.revenuePerEmployee === null ? "—" : money(w.revenuePerEmployee)} sub={`a month, from ${money(mrr)} MRR`} />
       <HeroKpi
@@ -297,6 +301,7 @@ export function WholeBusinessHero({ setup, base }: { setup: CapacitySetup; base:
           )
         }
       />
+      {extra}
     </div>
   );
 }
@@ -306,14 +311,15 @@ export function WholeBusinessHero({ setup, base }: { setup: CapacitySetup; base:
 // ---------------------------------------------------------------------------------------------------------------------
 
 type TileTone = "good" | "warn" | "bad" | null;
-const TILE_BG: Record<Exclude<TileTone, null>, string> = { good: "bg-good-soft", warn: "bg-warn-soft", bad: "bg-crit-soft" };
+const TILE_EDGE: Record<Exclude<TileTone, null>, string> = { good: "border-l-good", warn: "border-l-warn", bad: "border-l-crit" };
 
+/** One figure of a department: a plain label and number, its status on the left edge (the words in `sub` carry it, not the colour). */
 function Tile({ label, value, sub, tone = null, className }: { label: string; value: ReactNode; sub?: ReactNode; tone?: TileTone; className?: string }) {
   return (
-    <div className={cn("flex min-w-0 flex-col gap-0.5 rounded-token px-3 py-2.5", tone ? TILE_BG[tone] : "bg-panel-2", className)} data-kpi data-tone={tone ?? "none"}>
-      <div className="text-xs text-fg-2">{label}</div>
+    <div className={cn("flex min-w-0 flex-col gap-0.5 border-l-2 py-0.5 pl-3", tone ? TILE_EDGE[tone] : "border-l-line", className)} data-kpi data-tone={tone ?? "none"}>
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div className="font-mono text-xl font-semibold tabular-nums">{value}</div>
-      {sub && <div className="text-xs text-fg-2">{sub}</div>}
+      {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
     </div>
   );
 }
@@ -336,30 +342,45 @@ export function departmentsAnswer(rows: readonly Pick<DepartmentFigure, "name" |
   return [money, people].filter(Boolean).join(" ");
 }
 
-export function DepartmentTiles({ figures, base, currency }: { figures: DepartmentFigures; base: string; currency: string }) {
+const DEPARTMENTS_HOW = {
+  works: (
+    <>
+      Clients and MRR come from Set up; MRR ÷ people divides each department&apos;s MRR by everyone in it (contractors and leadership out). DLER is MRR ÷
+      salaries, the average of each client-facing person&apos;s, against a goal of {f1(DLER_GOAL)}. Who is over their utilisation threshold and the room
+      for more clients come from a simulation of today&apos;s clients; the room is a rough guide from the simulation, not a promise, and names what fills
+      first.
+    </>
+  ),
+  tells: "Which department needs you first: a DLER below the goal, people over their utilisation threshold, or little room for more clients.",
+};
+
+export function DepartmentTiles({ figures, base, currency, className }: { figures: DepartmentFigures; base: string; currency: string; className?: string }) {
   const money = (v: number) => formatWholeCurrency(v, currency);
   const pending = (what: string) => (figures.failure ? "—" : <Skeleton className="mt-1 h-6 w-14" aria-busy="true" aria-label={`${what} is being worked out`} />);
   return (
     <SectionCard
       id="departments"
       section="departments"
-      level={3}
+      level={2}
       title="Departments"
+      className={className}
       description={departmentsAnswer(figures.rows)}
       action={
-        <Link href={`${base}/capacity`} className="text-xs font-medium text-accent hover:underline" data-capacity-link>
-          Capacity →
-        </Link>
+        <PanelActions how={DEPARTMENTS_HOW}>
+          <Link href={`${base}/capacity`} className="text-xs font-medium text-accent hover:underline" data-capacity-link>
+            Capacity →
+          </Link>
+        </PanelActions>
       }
     >
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(17rem,100%),1fr))] gap-x-5 gap-y-4" data-tier="departments">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(20rem,100%),1fr))] gap-x-10 gap-y-6" data-tier="departments">
         {figures.rows.map((d) => {
           const status = dlerStatus(d.dler);
           const run = d.run;
           return (
             <div key={d.id} className="flex min-w-0 flex-col gap-2" data-department={d.name}>
-              <h4 className="text-sm font-semibold">{d.name}</h4>
-              <div className="grid grid-cols-2 gap-2">
+              <h4 className="border-b border-line pb-1.5 text-sm font-semibold">{d.name}</h4>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
                 <Tile label="Clients" value={f0(d.per.clients)} sub={`${f0(d.alsoTake.count)} also take ${d.alsoTake.other}`} />
                 <Tile label={`MRR ÷ ${d.per.employees} people`} value={d.per.revenuePerEmployee === null ? "—" : money(d.per.revenuePerEmployee)} sub="a month" />
                 <Tile
@@ -394,17 +415,6 @@ export function DepartmentTiles({ figures, base, currency }: { figures: Departme
           );
         })}
       </div>
-      <How
-        works={
-          <>
-            Clients and MRR come from Set up; MRR ÷ people divides each department&apos;s MRR by everyone in it (contractors and leadership out). DLER is MRR ÷
-            salaries, the average of each client-facing person&apos;s, against a goal of {f1(DLER_GOAL)}. Who is over their utilisation threshold and the room
-            for more clients come from a simulation of today&apos;s clients; the room is a rough guide from the simulation, not a promise, and names what fills
-            first.
-          </>
-        }
-        tells="Which department needs you first: a DLER below the goal, people over their utilisation threshold, or little room for more clients."
-      />
     </SectionCard>
   );
 }

@@ -115,7 +115,8 @@ function Harness({ setup, ctx }: { setup: ReturnType<typeof capacitySetupFromMod
   const todayPlan = useMemo(() => prepareOnModel(defaultPlay(), ctx, horizon), [ctx, horizon]);
   const prepare = useMemo(() => (play: PlayState) => prepareOnModel(play, ctx, horizon), [ctx, horizon]);
   return (
-    <div className="p-4">
+    // The page's frame: from lg up the workbench fills the viewport and its panes scroll on their own.
+    <div className="flex min-w-0 flex-col lg:h-svh">
       <PlayView
         setup={setup}
         processes={processes}

@@ -10,11 +10,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Shuffle } from "lucide-react";
 import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS, type ProcessCategory } from "@transpera-flow/db";
+import { ClearFilters, EmptyState, FilterMenu, Toolbar, ToolbarSearch, type FilterOption } from "@/components/page-kit";
+import { ListCount, ListTable, ListTableHeader } from "@/components/processes/list-table";
 import { ProcessesTable } from "@/components/processes/processes-table";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   ARCHIVE_EXPLAINED,
   MAX_PROCESS_NAME,
@@ -29,7 +33,6 @@ import {
 } from "@/lib/processes/admin";
 import type { ProcessCardData } from "@/lib/processes/data";
 import { shortDate, type CompanyRowData, type ProcessRowData } from "@/lib/processes/rows";
-import { cn } from "@/lib/utils";
 import { EDIT_ONLY } from "@/lib/phone";
 
 type Open = { mode: "rename" | "type" | "archive"; row: ProcessRowData } | null;
@@ -57,10 +60,20 @@ export function ProcessesList({
 }) {
   const router = useRouter();
   const [view, setView] = useState<"active" | "archived">("active");
-  // The Type filter: one category, or all. Only the categories some process has are offered.
-  const [category, setCategory] = useState<ProcessCategory | null>(null);
+  const [search, setSearch] = useState("");
+  // The Type filter: any of the categories some process has (none ticked shows them all).
+  const [categories, setCategories] = useState<string[]>([]);
   const present = useMemo(() => PROCESS_CATEGORIES.filter((c) => rows.some((r) => r.category === c)), [rows]);
-  const shown = useMemo(() => (category && present.includes(category) ? rows.filter((r) => r.category === category) : rows), [rows, category, present]);
+  const q = search.trim().toLowerCase();
+  const named = (name: string) => !q || name.toLowerCase().includes(q);
+  const picked = categories.filter((c) => present.includes(c as ProcessCategory));
+  const shown = rows.filter((r) => named(r.name) && (picked.length === 0 || picked.includes(r.category)));
+  const archivedShown = archived.filter((p) => named(p.name));
+  const typeOptions: FilterOption[] = present.map((c) => ({ value: c, label: PROCESS_CATEGORY_LABELS[c], count: rows.filter((r) => r.category === c && named(r.name)).length }));
+  const filtered = Boolean(q) || picked.length > 0;
+  const total = view === "active" ? rows.length : archived.length;
+  const count = view === "active" ? shown.length : archivedShown.length;
+  const noun = (n: number) => (n === 1 ? "process" : "processes");
   const [open, setOpen] = useState<Open>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
@@ -97,28 +110,39 @@ export function ProcessesList({
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 pt-1" data-processes-toolbar>
-        <Segmented label="Show" data-process-view={view}>
-          <SegmentButton on={view === "active"} onPick={() => setView("active")}>
-            In use ({rows.length})
-          </SegmentButton>
-          <SegmentButton on={view === "archived"} onPick={() => setView("archived")}>
-            Archived ({archived.length})
-          </SegmentButton>
-        </Segmented>
-        {view === "active" && present.length > 1 && (
-          <Segmented label="Type" data-process-category-filter={category ?? "all"}>
-            <SegmentButton on={category === null} onPick={() => setCategory(null)}>
-              All
-            </SegmentButton>
-            {present.map((c) => (
-              <SegmentButton key={c} on={category === c} onPick={() => setCategory(c)}>
-                {PROCESS_CATEGORY_LABELS[c]} ({rows.filter((r) => r.category === c).length})
-              </SegmentButton>
-            ))}
-          </Segmented>
-        )}
-      </div>
+      {(rows.length > 0 || archived.length > 0) && (
+        <Toolbar label="Filter processes">
+          <ToolbarSearch value={search} onChange={setSearch} label="Search processes" placeholder="Search processes" />
+          {view === "active" && present.length > 1 && <FilterMenu name="Type" options={typeOptions} selected={picked} onChange={setCategories} />}
+          {filtered && (
+            <ClearFilters
+              onClick={() => {
+                setSearch("");
+                setCategories([]);
+              }}
+            />
+          )}
+          <ListCount data-process-count>{count === total ? `${total} ${noun(total)}` : `${count} of ${total} ${noun(total)}`}</ListCount>
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            spacing={0}
+            value={view}
+            onValueChange={(v) => v && setView(v as "active" | "archived")}
+            aria-label="Show"
+            data-process-view={view}
+            data-allow-on-phone /* a view filter (Archived), not an edit */
+          >
+            <ToggleGroupItem value="active" data-allow-on-phone>
+              In use ({rows.length})
+            </ToggleGroupItem>
+            <ToggleGroupItem value="archived" data-allow-on-phone>
+              Archived ({archived.length})
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </Toolbar>
+      )}
       <p role="status" aria-live="polite" className={status ? "text-xs text-muted-foreground" : "sr-only"} data-process-status>
         {status}
       </p>
@@ -128,11 +152,12 @@ export function ProcessesList({
           rows={shown}
           hrefs={hrefs}
           loadCard={loadCard}
-          empty={empty}
+          empty={rows.length === 0 ? empty : undefined}
+          filtered={filtered}
           actions={admin ? (r) => <RowMenu row={r} onPick={(mode) => setOpen({ mode, row: r })} /> : undefined}
         />
       ) : (
-        <ArchivedTable archived={archived} hrefs={hrefs} canRestore={!!admin} restoring={restoring} error={restoreError} onRestore={(p) => void restore(p)} />
+        <ArchivedTable archived={archivedShown} filtered={filtered} hrefs={hrefs} canRestore={!!admin} restoring={restoring} error={restoreError} onRestore={(p) => void restore(p)} />
       )}
       {admin && open && (
         <AdminDialog
@@ -148,45 +173,13 @@ export function ProcessesList({
   );
 }
 
-/** A segmented control: one joined, rounded track of buttons, the picked one raised. */
-function Segmented({ label, children, ...rest }: { label: string; children: ReactNode } & Record<`data-${string}`, string>) {
-  return (
-    <div role="group" aria-label={label} className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-lg border bg-muted/40 p-0.5" {...rest}>
-      {children}
-    </div>
-  );
-}
-
-function SegmentButton({ on, onPick, children }: { on: boolean; onPick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      data-allow-on-phone /* a view filter (Archived), not an edit */
-      aria-pressed={on}
-      onClick={onPick}
-      className={cn(
-        "inline-flex h-7 items-center rounded-md px-2.5 text-xs whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        on ? "bg-card font-semibold text-foreground shadow-sm ring-1 ring-foreground/10" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
-  );
-}
-
 function RowMenu({ row, onPick }: { row: ProcessRowData; onPick: (mode: "rename" | "type" | "archive") => void }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          aria-label={`Change ${row.name}`}
-          data-process-menu={row.name}
-          data-edit-entry
-          className={`grid size-7 place-items-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring ${EDIT_ONLY}`}
-        >
-          <MoreHorizontal aria-hidden className="size-4" />
-        </button>
+        <Button type="button" variant="ghost" size="icon-sm" aria-label={`Change ${row.name}`} data-process-menu={row.name} data-edit-entry className={`text-muted-foreground ${EDIT_ONLY}`}>
+          <MoreHorizontal aria-hidden />
+        </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-auto min-w-48">
         <DropdownMenuItem onSelect={() => onPick("rename")} className="whitespace-nowrap">
@@ -205,6 +198,7 @@ function RowMenu({ row, onPick }: { row: ProcessRowData; onPick: (mode: "rename"
 
 function ArchivedTable({
   archived,
+  filtered,
   hrefs,
   canRestore,
   restoring,
@@ -212,6 +206,8 @@ function ArchivedTable({
   onRestore,
 }: {
   archived: ArchivedProcess[];
+  /** A search is on, so an empty list means nothing matched. */
+  filtered: boolean;
   /** Where an archived process still opens (its history is kept). */
   hrefs: Record<string, string>;
   canRestore: boolean;
@@ -221,9 +217,9 @@ function ArchivedTable({
 }) {
   if (archived.length === 0) {
     return (
-      <p className="rounded-token border border-dashed border-line p-6 text-sm text-muted-foreground" data-archived-empty>
-        Nothing is archived. An archived process leaves the map, the lists and the simulation, and keeps its history.
-      </p>
+      <EmptyState icon={Archive} data-archived-empty>
+        {filtered ? "No archived process matches." : "Nothing is archived. An archived process leaves the map, the lists and the simulation, and keeps its history."}
+      </EmptyState>
     );
   }
   return (
@@ -233,42 +229,40 @@ function ArchivedTable({
           {error}
         </p>
       )}
-      <div className="overflow-x-auto rounded-token border bg-card">
-        <table className="w-full border-collapse text-sm" aria-label="Archived processes">
-          <thead>
-            <tr className="border-b bg-muted/40 text-center text-xs text-muted-foreground">
-              <th className="px-3 py-2 text-left font-medium">Process</th>
-              <th className="hidden px-2 py-2 text-left font-medium sm:table-cell">Type</th>
-              <th className="px-2 py-2 font-medium">Archived</th>
-              {canRestore && <th className="w-28 px-2 py-2" aria-label="Restore" />}
-            </tr>
-          </thead>
-          <tbody>
-            {archived.map((p) => (
-              <tr key={p.id} className="border-b last:border-b-0" data-archived-process={p.name}>
-                <td className="px-3 py-2.5 font-semibold">
-                  {hrefs[p.id] ? (
-                    <Link href={hrefs[p.id]!} className="hover:underline">
-                      {p.name}
-                    </Link>
-                  ) : (
-                    p.name
-                  )}
-                </td>
-                <td className="hidden px-2 py-2.5 text-left text-xs sm:table-cell">{PROCESS_KIND_LABELS[p.kind]}</td>
-                <td className="px-2 py-2.5 text-center text-xs whitespace-nowrap text-muted-foreground">{shortDate(p.archivedAt)}</td>
-                {canRestore && (
-                  <td className="px-2 py-2 text-center">
-                    <Button type="button" size="sm" variant="outline" className={EDIT_ONLY} data-edit-entry disabled={restoring !== null} onClick={() => onRestore(p)} aria-label={`Restore ${p.name}`}>
-                      <ArchiveRestore aria-hidden /> {restoring === p.id ? "Restoring…" : "Restore"}
-                    </Button>
-                  </td>
+      <ListTable aria-label="Archived processes">
+        <ListTableHeader>
+          <TableRow>
+            <TableHead className="px-3">Process</TableHead>
+            <TableHead className="hidden px-3 sm:table-cell">Type</TableHead>
+            <TableHead className="px-3">Archived</TableHead>
+            {canRestore && <TableHead className="w-28 px-3" aria-label="Restore" />}
+          </TableRow>
+        </ListTableHeader>
+        <TableBody>
+          {archived.map((p) => (
+            <TableRow key={p.id} data-archived-process={p.name}>
+              <TableCell className="px-3 py-2.5 font-semibold">
+                {hrefs[p.id] ? (
+                  <Link href={hrefs[p.id]!} className="hover:underline">
+                    {p.name}
+                  </Link>
+                ) : (
+                  p.name
                 )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+              </TableCell>
+              <TableCell className="hidden px-3 py-2.5 text-xs sm:table-cell">{PROCESS_KIND_LABELS[p.kind]}</TableCell>
+              <TableCell className="px-3 py-2.5 text-xs whitespace-nowrap text-muted-foreground tabular-nums">{shortDate(p.archivedAt)}</TableCell>
+              {canRestore && (
+                <TableCell className="px-3 py-2 text-right">
+                  <Button type="button" size="sm" variant="outline" className={EDIT_ONLY} data-edit-entry disabled={restoring !== null} onClick={() => onRestore(p)} aria-label={`Restore ${p.name}`}>
+                    <ArchiveRestore aria-hidden /> {restoring === p.id ? "Restoring…" : "Restore"}
+                  </Button>
+                </TableCell>
+              )}
+            </TableRow>
+          ))}
+        </TableBody>
+      </ListTable>
     </div>
   );
 }
@@ -382,7 +376,7 @@ function AdminDialog({
               <fieldset className="flex flex-col gap-2">
                 <legend className="sr-only">Type</legend>
                 {PROCESS_CATEGORIES.map((c) => (
-                  <label key={c} className="flex cursor-pointer items-start gap-2 rounded-token border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
+                  <label key={c} className="flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
                     <input type="radio" name="process-category" value={c} checked={category === c} onChange={() => setCategory(c)} className="mt-1" />
                     <span>
                       <span className="font-semibold">
@@ -394,14 +388,14 @@ function AdminDialog({
                   </label>
                 ))}
               </fieldset>
-              <details className="rounded-token border p-2 text-sm" data-how-simulated>
+              <details className="rounded-md border p-2 text-sm" data-how-simulated>
                 <summary className="cursor-pointer font-medium">How it&apos;s simulated</summary>
                 <div className="mt-2 flex flex-col gap-2">
                   <p data-simulated-as>{PROCESS_KIND_SIMULATED[row.kind]}.</p>
                   <fieldset className="flex flex-col gap-2">
                     <legend className="sr-only">Simulation</legend>
                     {PROCESS_KIND_CHOICES.map((k) => (
-                      <label key={k.value} className="flex cursor-pointer items-start gap-2 rounded-token border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
+                      <label key={k.value} className="flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
                         <input type="radio" name="process-kind" value={k.value} checked={kind === k.value} onChange={() => setKind(k.value)} className="mt-1" />
                         <span>
                           <span className="font-semibold">

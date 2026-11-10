@@ -172,33 +172,38 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
       ))}
     </ul>
   ) : null;
+  // In the toolbar: which version of the company map runs (sized to its content). What that means is behind its (i) and in the map section's line.
   const companySelect =
+    companyRevisions.length > 1 ? (
+      <label className="flex min-w-0 items-center gap-2 text-xs" data-company-version-select>
+        <span className="font-medium text-muted-foreground">Company map</span>
+        <NativeSelect value={companyRevisionId ?? ""} onChange={(e) => pickCompany(e.target.value)} aria-label="Company map version" className="h-7 w-auto">
+          {companyRevisions.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.status === "draft" ? "Draft" : r.live ? `Live · version ${r.number}` : `Version ${r.number}${r.publishedAt ? ` · ${shortDate(r.publishedAt)}` : ""}`}
+            </option>
+          ))}
+        </NativeSelect>
+        <Help {...SANDBOX_HELP.companyMap} />
+      </label>
+    ) : null;
+  // In the map section: whether the map on screen is the live one, and what it can't honour.
+  const mapHeader =
     companyRevisions.length > 1 || noteList ? (
-      <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="flex min-w-0 flex-col gap-1">
         {companyRevisions.length > 1 && (
-          <label className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm" data-company-version-select>
-            <span className="font-medium">Company map</span>
-            <Help {...SANDBOX_HELP.companyMap} />
-            <NativeSelect value={companyRevisionId ?? ""} onChange={(e) => pickCompany(e.target.value)} aria-label="Company map version" className="w-auto min-w-44">
-              {companyRevisions.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.status === "draft" ? "Draft" : r.live ? `Live · version ${r.number}` : `Version ${r.number}${r.publishedAt ? ` · ${shortDate(r.publishedAt)}` : ""}`}
-                </option>
-              ))}
-            </NativeSelect>
-            <span className="text-xs text-muted-foreground">
-              {mapKey === null
-                ? "The processes on the company map are what is simulated, and its hand-off lines say where won clients carry on."
-                : "This version's processes and hand-off lines are run against today's path (the live company map)."}
-            </span>
-          </label>
+          <p className="max-w-prose text-xs text-muted-foreground" data-company-version-note>
+            {mapKey === null
+              ? "The processes on the company map are what is simulated, and its hand-off lines say where won clients carry on."
+              : "This version's processes and hand-off lines are run against today's path (the live company map)."}
+          </p>
         )}
         {noteList}
       </div>
     ) : null;
   const renderMap = (runs: PlayRuns, api: PlayMapApi) =>
     map.bundle.steps.length ? (
-      <div className="overflow-hidden rounded-lg border" data-company-map>
+      <div className="overflow-hidden rounded-xl border border-line" data-company-map>
         <ProcessCanvas
           // Opening a card changes the map's size: frame it again, with playback going on.
           refitOn={[...expanded].sort().join("|")}
@@ -240,7 +245,8 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
       today={base0}
       prepare={prepare}
       map={renderMap}
-      mapHeader={companySelect}
+      mapHeader={mapHeader}
+      versionSelect={companySelect}
       exportSlot={exportSlot}
       base={base}
       modelError={base0.error ?? mapProblem}

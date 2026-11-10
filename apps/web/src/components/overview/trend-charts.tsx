@@ -14,6 +14,7 @@
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { How } from "@/components/capacity/widgets";
+import { OPEN_ISSUES_HOW, TIME_SPLIT_HOW } from "./how-texts";
 import { FloatingTip } from "@/components/ui/floating-tip";
 import { RATING_LABELS, type Rating } from "@transpera-flow/engine";
 import { formatNumber, formatPercent } from "@/lib/format";
@@ -67,20 +68,6 @@ const swatch = (background: string, extra?: string) => <i aria-hidden className=
 
 /** How many processes "Most in" names before "and N more". */
 export const TOP_PROCESSES = 3;
-
-/** "How this works" for the open issues: in its panel's header on the Overview. */
-export const OPEN_ISSUES_HOW = {
-  works:
-    "Every issue that is open or being tested, from the Issues list: insights someone acknowledged and issues logged by hand. The bar counts them by rating, worst first; the processes with the most open issues are named, each linked to its page.",
-  tells: "How many problems are open, how bad they are, and where to look first.",
-};
-
-/** "How this works" for the time split by process: in its panel's header on the Overview. */
-export const TIME_SPLIT_HOW = {
-  works:
-    "For each process, the time a piece of work spends in it from the simulation, split three ways: someone working on it (hands-on), waiting for one of our people who is busy elsewhere, and waiting on the client or others (a fixed wait). The share at the right is the hands-on part. Slowest first.",
-  tells: "Where work stands still, and whether the fix is our people's time or the wait on the client.",
-};
 
 export function OpenIssuesSummary({
   byRating,

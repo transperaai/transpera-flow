@@ -6,7 +6,8 @@
 import { isReadOnly, type ScreenMode } from "@/lib/mode";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
+import { CircleAlert } from "lucide-react";
 import { retiredSteps, ModelError, toEngineModel, type IssueRow, type ProcessBundle, type ScenarioRow, type SourceRow } from "@transpera-flow/db";
 import { RATING_LABELS, detectBrokenScenarios, ratingOfStored, resolveMoney, type IssueCost, type Rating } from "@transpera-flow/engine";
 import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
@@ -15,12 +16,14 @@ import { LIST_HELP } from "@/lib/issues/help";
 import { IssueStatusPill } from "@/components/issues/status-pill";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { ListCount, ListTable, ListTableHeader } from "@/components/processes/list-table";
+import { PageHeader } from "@/components/shell/page";
+import { TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { emptyDraft, issueFormOptions, toSaveInput } from "@/lib/issues/draft";
 import { DEFAULT_LIST_STATE, LISTED_STATUSES, NO_SOLUTIONS, RATINGS_WORST_FIRST, UNASSIGNED, facetCounts, filtersOn, isOpenIssue, issueHref, listIssues, listQuery, ownersOf, parseListState, processesOf, shortDate, visibleIssues, type ListState } from "@/lib/issues/pages";
 import { STATUS_LABELS } from "@/lib/issues/register";
 import { STATUS_TONE } from "@/components/issues/status-pill";
-import { ClearFilters, FilterMenu, Toolbar, ToolbarSearch, type FilterOption } from "@/components/page-kit";
+import { ClearFilters, EmptyState, FilterMenu, Toolbar, ToolbarSearch, type FilterOption } from "@/components/page-kit";
 import { NO_SOLUTIONS_DATA, solutionSummaries, solutionsListHref, type SolutionsData } from "@/lib/solutions/cards";
 import { startSolutionHref } from "@/lib/solutions/list";
 import { solutionEditorHref } from "@/lib/solutions/links";
@@ -52,6 +55,7 @@ export function IssuesPage({
   base,
   liveRevisions,
   solutions,
+  description,
 }: {
   bundle: ProcessBundle;
   issues: IssueRow[];
@@ -65,6 +69,8 @@ export function IssuesPage({
   liveRevisions?: Record<string, string>;
   /** The workspace's solutions and which issues they solve, for the "Solutions" column (the demo keeps its own in this tab). */
   solutions?: SolutionsData;
+  /** The sentence under the page's title. The list draws the page's header itself, so New issue can sit at its right. */
+  description?: ReactNode;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -135,59 +141,69 @@ export function IssuesPage({
     .map((id) => ({ value: id, label: processNames.get(id) ?? "A process", count: facets.processes.get(id) ?? 0 }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
+  const shownCount = list.length;
+  const allCount = facetCounts(state.issues, DEFAULT_LIST_STATE, "status").size === 0 ? 0 : visibleIssues(state.issues).length;
   return (
-    <div className="flex flex-col gap-4">
-      <Toolbar>
-        <ToolbarSearch value={search} onChange={onSearch} label="Search issues" placeholder="Search issues" />
-        <FilterMenu name="Status" options={statusOptions} selected={filters.status} onChange={(status) => setFilter({ ...filters, status: LISTED_STATUSES.filter((s) => status.includes(s)) })} help={<Help {...LIST_HELP.show} />} />
-        <FilterMenu name="Owner" options={ownerOptions} selected={filters.owners} onChange={(owners) => setFilter({ ...filters, owners })} help={<Help {...LIST_HELP.owner} />} />
-        <FilterMenu name="Rating" options={ratingOptions} selected={filters.ratings} onChange={(ratings) => setFilter({ ...filters, ratings: RATINGS_WORST_FIRST.filter((r) => ratings.includes(r)) })} help={<Help {...LIST_HELP.rating} />} />
-        {processOptions.length > 1 && <FilterMenu name="Process" options={processOptions} selected={filters.processes} onChange={(processes) => setFilter({ ...filters, processes })} help={<Help {...LIST_HELP.process} />} />}
-        {filtersOn(filters) && <ClearFilters onClick={() => setFilter(DEFAULT_LIST_STATE)} />}
-        {canEdit && (
-          <span className={`ml-auto flex items-center ${EDIT_ONLY}`} data-edit-entry>
-            <Button type="button" onClick={() => setNewOpen(true)}>
-              + New issue
-            </Button>
-            <Help {...LIST_HELP.newIssue} />
-          </span>
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Issues"
+        eyebrow="Improve"
+        description={description}
+        actions={
+          canEdit ? (
+            <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
+              <Button type="button" onClick={() => setNewOpen(true)}>
+                + New issue
+              </Button>
+              <Help {...LIST_HELP.newIssue} />
+            </span>
+          ) : undefined
+        }
+      />
+      <div className="flex flex-col gap-3">
+        <Toolbar>
+          <ToolbarSearch value={search} onChange={onSearch} label="Search issues" placeholder="Search issues" />
+          <FilterMenu name="Status" options={statusOptions} selected={filters.status} onChange={(status) => setFilter({ ...filters, status: LISTED_STATUSES.filter((s) => status.includes(s)) })} help={<Help {...LIST_HELP.show} />} />
+          <FilterMenu name="Owner" options={ownerOptions} selected={filters.owners} onChange={(owners) => setFilter({ ...filters, owners })} help={<Help {...LIST_HELP.owner} />} />
+          <FilterMenu name="Rating" options={ratingOptions} selected={filters.ratings} onChange={(ratings) => setFilter({ ...filters, ratings: RATINGS_WORST_FIRST.filter((r) => ratings.includes(r)) })} help={<Help {...LIST_HELP.rating} />} />
+          {processOptions.length > 1 && <FilterMenu name="Process" options={processOptions} selected={filters.processes} onChange={(processes) => setFilter({ ...filters, processes })} help={<Help {...LIST_HELP.process} />} />}
+          {filtersOn(filters) && <ClearFilters onClick={() => setFilter(DEFAULT_LIST_STATE)} />}
+          <ListCount data-issue-count>{shownCount === allCount ? `${allCount} ${allCount === 1 ? "issue" : "issues"}` : `${shownCount} of ${allCount} issues`}</ListCount>
+        </Toolbar>
+
+        {state.error && (
+          <p role="alert" className="text-sm text-destructive">
+            {state.error}
+          </p>
         )}
-      </Toolbar>
 
-      {state.error && (
-        <p role="alert" className="text-sm text-destructive">
-          {state.error}
-        </p>
-      )}
-
-      {list.length === 0 ? (
-        <Card className="px-4 py-8 text-center text-sm text-muted-foreground" data-empty>
-          No issues here. Acknowledge an insight, or add one by hand.
-        </Card>
-      ) : (
-        <Card className="relative overflow-x-auto p-0">
-          <table className="w-full min-w-[44rem] text-left text-sm" data-issues-table>
-            <thead>
-              <tr className="border-b border-border text-2xs font-semibold tracking-wider text-muted-foreground uppercase">
-                <th className="px-4 py-2.5">
+        {list.length === 0 ? (
+          <EmptyState icon={CircleAlert} data-empty action={filtersOn(filters) ? <ClearFilters onClick={() => setFilter(DEFAULT_LIST_STATE)} /> : undefined}>
+            No issues here. Acknowledge an insight, or add one by hand.
+          </EmptyState>
+        ) : (
+          <ListTable className="min-w-[44rem] text-left" data-issues-table aria-label="Issues">
+            <ListTableHeader>
+              <TableRow>
+                <TableHead className="px-4">
                   <span className="inline-flex items-center">
                     Issue
                     <Help {...LIST_HELP.table} />
                   </span>
-                </th>
-                <th className="px-3 py-2.5">Rating</th>
-                <th className="px-3 py-2.5">Step</th>
-                <th className="px-3 py-2.5">Owners</th>
-                <th className="px-3 py-2.5">Status</th>
-                <th className="px-3 py-2.5">
+                </TableHead>
+                <TableHead className="px-3">Rating</TableHead>
+                <TableHead className="px-3">Step</TableHead>
+                <TableHead className="px-3">Owners</TableHead>
+                <TableHead className="px-3">Status</TableHead>
+                <TableHead className="px-3">
                   <span className="inline-flex items-center">
                     Solutions
                     <Help {...LIST_HELP.solutions} />
                   </span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+                </TableHead>
+              </TableRow>
+            </ListTableHeader>
+            <TableBody>
               {list.map((i) => {
                 const touched = i.links.length
                   ? i.links.map((l) => (l.step_id ? (stepNames.get(l.step_id) ?? "A step") : `Whole process: ${processNames.get(l.process_id ?? "") ?? "process"}`))
@@ -196,28 +212,23 @@ export function IssuesPage({
                 const sol = summaries[i.id] ?? NO_SOLUTIONS;
                 const href = issueHref(base, i);
                 return (
-                  <tr
-                    key={i.id}
-                    data-issue-row={i.number ?? i.id}
-                    className={cn("cursor-pointer border-b border-border last:border-0 hover:bg-muted/50", !isOpenIssue(i) && "opacity-70")}
-                    onClick={() => router.push(href)}
-                  >
-                    <td className="px-4 py-2.5">
+                  <TableRow key={i.id} data-issue-row={i.number ?? i.id} className={cn("cursor-pointer", !isOpenIssue(i) && "opacity-70")} onClick={() => router.push(href)}>
+                    <TableCell className="px-4 py-2.5">
                       <Link href={href} className="font-medium hover:underline" onClick={(e) => e.stopPropagation()}>
                         <span className="mr-1.5 font-mono text-xs text-muted-foreground">{i.number ? `#${i.number}` : ""}</span>
                         {i.title}
                       </Link>
-                    </td>
-                    <td className="px-3 py-2.5">
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5">
                       <RatingPillOf issue={i} />
-                    </td>
-                    <td className="max-w-56 px-3 py-2.5 text-xs text-fg-2">{touched.join(", ") || "—"}</td>
-                    <td className="px-3 py-2.5 text-xs">{owners.join(", ") || <span className="text-muted-foreground">No owner</span>}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap">
+                    </TableCell>
+                    <TableCell className="max-w-56 px-3 py-2.5 text-xs whitespace-normal text-fg-2">{touched.join(", ") || "—"}</TableCell>
+                    <TableCell className="px-3 py-2.5 text-xs whitespace-normal">{owners.join(", ") || <span className="text-muted-foreground">No owner</span>}</TableCell>
+                    <TableCell className="px-3 py-2.5 whitespace-nowrap">
                       <IssueStatusPill status={i.status} />
                       {i.resolved_at && !isOpenIssue(i) && <div className="text-xs text-muted-foreground">{shortDate(i.resolved_at)}</div>}
-                    </td>
-                    <td className="px-3 py-2.5 text-xs whitespace-nowrap" data-solutions>
+                    </TableCell>
+                    <TableCell className="px-3 py-2.5 text-xs whitespace-nowrap" data-solutions>
                       {sol.tested ? (
                         <span>
                           {sol.tested} tested{sol.passed ? <span className="ml-1 text-good">✓ passed</span> : null}
@@ -225,14 +236,14 @@ export function IssuesPage({
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
-        </Card>
-      )}
+            </TableBody>
+          </ListTable>
+        )}
+      </div>
 
       <AcknowledgeDialog
         open={newOpen}

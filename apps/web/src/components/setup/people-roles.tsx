@@ -8,7 +8,7 @@
 
 import { ChevronRight, Users } from "lucide-react";
 import Link from "next/link";
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { missingForCapacity, tierDiscrepancies, type CapacitySetup, type SetupPerson, type SetupRole } from "@transpera-flow/db";
 import { ClearFilters, EmptyState, FilterMenu, Toolbar, ToolbarSearch } from "@/components/page-kit";
 import { SettingsSection } from "@/app/w/[slug]/settings/section";
@@ -22,6 +22,7 @@ import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { WorkspaceSettingsData } from "@/lib/data";
 import type { SaveOutcome, Saver } from "@/lib/fields/field-controller";
 import { formatWholeCurrency } from "@/lib/format";
@@ -74,83 +75,100 @@ export function PeopleAndRoles({ setup, data }: { setup: CapacitySetup; data: Wo
   );
 }
 
-/** "+ Add person" and "+ Add role" for the page header: each opens a small dialog with the form. Nothing for a reader, or on a phone. */
-export function PeopleHeaderActions({ setup, data }: { setup: CapacitySetup; data: WorkspaceSettingsData }) {
-  const [person, setPerson] = useState(false);
-  const [role, setRole] = useState(false);
-  if (!setup.canEdit) return null;
+/**
+ * Formerly the page header's "+ Add person" and "+ Add role". They now sit with their lists (the people toolbar, the Roles section's
+ * title), so this draws nothing; it stays for the screenshot harnesses that still pass it as the header's actions.
+ * @deprecated
+ */
+export function PeopleHeaderActions(_props: { setup: CapacitySetup; data: WorkspaceSettingsData }) {
+  return null;
+}
+
+/** "+ Add person": a small dialog with the form. Nothing for a reader, or on a phone. */
+function AddPersonButton({ data }: { data: WorkspaceSettingsData }) {
+  const [open, setOpen] = useState(false);
   return (
-    <>
-      <Dialog open={person} onOpenChange={setPerson}>
-        <DialogTrigger asChild>
-          <Button type="button" className={EDIT_ONLY} data-edit-entry data-add-person>
-            + Add person
-          </Button>
-        </DialogTrigger>
-        <DialogContent onOpenAutoFocus={focusPanel}>
-          <DialogHeader>
-            <DialogTitle>Add a person</DialogTitle>
-            <DialogDescription>Their name and, if you know it, their role. Everything else is in their panel.</DialogDescription>
-          </DialogHeader>
-          <AddPerson data={data} className="items-end" onAdded={() => setPerson(false)} />
-        </DialogContent>
-      </Dialog>
-      <Dialog open={role} onOpenChange={setRole}>
-        <DialogTrigger asChild>
-          <Button type="button" variant="outline" className={EDIT_ONLY} data-edit-entry data-add-role>
-            + Add role
-          </Button>
-        </DialogTrigger>
-        <DialogContent onOpenAutoFocus={focusPanel}>
-          <DialogHeader>
-            <DialogTitle>Add a role</DialogTitle>
-            <DialogDescription>A kind of work. Its kind, department and utilisation threshold are in its panel.</DialogDescription>
-          </DialogHeader>
-          <AddRole workspaceId={setup.workspaceId} className="items-end" onAdded={() => setRole(false)} />
-        </DialogContent>
-      </Dialog>
-    </>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button type="button" className={EDIT_ONLY} data-edit-entry data-add-person>
+          + Add person
+        </Button>
+      </DialogTrigger>
+      <DialogContent onOpenAutoFocus={focusPanel}>
+        <DialogHeader>
+          <DialogTitle>Add a person</DialogTitle>
+          <DialogDescription>Their name and, if you know it, their role. Everything else is in their panel.</DialogDescription>
+        </DialogHeader>
+        <AddPerson data={data} className="items-end" onAdded={() => setOpen(false)} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** "+ Add role": a small dialog with the form, at the right of the Roles title. */
+function AddRoleButton({ workspaceId }: { workspaceId: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button type="button" variant="outline" className={EDIT_ONLY} data-edit-entry data-add-role>
+          + Add role
+        </Button>
+      </DialogTrigger>
+      <DialogContent onOpenAutoFocus={focusPanel}>
+        <DialogHeader>
+          <DialogTitle>Add a role</DialogTitle>
+          <DialogDescription>A kind of work. Its kind, department and utilisation threshold are in its panel.</DialogDescription>
+        </DialogHeader>
+        <AddRole workspaceId={workspaceId} className="items-end" onAdded={() => setOpen(false)} />
+      </DialogContent>
+    </Dialog>
   );
 }
 
 // ---- Rows ------------------------------------------------------------------------------------------------------------------------------
 
-/** A column heading with its (i). */
+/** A column heading with its (i): the name first (a test reads it as `th > span:first-child`). */
 function ColHead({ children, help, className }: { children: ReactNode; help: FieldHelp & { label: string }; className?: string }) {
   return (
-    <span role="columnheader" className={cn("flex min-w-0 items-center text-xs font-medium whitespace-nowrap text-fg-2", className)}>
-      <span className="truncate">{children}</span>
+    <TableHead className={cn("px-3", className)}>
+      <span>{children}</span>
       <Help label={help.label} description={help.description} example={help.example} />
-    </span>
+    </TableHead>
   );
 }
 
-const ROW = "grid items-center gap-x-3";
-const HEAD = "px-3 pb-1";
-const LINE = "rounded-lg bg-muted/40 px-3 py-2.5 text-left transition-colors hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none cursor-pointer";
-// A phone: name, role, chevron. A tablet drops the department and the label; a desktop shows every column. `minmax(0, ...)` lets text shrink.
-const PEOPLE_COLS = {
-  pay: "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1rem] sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_5rem_5rem_6rem_1rem] xl:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.2fr)_7rem_5.5rem_7.5rem_6rem_1rem]",
-  noPay: "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1rem] sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_5rem_5rem_1rem] xl:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.2fr)_7rem_5.5rem_6rem_1rem]",
-};
-const ROLE_COLS = "grid-cols-[minmax(0,1fr)_minmax(0,1fr)_1rem] sm:grid-cols-[minmax(0,2fr)_minmax(0,1.5fr)_minmax(0,1.3fr)_6.5rem_5rem_1rem]";
+/** The list's surface: one bordered table, no card inside the card. */
+const SURFACE = "overflow-hidden rounded-lg border border-line [&_[data-slot=table-header]]:bg-panel-2";
+const CELL = "px-3 py-2.5";
 
-const onKey = (open: () => void) => (e: KeyboardEvent) => {
-  if (e.key === "Enter" || e.key === " ") {
-    e.preventDefault();
-    open();
-  }
-};
-
-/** A row that opens its panel. It is not a `<button>`, so a phone's read-only fieldset doesn't stop a reader opening it. */
-function OpenRow({ onOpen, className, label, children, ...rest }: { onOpen: () => void; className: string; label: string; children: ReactNode } & Record<`data-${string}`, string | undefined>) {
+/**
+ * A row that opens its panel: a click anywhere on it, or its name (a real button, for the keyboard and a screen reader, named
+ * "Open <name>"). The People and Roles lists are not wrapped in the phone's read-only fieldset, so a reader on a phone can open it.
+ */
+function OpenRow({ onOpen, label, name, sub, children, ...rest }: { onOpen: () => void; label: string; name: string; sub?: ReactNode; children: ReactNode } & Record<`data-${string}`, string | undefined>) {
   return (
-    <li>
-      <div role="button" tabIndex={0} aria-haspopup="dialog" aria-label={label} onClick={onOpen} onKeyDown={onKey(onOpen)} className={cn(ROW, LINE, className)} {...rest}>
-        {children}
+    <TableRow className="cursor-pointer border-line hover:bg-panel-2" onClick={onOpen} {...rest}>
+      <TableCell className={cn(CELL, "max-w-0 min-w-40")}>
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          aria-label={label}
+          className="block max-w-full truncate text-left text-sm font-semibold outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+        >
+          {name}
+        </button>
+        {sub}
+      </TableCell>
+      {children}
+      <TableCell className={cn(CELL, "w-8")}>
         <ChevronRight aria-hidden className="size-4 text-fg-3" />
-      </div>
-    </li>
+      </TableCell>
+    </TableRow>
   );
 }
 

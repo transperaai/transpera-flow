@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { loadCapacitySetup } from "@transpera-flow/db";
 import { SettingsPage } from "@/components/settings/settings-page";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
-import { PeopleAndRoles, PeopleHeaderActions } from "@/components/setup/people-roles";
+import { PeopleAndRoles } from "@/components/setup/people-roles";
 import { peopleMeta } from "@/lib/setup/people-meta";
 import { loadWorkspaceSettings } from "@/lib/data";
 import { getDb } from "@/lib/auth/session";
@@ -17,9 +17,9 @@ export default async function SettingsPeoplePage(props: PageProps<"/w/[slug]/set
   return (
     <SettingsPage
       title="People & roles"
-      eyebrow="Settings"
+      slug={slug}
+      canManage={data.canManage}
       description={peopleMeta(setup)}
-      actions={<PeopleHeaderActions setup={setup} data={data} />}
     >
       <PhoneNotice />
       <PeopleAndRoles setup={setup} data={data} />

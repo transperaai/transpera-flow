@@ -5,9 +5,10 @@ import { History } from "lucide-react";
 import { useState } from "react";
 import { Help } from "@/components/help";
 import { RestoreDialog, type VersionActions, type VersionLinks } from "@/components/history/version-dialogs";
-import { EmptyState, ListRow, SectionCard, StatusPill } from "@/components/page-kit";
+import { VersionBrowser } from "@/components/history/version-browser";
+import { EmptyState } from "@/components/page-kit";
 import { Button } from "@/components/ui/button";
-import { authorLabel, describeChanges, formatPublished, type VersionMeta } from "@/lib/history/versions";
+import { describeChanges, type VersionMeta } from "@/lib/history/versions";
 import { EDIT_ONLY } from "@/lib/phone";
 
 /**
@@ -22,6 +23,7 @@ export function CompanyHistoryView({
   links,
   note,
   viewBase,
+  initialVersion,
 }: {
   /** Where the company map is drawn (the Overview): View adds `?version=N`. Omitted: no View buttons. */
   viewBase?: string;
@@ -31,70 +33,52 @@ export function CompanyHistoryView({
   actions?: VersionActions;
   links: VersionLinks;
   note?: string;
+  /** The version chosen to start with; the newest by default. */
+  initialVersion?: number;
 }) {
   const [restoring, setRestoring] = useState<VersionMeta | null>(null);
   const firstNumber = Math.min(...versions.map((v) => v.number));
   if (versions.length === 0) {
     return (
-      <SectionCard id="versions" section="versions" title="Versions">
-        <EmptyState icon={History} data-empty="versions">
-          The company map has no versions yet.
-        </EmptyState>
-      </SectionCard>
+      <EmptyState icon={History} data-empty="versions" className="ring-1 ring-foreground/10">
+        The company map has no versions yet.
+      </EmptyState>
     );
   }
   return (
     <>
-      <SectionCard
-        id="versions"
-        section="versions"
-        title={
-          <span className="flex items-center">
+      <VersionBrowser
+        versions={versions}
+        initialVersion={initialVersion}
+        note={note}
+        heading={
+          <>
             Versions
             <Help
               label="Version"
               description="Each time you publish the Editor's draft of the company map it becomes the next version. Live is the one the Overview draws today. Older versions are kept."
               example="v4 · Live is the map people see; v3 is how it was before the last publish."
             />
-          </span>
+          </>
         }
         description={`Every published version of the company map. When someone adds, renames or removes a process, the map records a new version of its own, so this list says what happened. ${viewBase ? "View one to see how the map looked, read only." : ""} ${actions ? "Restore one to bring it back into your draft." : ""}`}
-      >
-        <ul className="flex flex-col gap-2" aria-label="Versions">
-          {versions.map((v) => (
-            <ListRow
-              key={v.revisionId}
-              data-version={v.number}
-              title={<span className="font-mono">v{v.number}</span>}
-              pills={v.live ? <StatusPill label="Live" tone="auto" /> : undefined}
-              meta={
-                <>
-                  {formatPublished(v.publishedAt)} · {authorLabel(v)}
-                </>
-              }
-              actions={
-                viewBase || actions ? (
-                  <>
-                    {viewBase && !v.live && (
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href={`${viewBase}?version=${v.number}`}>View</Link>
-                      </Button>
-                    )}
-                    {actions && !v.live && (
-                      <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry onClick={() => setRestoring(v)}>
-                        Restore
-                      </Button>
-                    )}
-                  </>
-                ) : undefined
-              }
-            >
-              <span data-what-changed>{v.note ?? describeChanges(v.changes, v.number === firstNumber)}</span>
-            </ListRow>
-          ))}
-        </ul>
-      </SectionCard>
-      {note && <p className="text-xs text-fg-2">{note}</p>}
+        summary={(v) => <span data-what-changed>{v.note ?? describeChanges(v.changes, v.number === firstNumber)}</span>}
+        actions={(v) => (
+          <>
+            {viewBase && !v.live && (
+              <Button variant="outline" asChild>
+                <Link href={`${viewBase}?version=${v.number}`}>View</Link>
+              </Button>
+            )}
+            {actions && !v.live && (
+              <Button variant="outline" className={EDIT_ONLY} data-edit-entry onClick={() => setRestoring(v)}>
+                Restore
+              </Button>
+            )}
+            {v.live && <span className="text-sm text-fg-2">The Overview draws this version.</span>}
+          </>
+        )}
+      />
       {actions && restoring && (
         <RestoreDialog
           version={restoring.number}

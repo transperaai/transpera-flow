@@ -103,15 +103,23 @@ const issuePage = (number: number, o: { editor?: boolean; noSolutions?: boolean;
 const calls = (page: Page) => page.evaluate(() => window.__serverActions ?? []);
 
 describe("the Issue page as cards", () => {
-  it("#6 has a header card with the title, pills, owners, dates and the buttons", async () => {
+  it("#6 has the breadcrumb above a flat header (title, pills, meta line, buttons) and a metadata rail", async () => {
     const { page, errors } = await issuePage(6);
     const header = page.locator("[data-testid=issue-header]");
+    // The breadcrumb sits above the header, not inside it (layout A).
+    expect(await header.locator("nav[aria-label=Breadcrumb]").count()).toBe(0);
+    expect(await page.locator("nav[aria-label=Breadcrumb]").innerText()).toMatch(/^Issues\s*\/\s*#6$/);
     expect(await header.locator("h1").innerText()).toMatch(/^#6\s+Only Karl can vet link domains$/);
     expect(await header.locator("[data-status-menu]").count()).toBe(1);
-    // Its process only: no step pill (QA round 2).
-    expect(await header.locator("[data-process-tag]").count()).toBe(1);
-    expect(await header.locator("[data-meta-line]").innerText()).toMatch(/Owner: \w+\s*·\s*Created \d+ \w+(?: \d+)?\s*·\s*Last change \d+ \w+/);
+    expect(await header.locator("[data-meta-line]").innerText()).toMatch(/^.+\s*·\s*Last change \d+ \w+/);
     for (const name of ["Edit", "Resolve"]) expect(await header.getByRole("button", { name, exact: true }).count()).toBe(1);
+    // One (i) for the buttons, not one hand-wrapped beside each.
+    expect(await header.locator("[data-page-actions] [data-slot=help]").count()).toBe(1);
+    // The rail: rating, status, owners, its process only (no step pill, QA round 2), dates, sources and solutions.
+    const rail = page.getByRole("complementary", { name: "Issue details" });
+    expect(await rail.locator("dt").allInnerTexts()).toEqual(["Rating", "Status", "Owner", "Process", "Created", "Last change", "Sources", "Solutions"]);
+    expect(await rail.locator("[data-process-tag]").count()).toBe(1);
+    expect(await rail.locator("[data-owners]").count()).toBe(1);
     expect(errors).toEqual([]);
     await page.close();
   }, 300_000);

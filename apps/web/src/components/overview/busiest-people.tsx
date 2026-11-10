@@ -55,7 +55,7 @@ export function BusiestPeople({ people, failed, capacityHref, className }: { peo
     <SectionCard
       id="busiest-people"
       section="busiest"
-      level={3}
+      level={2}
       title="Busiest people"
       className={className}
       description={split ? busiestAnswer(split.close) : failed ? "Can't be worked out until the simulation runs." : "Working out who is busiest, from a simulation of today's clients…"}

@@ -9,7 +9,7 @@
 // mode (issue #114: a copy of live, edited in memory and saved as a solution of its own; the process's live version and its
 // single draft are never touched, D18).
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { retiredSteps, isUnpublished, workspacePurposes, type BlockBundle, type BlockRow, type ProcessBundle, type PurposeCategory, type ScenarioRow, type StoredStepChange } from "@transpera-flow/db";
 import { createSolution } from "@/app/w/[slug]/solution-actions";
@@ -35,13 +35,15 @@ import { currentArea, type SolutionIssue } from "@/lib/solutions/area";
 import { changedStepIds, solutionCopy } from "@/lib/solutions/bundle";
 import { addDemoSolution } from "@/lib/solutions/demo";
 import { parseSolutionInput, type SaveSolutionResult } from "@/lib/solutions/save";
-import { Button } from "@/components/ui/button";
 import { PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { NO_SELECTION, ProcessCanvas, type Selection } from "@/components/process-canvas";
 import { laneOfProcesses, laneSpecs, type DepartmentLaneInput } from "@/lib/overview/department-lanes";
 import { SaveProblems } from "@/components/save-problems";
 import { useEngineModel, type EditMode } from "@/lib/sim/use-engine-model";
-import { EditorBar, type BlockForm, type SolutionForm } from "./editor-bar";
+import { BAR_CLASS, BarButton, BlockFormFields, DraftMessages, EditorBar, EditorGuide, EditorTag, SolutionFormFields, type BlockForm, type SolutionForm } from "./editor-bar";
+import { PanelResizer, PanelToggle } from "./panel-chrome";
+import { usePanelLayout } from "./use-panel-layout";
+import { cn } from "@/lib/utils";
 import { IssueArea } from "./issue-area";
 import { Inspector } from "./inspector";
 import { Palette } from "./palette";
@@ -154,6 +156,8 @@ export function EditorView({
   const [selection, setSelection] = useState<Selection>(NO_SELECTION);
   // The written tour: opens the first time this user opens the Editor, and again from "Take the tour".
   const tour = useEditorTour({ userId, company, dismissed: tourDismissed });
+  // The palette and the inspector fold to a rail, and the inspector's width is dragged; both are remembered per browser.
+  const panels = usePanelLayout();
 
   const diff = useMemo(() => (marksChanges ? diffBundles(live, working) : EMPTY_DIFF), [marksChanges, live, working]);
   const names = useMemo(() => namesOf(working, live), [working, live]);
@@ -377,18 +381,16 @@ export function EditorView({
   if (!info.available) {
     return (
       <div data-editor={editorMode} className="flex min-h-svh flex-col bg-bg text-fg">
-        <div className="flex flex-wrap items-center justify-between gap-2 bg-edit px-4 py-2.5 text-edit-fg">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="rounded border-[1.5px] border-current px-1.5 py-px font-mono text-[11px] font-semibold tracking-widest uppercase">✎ Editor</span>
-            <h1 className="text-[17px] font-bold">{info.title(live.process.name)}</h1>
+        <div className={BAR_CLASS}>
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            <EditorTag />
+            <h1 className="min-w-0 truncate text-base font-semibold">{info.title(live.process.name)}</h1>
           </div>
-          <Button type="button" variant="outline" size="sm" className="border-edit-fg/50 bg-transparent text-edit-fg hover:bg-edit-fg/15 hover:text-edit-fg dark:bg-transparent" onClick={() => router.push(exitHref)}>
-            Exit editor
-          </Button>
+          <BarButton onClick={() => router.push(exitHref)}>Exit editor</BarButton>
         </div>
-        <main className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-3 p-6">
-          <h2 className="text-base font-bold">Coming soon</h2>
-          <p className="text-sm text-fg-2">
+        <main className="flex w-full flex-1 flex-col gap-3 p-6">
+          <h2 className="text-base font-semibold">Coming soon</h2>
+          <p className="max-w-prose text-sm text-fg-2">
             {info.arrivesWith} aren&apos;t built yet, so this mode can&apos;t save anything. Nothing here changes {live.process.name} or its draft.
             To change the process itself, exit and open it in the Editor.
           </p>
@@ -396,6 +398,11 @@ export function EditorView({
       </div>
     );
   }
+
+  const problemsProp = problemLine ? { line: problemLine, onJump: jumpToProblem, canJump: !!problems && !!firstProblem(working, problems) } : null;
+  const { paletteCollapsed, inspectorCollapsed, inspectorWidth } = panels.layout;
+  // Something in the folded inspector wants attention: things to fix, or a form's refusal.
+  const inspectorAlert = !!problemsProp || !!blockForm?.error || !!solutionForm?.error;
 
   return (
     <div data-editor={editorMode} className="flex min-h-svh flex-col bg-bg text-fg lg:h-svh">
@@ -410,7 +417,6 @@ export function EditorView({
         unresolved={unresolved}
         breaks={breaks}
         company={company}
-        problems={problemLine ? { line: problemLine, onJump: jumpToProblem, canJump: !!problems && !!firstProblem(working, problems) } : null}
         publishBlocked={problems ? publishBlocker(problems.total) : null}
         onTour={tour.start}
         historyHref={historyHref}
@@ -424,23 +430,35 @@ export function EditorView({
         solutionForm={solutionForm}
         issue={solutionMode ? issue : null}
       />
-      <div className="flex min-h-0 flex-1 flex-col lg:grid lg:grid-cols-[264px_minmax(0,1fr)_320px] lg:grid-rows-[minmax(0,1fr)]">
-        <aside aria-label="Palette" className="flex flex-col gap-4 border-b border-line bg-panel p-3.5 lg:overflow-y-auto lg:border-r lg:border-b-0">
-          <Palette bundle={working} editor={editor} selected={inspected} setSelection={setSelection} blocks={blockTools} company={company} viewRef={viewRef} library={libraryProps} />
-          {solutionMode && <IssueArea issue={issue} steps={[...live.steps, ...working.steps]} present={new Set(working.steps.map((s) => s.id))} onSelect={select} />}
-          {mode === "demo" && (
-            <p role="note" className="text-xs text-muted-foreground">
-              {blockMode
-                ? "Demo: the block library lives in this tab only. Reloading starts the sample again."
-                : solutionMode
-                  ? "Demo: solutions live in this tab only. Reloading starts the sample again."
-                  : "Demo: your edits live in this tab only. Leaving the Editor or reloading starts the sample again."}
-            </p>
-          )}
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <aside aria-label="Palette"
+          data-collapsed={paletteCollapsed ? "" : undefined}
+          className={cn("flex shrink-0 flex-col border-b border-line bg-panel lg:border-r lg:border-b-0", paletteCollapsed ? "lg:w-11" : "lg:w-60")}
+        >
+          <PanelToggle side="left" collapsed={paletteCollapsed} onToggle={panels.togglePalette} label="palette" />
+          <div className={cn("flex min-h-0 flex-1 flex-col gap-4 p-3.5 lg:overflow-y-auto lg:pt-0", paletteCollapsed && "lg:hidden")}>
+            <Palette bundle={working} editor={editor} selected={inspected} setSelection={setSelection} blocks={blockTools} company={company} viewRef={viewRef} library={libraryProps} />
+            {solutionMode && <IssueArea issue={issue} steps={[...live.steps, ...working.steps]} present={new Set(working.steps.map((s) => s.id))} onSelect={select} />}
+            {mode === "demo" && (
+              <p role="note" className="text-xs text-muted-foreground">
+                {blockMode
+                  ? "Demo: the block library lives in this tab only. Reloading starts the sample again."
+                  : solutionMode
+                    ? "Demo: solutions live in this tab only. Reloading starts the sample again."
+                    : "Demo: your edits live in this tab only. Leaving the Editor or reloading starts the sample again."}
+              </p>
+            )}
+          </div>
         </aside>
-        <main className="flex min-h-[28rem] min-w-0 flex-col gap-2 bg-bg p-3 lg:min-h-0">
-          {(state.conflicts.length > 0 || state.error) && <SaveProblems editor={editor} bundle={working} conflicts={state.conflicts} error={state.error} />}
-          <div className="flex min-h-0 flex-1" data-tour="canvas" data-highlight-tone={solutionMode ? "issue" : undefined}>
+        <main className="relative flex min-h-[28rem] min-w-0 flex-1 flex-col bg-bg lg:min-h-0">
+          {(state.conflicts.length > 0 || state.error || drafts.notice || drafts.error) && (
+            <div className="flex flex-col gap-2 border-b border-line p-2">
+              <SaveProblems editor={editor} bundle={working} conflicts={state.conflicts} error={state.error} />
+              <DraftMessages drafts={drafts} session={session} />
+            </div>
+          )}
+          {/* Edge to edge: the map's own frame (a rounded border) is dropped, the panels' borders are its edges. */}
+          <div className="flex min-h-0 flex-1 [&>[data-process-map]]:rounded-none [&>[data-process-map]]:border-0" data-tour="canvas" data-highlight-tone={solutionMode ? "issue" : undefined}>
             <ProcessCanvas
               bundle={working}
               result={null}
@@ -467,34 +485,45 @@ export function EditorView({
             />
           </div>
         </main>
-        <aside aria-label="Inspector" className="flex flex-col gap-4 border-t border-line bg-panel p-3.5 lg:overflow-y-auto lg:border-t-0 lg:border-l">
-          <Inspector
-            bundle={working}
-            editor={editor}
-            selected={inspected}
-            setSelection={setSelection}
-            inspectFocus={inspectFocus}
-            onFocused={clearInspectFocus}
-            stamp={stamp}
-            purposes={purposeTools}
-            branchFocus={branchFocus ?? addedBranch}
-            onFocusBranch={focusBranch}
-            turnInto={turnInto}
-            blocks={blockTools}
-            company={company}
-            tierSetup={tierSetup}
-            settingsHref={settingsHref}
-            draft={
-              marksChanges
-                ? (step) => ({
-                    change: diff.steps.get(step.id),
-                    names,
-                    onRevert: (field) => editor.run((b) => revertField(session.getState().live, b, "steps", step.id, field)),
-                    onDiscard: () => editor.run((b) => discardChange(session.getState().live, b, "steps", step.id)),
-                  })
-                : null
-            }
-          />
+        <aside aria-label="Inspector"
+          data-collapsed={inspectorCollapsed ? "" : undefined}
+          style={{ "--inspector-w": `${inspectorWidth}px` } as CSSProperties}
+          className={cn("relative flex shrink-0 flex-col border-t border-line bg-panel lg:border-t-0 lg:border-l", inspectorCollapsed ? "lg:w-11" : "lg:w-(--inspector-w)")}
+        >
+          {!inspectorCollapsed && <PanelResizer width={inspectorWidth} onWidth={panels.setInspectorWidth} />}
+          <PanelToggle side="right" collapsed={inspectorCollapsed} onToggle={panels.toggleInspector} label="inspector" alert={inspectorAlert} />
+          <div className={cn("flex min-h-0 flex-1 flex-col gap-4 p-3.5 lg:overflow-y-auto lg:pt-0", inspectorCollapsed && "lg:hidden")}>
+            {blockForm && <BlockFormFields form={blockForm} />}
+            {solutionForm && <SolutionFormFields form={solutionForm} />}
+            <EditorGuide mode={editorMode} company={company} issue={solutionMode ? issue : null} blockEditing={!!blockForm?.editing} problems={problemsProp} />
+            <Inspector
+              bundle={working}
+              editor={editor}
+              selected={inspected}
+              setSelection={setSelection}
+              inspectFocus={inspectFocus}
+              onFocused={clearInspectFocus}
+              stamp={stamp}
+              purposes={purposeTools}
+              branchFocus={branchFocus ?? addedBranch}
+              onFocusBranch={focusBranch}
+              turnInto={turnInto}
+              blocks={blockTools}
+              company={company}
+              tierSetup={tierSetup}
+              settingsHref={settingsHref}
+              draft={
+                marksChanges
+                  ? (step) => ({
+                      change: diff.steps.get(step.id),
+                      names,
+                      onRevert: (field) => editor.run((b) => revertField(session.getState().live, b, "steps", step.id, field)),
+                      onDiscard: () => editor.run((b) => discardChange(session.getState().live, b, "steps", step.id)),
+                    })
+                  : null
+              }
+            />
+          </div>
         </aside>
       </div>
       {tour.node}

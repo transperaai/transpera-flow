@@ -39,7 +39,8 @@ describe("the process page", () => {
 });
 
 describe("the process History", () => {
-  const html = renderToStaticMarkup(createElement(HistoryView, { processName: "Lead to live", versions, viewBase: "/w/x/p/1", links }));
+  // The list shows every version; the chosen one (v2 here) shows its View button beside what changed.
+  const html = renderToStaticMarkup(createElement(HistoryView, { processName: "Lead to live", versions, viewBase: "/w/x/p/1", links, initialVersion: 2 }));
   it("lists who, when and what changed for each version", () => {
     expect(html).toContain("Maya Collins");
     expect(html).toContain("Claude (MCP)");
@@ -54,15 +55,16 @@ describe("the process History", () => {
 
 describe("the company map History", () => {
   it("offers View on every earlier version, linking to the Overview at that version", () => {
-    const html = renderToStaticMarkup(createElement(CompanyHistoryView, { versions, links, viewBase: "/w/x" }));
-    expect(html).toContain('href="/w/x?version=2"');
-    expect(html).toContain('href="/w/x?version=1"');
-    expect(html).not.toContain('href="/w/x?version=3"');
+    const at = (initialVersion: number) => renderToStaticMarkup(createElement(CompanyHistoryView, { versions, links, viewBase: "/w/x", initialVersion }));
+    expect(at(2)).toContain('href="/w/x?version=2"');
+    expect(at(1)).toContain('href="/w/x?version=1"');
+    // Live (v3) has no View: the Overview draws it.
+    expect(at(3)).not.toContain("?version=");
   });
   it("keeps Restore a separate action, only for those who can edit", () => {
     const actions = { restore: async () => ({ status: "error" as const, message: "" }), duplicate: async () => ({ status: "error" as const, message: "" }) };
-    expect(renderToStaticMarkup(createElement(CompanyHistoryView, { versions, links, viewBase: "/w/x", actions }))).toContain("Restore");
-    expect(renderToStaticMarkup(createElement(CompanyHistoryView, { versions, links, viewBase: "/w/x" }))).not.toContain("Restore");
+    expect(renderToStaticMarkup(createElement(CompanyHistoryView, { versions, links, viewBase: "/w/x", actions, initialVersion: 2 }))).toContain("Restore");
+    expect(renderToStaticMarkup(createElement(CompanyHistoryView, { versions, links, viewBase: "/w/x", initialVersion: 2 }))).not.toContain("Restore");
   });
   it("the Overview draws the live map unless ?version= names an earlier one, which is read only with no Editor link", () => {
     const part = (id: string, number: number) => ({ revision: { id, number } }) as unknown as ProcessPart;
