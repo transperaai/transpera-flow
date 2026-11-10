@@ -74,7 +74,7 @@ export function TimeAchieves({
   return (
     <div className="flex flex-col gap-3" data-time-achieves>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <span className="font-mono text-4xl leading-none font-semibold tabular-nums" data-client-share>
+        <span className="text-2xl leading-none font-semibold tabular-nums" data-client-share>
           {formatPercent(period)}
         </span>
         <span className="min-w-[10rem] flex-1 text-sm">of the team&apos;s hours go on client work over the next {span}</span>

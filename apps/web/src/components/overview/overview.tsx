@@ -431,6 +431,9 @@ export function Overview({
     },
   ];
 
+  // The cards under the map: open issues, the busiest people (when capacity is set up), then the charts.
+  const cardOffset = peopleReady ? 2 : 1;
+  const cardCount = cardOffset + charts.length;
   return (
     <div>
       <ShellHeader title="Overview" />
@@ -518,12 +521,12 @@ export function Overview({
                         overThreshold !== null ? (
                           <span data-over-threshold>
                             {overThreshold}
-                            <span className="text-xl text-muted-foreground"> of {departmentFigures.people!.length}</span>
+                            <span className="text-sm font-medium text-muted-foreground"> of {departmentFigures.people!.length}</span>
                           </span>
                         ) : departmentFigures.failure ? (
                           "—"
                         ) : (
-                          <Skeleton className="h-9 w-16" aria-busy="true" aria-label="Who is over their utilisation threshold is being worked out" />
+                          <Skeleton className="h-7 w-16" aria-busy="true" aria-label="Who is over their utilisation threshold is being worked out" />
                         )
                       }
                       sub="people, in a simulation of today's clients"
@@ -553,14 +556,13 @@ export function Overview({
             <StartChecklist setup={capacity.setup} base={capacity.base} />
           ))}
 
-        {/* The company map and, beside it, what needs attention. */}
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+        {/* The company map, the full width of the page; what needs attention sits under it. */}
           <section
             id="company-map"
             data-section="company-map"
             data-company-map
             aria-labelledby="company-map-heading"
-            className="flex h-[60svh] min-h-[32rem] min-w-0 scroll-mt-16 flex-col overflow-hidden rounded-xl border border-line bg-card xl:col-span-8 [&_[data-process-map]]:rounded-none [&_[data-process-map]]:border-0"
+            className="flex h-[65svh] min-h-[28rem] min-w-0 scroll-mt-16 flex-col overflow-hidden rounded-xl border border-line bg-card [&_[data-process-map]]:rounded-none [&_[data-process-map]]:border-0"
           >
             <div className="flex flex-none flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-2.5" data-map-controls>
               <div className="flex items-center gap-1">
@@ -619,8 +621,9 @@ export function Overview({
             </div>
           </section>
 
-          <div className="flex min-w-0 flex-col gap-6 xl:col-span-4" data-rail>
-            <div data-chart="issues" className="min-w-0">
+        {/* Under the map, three cards a row: what needs attention first (open issues, the busiest people, team load), then the time charts. */}
+        <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-2 xl:grid-cols-3" data-cards data-rail>
+            <div data-chart="issues" className="flex min-w-0 flex-col [&>*]:flex-1">
               <SectionCard
                 id="open-issues"
                 section="issues"
@@ -642,16 +645,12 @@ export function Overview({
               </SectionCard>
             </div>
             {peopleReady && (
-              <div data-chart="busiest" className="min-w-0">
+              <div data-chart="busiest" className="flex min-w-0 flex-col [&>*]:flex-1">
                 <BusiestPeople people={departmentFigures.people} failed={!!departmentFigures.failure} capacityHref={`${capacity!.base}/capacity`} />
               </div>
             )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2" data-charts>
           {charts.map((c, i) => (
-            <div key={c.key} data-chart={c.key} className={cn("flex min-w-0 flex-col", charts.length % 2 === 1 && i === charts.length - 1 && "xl:col-span-2")}>
+            <div key={c.key} data-chart={c.key} className={cn("flex min-w-0 flex-col", lastSpan(cardCount, cardOffset + i))}>
               {c.node}
             </div>
           ))}
@@ -661,4 +660,12 @@ export function Overview({
       </div>
     </div>
   );
+}
+
+/** The last card under the map spans what is left of its row, so a row never ends in a hole (two a row from `lg`, three from `xl`). */
+function lastSpan(count: number, position: number): string | false {
+  if (position !== count - 1) return false;
+  const lg = count % 2 === 1 ? "lg:col-span-2" : "";
+  const xl = count % 3 === 1 ? "xl:col-span-3" : count % 3 === 2 ? "xl:col-span-2" : "xl:col-span-1";
+  return `${lg} ${xl}`;
 }

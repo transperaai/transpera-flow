@@ -325,7 +325,7 @@ function Room({ name, ceiling, people }: { name: string; ceiling: DepartmentCeil
       }
     >
       <p className="flex flex-wrap items-baseline gap-x-2 leading-none" data-room-clients>
-        <span className="font-mono text-4xl font-semibold tracking-tight tabular-nums">{f0(ceiling.clients)}</span>
+        <span className="text-2xl font-semibold tracking-tight tabular-nums">{f0(ceiling.clients)}</span>
         <span className="text-base font-medium">clients today</span>
       </p>
       <div className="flex max-w-[40rem] flex-col gap-1.5">

@@ -3,7 +3,7 @@
 // Controls and legend for the process map (issue #99): zoom in, zoom out, fit and full screen on the map itself, and the four
 // rating colours (plus the red badge) with their plain names.
 
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { ControlButton, Controls, useStore } from "@xyflow/react";
 import { Maximize2, Minimize2, Minus, Plus, Scan } from "lucide-react";
 import { RATING_LABELS } from "@transpera-flow/engine";
@@ -86,7 +86,7 @@ function Item({ color, full, short, title, round = false }: { color: string; ful
 /** What the colours on the map mean. `badge`: the red count of confirmed issues is shown too. */
 export function MapLegend({ badge, column = false }: { badge: boolean; column?: boolean }) {
   return (
-    <ul aria-label="Map colours" className={column ? "flex flex-col gap-1.5 text-xs text-fg-2" : "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-fg-2"}>
+    <ul aria-label="Map colours" className={column ? "flex flex-col gap-1.5 text-xs text-fg-2" : "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-2"}>
       {LEGEND_ORDER.map((r) => (
         <Item key={r} color={RATING_STYLE[r].stripe} full={RATING_LABELS[r]} short={SHORT[r]} title={RATING_STYLE[r].hint} />
       ))}
@@ -104,8 +104,11 @@ export function MapLegend({ badge, column = false }: { badge: boolean; column?: 
   );
 }
 
-/** The legend behind a "Key" button, for the map inside a card (Q8), where a long row of colours has no room. */
-export function MapKey({ badge }: { badge: boolean }) {
+/**
+ * The legend behind a "Key" button, in the one toolbar row above a read-only map, where a long row of colours has no room.
+ * `note`: a line under the colours (which run playback shows).
+ */
+export function MapKey({ badge, note }: { badge: boolean; note?: ReactNode }) {
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -116,6 +119,11 @@ export function MapKey({ badge }: { badge: boolean }) {
       <PopoverContent align="end" className="w-60">
         <p className="font-medium">What the colours mean</p>
         <MapLegend badge={badge} column />
+        {note && (
+          <p className="mt-1 border-t border-line pt-2 text-xs text-fg-2" data-map-key-note>
+            {note}
+          </p>
+        )}
       </PopoverContent>
     </Popover>
   );

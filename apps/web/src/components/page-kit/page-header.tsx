@@ -43,7 +43,7 @@ export function PageHeader({
     <div data-testid={testId} data-page-header role="region" aria-label={label} className={cn("flex flex-wrap items-start justify-between gap-x-6 gap-y-3", className)}>
       <div className="flex min-w-0 flex-1 basis-80 flex-col gap-1.5">
         {eyebrow}
-        <h1 className="font-display text-2xl leading-tight font-semibold tracking-tight break-words">{title}</h1>
+        <h1 className="font-display text-xl leading-tight font-semibold tracking-tight break-words">{title}</h1>
         {pills && <div className="flex flex-wrap items-center gap-1.5">{pills}</div>}
         {meta}
         {below}

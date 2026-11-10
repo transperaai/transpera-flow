@@ -98,7 +98,7 @@ function HeaderShape({ eyebrow, title, pills = false, buttons = 2 }: { eyebrow?:
     <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3" aria-hidden>
       <div className="flex min-w-0 flex-1 basis-80 flex-col gap-1.5">
         {eyebrow && <span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">{eyebrow}</span>}
-        {title ? <span className="font-display text-2xl leading-tight font-semibold tracking-tight">{title}</span> : <Skeleton className="h-8 w-72 max-w-full" />}
+        {title ? <span className="font-display text-xl leading-tight font-semibold tracking-tight">{title}</span> : <Skeleton className="h-7 w-72 max-w-full" />}
         {pills && (
           <div className="flex flex-wrap gap-1.5">
             <Skeleton className="h-6 w-24 rounded-full" />

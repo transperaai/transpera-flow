@@ -13,7 +13,7 @@ export type PageVariant = "fluid" | "narrow";
 
 /** The body of a page: the one place that owns the page gutter and the gap between sections. Pages that draw their own frame use it too. */
 export function pageBodyClass(variant: PageVariant = "fluid") {
-  return cn("flex w-full min-w-0 flex-col gap-6 px-4 pt-6 pb-12 sm:px-6 lg:px-8", variant === "narrow" && "mx-auto max-w-3xl");
+  return cn("flex w-full min-w-0 flex-col gap-5 px-4 pt-5 pb-12 sm:px-6 lg:px-8", variant === "narrow" && "mx-auto max-w-3xl");
 }
 
 /**
@@ -62,7 +62,7 @@ export function PageHeader({ title, eyebrow, description, actions }: { title: st
       label={title}
       title={title}
       eyebrow={eyebrow ? <Eyebrow>{eyebrow}</Eyebrow> : undefined}
-      meta={description ? <MetaLine className="max-w-prose text-sm">{description}</MetaLine> : undefined}
+      meta={description ? <MetaLine className="max-w-prose text-xs">{description}</MetaLine> : undefined}
       actions={actions}
     />
   );

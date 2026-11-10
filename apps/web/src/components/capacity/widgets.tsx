@@ -181,7 +181,7 @@ export function Kpi({ label, value, sub }: { label: string; value: ReactNode; su
   return (
     <div className="min-w-0 rounded-md border border-line bg-panel px-3.5 py-3" data-kpi>
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-0.5 font-mono text-2xl font-medium tabular-nums">{value}</div>
+      <div className="mt-0.5 text-xl font-semibold tabular-nums">{value}</div>
       {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
     </div>
   );
@@ -198,13 +198,13 @@ const STATUS_DOT: Record<KpiStatus["tone"], string> = { good: "bg-good", warn: "
 export function HeroKpi({ label, value, sub, status }: { label: string; value: ReactNode; sub?: ReactNode; status?: KpiStatus }) {
   return (
     <div
-      className={cn("flex min-w-0 flex-col gap-1 rounded-xl border border-line bg-panel px-4 py-3", status && STATUS_EDGE[status.tone])}
+      className={cn("flex h-full min-w-0 flex-col gap-1 rounded-xl border border-line bg-panel px-3.5 py-3", status && STATUS_EDGE[status.tone])}
       data-kpi
       data-kpi-status={status?.tone}
     >
-      <div className="text-sm font-medium text-fg-2">{label}</div>
-      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-        <span className="font-mono text-4xl leading-none font-semibold tracking-tight text-fg tabular-nums">{value}</span>
+      <div className="truncate text-xs font-medium text-fg-2">{label}</div>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-2xl leading-tight font-semibold tracking-tight text-fg tabular-nums">{value}</span>
         {status && (
           <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium text-fg", STATUS_BADGE[status.tone])} data-kpi-badge>
             <i aria-hidden className={cn("size-2 rounded-full", STATUS_DOT[status.tone])} />

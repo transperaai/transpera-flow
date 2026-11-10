@@ -90,13 +90,13 @@ export function OpenIssuesSummary({
     <div className="flex flex-col gap-3" data-open-issues>
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
         <p>
-          <span className="font-mono text-4xl leading-none font-semibold tabular-nums" data-open-total>
+          <span className="text-2xl leading-none font-semibold tabular-nums" data-open-total>
             {total}
           </span>{" "}
           <span className="text-sm text-muted-foreground">open</span>
         </p>
         <p data-risks>
-          <span className={cn("font-mono text-2xl leading-none font-semibold tabular-nums", risks > 0 ? "text-rate-risk" : "text-fg")}>{risks}</span>{" "}
+          <span className={cn("text-xl leading-none font-semibold tabular-nums", risks > 0 ? "text-rate-risk" : "text-fg")}>{risks}</span>{" "}
           <span className="text-sm">{risks === 1 ? "operational risk" : "operational risks"}</span>
         </p>
       </div>

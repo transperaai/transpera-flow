@@ -103,6 +103,7 @@ import { MIN_ZOOM, autoPanelHeight, fitViewport, stepZoom, type Padding } from "
 import { countRender } from "@/lib/map/render-count";
 import { useStableHandler } from "@/lib/use-stable-handler";
 import { MapKey, MapLegend, MapViewControls } from "./map/map-controls";
+import { Button } from "./ui/button";
 import { TagPill } from "./tag-pill";
 import { ProblemMark } from "./editor/problem-mark";
 import type { NodeProblems } from "@/lib/editor/problems";
@@ -1404,13 +1405,18 @@ interface CanvasProps {
   focus?: readonly string[] | null;
   /** Show the zoom in, zoom out and fit buttons (and, read-only, full screen) on the map's bottom-right corner. Default true. */
   zoomControls?: boolean;
-  /** Show the playback bar over the foot of the map. Default true; embedded maps turn it off. */
-  showPlayback?: boolean;
   /**
-   * Put the playback bar in its own strip above the map rather than floating over its foot, so it never covers a card
-   * (the Overview's company map, where on a phone the bar wraps to two lines). Default false.
+   * Show the playback controls. Default true; embedded maps turn it off. A read-only map has them in its one toolbar row above
+   * the map; the Editor's float over the foot of the map.
    */
+  showPlayback?: boolean;
+  /** Kept for the hosts that pass it: a read-only map's playback is always in the toolbar row above the map now, never over it. */
   playbackAbove?: boolean;
+  /**
+   * The start of a read-only map's one toolbar row (the Overview: "Company map", its (?), the horizon toggle and the Sandbox link),
+   * before Expand all, the lanes toggle, Key and playback. When given, `card.title` and its help are not drawn: the host's title is.
+   */
+  toolbarStart?: ReactNode;
   /**
    * Playback of the company map (issue #173): every item plays, pipeline and servicing, and what is inside a closed card
    * is counted on the card. Default false: a process's own items only, on the steps drawn.
@@ -1467,11 +1473,10 @@ interface CanvasProps {
   /** The wheel zooms the map. Default: on an editable map only (a read-only map usually sits in a page that scrolls). */
   wheelZoom?: boolean;
   /**
-   * The map as the body of a card that is not its own (Q8, the process page): no border or rounding of its own, the bar above it
-   * becomes the card's header (the title, the lane and zoom controls, a "Key" button that opens the colour legend, then `action`),
-   * and the playback bar docks along the card's bottom edge instead of floating over the map.
-   * `compact`: a slim bar for a map that runs edge to edge (the process page's workbench): the title as a small panel label, a rule under
-   * the bar, and `below` capped in height so it never squeezes the map away.
+   * The map as the body of a card that is not its own (Q8, the process page): no border or rounding of its own, and the toolbar row
+   * above it starts with the card's title (unless `toolbarStart` is given), with `action` after the Key button and before playback.
+   * `compact`: for a map that runs edge to edge (the process page's workbench): the title as a small panel label, and `below` capped
+   * in height so it never squeezes the map away.
    */
   card?: {
     title: string;
@@ -1527,7 +1532,6 @@ function Canvas({
   focus = null,
   zoomControls = true,
   showPlayback = true,
-  playbackAbove = false,
   playbackRollUp = false,
   showLanes = true,
   defaultLanes = false,
@@ -1548,6 +1552,7 @@ function Canvas({
   onStepDetailChange,
   wheelZoom,
   card,
+  toolbarStart,
 }: CanvasProps) {
   const editable = editor !== null;
   // A read-only map with nothing between start and end has nothing to draw. (The Editor keeps its empty canvas: a new block starts there.)
@@ -2288,8 +2293,8 @@ function Canvas({
         const bottom = Math.max(bounds.y + bounds.height, ...bands.map((l) => l.y + l.height));
         bounds = { x: left, y: top, width: right - left, height: bottom - top };
       }
-      // A bar in its own strip above takes no room off the map.
-      const pad = fitPadding(lanes && !bands.length, editable, showPlayback && !playbackAbove && !card, controls);
+      // A read-only map's playback sits in the toolbar row above it and takes no room off the map; the Editor's floats over its foot.
+      const pad = fitPadding(lanes && !bands.length, editable, showPlayback && editable, controls);
       let panelHeight = panel.height;
       if (heightMode === "auto") {
         panelHeight = autoPanelHeight(bounds, panel.width, pad, minZoom);
@@ -2299,7 +2304,7 @@ function Canvas({
       void flow.setViewport(fitViewport(bounds, { width: panel.width, height: panelHeight }, pad, minZoom, fullscreen), animate ? { duration: 200 } : undefined);
       setTimeout(measureOverflow, animate ? 260 : 20);
     },
-    [flow, lanes, editable, showPlayback, playbackAbove, card, controls, heightMode, fullscreen, measureOverflow, focus],
+    [flow, lanes, editable, showPlayback, controls, heightMode, fullscreen, measureOverflow, focus],
   );
   const fitRef = useRef(fit);
   useEffect(() => {
@@ -2358,8 +2363,8 @@ function Canvas({
     wasFullscreen.current = fullscreen;
     requestFit();
   }, [fullscreen]);
-  // The playback bar floats over the foot of the map: the buttons sit above it, however tall it wraps.
-  const floatingPlayback = showPlayback && !playbackAbove && !card;
+  // The Editor's playback bar floats over the foot of the map: the buttons sit above it, however tall it wraps.
+  const floatingPlayback = showPlayback && editable;
   const footRef = useRef<HTMLDivElement>(null);
   const [footHeight, setFootHeight] = useState(0);
   useEffect(() => {
@@ -2468,6 +2473,28 @@ function Canvas({
     onPaneClick: useStableHandler(() => setDetailId(null)),
   };
 
+  // Expand all and the lane toggles, in the bar above the map.
+  const laneControls = ((showLanes && !hasGroups) || allGroups.length > 0 || (departmentLanes && !departmentLanes.always)) && (
+    <div className="flex flex-none items-center gap-1.5">
+      {departmentLanes && !departmentLanes.always && (
+        <LaneToggle
+          lanes={bandsOn}
+          onToggle={toggleBands}
+          label="Department lanes"
+          title="Lay the process cards in a lane for each department. Dragging a card does not change its department: set that on the process page."
+        />
+      )}
+      {showLanes && !hasGroups && !departmentLanes && <LaneToggle lanes={lanes} onToggle={toggleLanes} />}
+      {allGroups.length > 0 && <GroupControls allOpen={allGroups.every((id) => expanded.has(id))} onToggle={toggleAllGroups} />}
+    </div>
+  );
+  const overflowNote = (className: string) =>
+    (overflow.left || overflow.right) && (
+      <p className={`${className} text-xs text-fg-2`} data-map-overflow>
+        {overflow.right && !overflow.left ? "Drag the map to see the rest →" : overflow.left && !overflow.right ? "← Drag the map to see the rest" : "Drag the map to see the rest"}
+      </p>
+    );
+
   return (
     <CanvasContext.Provider value={canvasContext}>
       <InlineEditContext.Provider value={inline}>
@@ -2482,60 +2509,54 @@ function Canvas({
           role="region"
           aria-label={`${bundle.process.name} process map`}
         >
-          {/* Above the map in the page, so Tab reaches these first: open or close every group, and what the colours mean. */}
-          {(card || legend || allGroups.length > 0 || (showLanes && !hasGroups) || (departmentLanes && !departmentLanes.always)) && (
-            <div
-              className={
-                compact
-                  ? "flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-1.5"
-                  : card
-                    ? "flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3"
-                    : "flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2"
-              }
-            >
-              {card && (
-                <div className="mr-auto flex items-center">
-                  <h2 id="map-heading" className={compact ? "text-2xs font-semibold tracking-wider text-muted-foreground uppercase" : "font-display text-base leading-snug font-bold"}>
-                    {card.title}
-                  </h2>
-                  {card.help && <Help {...card.help} />}
+          {/* Above the map in the page, so Tab reaches these first. A read-only map has one slim toolbar row: the host's start (or the
+              card's title), Expand all and the lanes toggle, Key (the colours), the card's action, then playback taking the room left.
+              It wraps to a second row only when the panel is too narrow. The Editor keeps its bar of lane controls and legend. */}
+          {editable
+            ? (legend || allGroups.length > 0 || (showLanes && !hasGroups) || (departmentLanes && !departmentLanes.always)) && (
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2">
+                  {laneControls}
+                  {legend && <MapLegend badge={!!openIssues} />}
+                  {card?.action}
+                  {overflowNote("ml-auto")}
                 </div>
-              )}
-              {((showLanes && !hasGroups) || allGroups.length > 0 || (departmentLanes && !departmentLanes.always)) && (
-                <div className="flex items-center gap-1.5">
-                  {departmentLanes && !departmentLanes.always && (
-                    <LaneToggle
-                      lanes={bandsOn}
-                      onToggle={toggleBands}
-                      label="Department lanes"
-                      title="Lay the process cards in a lane for each department. Dragging a card does not change its department: set that on the process page."
-                    />
+              )
+            : (toolbarStart || card || legend || laneControls || showPlayback) && (
+                <div className="flex min-h-11 flex-none flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-1.5 text-xs" data-map-toolbar>
+                  {toolbarStart ? (
+                    <div className="flex min-w-0 flex-none flex-wrap items-center gap-x-3 gap-y-1.5" data-map-toolbar-start>
+                      {toolbarStart}
+                    </div>
+                  ) : (
+                    card && (
+                      <div className="flex flex-none items-center">
+                        <h2 id="map-heading" className={compact ? "text-xs font-semibold tracking-wider text-muted-foreground uppercase" : "font-display text-sm leading-snug font-bold"}>
+                          {card.title}
+                        </h2>
+                        {card.help && <Help {...card.help} />}
+                      </div>
+                    )
                   )}
-                  {showLanes && !hasGroups && !departmentLanes && <LaneToggle lanes={lanes} onToggle={toggleLanes} />}
-                  {allGroups.length > 0 && <GroupControls allOpen={allGroups.every((id) => expanded.has(id))} onToggle={toggleAllGroups} />}
+                  {laneControls}
+                  {legend && <MapKey badge={!!openIssues} note={showPlayback && playback.index ? `Playback shows run 1 of ${result?.reps ?? 1}; the figures average all ${result?.reps ?? 1} runs.` : undefined} />}
+                  {card?.action}
+                  {showPlayback ? (
+                    <div className="flex min-w-0 flex-auto" data-playback-strip>
+                      <PlaybackBar
+                        inline
+                        clock={playback.clock}
+                        H={playback.index?.H ?? null}
+                        hoursPerWeek={playback.hoursPerWeek}
+                        reps={result?.reps ?? null}
+                        describe={playback.describe}
+                      />
+                    </div>
+                  ) : (
+                    <span className="flex-1" aria-hidden />
+                  )}
                 </div>
               )}
-              {legend && (card ? <MapKey badge={!!openIssues} /> : <MapLegend badge={!!openIssues} />)}
-              {card?.action}
-              {(overflow.left || overflow.right) && (
-                <p className={`${card ? "w-full" : "ml-auto"} text-[11.5px] text-fg-2`} data-map-overflow>
-                  {overflow.right && !overflow.left ? "Drag the map to see the rest →" : overflow.left && !overflow.right ? "← Drag the map to see the rest" : "Drag the map to see the rest"}
-                </p>
-              )}
-            </div>
-          )}
           {card?.below && <div className={compact ? "flex max-h-48 shrink-0 flex-col gap-2 overflow-y-auto border-b border-line px-3 py-2" : "flex flex-col gap-2 px-4 pb-3"}>{card.below}</div>}
-          {showPlayback && playbackAbove && !card && (
-            <div className="border-b border-line px-2.5 py-2" data-playback-strip>
-              <PlaybackBar
-                clock={playback.clock}
-                H={playback.index?.H ?? null}
-                hoursPerWeek={playback.hoursPerWeek}
-                reps={result?.reps ?? null}
-                describe={playback.describe}
-              />
-            </div>
-          )}
           <div className={`relative min-h-0 ${heightMode === "fill" ? "flex-1" : ""} ${card ? "bg-muted/30" : ""}`} style={heightMode === "auto" ? { height: autoHeight ?? 360 } : undefined}>
           {/* Before the map in the page, so Tab reaches the toolbar first. */}
           {editable && editorState && (
@@ -2543,6 +2564,8 @@ function Canvas({
               <Toolbar bundle={bundle} state={editorState} onAdd={addFromToolbar} hideAdd={hideAdd} savedLabel={savedLabel} />
             </div>
           )}
+          {/* A read-only map says in words that it runs past the panel, over its top edge (the toolbar row has no room for it). */}
+          {!editable && overflowNote("pointer-events-none absolute top-2 left-1/2 z-10 -translate-x-1/2 rounded-full border border-line bg-panel/95 px-2 py-0.5 shadow-token")}
           {/* Nothing to draw means nothing for a run to change on the map: the empty state says enough. */}
           {computing && !nothingToDraw && <FirstRunStatus />}
           {nothingToDraw && (
@@ -2666,19 +2689,6 @@ function Canvas({
             />
           )}
           </div>
-          {/* Docked along the card's bottom edge (Q8), so it never covers a step. */}
-          {showPlayback && card && (
-            <div className="bg-muted/40 px-3 py-2" data-playback-strip>
-              <PlaybackBar
-                docked
-                clock={playback.clock}
-                H={playback.index?.H ?? null}
-                hoursPerWeek={playback.hoursPerWeek}
-                reps={result?.reps ?? null}
-                describe={playback.describe}
-              />
-            </div>
-          )}
         </div>
       </InlineEditContext.Provider>
     </CanvasContext.Provider>
@@ -2731,14 +2741,9 @@ const toolButton =
 /** Open or close every group on the map at once (the numbers don't change; only what is drawn). */
 function GroupControls({ allOpen, onToggle }: { allOpen: boolean; onToggle: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      title={allOpen ? "Close every group to see each as one step with a roll-up" : "Open every group to see the steps inside"}
-      className={`${toolButton} text-xs`}
-    >
+    <Button type="button" variant="outline" size="sm" onClick={onToggle} title={allOpen ? "Close every group to see each as one step with a roll-up" : "Open every group to see the steps inside"}>
       {allOpen ? "Collapse all" : "Expand all"}
-    </button>
+    </Button>
   );
 }
 
@@ -2754,15 +2759,9 @@ function LaneToggle({
   title?: string;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={lanes}
-      onClick={onToggle}
-      title={title}
-      className={`${toolButton} text-xs ${lanes ? "!border-accent !bg-accent-soft" : ""}`}
-    >
+    <Button type="button" variant="outline" size="sm" aria-pressed={lanes} onClick={onToggle} title={title} className={lanes ? "border-accent bg-accent-soft hover:bg-accent-soft" : ""}>
       {label}
-    </button>
+    </Button>
   );
 }
 
