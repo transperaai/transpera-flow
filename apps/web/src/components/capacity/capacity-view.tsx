@@ -36,8 +36,9 @@ import { formatNumber, formatPercent, formatWholeCurrency } from "@/lib/format";
 import { useCapacityRuns } from "@/lib/sim/use-capacity-runs";
 import { cn } from "@/lib/utils";
 import { PeoplePicker, type PickerGroup } from "./people-picker";
+import { PanelHow } from "@/components/overview/panel-how";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ColourLegend, Dumbbell, How, KpiStrip, KpiTile, RoomBar, Section, StackBar, ThresholdBar, TONE_TEXT, type KpiStatus, type Tone } from "./widgets";
+import { ColourLegend, Dumbbell, KpiStrip, KpiTile, RoomBar, Section, StackBar, ThresholdBar, TONE_TEXT, type KpiStatus, type Tone } from "./widgets";
 
 export interface CapacityViewProps {
   setup: CapacitySetup;
@@ -300,7 +301,29 @@ function Room({ name, ceiling, people }: { name: string; ceiling: DepartmentCeil
     .map((x) => x.p.name);
   const teams = limitedBy(ceiling.limit);
   return (
-    <Section title={`${name}: room for more clients`} data-room={name}>
+    <Section title={`${name}: room for more clients`} data-room={name}
+      aside={
+        <PanelHow
+          works={
+            <>
+              Each manager&apos;s ceiling is how many clients of their current mix they could hold before reaching their utilisation threshold (how busy a role can be before it counts as full, set per role under Set up → People &amp; roles), from the simulation&apos;s busy share. The department&apos;s ceiling adds those up, then checks each shared team: how many clients could it serve at its own utilisation threshold? The lowest is the most that fit. The next client goes to the people with the most room. A rough guide from the simulation, not a promise. Each team&apos;s ceiling:{" "}
+              <span data-room-limits>
+                {ceiling.limits.map((l, i) => (
+                  <span key={l.name}>
+                    {i > 0 && " · "}
+                    <span className={cn(i === 0 && "font-semibold text-fg")}>
+                      {l.kind === "people" ? "Client managers" : l.name} {f0(l.max)}
+                    </span>
+                  </span>
+                ))}
+              </span>
+              .
+            </>
+          }
+          tells="whether the department can take on work, which team stops it, and who should get the next client."
+        />
+      }
+    >
       <p className="flex flex-wrap items-baseline gap-x-2 leading-none" data-room-clients>
         <span className="font-mono text-4xl font-semibold tracking-tight tabular-nums">{f0(ceiling.clients)}</span>
         <span className="text-base font-medium">clients today</span>
@@ -322,25 +345,6 @@ function Room({ name, ceiling, people }: { name: string; ceiling: DepartmentCeil
       <p className="text-sm" data-room-next>
         <b className="font-semibold">Next client goes to:</b> {next.length ? joinAnd(next, "or") : "nobody has room for another client without going over their utilisation threshold."}
       </p>
-      <How
-        works={
-          <>
-            Each manager&apos;s ceiling is how many clients of their current mix they could hold before reaching their utilisation threshold (how busy a role can be before it counts as full, set per role under Set up → People &amp; roles), from the simulation&apos;s busy share. The department&apos;s ceiling adds those up, then checks each shared team: how many clients could it serve at its own utilisation threshold? The lowest is the most that fit. The next client goes to the people with the most room. A rough guide from the simulation, not a promise. Each team&apos;s ceiling:{" "}
-            <span data-room-limits>
-              {ceiling.limits.map((l, i) => (
-                <span key={l.name}>
-                  {i > 0 && " · "}
-                  <span className={cn(i === 0 && "font-semibold text-fg")}>
-                    {l.kind === "people" ? "Client managers" : l.name} {f0(l.max)}
-                  </span>
-                </span>
-              ))}
-            </span>
-            .
-          </>
-        }
-        tells="whether the department can take on work, which team stops it, and who should get the next client."
-      />
     </Section>
   );
 }
@@ -349,7 +353,14 @@ function ClientFacingPeople({ name, setup, ceiling, people, showChannels }: { na
   const roleRule = new Map(setup.roles.map((r) => [r.id, r.rule_of_thumb]));
   const rows = [...people].sort((a, b) => b.busy - a.busy || a.name.localeCompare(b.name));
   return (
-    <Section title={`${name}: client-facing people`} data-people-table={name}>
+    <Section title={`${name}: client-facing people`} data-people-table={name}
+      aside={
+        <PanelHow
+          works="Busy is the simulation's busy share, which includes waiting and rework; the black tick is the person's utilisation threshold (how busy their role can be before it counts as full). Green is under it, amber within 10 points of it, red at or over it. +N is their clients × utilisation threshold ÷ busy, less the clients they have now. Hours needed adds up every process step for each of their clients at their tier's frequency, from the simulation; available is the hours a month they have for client work after leave and team time."
+          tells="who is stretched, who has room, and whether a rule of thumb matches what the work actually takes."
+        />
+      }
+    >
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nobody looks after clients in this department yet.</p>
       ) : (
@@ -400,10 +411,6 @@ function ClientFacingPeople({ name, setup, ceiling, people, showChannels }: { na
         </ul>
       )}
       <p className="text-xs text-muted-foreground">The black tick is each person&apos;s own utilisation threshold. +N is how many more clients they can take. Hover or focus a row for their hours, tiers and rule of thumb.</p>
-      <How
-        works="Busy is the simulation's busy share, which includes waiting and rework; the black tick is the person's utilisation threshold (how busy their role can be before it counts as full). Green is under it, amber within 10 points of it, red at or over it. +N is their clients × utilisation threshold ÷ busy, less the clients they have now. Hours needed adds up every process step for each of their clients at their tier's frequency, from the simulation; available is the hours a month they have for client work after leave and team time."
-        tells="who is stretched, who has room, and whether a rule of thumb matches what the work actually takes."
-      />
     </Section>
   );
 }
@@ -440,7 +447,44 @@ function Bottleneck({
   const deptName = (p: PersonBusy) => setup.departments.find((d) => d.id === p.departmentId)?.name ?? p.roleName;
   const used = new Map([...colours].filter(([n]) => risk.people.some((r) => parts.get(r.person.id)?.some((x) => x.name === n))));
   return (
-    <Section title="Bottleneck: who is at risk" data-bottleneck>
+    <Section title="Bottleneck: who is at risk" data-bottleneck
+      aside={
+        <PanelHow
+          works={
+            <>
+              At risk is anyone, client-facing or in a shared team, whose busy share from the simulation is at or over their own utilisation threshold (over), or within {MARGIN_POINTS} percentage points under it (near). Each bar is the hours the simulation gave them in a month, by the purpose of the process steps; hover a segment for its hours.
+              {risk.people.length > 0 && (
+                <>
+                  {" "}
+                  The steps that take the most of each month, linked to their place in the process:{" "}
+                  {risk.people.map(({ person: p, steps }, i) => (
+                    <span key={p.id}>
+                      {i > 0 && "; "}
+                      {p.name}:{" "}
+                      {steps.map((s, j) => (
+                        <span key={s.stepId}>
+                          {j > 0 && ", "}
+                          {s.stepId !== "hand" && stepProcess[s.stepId] ? (
+                            <Link href={`${base}/p/${stepProcess[s.stepId]}?step=${s.stepId}`} className="text-accent hover:underline" data-step-link={s.stepId}>
+                              {s.name}
+                            </Link>
+                          ) : (
+                            s.name
+                          )}{" "}
+                          ({f1(s.hours)} h)
+                        </span>
+                      ))}
+                    </span>
+                  ))}
+                  .
+                </>
+              )}
+            </>
+          }
+          tells="who to take work from first, and what kind of work fills their month."
+        />
+      }
+    >
       <p className="text-base leading-snug" data-bottleneck-sentence>
         {risk.people.length === 0 ? (
           <>Nobody is over or within {MARGIN_POINTS} points of their utilisation threshold.</>
@@ -480,40 +524,6 @@ function Bottleneck({
           {used.size > 0 && <ColourLegend colours={used} />}
         </>
       )}
-      <How
-        works={
-          <>
-            At risk is anyone, client-facing or in a shared team, whose busy share from the simulation is at or over their own utilisation threshold (over), or within {MARGIN_POINTS} percentage points under it (near). Each bar is the hours the simulation gave them in a month, by the purpose of the process steps; hover a segment for its hours.
-            {risk.people.length > 0 && (
-              <>
-                {" "}
-                The steps that take the most of each month, linked to their place in the process:{" "}
-                {risk.people.map(({ person: p, steps }, i) => (
-                  <span key={p.id}>
-                    {i > 0 && "; "}
-                    {p.name}:{" "}
-                    {steps.map((s, j) => (
-                      <span key={s.stepId}>
-                        {j > 0 && ", "}
-                        {s.stepId !== "hand" && stepProcess[s.stepId] ? (
-                          <Link href={`${base}/p/${stepProcess[s.stepId]}?step=${s.stepId}`} className="text-accent hover:underline" data-step-link={s.stepId}>
-                            {s.name}
-                          </Link>
-                        ) : (
-                          s.name
-                        )}{" "}
-                        ({f1(s.hours)} h)
-                      </span>
-                    ))}
-                  </span>
-                ))}
-                .
-              </>
-            )}
-          </>
-        }
-        tells="who to take work from first, and what kind of work fills their month."
-      />
     </Section>
   );
 }
@@ -551,7 +561,14 @@ function Leaver({ setup, model, result, people }: { setup: CapacitySetup; model:
   if (res?.sharedTeams.length) parts.push(`the rest of the ${joinAnd(res.sharedTeams.map((r) => roleName(r).toLowerCase()))} ${res.sharedTeams.length === 1 ? "shares" : "share"} their work`);
   if (res?.emptyTeams.length) parts.push(`nobody is left in the ${joinAnd(res.emptyTeams.map((r) => roleName(r).toLowerCase()))} to do their work`);
   return (
-    <Section title="What if someone leaves?" data-leaver>
+    <Section title="What if someone leaves?" data-leaver
+      aside={
+        <PanelHow
+          works="Takes everyone you choose out together, then hands each of their clients, one at a time, to whichever colleague in the same department is least busy and serves that tier (nobody who is leaving gets a client). A client adds the hours its tier needs from a manager (the planned hours, as in time to serve) to the colleague's busy share, which starts from the simulation's. Someone in a shared team has no clients: the rest of their team shares their hours. Each row shows a colleague's busy share before (hollow dot) and after (filled dot) against their utilisation threshold (the black tick)."
+          tells="key-person risk: who absorbs the loss, and whether you need a replacement or a rebalance."
+        />
+      }
+    >
       <PeoplePicker label="Who leaves (choose one or more)" groups={groups} value={ids} onChange={setPicked} />
       {res ? (
         <>
@@ -588,10 +605,6 @@ function Leaver({ setup, model, result, people }: { setup: CapacitySetup; model:
           Choose one or more people to see who takes their work.
         </p>
       )}
-      <How
-        works="Takes everyone you choose out together, then hands each of their clients, one at a time, to whichever colleague in the same department is least busy and serves that tier (nobody who is leaving gets a client). A client adds the hours its tier needs from a manager (the planned hours, as in time to serve) to the colleague's busy share, which starts from the simulation's. Someone in a shared team has no clients: the rest of their team shares their hours. Each row shows a colleague's busy share before (hollow dot) and after (filled dot) against their utilisation threshold (the black tick)."
-        tells="key-person risk: who absorbs the loss, and whether you need a replacement or a rebalance."
-      />
     </Section>
   );
 }
@@ -605,7 +618,14 @@ export function TimeToServe({ setup, model, purposes, colours: shared, className
   // The page passes its colours so a purpose matches the bottleneck's bars; on its own it picks them from these bars.
   const colours = useMemo(() => shared ?? purposeColours([...parts.values()]), [shared, parts]);
   return (
-    <Section title="Avg time to serve one client, by tier, per month" className={className} data-time-to-serve>
+    <Section title="Avg time to serve one client, by tier, per month" className={className} data-time-to-serve
+      aside={
+        <PanelHow
+          works="Adds up every step of the monthly servicing processes for one client of the tier, all roles together, using the tier's meetings, words, links, ad-hoc chance and so on, with the tier multipliers and any changes at their start. This is the planned time, not a simulation: it ignores waiting and rework. Named clients use their own values."
+          tells="what takes the time, and which clients earn the most per hour of effort."
+        />
+      }
+    >
       {t.departments.map((d) => (
         <div key={d.id} className="flex flex-col gap-2">
           <h3 className="text-sm font-semibold">{d.name}</h3>
@@ -654,10 +674,6 @@ export function TimeToServe({ setup, model, purposes, colours: shared, className
           </Table>
         </>
       )}
-      <How
-        works="Adds up every step of the monthly servicing processes for one client of the tier, all roles together, using the tier's meetings, words, links, ad-hoc chance and so on, with the tier multipliers and any changes at their start. This is the planned time, not a simulation: it ignores waiting and rework. Named clients use their own values."
-        tells="what takes the time, and which clients earn the most per hour of effort."
-      />
     </Section>
   );
 }

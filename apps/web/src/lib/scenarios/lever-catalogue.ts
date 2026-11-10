@@ -152,8 +152,8 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     description: "What one client pays each month.",
     example: "SEO clients pay A$3,600 a month.",
     control: "settings",
-    settingsPath: "/settings#services-heading",
-    settingsLabel: "Settings → Services",
+    settingsPath: "/settings/clients",
+    settingsLabel: "Settings → Tiers & clients",
   },
   {
     id: "clients.churn",

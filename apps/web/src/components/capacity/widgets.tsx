@@ -190,15 +190,15 @@ export function Kpi({ label, value, sub }: { label: string; value: ReactNode; su
 /** How a headline figure stands against its goal: the bar colour along the top, and the words in the badge (the words carry it, not the colour). */
 export type KpiStatus = { tone: "good" | "warn"; words: string };
 
-const STATUS_BAR: Record<KpiStatus["tone"], string> = { good: "border-t-good", warn: "border-t-warn" };
+const STATUS_EDGE: Record<KpiStatus["tone"], string> = { good: "shadow-[inset_3px_0_0_var(--good)]", warn: "shadow-[inset_3px_0_0_var(--warn)]" };
 const STATUS_BADGE: Record<KpiStatus["tone"], string> = { good: "bg-good-soft", warn: "bg-warn-soft" };
 const STATUS_DOT: Record<KpiStatus["tone"], string> = { good: "bg-good", warn: "bg-warn" };
 
-/** A page's headline figure, bigger than a `Kpi`: the label, the number large, an optional status against a goal, then the note. */
+/** A page's headline figure, bigger than a `Kpi`: the label, the number large, an optional status against a goal (in words, with a thin edge in its colour), then the note. Flat: a border, no shadow. */
 export function HeroKpi({ label, value, sub, status }: { label: string; value: ReactNode; sub?: ReactNode; status?: KpiStatus }) {
   return (
     <div
-      className={cn("flex min-w-0 flex-col gap-1 rounded-md border border-line bg-panel px-4 pt-3.5 pb-3 shadow-[var(--shadow)]", status ? cn("border-t-4", STATUS_BAR[status.tone]) : "border-t-4 border-t-accent")}
+      className={cn("flex min-w-0 flex-col gap-1 rounded-xl border border-line bg-panel px-4 py-3", status && STATUS_EDGE[status.tone])}
       data-kpi
       data-kpi-status={status?.tone}
     >

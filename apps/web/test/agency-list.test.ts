@@ -169,10 +169,10 @@ describe("Client health rules for editors", () => {
     expect(overview).toMatch(/weeks !== live\.workspace\.settings\.horizon_weeks/);
   });
 
-  it("the home page shows the table to agency admins and keeps the cards for everyone else", () => {
+  it("the home page shows the numbers table to agency admins and a plain list of workspaces to everyone else", () => {
     const page = read("app/page.tsx");
     expect(page).toContain("admin && workspaces.length > 0 ? await listAgencyWorkspaces()");
     expect(page).toContain("<AgencyWorkspaceTable");
-    expect(page).toContain("grid gap-3 sm:grid-cols-2");
+    expect(page).toContain('<ListTable aria-label="Workspaces" data-workspaces>');
   });
 });
