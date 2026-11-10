@@ -57,7 +57,6 @@ export function ProcessesPage({
     <Page
       title="Processes"
       eyebrow="Company"
-      width="max-w-6xl"
       description="This workspace's own processes: the company map and everything inside it. Other workspaces have their own. Open a row to see that process's map card."
       actions={
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2" data-processes-actions>

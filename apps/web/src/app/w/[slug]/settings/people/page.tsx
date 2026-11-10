@@ -20,7 +20,6 @@ export default async function SettingsPeoplePage(props: PageProps<"/w/[slug]/set
       eyebrow="Settings"
       description={peopleMeta(setup)}
       actions={<PeopleHeaderActions setup={setup} data={data} />}
-      width="max-w-6xl"
     >
       <PhoneNotice />
       <PeopleAndRoles setup={setup} data={data} />

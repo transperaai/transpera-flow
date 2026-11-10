@@ -29,7 +29,7 @@ export default async function HomePage() {
   // The Owner sees each company's headline numbers; everyone else keeps the cards.
   const agencyRows = admin && workspaces.length > 0 ? await listAgencyWorkspaces() : null;
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pb-12 sm:px-6">
+    <main className="flex w-full flex-col gap-6 px-4 pb-12 sm:px-6 lg:px-8">
       <AppHeader signedIn />
       <PageHeader title="Workspaces" description="Each workspace is one company: its processes, people, issues and settings." />
       {admin && (

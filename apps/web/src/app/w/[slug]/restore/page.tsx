@@ -18,7 +18,7 @@ export default async function RestorePage(props: PageProps<"/w/[slug]/restore">)
   const { slug } = await props.params;
   const description = "Fill this new workspace from a JSON backup another workspace exported (Export → JSON backup). Every process comes back as a draft of its latest published version; publish each to see its numbers.";
   const refused = (message: string) => (
-    <Page title="Restore a backup" eyebrow="Workspace" description={description} width="max-w-3xl">
+    <Page title="Restore a backup" eyebrow="Workspace" description={description} variant="narrow">
       <p data-restore-refused className="rounded-token border border-dashed border-line p-6 text-fg-2">
         {message}
       </p>
@@ -30,7 +30,7 @@ export default async function RestorePage(props: PageProps<"/w/[slug]/restore">)
   if (!(await canEditWorkspace(head.id))) return refused(ROLE_MESSAGE);
   if (!(await workspaceIsEmpty(await getDb(), head.id))) return refused(NOT_EMPTY_MESSAGE);
   return (
-    <Page title="Restore a backup" eyebrow="Workspace" description={description} width="max-w-3xl">
+    <Page title="Restore a backup" eyebrow="Workspace" description={description} variant="narrow">
       <PhoneReadOnly>
         <RestoreBackup slug={slug} canManage={await canManageWorkspace(head.id)} />
       </PhoneReadOnly>

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { MapSkeleton } from "@/components/map/map-placeholder";
-import { Page } from "@/components/shell/page";
+import { Page, pageBodyClass, type PageVariant } from "@/components/shell/page";
 import { ShellHeader } from "@/components/shell/shell-header";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -37,18 +37,18 @@ function FieldRow() {
 export function PageSkeleton({
   title,
   eyebrow,
-  width,
+  variant,
   hideHeader,
   children,
 }: {
   title: string;
   eyebrow?: string;
-  width?: "max-w-3xl" | "max-w-5xl" | "max-w-6xl";
+  variant?: PageVariant;
   hideHeader?: boolean;
   children: ReactNode;
 }) {
   return (
-    <Page title={title} eyebrow={eyebrow} description="Loading…" width={width} hideHeader={hideHeader}>
+    <Page title={title} eyebrow={eyebrow} variant={variant} hideHeader={hideHeader}>
       {children}
     </Page>
   );
@@ -174,7 +174,7 @@ export function OverviewSkeleton() {
   return (
     <div>
       <ShellHeader title="Overview" />
-      <Loading name="overview" label="Loading the Overview" className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-8 px-4 pb-14 pt-6 sm:px-6">
+      <Loading name="overview" label="Loading the Overview" className={pageBodyClass()}>
         <header className="flex flex-col gap-1" aria-hidden>
           <span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Overview</span>
           <Skeleton className="h-8 w-56" />
@@ -251,7 +251,7 @@ export function HistorySkeleton() {
   return (
     <div>
       <ShellHeader title="Process history" />
-      <Loading name="history" label="Loading the history" className="mx-auto flex w-full min-w-0 max-w-6xl flex-col gap-5 px-4 pt-6 pb-12 sm:px-6">
+      <Loading name="history" label="Loading the history" className={pageBodyClass()}>
         <header className="flex flex-col gap-1" aria-hidden>
           <Skeleton className="h-4 w-56" />
           <h2 className="font-heading text-2xl leading-tight font-semibold tracking-tight">Process history</h2>
@@ -291,7 +291,7 @@ export function EditorSkeleton() {
 /** One issue: breadcrumb, title and pills, the map beside a side column, then its cards. */
 export function IssuePageSkeleton() {
   return (
-    <Page title="Issue" eyebrow="Improve" width="max-w-6xl" hideHeader>
+    <Page title="Issue" eyebrow="Improve" hideHeader>
       <Loading name="issue-page" label="Loading the issue" className="flex min-w-0 flex-col gap-5">
         <header className="flex flex-col gap-2" aria-hidden>
           <Skeleton className="h-4 w-40" />
@@ -328,7 +328,7 @@ export function IssuePageSkeleton() {
 /** One solution: breadcrumb and title, the verdict card, then the two maps side by side from `lg`. */
 export function SolutionPageSkeleton() {
   return (
-    <Page title="Solution" eyebrow="Improve" width="max-w-6xl" hideHeader>
+    <Page title="Solution" eyebrow="Improve" hideHeader>
       <Loading name="solution-page" label="Loading the solution" className="flex min-w-0 flex-col gap-5">
         <header className="flex flex-col gap-2" aria-hidden>
           <Skeleton className="h-4 w-40" />

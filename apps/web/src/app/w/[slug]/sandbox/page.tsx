@@ -31,7 +31,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
     if (!state) notFound();
     const canEdit = await canEditWorkspace(state.workspace.id);
     return (
-      <Page title="Sandbox" width="max-w-6xl" hideHeader>
+      <Page title="Sandbox" hideHeader>
         <PageHeader label="Sandbox" eyebrow={<span className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Company</span>} title="Sandbox" />
         <NotPublished
           what="The Sandbox runs the published processes forward month by month to show who gets too busy, and when, and lets you try changes before you make them."
@@ -62,7 +62,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
     const company = chosen && !chosen.live ? ((await loadCompanyRevision(ws, chosen.id)) ?? liveCompany) : liveCompany;
     const companyRevisionId = chosen && company !== liveCompany ? chosen.id : (companyRevisions.find((r) => r.live)?.id ?? null);
     return (
-      <Page title="Sandbox" width="max-w-6xl" hideHeader>
+      <Page title="Sandbox" hideHeader>
         <PlayPage live={live} parts={parts} company={company} setup={setup} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} laneInput={laneInput} companyRevisions={companyRevisions} companyRevisionId={companyRevisionId} initialSolutionId={typeof solutionParam === "string" && isId(solutionParam) ? solutionParam : null} />
       </Page>
     );
@@ -76,7 +76,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
   ]);
   const base = `/w/${slug}`;
   return (
-    <Page title="Sandbox" width="max-w-6xl" hideHeader>
+    <Page title="Sandbox" hideHeader>
       <SourceLinkingScope workspaceId={ws} sources={sources} canEdit={canEdit}>
         <SandboxView
           live={live}

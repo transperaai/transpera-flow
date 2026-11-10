@@ -32,7 +32,7 @@ export default async function WorkspaceSolutionPage(props: PageProps<"/w/[slug]/
     loadSolutionBase(slug, solution.process_id, solution.base_revision_id, bundle).catch(() => null),
   ]);
   return (
-    <Page title={solution.name} eyebrow="Improve" width="max-w-6xl" hideHeader>
+    <Page title={solution.name} eyebrow="Improve" hideHeader>
       <SourceLinkingScope workspaceId={ws} sources={sources} canEdit={canEdit}>
         <SolutionPage
           workspaceId={ws}

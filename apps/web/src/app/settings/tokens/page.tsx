@@ -29,7 +29,7 @@ export default async function ApiTokensPage() {
   const endpoint = `${proto}://${host}/api/mcp`;
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 pb-12 sm:px-6">
+    <main className="flex w-full flex-col gap-6 px-4 pb-12 sm:px-6 lg:px-8">
       <AppHeader signedIn />
       <PageHeader
         label="API tokens"

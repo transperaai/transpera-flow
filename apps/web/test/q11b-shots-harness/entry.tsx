@@ -49,7 +49,7 @@ window.mountQ11b = (what) => {
   let page: React.ReactNode = null;
   if (what === "setup-clients") {
     page = (
-      <SettingsPage title="Tiers & clients" eyebrow="Settings" description="Where tiers, tier counts and named clients are keyed in. A named client starts from its tier's values; anything filled in replaces them. Agency admins and the Owner can change this; everyone can read it." width="max-w-6xl">
+      <SettingsPage title="Tiers & clients" eyebrow="Settings" description="Where tiers, tier counts and named clients are keyed in. A named client starts from its tier's values; anything filled in replaces them. Agency admins and the Owner can change this; everyone can read it.">
         <PhoneNotice />
         <p className="px-1 text-sm text-fg-2" data-unique-clients>
           <b className="text-foreground">8</b> unique clients: 6 with Organic, 3 with Performance, 1 taking both services.
@@ -59,7 +59,7 @@ window.mountQ11b = (what) => {
     );
   } else if (what === "setup-people") {
     page = (
-      <SettingsPage title="People & roles" eyebrow="Settings" description={peopleMeta(setup)} actions={<PeopleHeaderActions setup={setup} data={data} />} width="max-w-6xl">
+      <SettingsPage title="People & roles" eyebrow="Settings" description={peopleMeta(setup)} actions={<PeopleHeaderActions setup={setup} data={data} />}>
         <PhoneNotice />
         <PeopleAndRoles setup={setup} data={data} />
       </SettingsPage>
