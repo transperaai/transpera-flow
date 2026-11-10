@@ -29,6 +29,8 @@ export interface McpHandlerOptions {
   checkUser: (user: TokenUser) => Promise<TokenUser | null>;
   /** For tests: the current date. */
   now?: () => Date;
+  /** For tests: simulation tool calls a token may make a minute (default 10; the database holds it to 1 to 120). */
+  simulationsPerMinute?: number;
 }
 
 function jsonRpcError(status: number, message: string, headers: Record<string, string> = {}): Response {
@@ -77,6 +79,7 @@ export async function handleMcpRequest(request: Request, options: McpHandlerOpti
     userId: use.user_id,
     activeWorkspaceId: use.active_workspace_id,
     today: (options.now?.() ?? new Date()).toISOString().slice(0, 10),
+    ...(options.simulationsPerMinute !== undefined ? { simulationsPerMinute: options.simulationsPerMinute } : {}),
   });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   try {

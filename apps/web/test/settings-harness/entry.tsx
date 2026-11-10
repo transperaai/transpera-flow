@@ -2,6 +2,7 @@
 // components with the Server Actions stood in for by ../build-harness.ts (each call is noted on `window.__serverActions`).
 // Nothing here ships.
 
+import { useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { larkspurBundle, larkspurPersonIds, type PersonCapacityFactorRow } from "@transpera-flow/db";
 import { PersonMore, SimulationSettings } from "@/app/w/[slug]/settings/people-settings";
@@ -47,9 +48,9 @@ window.mountSettings = ({ who, switch: on = false, factors = [], factorSaves, un
     <div className="flex flex-col gap-6 p-4">
       <SimulationSettings data={data} />
       {/* What Set up, People & roles shows under "More" on a person: one row each, opening to their fields. */}
+      <ul aria-label="People" className="flex flex-col divide-y divide-line rounded-lg border border-line">
       {people.map((p) => (
-        <details key={p.id}>
-          <summary>{p.name}</summary>
+        <PersonRow key={p.id} name={p.name}>
           <PersonMore
             person={p as never}
             data={data}
@@ -59,8 +60,24 @@ window.mountSettings = ({ who, switch: on = false, factors = [], factorSaves, un
                 : async (_person, _step, _base, value) => (factorSaves === "saved" ? { status: "saved", value } : { status: "conflict", theirs: factorSaves.conflict })
             }
           />
-        </details>
+        </PersonRow>
       ))}
+      </ul>
     </div>,
   );
 };
+
+/** One person as a row: their name as a button that opens their fields under it (kept in the page while closed, as a panel's would be). */
+function PersonRow({ name, children }: { name: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li data-person-row={name} data-open={open}>
+      <button type="button" aria-expanded={open} className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm font-semibold hover:bg-panel-2" onClick={() => setOpen((o) => !o)}>
+        {name}
+      </button>
+      <div hidden={!open} className="border-t border-line px-3 py-3">
+        {children}
+      </div>
+    </li>
+  );
+}

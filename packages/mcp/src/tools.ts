@@ -5,6 +5,7 @@ import { listProcesses, loadLiveCompanyPart, loadProcessBundle, withCompanyRun, 
 import { applyPatches, isBlocking, MAX_PATCHES, PATCH_OPS, simulate, type EngineModel, type ScenarioPatch, type SimulationResult } from "@transpera-flow/engine";
 import { resolveProcess, resolveWorkspace, revisionIdFor, visibleWorkspaces, matchWorkspace, type ToolContext } from "./context";
 import { runTool, ToolError } from "./result";
+import { chargeSimulation } from "./simulation-limit";
 import { ANALYSIS_TOOL_NAMES, registerAnalysisTools } from "./analysis-tools";
 import { isRunDate, runSaved } from "./saved-scenarios";
 import { FACT_TOOL_NAMES, registerFactTools } from "./facts-tools";
@@ -262,6 +263,7 @@ export function createMcpServer(ctx: ToolContext): McpServer {
     },
     (args) =>
       runTool(async (assumptions) => {
+        await chargeSimulation(ctx);
         const saved = args.scenario !== undefined;
         if (!saved && (args.months !== undefined || args.include_baseline !== undefined || args.include_people !== undefined)) {
           throw new ToolError("invalid_args", "months, include_baseline and include_people only go with `scenario`.");

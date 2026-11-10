@@ -57,7 +57,8 @@ export async function setMemberPerson(slug: string, form: FormData) {
 // "Who can sign in" (deployment-wide). These run on the new data layer (getDb), as the signed-in user; RLS on public.deployment_access
 // decides.
 
-async function deploymentDone(slug: string, work: () => Promise<number | void>, notice: string): Promise<never> {
+/** `keep`: what the form held, sent back with an error so the page can fill the form in again (a refused add keeps what was typed). */
+async function deploymentDone(slug: string, work: () => Promise<number | void>, notice: string, keep: Record<string, string> = {}): Promise<never> {
   if (!(await getSessionUser())) redirect("/login");
   let error: DbError | null = null;
   try {
@@ -66,15 +67,16 @@ async function deploymentDone(slug: string, work: () => Promise<number | void>, 
   } catch (e) {
     error = e as DbError;
   }
-  return back(slug, error ? { error: deploymentErrorMessage(error) } : { notice });
+  return back(slug, error ? { error: deploymentErrorMessage(error), ...keep } : { notice });
 }
 
 export async function addDeploymentRule(slug: string, form: FormData) {
   const kind = text(form, "kind") === "email" ? "email" : "domain";
   const role = text(form, "role");
-  if (!isDeploymentRole(role)) return deploymentDone(slug, () => Promise.reject({ message: "invalid role" }), "");
+  const keep = { kind, value: text(form, "value").slice(0, 320), role };
+  if (!isDeploymentRole(role)) return deploymentDone(slug, () => Promise.reject({ message: "invalid role" }), "", keep);
   const value = normalizeRuleValue(kind, text(form, "value"));
-  await deploymentDone(slug, () => insertDeploymentRule({ kind, value, role }), `${value} can now sign in as ${roleWord(role)}.`);
+  await deploymentDone(slug, () => insertDeploymentRule({ kind, value, role }), `${value} can now sign in as ${roleWord(role)}.`, keep);
 }
 
 export async function setDeploymentRole(slug: string, form: FormData) {

@@ -7,6 +7,10 @@ import { getDb, getSessionUser } from "@/lib/auth/session";
 
 export type CreateTokenState = { token: string; label: string } | { error: string } | null;
 
+export type RevokeTokenResult = { status: "ok" } | { status: "error"; message: string };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Create a personal API token. The token is returned once; only its hash is stored. */
 export async function createToken(_prev: CreateTokenState, form: FormData): Promise<CreateTokenState> {
   const label = String(form.get("label") ?? "").trim();
@@ -24,10 +28,16 @@ export async function createToken(_prev: CreateTokenState, form: FormData): Prom
   return { token, label };
 }
 
-/** Revoke one of the signed-in user's tokens (RLS limits the update to their own). */
-export async function revokeToken(form: FormData): Promise<void> {
-  const id = String(form.get("id") ?? "");
-  const db = await getDb();
-  await db.updateTable("api_tokens").set({ revoked_at: new Date().toISOString() }).where("id", "=", id).where("revoked_at", "is", null).execute();
+/** Revoke one of the signed-in user's tokens (RLS limits the update to their own). Says what went wrong instead of throwing. */
+export async function revokeToken(id: string): Promise<RevokeTokenResult> {
+  if (typeof id !== "string" || !UUID.test(id)) return { status: "error", message: "That isn't one of your tokens. Reload the page and try again." };
+  if (!(await getSessionUser())) return { status: "error", message: "Your session has ended. Sign in again." };
+  try {
+    const db = await getDb();
+    await db.updateTable("api_tokens").set({ revoked_at: new Date().toISOString() }).where("id", "=", id).where("revoked_at", "is", null).execute();
+  } catch {
+    return { status: "error", message: "Couldn't revoke the token. Try again." };
+  }
   refresh();
+  return { status: "ok" };
 }

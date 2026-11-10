@@ -142,7 +142,7 @@ export function IssuesPage({
     .sort((a, b) => a.label.localeCompare(b.label));
 
   const shownCount = list.length;
-  const allCount = facetCounts(state.issues, DEFAULT_LIST_STATE, "status").size === 0 ? 0 : visibleIssues(state.issues).length;
+  const allCount = visibleIssues(state.issues).length;
   return (
     <div className="flex flex-col gap-6">
       <PageHeader

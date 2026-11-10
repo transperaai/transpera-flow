@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { Help } from "@/components/help";
 import { RatingPill } from "@/components/overview/rating-pill";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ListTable, ListTableHeader } from "@/components/processes/list-table";
+import { TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
 import type { AgencyWorkspaceRow } from "@/lib/data";
+import { cn } from "@/lib/utils";
 
 // The agency's workspace list (issue #30, B1 part 3): one row per company with the headline numbers its Overview last recorded.
 // The numbers come from `workspace_headlines`, written when an Agency admin opens the Overview, so a workspace nobody has
@@ -39,9 +41,9 @@ const COLUMN_HELP = {
 const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 const when = (iso: string) => day.format(new Date(iso));
 
-function Heading({ help, children }: { help: (typeof COLUMN_HELP)[keyof typeof COLUMN_HELP]; children: string }) {
+function Heading({ help, right, children }: { help: (typeof COLUMN_HELP)[keyof typeof COLUMN_HELP]; right?: boolean; children: string }) {
   return (
-    <TableHead>
+    <TableHead className={cn("px-3", right && "text-right")}>
       <span className="inline-flex items-center whitespace-nowrap">
         {children}
         <Help {...help} />
@@ -60,23 +62,31 @@ function OfTotal({ n, total }: { n: number; total: number }) {
 
 export function AgencyWorkspaceTable({ rows }: { rows: AgencyWorkspaceRow[] }) {
   return (
-    <Table data-agency-workspaces>
-      <TableHeader>
+    <ListTable data-agency-workspaces aria-label="Workspaces">
+      <ListTableHeader stickyTop="page">
         <TableRow>
-          <TableHead>Workspace</TableHead>
-          <Heading help={COLUMN_HELP.flow}>Flow efficiency</Heading>
-          <Heading help={COLUMN_HELP.attention}>Processes needing attention</Heading>
-          <Heading help={COLUMN_HELP.risk}>Open Operational risk issues</Heading>
-          <Heading help={COLUMN_HELP.clients}>Client groups at risk</Heading>
+          <TableHead className="px-3">Workspace</TableHead>
+          <Heading help={COLUMN_HELP.flow} right>
+            Flow efficiency
+          </Heading>
+          <Heading help={COLUMN_HELP.attention} right>
+            Processes needing attention
+          </Heading>
+          <Heading help={COLUMN_HELP.risk} right>
+            Open Operational risk issues
+          </Heading>
+          <Heading help={COLUMN_HELP.clients} right>
+            Client groups at risk
+          </Heading>
           <Heading help={COLUMN_HELP.activity}>Last activity</Heading>
         </TableRow>
-      </TableHeader>
+      </ListTableHeader>
       <TableBody>
         {rows.map((ws) => {
           const n = ws.headline?.numbers;
           return (
             <TableRow key={ws.id} data-workspace={ws.slug}>
-              <TableCell className="font-medium">
+              <TableCell className="px-3 py-2.5 font-medium">
                 <Link href={`/w/${ws.slug}`} className="rounded-sm hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
                   {ws.name}
                 </Link>
@@ -84,36 +94,36 @@ export function AgencyWorkspaceTable({ rows }: { rows: AgencyWorkspaceRow[] }) {
               </TableCell>
               {n ? (
                 <>
-                  <TableCell className="tabular-nums">{n.flow_efficiency === null ? "—" : `${Math.round(n.flow_efficiency * 100)}%`}</TableCell>
-                  <TableCell>
+                  <TableCell className="px-3 text-right tabular-nums">{n.flow_efficiency === null ? "—" : `${Math.round(n.flow_efficiency * 100)}%`}</TableCell>
+                  <TableCell className="px-3 text-right">
                     <OfTotal n={n.processes_attention} total={n.processes_total} />
                   </TableCell>
                 </>
               ) : (
-                <TableCell colSpan={2} className="text-muted-foreground">
+                <TableCell colSpan={2} className="px-3 text-right text-muted-foreground">
                   Open the Overview once to see these
                 </TableCell>
               )}
-              <TableCell>
+              <TableCell className="px-3 text-right">
                 <span className="inline-flex items-center gap-2 tabular-nums">
                   <b className="font-semibold">{ws.openRiskIssues}</b>
                   {ws.openRiskIssues > 0 && <RatingPill rating="risk" />}
                 </span>
               </TableCell>
               {n ? (
-                <TableCell>
+                <TableCell className="px-3 text-right">
                   <OfTotal n={n.client_groups_at_risk} total={n.client_groups_total} />
                 </TableCell>
               ) : (
-                <TableCell className="text-muted-foreground">Open the Overview once to see these</TableCell>
+                <TableCell className="px-3 text-right text-muted-foreground">Open the Overview once to see these</TableCell>
               )}
-              <TableCell className="whitespace-nowrap">
+              <TableCell className="px-3 whitespace-nowrap tabular-nums">
                 {ws.lastActivity ? when(ws.lastActivity) : <span className="text-muted-foreground">No activity yet</span>}
               </TableCell>
             </TableRow>
           );
         })}
       </TableBody>
-    </Table>
+    </ListTable>
   );
 }

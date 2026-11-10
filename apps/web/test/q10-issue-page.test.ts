@@ -141,6 +141,20 @@ describe("the Issue page as cards", () => {
     await page.close();
   }, 300_000);
 
+  it("a status save that fails says so on the page, with no unhandled rejection, and the pill keeps its value", async () => {
+    const { page, errors } = await issuePage(6);
+    // Every stand-in Server Action now throws, as a dropped connection would.
+    await page.evaluate(() => ((window as never as { __serverActions: unknown }).__serverActions = { push: () => { throw new Error("offline"); } }));
+    const header = page.locator("[data-testid=issue-header]");
+    await header.locator("[data-status-menu]").click();
+    await page.locator("[data-status-options] [data-option=open]").click();
+    await page.waitForSelector("[data-page-error]");
+    expect(await page.locator("[data-page-error]").innerText()).toBe("Couldn't save. Check your connection and try again.");
+    expect(await header.locator("[data-status-menu]").innerText()).toContain("Testing solutions");
+    expect(errors).toEqual([]);
+    await page.close();
+  }, 300_000);
+
   it("owners are edited in a popover", async () => {
     const { page } = await issuePage(6);
     await page.locator("[data-owners]").click();

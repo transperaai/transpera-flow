@@ -179,9 +179,9 @@ export function Section({ title, aside, description, children, className, ...res
 
 export function Kpi({ label, value, sub }: { label: string; value: ReactNode; sub?: ReactNode }) {
   return (
-    <div className="min-w-0 rounded-token border border-line bg-panel px-3.5 py-3" data-kpi>
+    <div className="min-w-0 rounded-md border border-line bg-panel px-3.5 py-3" data-kpi>
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-0.5 font-mono text-[22px] font-medium tabular-nums">{value}</div>
+      <div className="mt-0.5 font-mono text-2xl font-medium tabular-nums">{value}</div>
       {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
     </div>
   );
@@ -198,7 +198,7 @@ const STATUS_DOT: Record<KpiStatus["tone"], string> = { good: "bg-good", warn: "
 export function HeroKpi({ label, value, sub, status }: { label: string; value: ReactNode; sub?: ReactNode; status?: KpiStatus }) {
   return (
     <div
-      className={cn("flex min-w-0 flex-col gap-1 rounded-token border border-line bg-panel px-4 pt-3.5 pb-3 shadow-[var(--shadow)]", status ? cn("border-t-4", STATUS_BAR[status.tone]) : "border-t-4 border-t-accent")}
+      className={cn("flex min-w-0 flex-col gap-1 rounded-md border border-line bg-panel px-4 pt-3.5 pb-3 shadow-[var(--shadow)]", status ? cn("border-t-4", STATUS_BAR[status.tone]) : "border-t-4 border-t-accent")}
       data-kpi
       data-kpi-status={status?.tone}
     >

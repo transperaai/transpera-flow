@@ -43,7 +43,7 @@
 
 import { clientChurnMonthly, withClientGroups } from "./clients";
 import { exp, log } from "./det-math";
-import type { EngineModel } from "./model";
+import { WEEKS_PER_MONTH, type EngineModel } from "./model";
 
 export const BUILTIN_CHURN_DRIVER_IDS = ["late", "resp", "onb", "rework", "load", "handoff", "results", "tenure", "price", "market"] as const;
 export type BuiltinChurnDriverId = (typeof BUILTIN_CHURN_DRIVER_IDS)[number];
@@ -494,8 +494,6 @@ export function summariseChurn(model: EngineModel, drivers: readonly ResolvedChu
   };
 }
 
-/** Weeks in a month as the churn tick uses them (4.33), the engine's conversion from a monthly rate to a weekly chance. */
-const WEEKS_PER_MONTH = 4.33;
 
 /** Clients a month the model's clients at the start lose to normal churn alone: Σ each client's base monthly churn. */
 export function baseClientsPerMonth(source: EngineModel): number {
@@ -569,7 +567,7 @@ export function projectChurn(causes: ChurnCauses, choices: readonly DriverWeight
       v =
         c.mode === "chance"
           ? Math.max(0, choice.effect * c.pressure)
-          : Math.max(0, choice.effect * chance * (c.pressure / (PRICE_PRESSURE_PER_UNIT * PRICE_EFFECT_PER)) * ((months * (52 / 12)) / PRICE_WEIGHT_WEEKS));
+          : Math.max(0, choice.effect * chance * (c.pressure / (PRICE_PRESSURE_PER_UNIT * PRICE_EFFECT_PER)) * ((months * WEEKS_PER_MONTH) / PRICE_WEIGHT_WEEKS));
     } else if (choice.effect !== undefined && choice.effect !== null && Number.isFinite(choice.effect)) {
       // Chance mode: the chance of being under a hit's effect, times the effect. A run that was itself in chance mode with no new chance keeps its measured exposure.
       const months = choice.months ?? EFFECT_MONTHS.default;
@@ -616,6 +614,6 @@ export function equivalentEvents(cause: Pick<ChurnCause, "id" | "custom" | "pres
 
 /** The price driver's effect (per 10% rise, for `months`) that gives a rise the churn the weight gives it: 2 × weight per unit of rise for 13 weeks. */
 export function priceEffectOfWeight(weight: number, months: number = EFFECT_MONTHS.default): number {
-  const effect = (Math.max(0, weight) * PRICE_PRESSURE_PER_UNIT * PRICE_EFFECT_PER * PRICE_WEIGHT_WEEKS) / (months * (52 / 12));
+  const effect = (Math.max(0, weight) * PRICE_PRESSURE_PER_UNIT * PRICE_EFFECT_PER * PRICE_WEIGHT_WEEKS) / (months * WEEKS_PER_MONTH);
   return Math.min(CHURN_EFFECT_MAX, effect);
 }

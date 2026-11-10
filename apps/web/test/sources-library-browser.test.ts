@@ -42,6 +42,13 @@ const settle = async (page: Page) => {
   await page.evaluate(() => new Promise((r) => setTimeout(r, 60)));
   await page.waitForSelector("section[aria-label='Source library'][aria-busy=false]");
 };
+/** Ticks or unticks one choice in a toolbar filter menu (Kind, Process), closes it and waits for the rows. */
+const pick = async (page: Page, filter: string, option: string) => {
+  await page.locator(`[data-filter=${filter}]`).click();
+  await page.locator(`[data-filter-menu=${filter}] [data-option="${option}"]`).click();
+  await page.keyboard.press("Escape");
+  await settle(page);
+};
 const search = async (page: Page, text: string) => {
   await page.getByLabel("Search sources").fill(text);
   await settle(page);
@@ -93,23 +100,25 @@ describe("the Sources library table", () => {
 
   it("filters by kind, by process, and to the sources linked to nothing, alone or together", async () => {
     const { page } = await open({ sources: "many" });
-    await page.getByLabel("Filter by kind").selectOption("data");
-    await settle(page);
+    await pick(page, "kind", "data");
     const data = await titles(page);
     expect(data.length).toBe(2);
     expect(await page.locator("[data-source-row] td:nth-child(2)").allInnerTexts()).toEqual(["Data", "Data"]);
-    await page.getByLabel("Filter by kind").selectOption("all");
-    await settle(page);
+    // Kind takes one choice: unticking it shows every kind again.
+    await pick(page, "kind", "data");
+    expect((await titles(page)).length).toBeGreaterThan(2);
 
-    const processName = (await page.getByLabel("Filter by process").locator("option").allInnerTexts())[1]!;
-    await page.getByLabel("Filter by process").selectOption({ label: processName });
-    await settle(page);
+    await page.locator("[data-filter=process]").click();
+    const firstProcess = page.locator("[data-filter-menu=process] label").first();
+    const processName = (await firstProcess.locator("span.truncate").innerText()).trim();
+    const processId = (await firstProcess.locator("[data-option]").getAttribute("data-option"))!;
+    await page.keyboard.press("Escape");
+    await pick(page, "process", processId);
     const inProcess = await titles(page);
     expect(inProcess.length).toBeGreaterThan(0);
     expect(inProcess.length).toBeLessThan(12);
     for (const row of await page.locator("[data-source-row] td:nth-child(5)").allInnerTexts()) expect(row).toContain(processName);
-    await page.getByLabel("Filter by process").selectOption("all");
-    await settle(page);
+    await pick(page, "process", processId);
 
     await page.getByRole("checkbox", { name: "Not linked only" }).check();
 
@@ -117,8 +126,7 @@ describe("the Sources library table", () => {
     expect((await titles(page)).sort()).toEqual(["Interview H", "Interview I", "Notes: ops walkthrough with Leah"]);
     expect(await count(page)).toBe("3 sources found.");
     // With a kind as well: only the notes among them.
-    await page.getByLabel("Filter by kind").selectOption("notes");
-    await settle(page);
+    await pick(page, "kind", "notes");
     expect(await titles(page)).toEqual(expect.arrayContaining(["Notes: ops walkthrough with Leah"]));
     for (const kind of await page.locator("[data-source-row] td:nth-child(2)").allInnerTexts()) expect(kind).toBe("Notes");
     await page.close();
@@ -178,7 +186,8 @@ describe("what the table holds", () => {
 
   it("offers every kind a source can be, and the new ones filter", async () => {
     const { page } = await open();
-    expect(await page.getByLabel("Filter by kind").locator("option").allInnerTexts()).toEqual(["All kinds", "Transcript", "Notes", "SOP", "Spreadsheet", "Data", "Screenshot", "Other"]);
+    await page.locator("[data-filter=kind]").click();
+    expect((await page.locator("[data-filter-menu=kind] label").allInnerTexts()).map((t) => t.replace(/[\d\s]+$/, "").trim())).toEqual(["Transcript", "Notes", "SOP", "Spreadsheet", "Data", "Screenshot", "Other"]);
     await page.close();
   }, 60_000);
 
@@ -204,7 +213,13 @@ describe("what the table holds", () => {
 
   it("gives the search, each filter and the toggle an (i)", async () => {
     const { page } = await open();
-    for (const label of ["Search", "Kind", "Process", "Sort by", "Not linked only"]) expect(await page.getByRole("button", { name: `About ${label}` }).count(), label).toBe(1);
+    for (const label of ["Search", "Sort by", "Not linked only"]) expect(await page.getByRole("button", { name: `About ${label}` }).count(), label).toBe(1);
+    // A filter's (i) sits in its menu.
+    for (const filter of ["Kind", "Process"]) {
+      await page.locator(`[data-filter=${filter.toLowerCase()}]`).click();
+      expect(await page.locator(`[data-filter-menu=${filter.toLowerCase()}]`).getByRole("button", { name: `About ${filter}` }).count(), filter).toBe(1);
+      await page.keyboard.press("Escape");
+    }
     await page.close();
   }, 60_000);
 });

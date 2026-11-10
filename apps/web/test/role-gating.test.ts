@@ -134,7 +134,8 @@ describe("the Editor and the Settings", () => {
     expect(access).toContain('rpc(db, "can_manage_workspace", { ws }),');
     expect(access).toContain("if (!canManage) return null;");
     expect(read(PAGE("settings/access"))).toContain("if (!settings) notFound();");
-    // The link is on the Settings page, for managers only.
-    expect(read(PAGE("settings"))).toContain("...(data.canManage ? [{ href: `/w/${slug}/settings/access`");
+    // The link is in the Settings sub-nav, for managers only: every Settings page passes it whether this person manages the workspace.
+    expect(read("components/settings/settings-nav.tsx")).toContain('...(canManage ? [{ label: "Access", href: `/w/${slug}/settings/access` }] : [])');
+    expect(read(PAGE("settings"))).toContain("canManage={data.canManage}");
   });
 });

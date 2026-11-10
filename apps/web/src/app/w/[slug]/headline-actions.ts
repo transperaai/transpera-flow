@@ -13,7 +13,12 @@ import { getDb, getSessionUser } from "@/lib/auth/session";
 
 export type RecordHeadlineResult = { status: "recorded" | "fresh" } | { status: "error"; message: string };
 
-const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= MAX_COUNT;
+/** One revision per process: far more processes than a workspace has. */
+const MAX_REVISIONS = 200;
+/** The workspace horizon setting's own range (1 to 104 weeks). */
+const MAX_HORIZON_WEEKS = 104;
+const MAX_COUNT = 100_000;
 
 /**
  * Store the workspace's headline numbers, unless the stored ones are the same numbers for the same engine, revisions and horizon
@@ -27,12 +32,16 @@ export async function recordHeadline(
 ): Promise<RecordHeadlineResult> {
   const flow = numbers?.flow_efficiency;
   if (
+    !numbers ||
+    typeof numbers !== "object" ||
     !isId(workspaceId) ||
     !Array.isArray(revisionIds) ||
-    revisionIds.length > 500 ||
+    revisionIds.length > MAX_REVISIONS ||
     !revisionIds.every(isId) ||
+    new Set(revisionIds).size !== revisionIds.length ||
     !Number.isInteger(horizonWeeks) ||
     horizonWeeks < 1 ||
+    horizonWeeks > MAX_HORIZON_WEEKS ||
     !(flow === null || (typeof flow === "number" && flow >= 0 && flow <= 1)) ||
     !isCount(numbers.processes_attention) ||
     !isCount(numbers.processes_total) ||

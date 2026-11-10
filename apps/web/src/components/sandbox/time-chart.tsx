@@ -113,7 +113,7 @@ export function TimeChart({ view, label }: { view: TimeView; label: string }) {
         {ticks.map((t) => (
           <g key={t}>
             <line x1={m.l} x2={width - m.r} y1={y(t / 100)} y2={y(t / 100)} stroke="var(--line)" strokeWidth={1} />
-            <text x={m.l - 6} y={y(t / 100) + 4} textAnchor="end" className="fill-fg-3 text-[11px] tabular-nums">
+            <text x={m.l - 6} y={y(t / 100) + 4} textAnchor="end" className="fill-fg-3 text-2xs tabular-nums">
               {t}%
             </text>
           </g>
@@ -146,7 +146,7 @@ export function TimeChart({ view, label }: { view: TimeView; label: string }) {
               {upper > 0 && cap ? <rect x={cx - bar / 2} y={y(acc + upper)} width={bar} height={Math.max(0, y(acc) - y(acc + upper))} fill="url(#time-hatch)" stroke="var(--fg-3)" strokeWidth={0.5} data-row={UNCOVERED} /> : null}
               {view.over[i] ? <circle cx={cx} cy={m.t + 3} r={3} fill="var(--crit)" data-over-dot /> : null}
               {i % every === 0 || i === n - 1 ? (
-                <text x={cx} y={HEIGHT - 8} textAnchor="middle" className="fill-fg-3 text-[11px]">
+                <text x={cx} y={HEIGHT - 8} textAnchor="middle" className="fill-fg-3 text-2xs">
                   {mo.short}
                 </text>
               ) : null}

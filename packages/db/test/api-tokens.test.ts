@@ -185,44 +185,60 @@ describe("pre-request hook", () => {
 });
 
 describe("use_api_token", () => {
-  it("records use, allows 120 requests a minute and then refuses", async () => {
-    const user = await createUser(db, "rate@example.com");
-    const { token, id } = await issueToken(user.id);
-    const use = async () => (await db.client.query("select use_api_token($1) as r", [token])).rows[0].r;
-    for (let i = 0; i < 119; i++) await use();
-    expect(await use()).toMatchObject({ allowed: true });
-    const over = await use();
+  it("is gone: the MCP endpoint checks tokens with mcp_token_lookup (ADR 0018)", async () => {
+    expect((await db.client.query("select count(*)::int as n from pg_proc where proname = 'use_api_token'")).rows[0].n).toBe(0);
+  });
+});
+
+describe("mcp_simulation_use", () => {
+  const use = (claims: Record<string, unknown> | null) =>
+    commitAs(claims, async (c) => (await c.query("select public.mcp_simulation_use() as r")).rows[0].r as { allowed: boolean; retry_after_seconds: number; limit: number });
+  /** Like db.as, but committed, so the counter persists between calls. */
+  async function commitAs<T>(claims: Record<string, unknown> | null, fn: (c: pg.Client) => Promise<T>): Promise<T> {
+    const c = db.client;
+    await c.query("begin");
+    try {
+      await c.query("set local role authenticated");
+      await c.query("select set_config('request.jwt.claims', $1, true)", [claims ? JSON.stringify(claims) : ""]);
+      const out = await fn(c);
+      await c.query("commit");
+      return out;
+    } catch (e) {
+      await c.query("rollback");
+      throw e;
+    }
+  }
+
+  it("allows 10 simulations a minute per token, then refuses until the window ends", async () => {
+    const user = await createUser(db, "sim-rate@example.com");
+    const { id } = await issueToken(user.id);
+    const claims = { sub: user.id, role: "authenticated", api_token_id: id };
+    for (let i = 0; i < 10; i++) expect(await use(claims)).toMatchObject({ allowed: true, limit: 10 });
+    const over = await use(claims);
     expect(over).toMatchObject({ allowed: false });
     expect(over.retry_after_seconds).toBeGreaterThan(0);
-    const row = (await db.client.query("select last_used_at, rate_window_count from api_tokens where id = $1", [id])).rows[0];
-    expect(row.last_used_at).not.toBeNull();
-    expect(row.rate_window_count).toBe(121);
+    // The general per-request window is separate.
+    expect((await db.client.query("select rate_window_count, sim_window_count from api_tokens where id = $1", [id])).rows[0]).toEqual({ rate_window_count: 0, sim_window_count: 11 });
+    await db.client.query("update api_tokens set sim_window_start = now() - interval '61 seconds' where id = $1", [id]);
+    expect(await use(claims)).toMatchObject({ allowed: true });
   });
 
-  it("reports acting_as_user when called through the hook as the token's user", async () => {
-    const user = await createUser(db, "hooked@example.com");
-    const { token } = await issueToken(user.id);
-    const r = await asAnonRequest({ "x-api-token": token }, async (c) => (await c.query("select use_api_token($1) as r", [token])).rows[0].r);
-    expect(r).toMatchObject({ allowed: true, acting_as_user: true });
-  });
-
-  it("starts a new window after a minute", async () => {
-    const user = await createUser(db, "rate-window@example.com");
-    const { token, id } = await issueToken(user.id);
-    await db.client.query("update api_tokens set rate_window_count = 500, rate_window_start = now() - interval '61 seconds' where id = $1", [id]);
-    const r = (await db.client.query("select use_api_token($1) as r", [token])).rows[0].r;
-    expect(r).toMatchObject({ allowed: true });
-    expect((await db.client.query("select rate_window_count from api_tokens where id = $1", [id])).rows[0].rate_window_count).toBe(1);
-  });
-
-  it("reports when the caller is not acting as the token's user (hook missing)", async () => {
-    const user = await createUser(db, "nohook@example.com");
-    const { token } = await issueToken(user.id);
-    const r = (await db.client.query("select use_api_token($1) as r", [token])).rows[0].r;
-    expect(r).toMatchObject({ allowed: true, acting_as_user: false });
-  });
-
-  it("rejects an unknown token", async () => {
-    await expect(db.client.query("select use_api_token($1)", [newToken()])).rejects.toThrow(/Invalid or revoked API token/);
+  it("counts nothing for a browser session, someone else's token or a revoked one, and anon can't call it", async () => {
+    const user = await createUser(db, "sim-other@example.com");
+    const other = await createUser(db, "sim-other2@example.com");
+    const { id } = await issueToken(user.id);
+    expect(await use({ sub: user.id, role: "authenticated" })).toMatchObject({ allowed: false });
+    expect(await use({ sub: other.id, role: "authenticated", api_token_id: id })).toMatchObject({ allowed: false });
+    expect(await use({ sub: user.id, role: "authenticated", api_token_id: "not-a-uuid" })).toMatchObject({ allowed: false });
+    await db.client.query("update api_tokens set revoked_at = now() where id = $1", [id]);
+    expect(await use({ sub: user.id, role: "authenticated", api_token_id: id })).toMatchObject({ allowed: false });
+    expect((await db.client.query("select sim_window_count from api_tokens where id = $1", [id])).rows[0].sim_window_count).toBe(0);
+    await db.client.query("begin");
+    try {
+      await db.client.query("set local role anon");
+      await expect(db.client.query("select public.mcp_simulation_use()")).rejects.toThrow(/permission denied/);
+    } finally {
+      await db.client.query("rollback");
+    }
   });
 });

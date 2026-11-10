@@ -114,17 +114,28 @@ export async function duplicateBlock(workspaceId: unknown, blockId: unknown): Pr
   }
 }
 
-/** Delete a block, unless a solution holds a copy of it (then the answer says which). */
+/**
+ * Delete a block, unless a solution holds a copy of it (then the answer says which). The check here gives the message; the database
+ * enforces the rule (`private.refuse_used_block_delete`, 20270203000100), so a solution saved between the check and the delete still
+ * stops it.
+ */
 export async function deleteBlock(workspaceId: unknown, blockId: unknown): Promise<BlockOpResult> {
   if (!isId(workspaceId) || !isId(blockId)) return invalid;
   if (!(await getSessionUser())) return signedOut;
   const db = await getDb();
-  try {
+  const inUse = async () => {
     const users = blockUsers(await loadSolutions(db, workspaceId))[blockId] ?? [];
-    if (users.length) return { status: "error", message: `This block can't be deleted. ${usedInSentence(users)}` };
+    return users.length ? ({ status: "error", message: `This block can't be deleted. ${usedInSentence(users)}` } as const) : null;
+  };
+  try {
+    const used = await inUse();
+    if (used) return used;
     const removed = await db.deleteFrom("blocks").where("id", "=", blockId).where("workspace_id", "=", workspaceId).returning("id").executeTakeFirst();
     return removed ? { status: "ok" } : { status: "error", message: "That block no longer exists, or you don't have permission to delete it." };
   } catch (e) {
+    if (pgCode(e) === "23503" && /^block is used by a solution/.test((e as { message?: string } | null)?.message ?? "")) {
+      return (await inUse().catch(() => null)) ?? { status: "error", message: "This block can't be deleted: a solution holds a copy of it." };
+    }
     return failed(e);
   }
 }

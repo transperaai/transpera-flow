@@ -5,7 +5,10 @@ export type ProviderId = "google" | "microsoft";
 export interface AuthEnv {
   /** `DATABASE_URL`: the owner. Better Auth and the sign-in access functions use it; nothing else should. */
   databaseUrl: string;
-  /** `APP_DATABASE_URL`, the `authenticator` login (packages/db/scripts/create-app-login.sql), or `databaseUrl` when it is not set. The app's queries use it. */
+  /**
+   * `APP_DATABASE_URL`, the `authenticator` login (packages/db/scripts/create-app-login.sql). The app's queries use it. Outside
+   * production it falls back to `databaseUrl` when unset; in production it must be set and differ from `DATABASE_URL`.
+   */
   appDatabaseUrl: string;
   secret: string;
   /** The deployment's own URL; a preview deployment sets the stable alias here and signs in through it (oAuthProxy). */
@@ -23,13 +26,36 @@ export function authEnv(env: Record<string, string | undefined> = process.env): 
   if (!databaseUrl || !secret) return null;
   return {
     databaseUrl,
-    appDatabaseUrl: env.APP_DATABASE_URL?.trim() || databaseUrl,
+    appDatabaseUrl: appDatabaseUrl(env, databaseUrl),
     secret,
     baseUrl: env.BETTER_AUTH_URL?.trim() || undefined,
     oauthProxySecret: env.OAUTH_PROXY_SECRET?.trim() || undefined,
     providers: parseProviders(env.AUTH_PROVIDERS),
     adminEmails: parseEmails(env.ACCESS_ADMIN_EMAILS),
   };
+}
+
+/** A production deployment: `next build`/`next start` (NODE_ENV) or Vercel's Production environment. */
+export function isProduction(env: Record<string, string | undefined>): boolean {
+  return env.NODE_ENV === "production" || env.VERCEL_ENV === "production";
+}
+
+/**
+ * The login the app's queries use. In production it must be the `authenticator` login, never the owner: the owner bypasses
+ * row-level security, so a missing `APP_DATABASE_URL` would leave the driver's claims as the only guard (ADR 0019). Locally and in
+ * tests it falls back to `DATABASE_URL`.
+ */
+function appDatabaseUrl(env: Record<string, string | undefined>, databaseUrl: string): string {
+  const app = env.APP_DATABASE_URL?.trim();
+  if (isProduction(env)) {
+    if (!app) {
+      throw new Error("APP_DATABASE_URL is not set. In production the app's queries must use the authenticator login (packages/db/scripts/create-app-login.sql), not the DATABASE_URL owner.");
+    }
+    if (app === databaseUrl) {
+      throw new Error("APP_DATABASE_URL is the same as DATABASE_URL. In production it must be the authenticator login (packages/db/scripts/create-app-login.sql), not the owner.");
+    }
+  }
+  return app || databaseUrl;
 }
 
 /** `AUTH_PROVIDERS` is a comma-separated list; unset or empty means Google. Unknown names are ignored. */

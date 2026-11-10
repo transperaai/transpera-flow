@@ -12,9 +12,9 @@ import { departmentField } from "@/lib/process-page/department";
 import { tierSetupFrom } from "@/lib/tier-setup";
 import { bundleHarness } from "./build-harness";
 
-// Q8, the process page as one card system, in a real browser on the example agency's "Performance: Pacing and hygiene, per channel" process:
-// the header card (title, pills, pencil popover, History, Edit, Export), the Process map card (Key popover, playback docked in the card),
-// What the process shows, and Issues and solutions (rows, and the empty state). Nothing sideways at 400 px.
+// Q8, the process page as a workbench, in a real browser on the example agency's "Performance: Pacing and hygiene, per channel" process:
+// the toolbar (title, pills, the key numbers, pencil popover, History, Edit, Export), the map edge to edge (Key popover, playback docked
+// under it), and the inspector's tabs: Step, Facts (What the process shows) and Issues (rows, and the empty state). Nothing sideways at 400 px.
 // With Q8_SHOTS=<dir> it also saves the screenshots (with and without issues; 1440 px light and dark, 400 px light).
 
 const META = { "import.meta.url": JSON.stringify("http://harness.test/src/lib/x/") };
@@ -91,21 +91,22 @@ async function mount(o: { editor: boolean; issues: boolean; width?: number; sche
   await page.addScriptTag({ content: script });
   await page.evaluate((m) => window.mountQ8(m), { editor: o.editor, issues: o.issues });
   await page.waitForSelector("[data-supporting-headline]:not(:has(span))", { timeout: 240_000 });
-  await page.waitForSelector("#issues");
+  await page.waitForSelector("#issues", { state: "attached" });
   await page.evaluate(() => document.fonts.ready);
   // Let the map frame itself.
   await page.waitForTimeout(800);
   return { page, errors };
 }
 
-describe("the process page as cards", () => {
-  it("an editor sees the header, the map card, the What the process shows card and the issues rows", async () => {
+describe("the process page as a workbench", () => {
+  it("an editor sees the toolbar, the map, the What the process shows tab and the issues rows", async () => {
     const { page, errors } = await mount({ editor: true, issues: true });
     // Header: the title, the pills, History, Edit, Export.
     const header = page.locator("[data-testid=about-process]");
     expect(await header.locator("h1").innerText()).toBe(processName);
     expect(await header.locator("[data-process-tag]").count()).toBe(2);
-    expect(await header.innerText()).toMatch(/\d+ steps? · \d+ roles? · Version 3/);
+    expect(await header.innerText()).toMatch(/Live\s+Version 3/);
+    expect(await header.locator("[data-process-numbers]").innerText()).toMatch(/^\d+ steps? · \d+ roles? · [\d,.]+ h a month/);
     for (const name of ["History", "Edit", "Export"]) expect(await header.getByRole(name === "Export" ? "button" : "link", { name }).count()).toBe(1);
     // The pencil opens the Type and Department selects.
     await header.getByRole("button", { name: "Edit type and department" }).click();
@@ -113,7 +114,7 @@ describe("the process page as cards", () => {
     expect(await pop.locator("select[data-process-category] option").count()).toBe(5);
     expect(await pop.innerText()).toContain("Department");
     await page.keyboard.press("Escape");
-    // The map card: title, Swimlanes, Fit, the Key popover, and the playback bar inside the card.
+    // The map: its label, Swimlanes, Fit, the Key popover, and the playback bar docked under it. It fills the page under the toolbar.
     const map = page.locator("#map");
     expect(await map.getByRole("heading", { name: "Process map" }).count()).toBe(1);
     for (const name of ["Swimlanes", "Fit", "Key"]) expect(await map.getByRole("button", { name }).count()).toBe(1);
@@ -121,14 +122,24 @@ describe("the process page as cards", () => {
     await map.getByRole("button", { name: "Key" }).click();
     expect(await page.locator("[data-slot=popover-content][data-state=open]").innerText()).toContain("Operational risk");
     await page.keyboard.press("Escape");
-    // The What the process shows card: the headline, then the panels.
+    const box = await map.boundingBox();
+    expect(box!.height).toBeGreaterThan(600);
+    // The inspector opens on Facts, What the process shows: the headline, then the panels. No card stack under the map.
+    expect(await page.getByRole("tab", { name: "Facts" }).getAttribute("aria-selected")).toBe("true");
     const run = page.locator("#run");
     for (const panel of ["facts", "hours-by-role", "heaviest-steps", "time-split", "key-person"]) expect(await run.locator(`[data-panel=${panel}]`).count()).toBe(1);
     // Heaviest steps as one strip, the time split as three totals, key-person risk grouped by person under its worst case.
     await run.locator("[data-hours-strip]").waitFor();
     expect(await run.locator("[data-time-total]").count()).toBe(3);
     expect(await run.locator("[data-panel=heaviest-steps] [data-lead]").innerText()).toMatch(/of the [\d,.]+ h a month\.$/);
+    // A click on a step shows its detail in the Step tab, not over the map.
+    const task = await page.evaluate(() => window.q8Data.bundle.steps.find((st) => st.kind === "task" && !st.parent_step_id && !st.child_process_id)!.id);
+    await map.locator(`.react-flow__node[data-id="${task}"]`).click();
+    await page.locator("#inspector [data-step-detail]").waitFor();
+    expect(await page.getByRole("tab", { name: "Step" }).getAttribute("aria-selected")).toBe("true");
+    expect(await map.locator("[data-step-detail]").count()).toBe(0);
     // Issues: counts, a Log an issue button, and rows that open the issue page.
+    await page.getByRole("tab", { name: "Issues" }).click();
     const issues = page.locator("#issues");
     expect(await issues.locator("[data-issue-counts]").innerText()).toMatch(/\d+ open · \d+ in progress · \d+ resolved/);
     expect(await issues.getByRole("button", { name: "Log an issue" }).count()).toBe(1);
@@ -163,6 +174,7 @@ describe("the process page as cards", () => {
 
   it("with no issues the card says what goes there, with an icon and the button", async () => {
     const { page } = await mount({ editor: true, issues: false });
+    await page.getByRole("tab", { name: "Issues" }).click();
     const empty = page.locator("#issues [data-issues-empty]");
     expect(await empty.innerText()).toContain("Log the problems you find on this map, then link solutions to them.");
     expect(await empty.locator("svg").count()).toBe(1);
@@ -186,8 +198,8 @@ describe("the process page as cards", () => {
         [400, "light"],
       ] as const) {
         const { page } = await mount({ editor: true, issues, width, scheme });
-        // One tall viewport, so the sticky header stays at the top of the picture.
-        await page.setViewportSize({ width, height: await page.evaluate(() => document.documentElement.scrollHeight) });
+        // The workbench fills the viewport from md up; a phone's stacked page is taken whole.
+        if (width < 768) await page.setViewportSize({ width, height: await page.evaluate(() => document.documentElement.scrollHeight) });
         await page.waitForTimeout(500);
         await page.screenshot({ path: `${shots}/process-page-${issues ? "with" : "no"}-issues-${scheme}-${width}.png` });
         await page.close();

@@ -66,7 +66,8 @@ beforeAll(async () => {
     workspaceId: ws,
   };
   [script, css, workers] = await Promise.all([
-    bundleHarness(new URL("./q11c-harness/entry.tsx", import.meta.url), META),
+    // The URL stand-in: the Solutions list keeps its filters in the URL.
+    bundleHarness(new URL("./q11c-harness/entry.tsx", import.meta.url), META, { navigation: "navigation-url.ts" }),
     appCss(),
     Promise.all(["simulate.worker.ts", "absence.worker.ts", "issue-costs.worker.ts", "shadow-price.worker.ts", "projection.worker.ts"].map(async (f) => [f, await bundleHarness(new URL(`../src/workers/${f}`, import.meta.url))] as const)).then(Object.fromEntries),
   ]);
@@ -221,7 +222,7 @@ describe("Block library", () => {
     const { page, errors } = await pageOf("blocks-library");
     const header = page.locator("[data-testid=blocks-header]");
     expect(await header.locator("h1").innerText()).toBe("Block library");
-    expect(await page.locator("[data-list-toolbar] [data-new-block]").innerText()).toBe("+ New block");
+    expect(await header.locator("[data-page-actions] [data-new-block]").innerText()).toBe("+ New block");
     const rows = page.locator("tr[data-block]");
     expect(await rows.count()).toBeGreaterThan(1);
     expect(await header.locator("[data-blocks-count]").innerText()).toBe(`${await rows.count()} blocks`);
@@ -263,22 +264,30 @@ describe("Block library", () => {
 });
 
 describe("History pages", () => {
-  it("the process history is a header card and a Versions card of rows", async () => {
+  it("the process history is a header and a master-detail: the versions on the left, the chosen one on the right", async () => {
     const { page, errors } = await pageOf("history-process");
     expect(await page.locator("[data-testid=history-header] h1").innerText()).toBe("Sales history");
     expect(await page.locator("[data-testid=history-header] [data-meta-line]").innerText()).toMatch(/^6 versions\s*·\s*Live is version 6$/);
-    expect(await page.locator("#versions [role=heading][aria-level='2']").innerText()).toBe("Versions");
+    expect(await page.locator("#versions").getByRole("heading", { level: 2 }).innerText()).toMatch(/^Versions$/i);
     const rows = page.locator("#versions li[data-version]");
     expect(await rows.count()).toBe(6);
     expect(await rows.first().locator("[data-status]").count()).toBe(0);
     expect(await rows.first().innerText()).toContain("Live");
-    expect(await rows.first().getByRole("link", { name: "View" }).count()).toBe(0);
-    expect(await rows.nth(1).getByRole("link", { name: "View" }).getAttribute("href")).toBe("/w/example/p/x?version=5");
-    expect(await rows.nth(1).getByRole("button", { name: "Restore" }).count()).toBe(1);
-    expect(await rows.nth(1).getByRole("button", { name: "Duplicate" }).count()).toBe(1);
     expect(await rows.nth(3).innerText()).toContain("Claude (MCP)");
     expect(await rows.last().innerText()).toContain("First version");
     expect(await page.locator("#versions table").count()).toBe(0);
+    // The newest (live) is chosen to start with: no View, no Restore.
+    const detail = page.locator("[data-version-detail]");
+    expect(await detail.getAttribute("data-version-detail")).toBe("6");
+    expect(await detail.getByRole("link", { name: "View" }).count()).toBe(0);
+    expect(await detail.getByRole("button", { name: "Restore" }).count()).toBe(0);
+    // Choosing v5 shows its buttons.
+    await rows.nth(1).getByRole("button").click();
+    expect(await rows.nth(1).getByRole("button").getAttribute("aria-current")).toBe("true");
+    expect(await detail.getAttribute("data-version-detail")).toBe("5");
+    expect(await detail.getByRole("link", { name: "View" }).getAttribute("href")).toBe("/w/example/p/x?version=5");
+    expect(await detail.getByRole("button", { name: "Restore" }).count()).toBe(1);
+    expect(await detail.getByRole("button", { name: "Duplicate" }).count()).toBe(1);
     expect(errors).toEqual([]);
     await page.close();
   }, 300_000);
@@ -287,7 +296,9 @@ describe("History pages", () => {
     const { page } = await pageOf("history-company");
     expect(await page.locator("[data-testid=history-header] h1").innerText()).toBe("Company map history");
     expect(await page.locator("#versions li[data-version]").count()).toBe(7);
+    // Each row says what changed, and so does the chosen version.
     expect(await page.locator("#versions [data-what-changed]").count()).toBe(7);
+    expect(await page.locator("[data-version-detail] [data-what-changed]").count()).toBe(1);
     await page.close();
   }, 300_000);
 
@@ -298,10 +309,11 @@ describe("History pages", () => {
   }, 300_000);
 });
 
-describe("Issue page, its one column and the map card", () => {
-  it("has no right column: the target and the sources sit in What's wrong (QA round 2)", async () => {
+describe("Issue page, its main column, rail and the map card", () => {
+  it("its rail holds the metadata only: the target and the sources sit in What's wrong (QA round 2)", async () => {
     const { page, errors } = await pageOf("issue-6");
-    expect(await page.locator("[data-issue-page] aside, #target").count()).toBe(0);
+    expect(await page.locator("[data-issue-page] aside").count()).toBe(1);
+    expect(await page.locator("#target, aside #sources, aside [data-issue-sources]").count()).toBe(0);
     expect(await page.locator("#wrong [role=heading][aria-level='2']").innerText()).toMatch(/^What's wrong and sources/);
     expect(await page.locator("#wrong [data-issue-sources] [data-edit-entry]").count()).toBeGreaterThan(0);
     expect(errors).toEqual([]);
@@ -340,12 +352,13 @@ describe("Other improvements", () => {
 });
 
 describe("Sources page", () => {
-  it("has a header card with Add source, and the library in a section card", async () => {
+  it("has a header with Add source, and the library flat on the page: a toolbar and one table, no card", async () => {
     const { page, errors } = await pageOf("sources");
     const header = page.locator("[data-testid=sources-header]");
     expect(await header.locator("h1").innerText()).toBe("Sources");
     expect(await header.locator("[data-page-actions]").getByRole("button", { name: "+ Add source" }).count()).toBe(1);
-    expect(await page.locator("#library [role=heading][aria-level='2']").innerText()).toBe("Library");
+    expect(await page.locator("#library [data-slot=card]").count()).toBe(0);
+    expect(await page.locator("#library [data-list-toolbar]").count()).toBe(1);
     expect(await page.locator("#library [data-source-row]").count()).toBeGreaterThan(2);
     expect(errors).toEqual([]);
     await page.close();

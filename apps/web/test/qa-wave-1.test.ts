@@ -26,15 +26,13 @@ describe("the process page", () => {
   it("has no stat cards, projection (horizon) picker or levers", () => {
     for (const gone of ["HeadlineCards", "HorizonPicker", "LeverPanel", 'id="projection"']) expect(page).not.toContain(gone);
   });
-  it("puts Sources last, in a section that starts closed", () => {
+  it("puts Sources last, as the inspector's last tab, which a #sources address opens", () => {
     expect(page.lastIndexOf("<ProcessSources")).toBeGreaterThan(page.lastIndexOf("issuesUi.issuesList"));
     const sources = page.slice(page.indexOf("function ProcessSources"));
-    // A heading holding a button (not a heading inside a <summary>), closed to start, opened by a #sources address.
     expect(sources).not.toContain("<summary");
-    expect(sources).toContain("useState(false)");
-    expect(sources).toContain("aria-expanded={open}");
-    expect(sources).toContain("aria-controls=\"sources-body\"");
-    expect(sources).toContain('"#sources"');
+    expect(sources).toContain('id="sources"');
+    expect(page).toContain('if (id === "sources") return "sources";');
+    expect(page).toContain('window.addEventListener("hashchange", fromHash)');
   });
 });
 

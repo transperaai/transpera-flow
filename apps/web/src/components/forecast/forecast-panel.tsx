@@ -12,7 +12,6 @@ import type { ProcessBundle } from "@transpera-flow/db";
 import { RATING_LABELS, toRatingConfig } from "@transpera-flow/engine";
 import { ANALYSIS_DEFAULTS } from "@/lib/analysis/defaults";
 import { buttonVariants } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DEFAULT_FORECAST_MONTHS, forecastInsights, forecastModel, today } from "@/lib/forecast/forecast";
 import { timelineData } from "@/lib/forecast/timeline";
@@ -58,7 +57,7 @@ export function ForecastPanel({
     <section ref={ref} className="flex min-w-0 flex-col gap-3" data-people-forecast>
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 className="font-heading text-lg leading-snug font-semibold tracking-tight">Who gets too busy, and when</h2>
+          <h2 className="text-base font-semibold">Who gets too busy, and when</h2>
           <p className="text-sm text-muted-foreground">The next {span}, with planned hires and leave.</p>
         </div>
         <Link href={forecastHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
@@ -66,7 +65,8 @@ export function ForecastPanel({
           <ArrowRight aria-hidden />
         </Link>
       </div>
-      <Card className="gap-3 px-4 py-4" data-chart="people-forecast">
+      {/* One surface, the full width: the alerts, the legend (five inline, the rest behind "Key") and the timeline. */}
+      <div className="flex min-w-0 flex-col gap-3 rounded-xl border border-line bg-panel p-4" data-chart="people-forecast">
         {alerts === null ? (
           <Skeleton className="h-6 w-2/3" aria-busy="true" />
         ) : alerts.length ? (
@@ -89,7 +89,7 @@ export function ForecastPanel({
         ) : (
           <Skeleton className="h-[320px] w-full" aria-busy="true" />
         )}
-      </Card>
+      </div>
     </section>
   );
 }

@@ -25,6 +25,7 @@ import { absenceTest, detectIssues, ENGINE_VERSION, ISSUE_TYPES, ratingOfStored,
 import { bottleneckReport, checkScenarioRobustness, compareScenarios, matchNamed, type NamedScenario } from "./analysis";
 import { resolveProcess, resolveWorkspace, revisionIdFor, type ProcessWithDraft, type ToolContext, type WorkspaceRef } from "./context";
 import { runTool, ToolError } from "./result";
+import { chargeSimulation } from "./simulation-limit";
 import { isRunDate, listScenarios } from "./saved-scenarios";
 
 /** The statuses a tool may give or filter an issue by: the four a person sees, and the two old spellings of testing and resolved. */
@@ -167,6 +168,7 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
     },
     (args) =>
       runTool(async (assumptions) => {
+        await chargeSimulation(ctx);
         const loaded = await loadLiveModel(ctx, args, assumptions);
         const { reps, seed } = runSettings(args, assumptions);
         if (!args.a) assumptions.push("a defaulted to the baseline (the live model with no scenario applied).");
@@ -213,6 +215,7 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
     },
     (args) =>
       runTool(async (assumptions) => {
+        await chargeSimulation(ctx);
         const loaded = await loadLiveModel(ctx, args, assumptions);
         const scenario = await resolveScenarios(ctx, loaded.ws, refs(args.scenario));
         const metric = args.metric ?? "won";
@@ -292,6 +295,7 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
     },
     (args) =>
       runTool(async (assumptions) => {
+        await chargeSimulation(ctx);
         const loaded = await loadLiveModel(ctx, args, assumptions);
         const { reps, seed } = runSettings(args, assumptions);
         const started = performance.now();
@@ -382,6 +386,7 @@ export function registerAnalysisTools(server: McpServer, ctx: ToolContext): void
 
         let detected: unknown[] | undefined;
         if (args.include_detected && proc) {
+          await chargeSimulation(ctx);
           const loaded = await loadLiveModel(ctx, { workspace: ws.id, process: proc.id }, assumptions);
           assumptions.push(`Detections come from a run of the live model at ${DEFAULT_REPS} replications, seed ${DEFAULT_SEED}.`);
           const run = simulate(loaded.model, DEFAULT_REPS, DEFAULT_SEED);

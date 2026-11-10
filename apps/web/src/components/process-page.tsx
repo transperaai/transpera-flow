@@ -283,11 +283,11 @@ export function ProcessPage({
   const numbers =
     supporting?.hours && supporting.hours.total > 0 ? (
       <>
-        <span aria-hidden>·</span>
+        {" · "}
         <span data-process-hours>{hoursText(supporting.hours.total)} a month</span>
         {monthCost !== null && (
           <>
-            <span aria-hidden>·</span>
+            {" · "}
             <span data-process-cost>{formatWholeCurrency(monthCost, currency)} a month</span>
           </>
         )}

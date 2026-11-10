@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NORTHBEAM_TEAM, northbeamModel, northbeamWithClientGroups, northbeamWithClients, northbeamWithServicing, simulate, type EngineModel } from "@transpera-flow/engine";
+import { MAX_REWORK, NORTHBEAM_TEAM, northbeamModel, northbeamWithClientGroups, northbeamWithClients, northbeamWithServicing, simulate, type EngineModel } from "@transpera-flow/engine";
 import {
   ModelError,
   northbeamBundle,
@@ -220,6 +220,19 @@ describe("toEngineModel", () => {
     const c = northbeamBundle();
     c.edges = c.edges.map((e) => (e.to_step_id === northbeamStepIds.won ? { ...e, to_step_id: northbeamStepIds.start } : e));
     expect(() => toEngineModel(c)).toThrow(/back to the start step/);
+  });
+
+  it("caps a step's rework at the engine's MAX_REWORK (a stored 1 would redo an item forever)", () => {
+    const b = northbeamBundle();
+    b.steps = b.steps.map((s) => (s.id === northbeamStepIds.audit ? { ...s, rework_rate: 1 } : s.id === northbeamStepIds.onboard ? { ...s, rework_rate: 0.4 } : s));
+    const steps = new Map(toEngineModel(b, { startDate: START }).steps.map((s) => [s.id, s]));
+    expect(steps.get(northbeamStepIds.audit)!.rework).toBe(MAX_REWORK);
+    expect(steps.get(northbeamStepIds.onboard)!.rework).toBe(0.4);
+  });
+
+  it("the engine's pre-run checks throw the same ModelError toEngineModel does", () => {
+    const m = toEngineModel(northbeamBundle(), { startDate: START });
+    expect(() => simulate({ ...m, horizonWeeks: 0 }, 1, 1)).toThrow(ModelError);
   });
 
   it("maps a step's SLA for breach counting, and leaves it out when blank", () => {

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
+import { TransperaMark } from "@/components/shell/transpera-mark";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent } from "@/components/ui/card";
 import { ACCESS_DENIED_CODE, ACCESS_DENIED_MESSAGE } from "@/lib/auth/access";
@@ -15,8 +16,8 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
   return (
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-6 px-4 py-16">
       <div className="flex flex-col gap-1">
-        <p className="flex items-center gap-2.5 font-display text-base font-bold tracking-tight">
-          <span aria-hidden className="size-[22px] rounded-md bg-[conic-gradient(from_200deg,var(--accent),var(--chart-1),var(--chart-5),var(--accent))]" />
+        <p className="flex items-center gap-2.5 font-display text-base font-semibold tracking-tight">
+          <TransperaMark />
           Transpera Flow
         </p>
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Sign in</h1>

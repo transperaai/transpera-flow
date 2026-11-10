@@ -16,7 +16,7 @@
 //   hire, pay  stored and exposed, but the engine has no hiring or cash-flow
 //           model yet, so they change no simulated number.
 
-import type { EngineModel } from "./model";
+import { WEEKS_PER_MONTH, type EngineModel } from "./model";
 
 /** The seven factors, as multipliers on today (1 is the same as today). */
 export interface MarketFactors {
@@ -106,7 +106,7 @@ export function activeMarket(model: EngineModel): EngineMarket | null {
 
 /** Hours in one market month (the same 52/12-week month as demand.ts). */
 export function marketMonthHours(model: EngineModel): number {
-  return (52 / 12) * model.hoursPerWeek;
+  return WEEKS_PER_MONTH * model.hoursPerWeek;
 }
 
 /** The factors in force at simulation hour `t` (month 1 before the run starts). Stable when the model has no active market. */

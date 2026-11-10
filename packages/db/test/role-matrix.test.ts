@@ -875,7 +875,7 @@ describe("anon writes nothing", () => {
       expect(fns).toEqual([
         "api_tokens_keep_revoked", "audit_access_change", "can_edit_workspace", "can_manage_workspace", "can_read_workspace", "edit_drafts_only",
         "is_agency_admin", "is_free_mail_domain", "mcp_token_lookup", "set_updated_at",
-        "stamp_provenance", "use_api_token", "workspace_role",
+        "stamp_provenance", "workspace_role",
       ]);
       // And none of the functions that acted on visitors' ideas or built solutions exists any more, or is open to anon.
       for (const f of ["play_proposal_contacts", "review_proposals", "review_suggestions", "build_proposal", "submit_play_proposal", "save_solution", "play_patch_problem", "lever_kind_ids", "share_team_capacity", "open_share_link"]) expect(fns, f).not.toContain(f);

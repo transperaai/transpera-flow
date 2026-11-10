@@ -276,7 +276,6 @@ function Leave({
   disabled: boolean;
 }) {
   const { state, pending, onSubmit } = useAddForm<ActionResult>(addLeave.bind(null, personId, workspaceId), {});
-  const [removing, startRemoving] = useTransition();
   const [removeError, setRemoveError] = useState<string>();
   return (
     <fieldset>
@@ -298,20 +297,7 @@ function Leave({
                 {l.start_date === l.end_date ? l.start_date : `${l.start_date} to ${l.end_date}`}
               </span>
               {l.note && <span className="text-fg-2">{l.note}</span>}
-              {!disabled && (
-                <Button variant="link" size="xs" className="h-auto p-0 text-muted-foreground underline hover:text-destructive"
-                  type="button"
-                  disabled={removing}
-                  onClick={() =>
-                    startRemoving(async () => {
-                      const r = await removeLeave(l.id);
-                      setRemoveError(r.error);
-                    })
-                  }
-                >
-                  Remove
-                </Button>
-              )}
+              {!disabled && <RemoveLeave id={l.id} when={l.start_date === l.end_date ? l.start_date : `${l.start_date} to ${l.end_date}`} onDone={setRemoveError} />}
             </li>
           ))}
         </ul>
@@ -349,5 +335,41 @@ function Leave({
         </form>
       )}
     </fieldset>
+  );
+}
+
+/** Remove for one booking of leave, asked once first ("Remove leave 4 to 15 August?"), as a role's Remove is. */
+function RemoveLeave({ id, when, onDone }: { id: string; when: string; onDone: (error: string | undefined) => void }) {
+  const [confirming, setConfirming] = useState(false);
+  const [removing, start] = useTransition();
+  if (!confirming) {
+    return (
+      <Button variant="link" size="xs" className="h-auto p-0 text-muted-foreground underline hover:text-destructive" type="button" onClick={() => setConfirming(true)}>
+        Remove
+      </Button>
+    );
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-2" data-confirm-remove-leave>
+      <span>Remove leave {when}?</span>
+      <Button
+        variant="destructive"
+        size="xs"
+        type="button"
+        disabled={removing}
+        onClick={() =>
+          start(async () => {
+            const r = await removeLeave(id);
+            onDone(r.error);
+            if (r.error) setConfirming(false);
+          })
+        }
+      >
+        {removing ? "Removing…" : "Remove"}
+      </Button>
+      <Button variant="outline" size="xs" type="button" disabled={removing} onClick={() => setConfirming(false)}>
+        Cancel
+      </Button>
+    </span>
   );
 }

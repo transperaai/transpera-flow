@@ -121,14 +121,14 @@ export function CompareChart({ title, months, series, format, formatDiff = (v) =
         {ticks.map((t) => (
           <g key={t}>
             <line x1={m.l} x2={width - m.r} y1={y(t)} y2={y(t)} stroke="var(--line)" strokeWidth={1} />
-            <text x={m.l - 8} y={y(t) + 4} textAnchor="end" className="fill-fg-3 text-[11px] tabular-nums">
+            <text x={m.l - 8} y={y(t) + 4} textAnchor="end" className="fill-fg-3 text-2xs tabular-nums">
               {format(t)}
             </text>
           </g>
         ))}
         {months.map((mo, i) =>
           labelled.has(i) ? (
-            <text key={mo.index} x={x(i)} y={HEIGHT - 8} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} className="fill-fg-3 text-[11px]">
+            <text key={mo.index} x={x(i)} y={HEIGHT - 8} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} className="fill-fg-3 text-2xs">
               {mo.short}
               {mo.partial ? "*" : ""}
             </text>

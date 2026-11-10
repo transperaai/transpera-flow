@@ -132,10 +132,8 @@ export function ProcessHeader({
         {rating && <RatingPill rating={rating} />}
         {pills}
       </div>
-      <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground tabular-nums" data-process-numbers>
-        <span>
-          {plural(about.steps, "step", "steps")} · {plural(about.roles, "role", "roles")}
-        </span>
+      <p className="text-xs text-muted-foreground tabular-nums" data-process-numbers>
+        {plural(about.steps, "step", "steps")} · {plural(about.roles, "role", "roles")}
         {numbers}
       </p>
       {inside}

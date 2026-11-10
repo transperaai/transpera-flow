@@ -1,0 +1,21 @@
+-- Drop `public.use_api_token(text)`, dead since the MCP token check moved into app code (docs/adr/0018-mcp-tokens-checked-in-app-code.md).
+--
+-- It was the PostgREST-era per-request bookkeeping for MCP tokens (20260930040000_api_tokens.sql): security definer, executable by
+-- `anon` and `authenticated`, taking a raw token. Nothing calls it since `public.mcp_token_lookup` (20261229000000) replaced it, and
+-- there is no PostgREST any more; leaving it meant one more definer function open to `anon` that stamps and counts a token.
+--
+-- What it does: `drop function public.use_api_token(text)`. No data changes. `private.hash_api_token`, the `api_tokens` table and
+-- `mcp_token_lookup` stay.
+--
+-- Preflight: `select count(*) from public.schema_migrations where version >= '20270203000400';` expect 0, and 20270203000300 applied.
+--     Nothing in the app, packages/mcp or packages/db/scripts names it (grep for use_api_token: only migrations and docs).
+-- Post-apply check: select count(*) from pg_proc where proname = 'use_api_token'; expect 0.
+--
+-- ROLLBACK (run as one transaction):
+--
+--   begin;
+--   -- Re-run the `create function public.use_api_token(token text) ...` block and its revoke/grant lines from 20260930040000_api_tokens.sql.
+--   delete from public.schema_migrations where version = '20270203000400';
+--   commit;
+
+drop function public.use_api_token(text);

@@ -8,7 +8,7 @@ import { setupChecklist } from "@/lib/overview/setup";
 
 declare global {
   interface Window {
-    mountStart: (opts: { canEdit: boolean }) => void;
+    mountStart: (opts: { canEdit: boolean; canRestore?: boolean }) => void;
     created: string[];
   }
 }
@@ -18,7 +18,7 @@ const base = "/w/acme";
 
 let root: Root | null = null;
 window.created = [];
-window.mountStart = ({ canEdit }) => {
+window.mountStart = ({ canEdit, canRestore = false }) => {
   root?.unmount();
   root = createRoot(document.getElementById("root")!);
   root.render(
@@ -40,7 +40,7 @@ window.mountStart = ({ canEdit }) => {
               : undefined
           }
           upload={canEdit ? { preview: async () => ({}) as never, create: async () => ({}) as never } : undefined}
-          canRestore={false}
+          canRestore={canRestore}
         />
       </div>
     </SidebarProvider>,

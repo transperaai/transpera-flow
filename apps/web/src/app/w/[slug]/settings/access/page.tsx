@@ -44,6 +44,7 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
   const search = await props.searchParams;
   const error = typeof search.error === "string" ? search.error : null;
   const notice = typeof search.notice === "string" ? search.notice : null;
+  const param = (key: string) => (typeof search[key] === "string" ? (search[key] as string) : undefined);
 
   const settings = await loadAccessSettings(slug);
   if (!settings) notFound();
@@ -79,7 +80,7 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
           </Alert>
         )}
 
-        {signInView && <WhoCanSignIn slug={slug} view={signInView} myEmail={members.find((m) => m.userId === userId)?.email ?? null} />}
+        {signInView && <WhoCanSignIn slug={slug} view={signInView} myEmail={members.find((m) => m.userId === userId)?.email ?? null} draft={error ? { kind: param("kind"), value: param("value"), role: param("role") } : undefined} />}
 
         <div role="region" aria-labelledby="members-heading">
           <SectionCard

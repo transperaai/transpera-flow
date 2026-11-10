@@ -9,6 +9,7 @@ import type { MonthlyResult } from "@transpera-flow/engine";
 import type { PurposeCategory, Viewer } from "@transpera-flow/db";
 import { Help } from "@/components/help";
 import { Card } from "@/components/ui/card";
+import { Segmented } from "./segmented";
 import { NativeSelect } from "@/components/ui/native-select";
 import { TimeChart, TimeLegend } from "@/components/sandbox/time-chart";
 import { formatNumber, formatPercent } from "@/lib/format";
@@ -75,21 +76,17 @@ export function TimeByPurpose({ monthly, months, categories, roles, people, view
           <p className="text-sm text-muted-foreground">What {who} {scope.kind === "team" || scope.kind === "others" ? "spend" : "spends"} working time on over the next {span}, as hours and as a share of all the hours available.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div role="group" aria-label="Show" className="inline-flex rounded-lg border border-border bg-muted/40 p-0.5 text-xs">
-            {(noPeople ? (["team", "role"] as const) : (["team", "role", "person"] as const)).map((k) => (
-              <button
-                key={k}
-                type="button"
-                aria-pressed={kind === k}
-                // The Month by month section has its own "By role" and "By person": this one says which it is.
-                aria-label={k === "team" ? "Where the time goes, team" : `Where the time goes, ${k === "role" ? "by role" : "by person"}`}
-                onClick={() => setKind(k)}
-                className={cn("rounded-md px-2.5 py-1 font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring", kind === k ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
-              >
-                {k === "team" ? "Team" : k === "role" ? "By role" : "By person"}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            aria-label="Show"
+            value={kind}
+            onChange={setKind}
+            options={(noPeople ? (["team", "role"] as const) : (["team", "role", "person"] as const)).map((k) => ({
+              value: k,
+              label: k === "team" ? "Team" : k === "role" ? "By role" : "By person",
+              // The Month by month section has its own "By role" and "By person": this one says which it is.
+              ariaLabel: k === "team" ? "Where the time goes, team" : `Where the time goes, ${k === "role" ? "by role" : "by person"}`,
+            }))}
+          />
           {kind === "role" && withWork.length > 0 ? (
             <NativeSelect aria-label="Role" value={role ?? ""} onChange={(e) => setRoleId(e.target.value)} className="h-8 w-auto text-xs" data-time-pick="role">
               {withWork.map((r) => (

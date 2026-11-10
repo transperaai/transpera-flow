@@ -320,17 +320,19 @@ export function ChangesPanel({
                 ))}
               </button>
               {editor && (
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="xs"
                   disabled={!!problem}
                   title={problem ?? undefined}
                   aria-label={`${action}: ${what ?? name}${what ? ` ${name}` : ""}`}
                   onClick={() => editor.run((b) => discardChange(live, b, c.table, c.id))}
                   data-edit-entry
-                  className={`${button} ${EDIT_ONLY}`}
+                  className={EDIT_ONLY}
                 >
                   {action}
-                </button>
+                </Button>
               )}
             </li>
           );

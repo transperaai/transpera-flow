@@ -130,7 +130,7 @@ export function PlayLevers({
               </label>
             ))}
           </div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <MonthSelect value={play.addFrom} months={months} onChange={(m) => set({ addFrom: m })} label="Starting" id="addFrom" />
             <label className={FIELD}>
               For
@@ -195,7 +195,7 @@ export function PlayLevers({
 
         <Group title="Prices" id="price">
           <Slider id="price" label="Price change" value={play.price} min={-20} max={30} step={1} unit="%" onChange={(v) => set({ price: v })} />
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <label className={FIELD}>
               Tiers
               <NativeSelect value={play.priceTier} onChange={(e) => set({ priceTier: e.target.value })} data-lever="priceTier" aria-label="Tiers the price change is for">

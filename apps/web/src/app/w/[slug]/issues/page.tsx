@@ -12,7 +12,7 @@ const DESCRIPTION = (
   </>
 );
 
-/** The Issues list (A48): the problems people have confirmed, filtered by Open / Resolved / All and rating (both in the URL). */
+/** The Issues list (A48): the problems people have confirmed, filtered by Open / Resolved / All and rating (both in the URL). The list draws its own header, with + New issue at its right. */
 export default async function WorkspaceIssuesPage(props: PageProps<"/w/[slug]/issues">) {
   const { slug } = await props.params;
   const bundle = await loadLiveProcess(slug);
@@ -44,12 +44,9 @@ export default async function WorkspaceIssuesPage(props: PageProps<"/w/[slug]/is
     loadWorkspaceSolutions(ws),
   ]);
   return (
-    <Page
-      title="Issues"
-      eyebrow="Improve"
-      description={DESCRIPTION}
-    >
+    <Page title="Issues" hideHeader>
       <IssuesPage
+        description={DESCRIPTION}
         bundle={bundle}
         issues={issues}
         scenarios={scenarios}

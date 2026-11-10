@@ -18,6 +18,8 @@ import type { TimelineData, TimelineMarker, TimelineRow } from "@/lib/forecast/t
 import { longDate, shortDate, type PlanLaneMarker } from "@/lib/sandbox/lane";
 import { addDays, dateAtPosition, monthIndexOfDate, positionOfDate, stepDate } from "@transpera-flow/db/sandbox";
 import { useElementWidth } from "@/lib/use-element-width";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 
 const ROW = 52;
@@ -62,34 +64,62 @@ export function TimelineLegend({
   /** The plan lane is drawn (B7): what its markers mean. */
   hasPlan?: boolean;
 }) {
+  const items: { key: string; swatch: ReactNode; label: ReactNode }[] = [
+    { key: "average", swatch: <i aria-hidden className="h-0.5 w-4 rounded bg-accent" />, label: "Average" },
+    { key: "range", swatch: <i aria-hidden className="h-2.5 w-4 rounded-sm bg-accent/20" />, label: "10–90% range" },
+    { key: "line", swatch: <i aria-hidden className="w-4 border-t border-dashed border-fg-3" />, label: `${formatPercent(busyLine)} utilisation threshold` },
+    { key: "busy", swatch: <i aria-hidden className="size-2.5 rounded-full border-2 border-panel bg-rate-bad ring-1 ring-rate-bad" />, label: "Too busy that month" },
+    ...(hasMarkers
+      ? [
+          { key: "starts", swatch: <span aria-hidden className="text-2xs leading-none text-fg">▲</span>, label: "Starts" },
+          { key: "leaves", swatch: <span aria-hidden className="text-2xs leading-none text-fg">▼</span>, label: "Leaves" },
+          { key: "leave", swatch: <i aria-hidden className="h-1 w-4 rounded-full bg-fg-3" />, label: "On leave" },
+        ]
+      : []),
+    ...(hasUncovered ? [{ key: "uncovered", swatch: <i aria-hidden className="h-2.5 w-4 rounded-sm border border-rate-risk bg-rate-risk-soft" />, label: "No one to do the work" }] : []),
+    ...(hasPlan
+      ? [
+          { key: "plan-hire", swatch: <span aria-hidden className="text-2xs leading-none text-edit">▲</span>, label: "Hire in your scenario" },
+          { key: "plan-leave", swatch: <i aria-hidden className="h-2 w-4 rounded-sm bg-edit" />, label: "Leave in your scenario" },
+          { key: "plan-solution", swatch: <span aria-hidden className="text-2xs leading-none text-edit">◆</span>, label: "Solution goes live" },
+          { key: "plan-change", swatch: <span aria-hidden className="text-2xs leading-none text-edit">●</span>, label: "Other change from a month" },
+        ]
+      : []),
+    ...(hasMarket ? [{ key: "market", swatch: <i aria-hidden className="h-2.5 w-4 rounded-sm border border-line-2 bg-[repeating-linear-gradient(135deg,var(--line-2)_0_2px,transparent_2px_5px)]" />, label: "Market condition" }] : []),
+  ];
+  // Up to five inline (docs/plans/ui-cleanup.md, ChartFrame); the rest behind "Key", so the legend stays one line above a full-width chart.
+  const inline = items.length <= LEGEND_INLINE + 1 ? items : items.slice(0, LEGEND_INLINE);
+  const more = items.slice(inline.length);
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5" data-timeline-legend>
-      <TimelineLegendItem swatch={<i aria-hidden className="h-0.5 w-4 rounded bg-accent" />}>Average</TimelineLegendItem>
-      <TimelineLegendItem swatch={<i aria-hidden className="h-2.5 w-4 rounded-sm bg-accent/20" />}>10–90% range</TimelineLegendItem>
-      <TimelineLegendItem swatch={<i aria-hidden className="w-4 border-t border-dashed border-fg-3" />}>{formatPercent(busyLine)} utilisation threshold</TimelineLegendItem>
-      <TimelineLegendItem swatch={<i aria-hidden className="size-2.5 rounded-full border-2 border-panel bg-rate-bad ring-1 ring-rate-bad" />}>Too busy that month</TimelineLegendItem>
-      {hasMarkers && (
-        <>
-          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-fg">▲</span>}>Starts</TimelineLegendItem>
-          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-fg">▼</span>}>Leaves</TimelineLegendItem>
-          <TimelineLegendItem swatch={<i aria-hidden className="h-1 w-4 rounded-full bg-fg-3" />}>On leave</TimelineLegendItem>
-        </>
+      {inline.map((it) => (
+        <TimelineLegendItem key={it.key} swatch={it.swatch}>
+          {it.label}
+        </TimelineLegendItem>
+      ))}
+      {more.length > 0 && (
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button type="button" variant="ghost" size="xs" className="text-muted-foreground" data-timeline-key>
+              Key
+              <span className="tabular-nums">+{more.length}</span>
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="start" className="flex w-64 flex-col gap-1.5 p-3" data-timeline-key-items>
+            {more.map((it) => (
+              <TimelineLegendItem key={it.key} swatch={it.swatch}>
+                {it.label}
+              </TimelineLegendItem>
+            ))}
+          </PopoverContent>
+        </Popover>
       )}
-      {hasUncovered && (
-        <TimelineLegendItem swatch={<i aria-hidden className="h-2.5 w-4 rounded-sm border border-rate-risk bg-rate-risk-soft" />}>No one to do the work</TimelineLegendItem>
-      )}
-      {hasPlan && (
-        <>
-          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">▲</span>}>Hire in your scenario</TimelineLegendItem>
-          <TimelineLegendItem swatch={<i aria-hidden className="h-2 w-4 rounded-sm bg-edit" />}>Leave in your scenario</TimelineLegendItem>
-          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">◆</span>}>Solution goes live</TimelineLegendItem>
-          <TimelineLegendItem swatch={<span aria-hidden className="text-[10px] leading-none text-edit">●</span>}>Other change from a month</TimelineLegendItem>
-        </>
-      )}
-      {hasMarket && <TimelineLegendItem swatch={<i aria-hidden className="h-2.5 w-4 rounded-sm border border-line-2 bg-[repeating-linear-gradient(135deg,var(--line-2)_0_2px,transparent_2px_5px)]" />}>Market condition</TimelineLegendItem>}
     </div>
   );
 }
+
+/** How many legend entries show inline before the rest go behind "Key". */
+const LEGEND_INLINE = 5;
 
 /** Where a row is at its busiest, in words: "Peaks at 92% in Feb". */
 function peakOf(row: TimelineRow, months: TimelineData["months"]): string {
@@ -273,7 +303,7 @@ export function ForecastTimeline({
       return (
         <>
           <path d={`M${x - 7},${laneMid + 6} L${x + 7},${laneMid + 6} L${x},${laneMid - 7} Z`} fill={fill} {...stroke} />
-          <text x={x + 10} y={laneMid + 4} className="fill-fg text-[11px] font-semibold" aria-hidden>
+          <text x={x + 10} y={laneMid + 4} className="fill-fg text-2xs font-semibold" aria-hidden>
             +
           </text>
         </>
@@ -284,16 +314,16 @@ export function ForecastTimeline({
   /** A row's name and what it adds, on two lines (wide) or one (narrow). */
   const rowLabel = (r: number, top0: number, name: string, sub: string) =>
     compact ? (
-      <text x={0} y={top0 + 13} className="fill-fg text-[12px] font-medium">
+      <text x={0} y={top0 + 13} className="fill-fg text-xs font-medium">
         {name}
-        <tspan className="fill-fg-2 text-[11px] font-normal"> · {sub}</tspan>
+        <tspan className="fill-fg-2 text-2xs font-normal"> · {sub}</tspan>
       </text>
     ) : (
       <>
-        <text x={0} y={top0 + 16} className="fill-fg text-[12px] font-medium">
+        <text x={0} y={top0 + 16} className="fill-fg text-xs font-medium">
           {name.length > 24 ? `${name.slice(0, 23)}…` : name}
         </text>
-        <text x={0} y={top0 + 31} className="fill-fg-2 text-[11px]">
+        <text x={0} y={top0 + 31} className="fill-fg-2 text-2xs">
           {sub}
         </text>
       </>
@@ -391,7 +421,7 @@ export function ForecastTimeline({
               <title>{`${band.name}: ${data.months[band.from]!.long} to ${data.months[band.to]!.long}`}</title>
               <rect x={a} y={TOP - 4} width={w} height={height - TOP - AXIS + 4} fill={`url(#${hatch})`} opacity={0.7} />
               <line x1={a} x2={a} y1={TOP - 4} y2={height - AXIS} stroke="var(--line-2)" strokeWidth={1} />
-              <text x={a + 3} y={12} className="fill-fg-2 text-[11px]">
+              <text x={a + 3} y={12} className="fill-fg-2 text-2xs">
                 {w > 64 || !compact ? band.name : ""}
               </text>
             </g>
@@ -402,7 +432,7 @@ export function ForecastTimeline({
           labelled.has(i) ? (
             <g key={mo.index}>
               <line x1={x(i)} x2={x(i)} y1={TOP - 4} y2={height - AXIS} stroke="var(--line)" strokeWidth={1} />
-              <text x={x(i)} y={height - 7} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} className="fill-fg-3 text-[11px]">
+              <text x={x(i)} y={height - 7} textAnchor={i === 0 ? "start" : i === n - 1 ? "end" : "middle"} className="fill-fg-3 text-2xs">
                 {mo.short}
                 {mo.partial ? "*" : ""}
               </text>
@@ -439,13 +469,13 @@ export function ForecastTimeline({
                 return tone ? <circle key={i} cx={x(i)} cy={y(s!.mean)} r={3.5} fill={tone} stroke="var(--panel)" strokeWidth={2} /> : null;
               })}
               {last && (
-                <text x={m.l + plotW + 6} y={y(last.mean) + 4} className="fill-fg text-[11px] font-semibold tabular-nums">
+                <text x={m.l + plotW + 6} y={y(last.mean) + 4} className="fill-fg text-2xs font-semibold tabular-nums">
                   {formatPercent(last.mean)}
                 </text>
               )}
               {row.markers.map((mk, k) => markerGlyph(mk, r, k))}
               {!last && row.uncovered && (
-                <text x={m.l + plotW + 6} y={rowBase(r) - ROW / 2 + 4} className="fill-fg text-[11px] font-semibold">
+                <text x={m.l + plotW + 6} y={rowBase(r) - ROW / 2 + 4} className="fill-fg text-2xs font-semibold">
                   No one
                 </text>
               )}
@@ -454,7 +484,7 @@ export function ForecastTimeline({
         })}
 
         {data.clients.length > 0 && (
-          <text x={0} y={clientsTop - 10} className="fill-fg-2 text-[11px] font-semibold tracking-wide uppercase">
+          <text x={0} y={clientsTop - 10} className="fill-fg-2 text-2xs font-semibold tracking-wide uppercase">
             Active clients
           </text>
         )}
@@ -468,7 +498,7 @@ export function ForecastTimeline({
               <line x1={m.l} x2={m.l + plotW} y1={base} y2={base} stroke="var(--line-2)" strokeWidth={1} />
               <path d={bandPath(c.series.map((s) => ({ lo: s.p10, hi: s.p90 })), y)} fill="var(--accent)" fillOpacity={0.22} />
               <path d={linePath(c.series.map((s) => s.mean), y)} fill="none" stroke="var(--accent)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-              <text x={m.l + plotW + 6} y={y(last.mean) + 4} className="fill-fg text-[11px] font-semibold tabular-nums">
+              <text x={m.l + plotW + 6} y={y(last.mean) + 4} className="fill-fg text-2xs font-semibold tabular-nums">
                 {formatNumber(last.mean, 0)}
               </text>
             </g>
@@ -477,7 +507,7 @@ export function ForecastTimeline({
 
         {plan && (
           <g data-plan-lane>
-            <text x={0} y={compact ? TOP + 13 : laneMid + 4} className="fill-fg text-[12px] font-medium">
+            <text x={0} y={compact ? TOP + 13 : laneMid + 4} className="fill-fg text-xs font-medium">
               This scenario
             </text>
             <line x1={m.l} x2={m.l + plotW} y1={laneTop + LANE} y2={laneTop + LANE} stroke="var(--line-2)" strokeWidth={1} />
@@ -533,7 +563,7 @@ export function ForecastTimeline({
                   return (
                     <g pointerEvents="none" data-plan-ghost opacity={0.7}>
                       {glyph(mk.kind, drag.x, drag.x + width, false)}
-                      <text x={Math.min(drag.x + 14, m.l + plotW - 80)} y={laneTop + 10} className="fill-fg text-[11px] font-semibold">
+                      <text x={Math.min(drag.x + 14, m.l + plotW - 80)} y={laneTop + 10} className="fill-fg text-2xs font-semibold">
                         {shortDate(date)}
                       </text>
                     </g>

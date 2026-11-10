@@ -11,6 +11,7 @@ import { absenceTest, compareCostsDesc, detectIssues, RATINGS, resolveMoney, sha
 import { loadLiveModel, processSteps } from "./analysis-tools";
 import { resolveProcess, resolveWorkspace, type ProcessWithDraft, type ToolContext, type WorkspaceRef } from "./context";
 import { runTool } from "./result";
+import { chargeSimulation } from "./simulation-limit";
 
 export const FACT_TOOL_NAMES = ["get_facts", "list_sources", "list_solutions"] as const;
 
@@ -93,6 +94,7 @@ export function registerFactTools(server: McpServer, ctx: ToolContext): void {
     },
     (args) =>
       runTool(async (assumptions) => {
+        await chargeSimulation(ctx);
         const ws = await resolveWorkspace(ctx, args.workspace, assumptions);
         const proc = await resolveProcess(ctx, ws, args.process, assumptions);
         const { loaded, facts: all, steps } = await liveFacts(ctx, ws, proc, assumptions);

@@ -33,7 +33,7 @@ export function ruleMatches(rule: { kind: string; value: string }, email: string
  * The Owner and Agency admins: who may sign in to this deployment at all, and with which of the three roles. Only an Owner changes an
  * Owner. `myEmail` is the signed-in person's, so removing a rule that lets them in can say so.
  */
-export function WhoCanSignIn({ slug, view, myEmail }: { slug: string; view: DeploymentAccessView; myEmail?: string | null }) {
+export function WhoCanSignIn({ slug, view, myEmail, draft }: { slug: string; view: DeploymentAccessView; myEmail?: string | null; /** What the add form held when the server refused it, to fill it in again. */ draft?: { kind?: string; value?: string; role?: string } }) {
   const { rules, environmentAdmins, isOwner } = view;
   return (
     <div role="region" aria-labelledby="sign-in-heading">
@@ -117,8 +117,9 @@ export function WhoCanSignIn({ slug, view, myEmail }: { slug: string; view: Depl
             })}
           </TableBody>
         </Table>
-        <form action={addDeploymentRule.bind(null, slug)} className="flex flex-wrap gap-2">
-          <NativeSelect name="kind" defaultValue="domain" aria-label="Kind" className="w-auto">
+        {/* Keyed on what came back, so a refused add opens with what was typed rather than an empty form. */}
+        <form key={JSON.stringify(draft ?? {})} action={addDeploymentRule.bind(null, slug)} className="flex flex-wrap gap-2">
+          <NativeSelect name="kind" defaultValue={draft?.kind === "email" ? "email" : "domain"} aria-label="Kind" className="w-auto">
             <option value="domain">Domain</option>
             <option value="email">Email</option>
           </NativeSelect>
@@ -128,14 +129,14 @@ export function WhoCanSignIn({ slug, view, myEmail }: { slug: string; view: Depl
             example="Domain acme.com for the whole company; email sam@gmail.com for a contractor."
             className="self-center"
           />
-          <Input name="value" required placeholder="acme.com or name@acme.com" aria-label="Domain or email" className="w-full sm:w-72" />
+          <Input name="value" required defaultValue={draft?.value} placeholder="acme.com or name@acme.com" aria-label="Domain or email" className="w-full sm:w-72" />
           <Help
             label="Domain or email"
             description="The domain (the part after the @) or the full address. Free email providers like gmail.com can only be added as a single email."
             example="northbeam.example, or maya@northbeam.example."
             className="self-center"
           />
-          <RuleRoleSelect isOwner={isOwner} />
+          <RuleRoleSelect value={draft?.role} isOwner={isOwner} />
           <Help
             label="Role"
             description="Owner is for Transpera: everything. Agency admin is for the client's founder and head of CS: edits everything, sees individual pay and manages this list (but not Owners). Viewer reads everything except individual pay."

@@ -80,7 +80,8 @@ export function PeopleAndRoles({ setup, data }: { setup: CapacitySetup; data: Wo
  * title), so this draws nothing; it stays for the screenshot harnesses that still pass it as the header's actions.
  * @deprecated
  */
-export function PeopleHeaderActions(_props: { setup: CapacitySetup; data: WorkspaceSettingsData }) {
+export function PeopleHeaderActions(props: { setup: CapacitySetup; data: WorkspaceSettingsData }) {
+  void props;
   return null;
 }
 
@@ -138,8 +139,12 @@ function ColHead({ children, help, className }: { children: ReactNode; help: Fie
   );
 }
 
-/** The list's surface: one bordered table, no card inside the card. */
-const SURFACE = "overflow-hidden rounded-lg border border-line [&_[data-slot=table-header]]:bg-panel-2";
+/**
+ * The list's surface: one bordered table, no card inside the card. A table too wide for a narrow window scrolls inside it, never the
+ * page; the overflow is also set inline so that holds without the stylesheet (the browser tests' harness has none).
+ */
+const SURFACE = "overflow-x-auto rounded-lg border border-line [&_[data-slot=table-header]]:bg-panel-2";
+const SURFACE_STYLE = { overflowX: "auto" } as const;
 const CELL = "px-3 py-2.5";
 
 /**
@@ -149,12 +154,12 @@ const CELL = "px-3 py-2.5";
 function OpenRow({ onOpen, label, name, sub, children, ...rest }: { onOpen: () => void; label: string; name: string; sub?: ReactNode; children: ReactNode } & Record<`data-${string}`, string | undefined>) {
   return (
     <TableRow className="cursor-pointer border-line hover:bg-panel-2" onClick={onOpen} {...rest}>
-      <TableCell className={cn(CELL, "max-w-0 min-w-40")}>
+      <TableCell className={CELL}>
         <button
           type="button"
           aria-haspopup="dialog"
           aria-label={label}
-          className="block max-w-full truncate text-left text-sm font-semibold outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          className="block max-w-full text-left text-sm font-semibold break-words outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
           onClick={(e) => {
             e.stopPropagation();
             onOpen();
@@ -209,7 +214,6 @@ function PeopleList({ setup, data }: { setup: CapacitySetup; data: WorkspaceSett
   const filtered = !!q || roleIds.length > 0 || deptIds.length > 0;
   const roleOptions = setup.roles.map((r) => ({ value: r.id, label: r.name, count: all.filter((p) => p.role_ids.includes(r.id)).length }));
   const deptOptions = setup.departments.map((d) => ({ value: d.id, label: d.name, count: all.filter((p) => info.get(p.id)!.dept === d.id).length }));
-  const cols = showSalary ? PEOPLE_COLS.pay : PEOPLE_COLS.noPay;
   const person = open ? all.find((p) => p.id === open) : undefined;
 
   return (
@@ -220,19 +224,28 @@ function PeopleList({ setup, data }: { setup: CapacitySetup; data: WorkspaceSett
       description={showSalary ? "Salary counts toward DLER. Directors, managers and contractors don't count. Click a person for everything about them." : "Your record. Agency admins see the whole team."}
     >
       {all.length > 0 && setup.tiers.length > 0 && <PortfolioTotals setup={setup} />}
-      {all.length > 0 && (
+      {(all.length > 0 || setup.canEdit) && (
         <Toolbar label="Filter the people">
-          <ToolbarSearch value={search} onChange={setSearch} label="Search people" placeholder="Search people" />
-          <FilterMenu name="Role" options={roleOptions} selected={roleIds} onChange={setRoleIds} />
-          <FilterMenu name="Department" options={deptOptions} selected={deptIds} onChange={setDeptIds} />
-          {filtered && (
-            <ClearFilters
-              onClick={() => {
-                setSearch("");
-                setRoleIds([]);
-                setDeptIds([]);
-              }}
-            />
+          {all.length > 0 && (
+            <>
+              <ToolbarSearch value={search} onChange={setSearch} label="Search people" placeholder="Search people" />
+              <FilterMenu name="Role" options={roleOptions} selected={roleIds} onChange={setRoleIds} />
+              <FilterMenu name="Department" options={deptOptions} selected={deptIds} onChange={setDeptIds} />
+              {filtered && (
+                <ClearFilters
+                  onClick={() => {
+                    setSearch("");
+                    setRoleIds([]);
+                    setDeptIds([]);
+                  }}
+                />
+              )}
+            </>
+          )}
+          {setup.canEdit && (
+            <span className="ml-auto">
+              <AddPersonButton data={data} />
+            </span>
           )}
         </Toolbar>
       )}
@@ -243,68 +256,80 @@ function PeopleList({ setup, data }: { setup: CapacitySetup; data: WorkspaceSett
       ) : shown.length === 0 ? (
         <EmptyState data-empty="no-match">No one matches. Clear the filters to see everyone.</EmptyState>
       ) : (
-        <div className="flex flex-col gap-1.5" data-people-list>
-          <div role="row" className={cn(ROW, HEAD, "max-sm:hidden", cols)}>
-            <ColHead help={HELP.person}>Person</ColHead>
-            <ColHead help={HELP.role}>Role</ColHead>
-            <ColHead help={HELP.department} className="max-xl:hidden">
-              Department
-            </ColHead>
-            <ColHead help={HELP.hours} className="justify-end">
-              Hours a week
-            </ColHead>
-            <ColHead help={HELP.teamTime} className="justify-end">
-              Team time
-            </ColHead>
-            {showSalary && (
-              <ColHead help={HELP.salary} className="justify-end">
-                Salary a month
-              </ColHead>
-            )}
-            <ColHead help={HELP.label} className="max-xl:hidden">
-              Label
-            </ColHead>
-            <span />
-          </div>
-          <ul className="flex flex-col gap-1.5">
-            {shown.map((p) => {
-              const i = info.get(p.id)!;
-              const placeholderHours = hoursPerWeek * p.fte;
-              return (
-                <OpenRow key={p.id} onOpen={() => setOpen(p.id)} label={`Open ${p.name}`} className={cols} data-person={p.name} data-active={String(p.active)}>
-                  <span className="flex min-w-0 flex-col">
-                    <span className="truncate text-sm font-semibold">{p.name}</span>
-                    <span className="truncate text-xs text-fg-2">{[!p.active && "Inactive", p.email].filter(Boolean).join(" · ") || " "}</span>
-                    {noClients.has(p.id) && (
-                      <span data-missing className="truncate text-2xs font-medium text-warn">
-                        missing: no clients in their portfolio
-                      </span>
+        <div className={SURFACE} style={SURFACE_STYLE} data-people-list>
+          {/* A phone: name, role, chevron. A tablet drops the department and the label; a desktop shows every column. */}
+          <Table>
+            <TableHeader>
+              <TableRow className="border-line hover:bg-transparent">
+                <ColHead help={HELP.person}>Person</ColHead>
+                <ColHead help={HELP.role}>Role</ColHead>
+                <ColHead help={HELP.department} className="max-xl:hidden">
+                  Department
+                </ColHead>
+                <ColHead help={HELP.hours} className="text-right max-sm:hidden">
+                  Hours a week
+                </ColHead>
+                <ColHead help={HELP.teamTime} className="text-right max-sm:hidden">
+                  Team time
+                </ColHead>
+                {showSalary && (
+                  <ColHead help={HELP.salary} className="text-right max-sm:hidden">
+                    Salary a month
+                  </ColHead>
+                )}
+                <ColHead help={HELP.label} className="max-xl:hidden">
+                  Label
+                </ColHead>
+                <TableHead className="w-8" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {shown.map((p) => {
+                const i = info.get(p.id)!;
+                const placeholderHours = hoursPerWeek * p.fte;
+                const sub = [!p.active && "Inactive", p.email].filter(Boolean).join(" · ");
+                return (
+                  <OpenRow
+                    key={p.id}
+                    onOpen={() => setOpen(p.id)}
+                    label={`Open ${p.name}`}
+                    name={p.name}
+                    data-person={p.name}
+                    data-active={String(p.active)}
+                    sub={
+                      <>
+                        {sub && <span className="block truncate text-xs text-fg-2">{sub}</span>}
+                        {noClients.has(p.id) && (
+                          <span data-missing className="block text-2xs font-medium text-warn">
+                            missing: no clients in their portfolio
+                          </span>
+                        )}
+                      </>
+                    }
+                  >
+                    <TableCell className={cn(CELL, "whitespace-normal")}>{i.roles.map((r) => r.name).join(", ") || <Muted>No role</Muted>}</TableCell>
+                    <TableCell className={cn(CELL, "max-xl:hidden")} data-cell="department">
+                      {i.dept ? (dept.get(i.dept) ?? <Muted>A removed department</Muted>) : <Muted>–</Muted>}
+                    </TableCell>
+                    <TableCell className={cn(CELL, "text-right tabular-nums max-sm:hidden")} data-cell="hours">
+                      {p.capacity_hours_week !== null ? p.capacity_hours_week : <Muted>{Math.round(placeholderHours * 10) / 10}</Muted>}
+                    </TableCell>
+                    <TableCell className={cn(CELL, "text-right tabular-nums max-sm:hidden")} data-cell="team-time">
+                      {Math.round(p.reserved_share * 100)}%
+                    </TableCell>
+                    {showSalary && (
+                      <TableCell className={cn(CELL, "text-right tabular-nums max-sm:hidden")} data-cell="salary">
+                        {p.salary_monthly !== null ? formatWholeCurrency(p.salary_monthly, setup.currency) : noSalary.has(p.id) ? <span data-missing className="text-xs font-medium text-warn">missing</span> : <Muted>–</Muted>}
+                      </TableCell>
                     )}
-                  </span>
-                  <span className="truncate text-sm" title={i.roles.map((r) => r.name).join(", ")}>
-                    {i.roles.map((r) => r.name).join(", ") || <Muted>No role</Muted>}
-                  </span>
-                  <span className="truncate text-sm max-xl:hidden" data-cell="department">
-                    {i.dept ? (dept.get(i.dept) ?? <Muted>A removed department</Muted>) : <Muted>–</Muted>}
-                  </span>
-                  <span className="text-right text-sm tabular-nums max-sm:hidden" data-cell="hours">
-                    {p.capacity_hours_week !== null ? p.capacity_hours_week : <Muted>{Math.round(placeholderHours * 10) / 10}</Muted>}
-                  </span>
-                  <span className="text-right text-sm tabular-nums max-sm:hidden" data-cell="team-time">
-                    {Math.round(p.reserved_share * 100)}%
-                  </span>
-                  {showSalary && (
-                    <span className="text-right text-sm tabular-nums max-sm:hidden" data-cell="salary">
-                      {p.salary_monthly !== null ? formatWholeCurrency(p.salary_monthly, setup.currency) : noSalary.has(p.id) ? <span data-missing className="text-xs font-medium text-warn">missing</span> : <Muted>–</Muted>}
-                    </span>
-                  )}
-                  <span className="truncate text-sm max-xl:hidden" data-cell="label">
-                    {p.label ? (p.label === "contractor" ? "Contractor" : "Offshore") : <Muted>–</Muted>}
-                  </span>
-                </OpenRow>
-              );
-            })}
-          </ul>
+                    <TableCell className={cn(CELL, "max-xl:hidden")} data-cell="label">
+                      {p.label ? (p.label === "contractor" ? "Contractor" : "Offshore") : <Muted>–</Muted>}
+                    </TableCell>
+                  </OpenRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
       )}
       <Panel open={!!person} onClose={() => setOpen(null)} testId="person-panel">
@@ -579,52 +604,69 @@ function RolesList({ setup, data }: { setup: CapacitySetup; data: WorkspaceSetti
   const headcount = (r: SetupRole) => data.roleUsage[r.id]?.people ?? setup.people.filter((p) => p.role_ids.includes(r.id)).length;
   const role = open ? setup.roles.find((r) => r.id === open) : undefined;
   return (
-    <SettingsSection id="roles" title="Roles" phoneWrap={false} description="Kinds of work. Steps, people and client assignments name roles. Click a role for the rest. A role that is in use can't be removed; make it inactive to hide it from pickers.">
+    <SettingsSection
+      id="roles"
+      title="Roles"
+      phoneWrap={false}
+      action={setup.canEdit ? <AddRoleButton workspaceId={setup.workspaceId} /> : undefined}
+      description="Kinds of work. Steps, people and client assignments name roles. Click a role for the rest. A role that is in use can't be removed; make it inactive to hide it from pickers."
+    >
       {setup.roles.length === 0 ? (
         <EmptyState data-empty="roles">No roles yet. Add the kinds of work your team does.</EmptyState>
       ) : (
-        <div className="flex flex-col gap-1.5" data-roles-list>
-          <div role="row" className={cn(ROW, HEAD, "max-sm:hidden", ROLE_COLS)}>
-            <ColHead help={HELP.roleName}>Role</ColHead>
-            <ColHead help={HELP.department}>Department</ColHead>
-            <ColHead help={HELP.kind}>Kind</ColHead>
-            <ColHead help={HELP.line} className="justify-end">
-              Utilisation threshold %
-            </ColHead>
-            <ColHead help={HELP.headcount} className="justify-end">
-              People
-            </ColHead>
-            <span />
-          </div>
-          <ul className="flex flex-col gap-1.5">
-            {setup.roles.map((r) => (
-              <OpenRow key={r.id} onOpen={() => setOpen(r.id)} label={`Open ${r.name}`} className={ROLE_COLS} data-role={r.name}>
-                <span className="flex min-w-0 flex-col">
-                  <span className="truncate text-sm font-semibold">{r.name}</span>
-                  {!r.active && <span className="text-xs text-fg-3">Inactive</span>}
-                  {r.kind === "shared" && noUnit.has(r.id) && (
-                    <span data-missing className="truncate text-2xs font-medium text-warn">
-                      missing: unit of work
-                    </span>
-                  )}
-                </span>
-                {/* On a phone the row is name, kind and a chevron. */}
-                <span className="truncate text-sm sm:hidden">{KIND_WORDS[r.kind]}</span>
-                <span className="truncate text-sm max-sm:hidden" data-cell="department">
-                  {r.department_id ? (dept.get(r.department_id) ?? <Muted>A removed department</Muted>) : <Muted>–</Muted>}
-                </span>
-                <span className="truncate text-sm max-sm:hidden" data-cell="kind">
-                  {KIND_WORDS[r.kind]}
-                </span>
-                <span className="text-right text-sm tabular-nums max-sm:hidden" data-cell="line">
-                  {Math.round(r.line * 100)}%
-                </span>
-                <span className="text-right text-sm tabular-nums max-sm:hidden" data-cell="people">
-                  {headcount(r)}
-                </span>
-              </OpenRow>
-            ))}
-          </ul>
+        <div className={SURFACE} style={SURFACE_STYLE} data-roles-list>
+          <Table>
+            <TableHeader>
+              <TableRow className="border-line hover:bg-transparent">
+                <ColHead help={HELP.roleName}>Role</ColHead>
+                <ColHead help={HELP.department} className="max-sm:hidden">
+                  Department
+                </ColHead>
+                <ColHead help={HELP.kind}>Kind</ColHead>
+                <ColHead help={HELP.line} className="text-right max-sm:hidden">
+                  Utilisation threshold %
+                </ColHead>
+                <ColHead help={HELP.headcount} className="text-right max-sm:hidden">
+                  People
+                </ColHead>
+                <TableHead className="w-8" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {setup.roles.map((r) => (
+                <OpenRow
+                  key={r.id}
+                  onOpen={() => setOpen(r.id)}
+                  label={`Open ${r.name}`}
+                  name={r.name}
+                  data-role={r.name}
+                  sub={
+                    <>
+                      {!r.active && <span className="block text-xs text-fg-3">Inactive</span>}
+                      {r.kind === "shared" && noUnit.has(r.id) && (
+                        <span data-missing className="block text-2xs font-medium text-warn">
+                          missing: unit of work
+                        </span>
+                      )}
+                    </>
+                  }
+                >
+                  <TableCell className={cn(CELL, "max-sm:hidden")} data-cell="department">
+                    {r.department_id ? (dept.get(r.department_id) ?? <Muted>A removed department</Muted>) : <Muted>–</Muted>}
+                  </TableCell>
+                  <TableCell className={CELL} data-cell="kind">
+                    {KIND_WORDS[r.kind]}
+                  </TableCell>
+                  <TableCell className={cn(CELL, "text-right tabular-nums max-sm:hidden")} data-cell="line">
+                    {Math.round(r.line * 100)}%
+                  </TableCell>
+                  <TableCell className={cn(CELL, "text-right tabular-nums max-sm:hidden")} data-cell="people">
+                    {headcount(r)}
+                  </TableCell>
+                </OpenRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
       <Panel open={!!role} onClose={() => setOpen(null)} testId="role-panel">

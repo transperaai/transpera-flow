@@ -12,6 +12,8 @@ export interface SegmentedOption<T extends string | number> {
   label: React.ReactNode;
   /** Extra attributes on the option's button (its `data-…` test hook). */
   attrs?: Record<`data-${string}`, string | number>;
+  /** The option's accessible name, when its label alone is ambiguous on the page. */
+  ariaLabel?: string;
 }
 
 export function Segmented<T extends string | number>({
@@ -53,6 +55,7 @@ export function Segmented<T extends string | number>({
           role="button"
           aria-checked={undefined}
           aria-pressed={o.value === value}
+          aria-label={o.ariaLabel}
           className="text-xs tabular-nums aria-pressed:text-foreground"
           {...o.attrs}
         >

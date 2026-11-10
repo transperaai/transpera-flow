@@ -3,15 +3,18 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { AgencyWorkspaceTable } from "@/components/agency-workspace-table";
 import { AppHeader } from "@/components/app-header";
-import { PageHeader } from "@/components/shell/page";
+import { ArrowRight, Building2 } from "lucide-react";
+import { EmptyState } from "@/components/page-kit";
+import { ListTable, ListTableHeader } from "@/components/processes/list-table";
+import { PageHeader, pageBodyClass } from "@/components/shell/page";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { isAgencyAdmin } from "@/lib/access-data";
 import { listAgencyWorkspaces, listWorkspaces } from "@/lib/data";
 import { authEnv } from "@/lib/auth/env";
 import { getSessionUser } from "@/lib/auth/session";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
-import { NewWorkspaceForm } from "./new-workspace-form";
+import { NewWorkspaceButton } from "./new-workspace-form";
 
 export default async function HomePage() {
   // Render per request: Auth and database settings are read at runtime, not build time.
@@ -29,43 +32,62 @@ export default async function HomePage() {
   // The Owner sees each company's headline numbers; everyone else keeps the cards.
   const agencyRows = admin && workspaces.length > 0 ? await listAgencyWorkspaces() : null;
   return (
-    <main className="flex w-full flex-col gap-6 px-4 pb-12 sm:px-6 lg:px-8">
-      <AppHeader signedIn />
-      <PageHeader title="Workspaces" description="Each workspace is one company: its processes, people, issues and settings." />
-      {admin && (
-        <Card>
-          <CardContent>
-            <details open={workspaces.length === 0}>
-              <summary className="cursor-pointer font-medium">New workspace</summary>
-              <div className="pt-4">
-                <PhoneReadOnly>
-                  <NewWorkspaceForm />
-                </PhoneReadOnly>
-              </div>
-            </details>
-          </CardContent>
-        </Card>
-      )}
-      {workspaces.length === 0 && <p className="text-muted-foreground">No workspaces yet. Create the first one above.</p>}
-      {agencyRows ? (
-        <AgencyWorkspaceTable rows={agencyRows} />
-      ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
-          {workspaces.map((ws) => (
-            <li key={ws.id}>
-              <Link
-                href={`/w/${ws.slug}`}
-                className="flex items-center gap-3 rounded-xl bg-card px-4 py-3 text-sm font-medium ring-1 ring-foreground/10 transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-              >
-                <span aria-hidden className="grid size-8 shrink-0 place-items-center rounded-md bg-accent-soft font-display text-sm font-bold text-accent">
-                  {ws.name.trim().charAt(0).toUpperCase()}
-                </span>
-                <span className="min-w-0 truncate">{ws.name}</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
+    <main className="flex w-full flex-col">
+      <div className="px-4 sm:px-6 lg:px-8">
+        <AppHeader signedIn />
+      </div>
+      <div className={pageBodyClass("fluid")}>
+        <PageHeader
+          title="Workspaces"
+          description="Each workspace is one company: its processes, people, issues and settings."
+          actions={
+            admin ? (
+              <PhoneReadOnly notice={false}>
+                <NewWorkspaceButton defaultOpen={workspaces.length === 0} />
+              </PhoneReadOnly>
+            ) : undefined
+          }
+        />
+        {workspaces.length === 0 ? (
+          <EmptyState icon={Building2} data-no-workspaces>
+            No workspaces yet. Create the first one with New workspace.
+          </EmptyState>
+        ) : agencyRows ? (
+          <AgencyWorkspaceTable rows={agencyRows} />
+        ) : (
+          <ListTable aria-label="Workspaces" data-workspaces>
+            <ListTableHeader stickyTop="page">
+              <TableRow>
+                <TableHead className="px-3">Workspace</TableHead>
+                <TableHead className="px-3">Address</TableHead>
+                <TableHead className="px-3" aria-label="Open the workspace" />
+              </TableRow>
+            </ListTableHeader>
+            <TableBody>
+              {workspaces.map((ws) => (
+                <TableRow key={ws.id} data-workspace={ws.slug}>
+                  <TableCell className="px-3 py-2.5">
+                    <Link href={`/w/${ws.slug}`} className="flex items-center gap-3 font-medium hover:underline">
+                      <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-md bg-accent-soft text-xs font-semibold text-accent">
+                        {ws.name.trim().charAt(0).toUpperCase()}
+                      </span>
+                      <span className="min-w-0 truncate">{ws.name}</span>
+                    </Link>
+                  </TableCell>
+                  <TableCell className="px-3 py-2.5 font-mono text-xs text-muted-foreground">/w/{ws.slug}</TableCell>
+                  <TableCell className="px-3 py-2 text-right">
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href={`/w/${ws.slug}`} aria-label={`Open ${ws.name}`}>
+                        Open <ArrowRight aria-hidden />
+                      </Link>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </ListTable>
+        )}
+      </div>
     </main>
   );
 }

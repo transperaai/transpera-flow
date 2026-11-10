@@ -633,6 +633,9 @@ function parentsFirst<T extends Row>(rows: T[], parentKey: string): T[] {
   return out;
 }
 
+/** The most a step's rework rate may be (`steps_rework_rate_check`, 20270203000200_rework_rate_cap.sql). */
+export const MAX_REWORK_RATE = 0.95;
+
 export function planWorkspaceImport(
   bundle: WorkspaceBundle,
   options: { canManage: boolean },
@@ -693,6 +696,7 @@ export function planWorkspaceImport(
   sets.sandbox_scenarios = new Set(sandbox.rows.map((r) => lc(r.id)));
 
   // Processes, with the steps and edges of the restored version.
+  let reworkClamped = 0;
   const stepProcess = new Map<string, string>();
   const pre = chosen.map(({ process, version }) => {
     const stepRows = rowsOf(version.steps);
@@ -704,7 +708,15 @@ export function planWorkspaceImport(
   });
   const processRows: Row[] = pre.map(({ process, version, stepRows }) => {
     sets.version = new Set(stepRows.map((s) => lc(s.id)));
-    const steps = resolveRefs("steps", stepRows, sets, IMPORT_STEP_REFS, note).map((s) => pick(s, IMPORT_COLUMNS.steps));
+    const steps = resolveRefs("steps", stepRows, sets, IMPORT_STEP_REFS, note).map((s) => {
+      const row = pick(s, IMPORT_COLUMNS.steps);
+      // A backup from before the 95% cap (20270203000200) may hold more; the database refuses it, so it is restored at the cap.
+      if (Number(row.rework_rate) > MAX_REWORK_RATE) {
+        reworkClamped++;
+        return { ...row, rework_rate: MAX_REWORK_RATE };
+      }
+      return row;
+    });
     const edges = rowsOf(version.edges).filter((e) => sets.version!.has(lc(e.from_step_id)) && sets.version!.has(lc(e.to_step_id)));
     for (let i = rowsOf(version.edges).length - edges.length; i > 0; i--) note("edges", "dropped");
     const parent = process.parent_process_id == null ? null : lc(process.parent_process_id);
@@ -724,6 +736,7 @@ export function planWorkspaceImport(
       edges: edges.map((e) => pick(e, IMPORT_COLUMNS.edges)),
     };
   });
+  if (reworkClamped) warnings.push(`${num(reworkClamped)} step${reworkClamped === 1 ? "" : "s"} had a rework rate above 95%; restored at 95%, the most a step may send back.`);
   const processes = parentsFirst(processRows, "parent_process_id") as unknown as PlanProcess[];
   const stepCount = processes.reduce((n, p) => n + p.steps.length, 0);
   const edgeCount = processes.reduce((n, p) => n + p.edges.length, 0);

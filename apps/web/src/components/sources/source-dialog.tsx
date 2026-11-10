@@ -128,7 +128,11 @@ export function SourceDialog(props: SourceDialogProps) {
   );
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+/** Today's date where the person is (YYYY-MM-DD). Not `toISOString()`, which is UTC: in Sydney before 11 am that is still yesterday. */
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 function Form({ targets, source, preset, presetLabel, existingSources, onSubmit, onClose }: SourceDialogProps) {
   const [draft, setDraft] = useState<SourceDraft>(() => emptyDraft(preset, today()));

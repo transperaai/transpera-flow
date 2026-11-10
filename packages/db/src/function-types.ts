@@ -26,10 +26,11 @@ export interface Functions {
   is_free_mail_domain: { Args: { domain: string }; Returns: boolean };
   is_sign_in_admin: { Args: never; Returns: boolean };
   log_process_import: { Args: { target_process: string; import_source: string }; Returns: null };
+  mcp_simulation_use: { Args: { p_per_minute?: number }; Returns: Json };
   mcp_token_lookup: { Args: { p_token_hash: string }; Returns: { user_id: string; token_id: string; email: string | null; agency_admin: boolean; active_workspace_id: string | null; allowed: boolean; retry_after_seconds: number }[] };
   my_person_id: { Args: { ws: string }; Returns: string };
   open_draft: { Args: { target_process: string }; Returns: Json };
-  publish_process: { Args: { target_process: string; accept_estimates?: boolean }; Returns: Json };
+  publish_process: { Args: { target_process: string; accept_estimates?: boolean; expected_draft?: string }; Returns: Json };
   remove_tier: { Args: { p_tier: string }; Returns: null };
   resolve_issue: { Args: { p_workspace: string; p_id: string; p_how: string; p_note?: string; p_status?: string }; Returns: Json }
     | { Args: { p_workspace: string; p_id: string; p_how: string; p_note: string; p_status: string; p_solution: string }; Returns: Json };
@@ -46,7 +47,6 @@ export interface Functions {
   take_link_fetch: { Args: never; Returns: number };
   team_capacity: { Args: { ws: string }; Returns: Json };
   unlinked_source_count: { Args: { p_workspace: string }; Returns: number };
-  use_api_token: { Args: { token: string }; Returns: Json };
   workspace_members: { Args: { ws: string }; Returns: { membership_id: string; user_id: string; email: string | null; role: "agency_admin" | "owner" | "editor" | "member" | "viewer"; active: boolean; person_id: string | null; last_sign_in_at: string | null; created_at: string }[] };
   workspace_role: { Args: { ws: string }; Returns: "agency_admin" | "owner" | "editor" | "member" | "viewer" };
 }

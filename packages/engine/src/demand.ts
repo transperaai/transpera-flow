@@ -9,11 +9,11 @@
 
 import { activeChannels, channelMonth, planChannels } from "./channels";
 import { activeMarket } from "./market";
-import type { EngineDemand, EngineModel } from "./model";
+import { WEEKS_PER_MONTH, type EngineDemand, type EngineModel } from "./model";
 import { expo, type Rng } from "./random";
 
 /** Weeks in a calendar month: twelve months make a 52-week year. */
-export const WEEKS_PER_CALENDAR_MONTH = 52 / 12;
+export const WEEKS_PER_CALENDAR_MONTH = WEEKS_PER_MONTH;
 
 const MONTHS = 12;
 

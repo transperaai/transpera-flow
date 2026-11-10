@@ -4,7 +4,7 @@
 // the inspector is. Kept per browser in localStorage, so the Editor opens the way it was left. Storage that is missing or throws
 // (private windows, blocked site data) just means the default layout.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 /** The inspector's width can be dragged between these (px). */
 export const INSPECTOR_MIN = 320;
@@ -37,27 +37,45 @@ export function readLayout(raw: string | null): PanelLayout {
   }
 }
 
-export function usePanelLayout() {
-  const [layout, setLayout] = useState<PanelLayout>(DEFAULT);
-  // Read after the first render, so the server's HTML and the first client render agree.
-  useEffect(() => {
+// The layout as stored, held here too so it still changes where storage throws. `undefined` until first read.
+let held: string | null | undefined;
+const listeners = new Set<() => void>();
+
+function stored(): string | null {
+  if (held === undefined) {
     try {
-      setLayout(readLayout(window.localStorage.getItem(KEY)));
+      held = window.localStorage.getItem(KEY);
     } catch {
-      // No storage: keep the default.
+      held = null;
     }
-  }, []);
-  // The new layout is stored as it is set. Writing to storage from the updater is idempotent, so a doubled call in Strict Mode is harmless.
+  }
+  return held;
+}
+
+function store(next: PanelLayout) {
+  held = JSON.stringify(next);
+  try {
+    window.localStorage.setItem(KEY, held);
+  } catch {
+    // Not remembered past this page; harmless.
+  }
+  for (const l of listeners) l();
+}
+
+const subscribe = (l: () => void) => {
+  listeners.add(l);
+  return () => {
+    listeners.delete(l);
+  };
+};
+
+export function usePanelLayout() {
+  // The server (and the first client render, while hydrating) draws the default layout; the stored one follows.
+  const raw = useSyncExternalStore(subscribe, stored, () => null);
+  const layout = useMemo(() => readLayout(raw), [raw]);
   const update = useCallback((change: (was: PanelLayout) => Partial<PanelLayout>) => {
-    setLayout((was) => {
-      const next = { ...was, ...change(was) };
-      try {
-        window.localStorage.setItem(KEY, JSON.stringify(next));
-      } catch {
-        // Not remembered this time; harmless.
-      }
-      return next;
-    });
+    const was = readLayout(stored());
+    store({ ...was, ...change(was) });
   }, []);
   return {
     layout,

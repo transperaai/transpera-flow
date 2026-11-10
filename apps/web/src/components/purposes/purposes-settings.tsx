@@ -21,7 +21,6 @@ import { SectionCard } from "@/components/page-kit";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { ConfirmDialog } from "@/components/sandbox/scenario-bar";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { purposeColor } from "@/components/sandbox/time-chart";
 import type { PurposesOutcome } from "@/app/w/[slug]/settings/actions";
@@ -149,7 +148,7 @@ export function PurposesSettings({
       action={
         <>
           <span role="status" aria-live="polite" className="text-xs text-muted-foreground" data-save-status>
-            {status.kind === "saving" ? "Saving…" : status.kind === "saved" ? "Saved" : dirty && canEdit ? "Not saved yet" : ""}
+            {status.kind === "saving" ? "Saving…" : status.kind === "saved" ? "Saved" : dirty && canEdit ? "Not saved" : ""}
           </span>
           <Button variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry disabled={!canEdit || same(list, DEFAULT_PURPOSES as PurposeCategory[])} onClick={reset}>
             Reset to the defaults
@@ -204,15 +203,15 @@ export function PurposesSettings({
             {problem}
           </p>
         )}
-        <ol className="flex flex-col gap-2" data-purposes-list>
+        <ol className="flex flex-col divide-y divide-line rounded-lg border border-line" data-purposes-list>
           {list.map((c, i) => {
             const n = use[c.key] ?? 0;
             return (
               <li key={c.key}>
-                <Card className="gap-2 px-4 py-3" data-purpose={c.key}>
+                <div className="flex flex-col gap-2 px-4 py-3" data-purpose={c.key}>
                   <div className="flex items-start gap-3">
                     <i aria-hidden className="mt-2.5 size-3 shrink-0 rounded-sm border border-line" style={{ background: purposeColor(c.key) }} />
-                    <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[minmax(10rem,1fr)_2fr]">
+                    <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[minmax(10rem,18rem)_minmax(0,1fr)]">
                       <label className="flex flex-col gap-1 text-xs font-medium text-fg-2">
                         Name
                         <Input
@@ -252,7 +251,7 @@ export function PurposesSettings({
                     {isFixed(c.key) ? "Can be renamed and moved, not deleted. " : ""}
                     {n > 0 ? `Chosen by ${n} ${n === 1 ? "step" : "steps"}.` : "No step has chosen it."}
                   </p>
-                </Card>
+                </div>
               </li>
             );
           })}

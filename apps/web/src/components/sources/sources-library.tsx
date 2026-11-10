@@ -6,7 +6,11 @@
 
 import { useMemo } from "react";
 import type { LinkTargets, SourceLinkRow, SourceListRow } from "@transpera-flow/db";
-import { LibraryFilters } from "@/components/sources/library-filters";
+import { EmptyState } from "@/components/page-kit";
+import { ListTable, ListTableHeader } from "@/components/processes/list-table";
+import { LibraryFilters, type LibraryCounts } from "@/components/sources/library-filters";
+import { TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table";
+import { SearchX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SOURCE_KIND_LABELS } from "@/lib/sources/validate";
@@ -39,6 +43,7 @@ export function SourcesLibrary({
   citations,
   openId,
   onOpen,
+  counts,
 }: {
   /** The rows loaded so far (a page at a time), without their full text. */
   rows: SourceListRow[];
@@ -57,6 +62,8 @@ export function SourcesLibrary({
   citations: Record<string, number>;
   openId: string | null;
   onOpen: (id: string) => void;
+  /** How many sources each filter choice shows. */
+  counts: LibraryCounts;
 }) {
   const set = (patch: Partial<LibraryQuery>) => onQuery({ ...query, ...patch });
   const linksOf = useMemo(() => {
@@ -68,77 +75,61 @@ export function SourcesLibrary({
   const more = rows.length < total;
   const noun = total === 1 ? "source" : "sources";
 
+  const countLine = (
+    <span role="status" aria-live="polite" data-library-count className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+      {loading ? "Searching…" : more ? `Showing ${rows.length} of ${total} ${noun}.` : filtered ? `${total} ${noun} found.` : `${total} ${noun}.`}
+    </span>
+  );
+
   return (
     <section aria-label="Source library" aria-busy={loading} className="flex flex-col gap-3">
-      <LibraryFilters query={query} filtered={filtered} targets={targets} set={set} onClear={() => onQuery(DEFAULT_QUERY)} />
-      <p role="status" aria-live="polite" data-library-count className="text-xs text-fg-2">
-        {loading ? "Searching…" : more ? `Showing ${rows.length} of ${total} ${noun}.` : filtered ? `${total} ${noun} found.` : `${total} ${noun}.`}
-      </p>
+      <LibraryFilters query={query} filtered={filtered} targets={targets} counts={counts} count={countLine} set={set} onClear={() => onQuery(DEFAULT_QUERY)} />
       {loadError && (
         <p role="alert" className="rounded-lg border border-crit bg-crit-soft p-2 text-sm">
           {loadError}
         </p>
       )}
       {rows.length === 0 && !loading ? (
-        <p
-          data-library-empty
-          className="rounded-lg border border-dashed border-line p-4 text-fg-2"
-        >
+        <EmptyState icon={SearchX} data-library-empty>
           No sources match. Clear the filters or try other words.
-        </p>
+        </EmptyState>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line bg-panel">
-          <table
-            aria-label="Sources"
-            className="w-full border-collapse text-left text-sm"
-          >
-            <thead className="bg-panel-2 text-xs text-fg-2">
-              <tr>
-                <th scope="col" className="px-3 py-2 font-semibold">
-                  Title
-                </th>
-                <th
-                  scope="col"
-                  className="hidden px-3 py-2 font-semibold md:table-cell"
-                >
-                  Kind
-                </th>
-                <th
-                  scope="col"
-                  className="hidden px-3 py-2 font-semibold md:table-cell"
-                >
-                  Date
-                </th>
-                <th
-                  scope="col"
-                  className="hidden px-3 py-2 font-semibold lg:table-cell"
-                >
-                  Speakers
-                </th>
-                <th
-                  scope="col"
-                  className="hidden px-3 py-2 font-semibold md:table-cell"
-                >
-                  Linked to
-                </th>
-              </tr>
-            </thead>
-            <tbody>
+        <ListTable aria-label="Sources" className="text-left">
+          <ListTableHeader>
+            <TableRow>
+              <TableHead scope="col" className="px-3">
+                Title
+              </TableHead>
+              <TableHead scope="col" className="hidden px-3 md:table-cell">
+                Kind
+              </TableHead>
+              <TableHead scope="col" className="hidden px-3 md:table-cell">
+                Date
+              </TableHead>
+              <TableHead scope="col" className="hidden px-3 lg:table-cell">
+                Speakers
+              </TableHead>
+              <TableHead scope="col" className="hidden px-3 md:table-cell">
+                Linked to
+              </TableHead>
+            </TableRow>
+          </ListTableHeader>
+          <TableBody>
               {rows.map((s) => {
                 const own = linksOf.get(s.id) ?? [];
                 const linked = linkedSummary(own, targets);
                 const unlinked = own.length === 0;
                 const cites = citations[s.id] ?? 0;
                 return (
-                  <tr
+                  <TableRow
                     key={s.id}
                     data-source-row={s.id}
                     data-linked={!unlinked}
                     data-open={openId === s.id}
-                    className="cursor-pointer border-t border-line align-top hover:bg-panel-2 data-[open=true]:bg-accent-soft"
+                    className="cursor-pointer align-top data-[open=true]:bg-accent-soft"
                     onClick={() => onOpen(s.id)}
                   >
-                    <td className="max-w-0 px-3 py-2.5 md:max-w-xs">
+                    <TableCell className="max-w-0 px-3 py-2.5 whitespace-normal md:max-w-xs">
                       <button
                         type="button"
                         className="block max-w-full text-left font-semibold underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
@@ -177,23 +168,23 @@ export function SourcesLibrary({
                             : `Cited by ${cites} values`}
                         </span>
                       )}
-                    </td>
-                    <td className="hidden px-3 py-2.5 md:table-cell">
-                      <span className="rounded-full border border-line px-1.5 text-[11px] font-semibold text-fg-2">
+                    </TableCell>
+                    <TableCell className="hidden px-3 py-2.5 md:table-cell">
+                      <span className="rounded-full border border-line px-1.5 text-2xs font-semibold text-fg-2">
                         {SOURCE_KIND_LABELS[s.kind]}
                       </span>
-                    </td>
-                    <td className="hidden px-3 py-2.5 tabular-nums text-fg-2 md:table-cell">
+                    </TableCell>
+                    <TableCell className="hidden px-3 py-2.5 whitespace-nowrap tabular-nums text-fg-2 md:table-cell">
                       {sourceDate(s)}
-                    </td>
-                    <td className="hidden max-w-48 px-3 py-2.5 text-fg-2 lg:table-cell">
+                    </TableCell>
+                    <TableCell className="hidden max-w-48 px-3 py-2.5 whitespace-normal text-fg-2 lg:table-cell">
                       {s.speakers.length ? (
                         <Names names={s.speakers} />
                       ) : (
                         <span className="text-fg-3">None</span>
                       )}
-                    </td>
-                    <td className="hidden px-3 py-2.5 md:table-cell">
+                    </TableCell>
+                    <TableCell className="hidden px-3 py-2.5 whitespace-normal md:table-cell">
                       {unlinked ? (
                         <UnlinkedFlag />
                       ) : (
@@ -229,13 +220,12 @@ export function SourcesLibrary({
                           )}
                         </dl>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
+          </TableBody>
+        </ListTable>
       )}
       {more && !loading && (
         <div>

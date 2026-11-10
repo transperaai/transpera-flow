@@ -85,6 +85,15 @@ describe("headline numbers", () => {
     expect(await recordHeadline(WS, [REV], 26, { ...numbers, processes_attention: 2 })).toEqual({ status: "recorded" });
     expect((await one("select numbers from workspace_headlines where workspace_id = $1", [WS])).numbers.processes_attention).toBe(2);
     expect((await q("select 1 from workspace_headlines where workspace_id = $1", [WS])).rowCount).toBe(1);
+    // Bounded: at most 200 distinct revisions, a horizon of 1 to 104 weeks (the setting's range), sane counts.
+    const many = Array.from({ length: 201 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, "0")}`);
+    const invalid = { status: "error", message: "That isn't valid." };
+    expect(await recordHeadline(WS, many, 26, numbers)).toEqual(invalid);
+    expect(await recordHeadline(WS, [REV, REV], 26, numbers)).toEqual(invalid);
+    expect(await recordHeadline(WS, [REV], 105, numbers)).toEqual(invalid);
+    expect(await recordHeadline(WS, [REV], 26, { ...numbers, processes_total: 1e12 })).toEqual(invalid);
+    expect(await recordHeadline(WS, [REV], 26, null as never)).toEqual(invalid);
+    expect(await recordHeadline(WS, many.slice(0, 200), 104, numbers)).toEqual({ status: "recorded" });
   });
 });
 
@@ -366,6 +375,13 @@ describe("blocks and runs", () => {
       expect(row.params_snapshot).toBeTypeOf("object");
     }
     expect(await saveRun({ ...input, revisionId: "99999999-9999-4999-8999-999999999999" })).toMatchObject({ status: "error", message: expect.stringMatching(/newer revision/) });
+    // Numbers the browser sends are bounded before anything is written.
+    const before = (await one("select count(*)::int as n from runs")).n;
+    for (const bad of [{ reps: 1001 }, { reps: 0 }, { reps: 1e12 }, { seed: 2 ** 31 }, { seed: -(2 ** 31) - 1 }, { seed: 1.5 }, { durationMs: -1 }, { durationMs: 3_600_001 }, { durationMs: 1e15 }, { durationMs: "12" }]) {
+      expect(await saveRun({ ...input, ...bad }), JSON.stringify(bad)).toEqual({ status: "error", message: "The run's settings aren't valid." });
+    }
+    expect((await one("select count(*)::int as n from runs")).n).toBe(before);
+    expect((await saveRun({ ...input, reps: 1000, seed: 2 ** 31 - 1, durationMs: null })).status).toBe("ok");
   });
 });
 

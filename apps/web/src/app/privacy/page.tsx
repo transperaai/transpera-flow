@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { TransperaMark } from "@/components/shell/transpera-mark";
 
 export const metadata: Metadata = { title: "Privacy policy · Transpera Flow" };
 
@@ -18,8 +19,8 @@ export default function PrivacyPage() {
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-12 text-base leading-relaxed text-fg-2">
       <header className="flex flex-col gap-1">
-        <p className="flex items-center gap-2.5 font-display text-base font-bold tracking-tight text-fg">
-          <span aria-hidden className="size-[22px] rounded-md bg-[conic-gradient(from_200deg,var(--accent),var(--chart-1),var(--chart-5),var(--accent))]" />
+        <p className="flex items-center gap-2.5 font-display text-base font-semibold tracking-tight text-fg">
+          <TransperaMark />
           Transpera Flow
         </p>
         <h1 className="font-heading text-2xl font-semibold tracking-tight text-fg">Privacy policy</h1>

@@ -70,7 +70,7 @@ export function DetailLayout({
 export function MetaRail({ label, children, ...rest }: { label: string; children: ReactNode } & Record<`data-${string}`, string | undefined>) {
   return (
     <aside aria-label={label} className="min-w-0 rounded-xl bg-card p-4 text-sm ring-1 ring-foreground/10 xl:sticky xl:top-16" {...rest}>
-      <dl className="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] items-baseline gap-x-4 gap-y-3">{children}</dl>
+      <dl className="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] items-start gap-x-4 gap-y-3">{children}</dl>
     </aside>
   );
 }
