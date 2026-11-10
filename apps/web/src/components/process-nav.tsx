@@ -30,6 +30,7 @@ export function ProcessNav({
   processesHref,
   companyMapHref,
   part = "all",
+  heading = true,
 }: {
   processes: ProcessListing[];
   current: string;
@@ -42,6 +43,11 @@ export function ProcessNav({
   /** The company map, the same place as the Processes page's Company map button. */
   companyMapHref?: string;
   part?: "all" | "crumbs" | "title";
+  /**
+   * The name (or the switcher) is the page's h1. Default true. False on a page with an h1 of its own (History): the same text in a
+   * plain element, so the page has one h1.
+   */
+  heading?: boolean;
 }) {
   const [adding, setAdding] = useState(false);
   // The company map's order: top-level processes, each followed by the child processes inside it (issue #102).
@@ -68,6 +74,7 @@ export function ProcessNav({
       {(processesHref || trail.length > 0) && <ChevronRight aria-hidden className="size-3 shrink-0" />}
     </nav>
   );
+  const Title = heading ? "h1" : "div";
   if (part === "crumbs") {
     return (
       <div className="flex min-w-0 items-center gap-x-1 overflow-hidden text-xs">
@@ -79,16 +86,16 @@ export function ProcessNav({
     );
   }
   if (processes.length <= 1 && !create) {
-    if (part === "title") return <h1 className="min-w-0 truncate font-display text-base font-semibold">{name}</h1>;
+    if (part === "title") return <Title className="min-w-0 truncate font-display text-base font-semibold">{name}</Title>;
     return (
       <div className="flex min-w-0 flex-wrap items-center gap-x-1">
         {crumbs}
-        <h1 className="truncate px-1 font-display text-base font-bold">{name}</h1>
+        <Title className="truncate px-1 font-display text-base font-bold">{name}</Title>
       </div>
     );
   }
   const title = (
-        <h1 className="min-w-0 text-base">
+        <Title className="min-w-0 text-base">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className={`max-w-full gap-1.5 px-2 font-display text-base ${part === "title" ? "-ml-2 h-8 font-semibold" : "font-bold"}`} aria-label={`Process: ${name}. Switch process`}>
@@ -134,7 +141,7 @@ export function ProcessNav({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
-        </h1>
+        </Title>
   );
   return (
     <>
