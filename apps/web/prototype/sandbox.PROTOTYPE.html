@@ -1,0 +1,331 @@
+<title>Sandbox Layouts</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<!--
+  PROTOTYPE — throwaway. Question: "How should the Sandbox look so the company map is the star while you pull levers?"
+  Three structurally different layouts on the app's tokens, with fake but live numbers: move a lever and the verdict, the
+  figures and the colour of each process on the map change. Switch with the bottom bar or ← / →.
+    A  Map stage: the map fills the page; levers in a drawer at the left; results float over the map; charts in a sheet you pull up.
+    B  Map + lever dock: the map fills most of the screen; a dock of lever cards runs along the bottom with the verdict beside it.
+    C  Map + control rail: the map takes the page; a right rail holds the levers and the results as tabs.
+-->
+<style>
+/* Layout: one full-frame app per variant; the map is always the largest thing on screen. Tokens copied from the app. */
+:root {
+  --bg: oklch(0.985 0 0); --panel: oklch(1 0 0); --panel-2: oklch(0.97 0 0);
+  --line: oklch(0.922 0 0); --line-2: oklch(0.87 0 0);
+  --fg: oklch(0.145 0 0); --fg-2: oklch(0.44 0 0); --fg-3: oklch(0.53 0 0);
+  --accent: oklch(0.52 0.105 223.128); --accent-soft: oklch(0.95 0.025 215); --accent-fg: oklch(0.984 0.019 200.873);
+  --good: #1baf7a; --warn: #eda100; --crit: #e34948; --good-soft: #d8f3e8; --warn-soft: #fdf0d1; --crit-soft: #fbe1e0;
+  --lane: oklch(0.975 0.004 223); --lane-2: oklch(0.96 0.006 223);
+  --shadow: 0 1px 2px rgba(20,24,30,.06), 0 6px 20px rgba(20,24,30,.08);
+  --switch-bg: oklch(0.2 0 0); --switch-fg: oklch(0.98 0 0);
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: oklch(0.145 0 0); --panel: oklch(0.195 0 0); --panel-2: oklch(0.25 0 0); --line: oklch(0.3 0 0); --line-2: oklch(0.38 0 0);
+  --fg: oklch(0.985 0 0); --fg-2: oklch(0.76 0 0); --fg-3: oklch(0.68 0 0);
+  --accent: oklch(0.715 0.143 215.221); --accent-soft: oklch(0.3 0.05 225); --accent-fg: oklch(0.2 0.04 229.695);
+  --good: #199e70; --warn: #c98500; --crit: #e66767; --good-soft: #153f30; --warn-soft: #45360f; --crit-soft: #4a2424;
+  --lane: oklch(0.17 0.004 223); --lane-2: oklch(0.19 0.006 223); --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.35);
+  --switch-bg: oklch(0.95 0 0); --switch-fg: oklch(0.15 0 0); color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: oklch(0.145 0 0); --panel: oklch(0.195 0 0); --panel-2: oklch(0.25 0 0); --line: oklch(0.3 0 0); --line-2: oklch(0.38 0 0);
+  --fg: oklch(0.985 0 0); --fg-2: oklch(0.76 0 0); --fg-3: oklch(0.68 0 0);
+  --accent: oklch(0.715 0.143 215.221); --accent-soft: oklch(0.3 0.05 225); --accent-fg: oklch(0.2 0.04 229.695);
+  --good: #199e70; --warn: #c98500; --crit: #e66767; --good-soft: #153f30; --warn-soft: #45360f; --crit-soft: #4a2424;
+  --lane: oklch(0.17 0.004 223); --lane-2: oklch(0.19 0.006 223); --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px rgba(0,0,0,.35);
+  --switch-bg: oklch(0.95 0 0); --switch-fg: oklch(0.15 0 0); color-scheme: dark; }
+
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--font); -webkit-font-smoothing: antialiased; overflow: hidden; }
+* { box-sizing: border-box; }
+h1, h2, h3, p { margin: 0; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--fg-2); } .t-label { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-2); }
+
+/* App chrome shared by the variants: the sidebar and the slim top bar. */
+.app { display: grid; grid-template-columns: 220px minmax(0,1fr); height: 100vh; }
+.side { border-right: 1px solid var(--line); padding: 12px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--bg); }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 600; padding: 4px 6px 12px; }
+.mark { width: 20px; height: 20px; border-radius: 6px; background: var(--accent); }
+.nav { padding: 6px 8px; border-radius: 6px; color: var(--fg-2); font-size: 13px; font-weight: 500; }
+.nav.on { background: var(--panel-2); color: var(--fg); }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.bar { height: 48px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.bar h1 { font-size: 15px; font-weight: 600; }
+.spacer { flex: 1; }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel); font-size: 12.5px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: var(--panel-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.seg { display: inline-flex; border: 1px solid var(--line-2); border-radius: 8px; padding: 2px; background: var(--panel-2); }
+.seg button { height: 24px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; font-weight: 500; color: var(--fg-2); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--panel); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.select { height: 30px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel); padding: 0 8px; font-size: 12.5px; }
+
+/* The map: lanes per department, process cards that colour by how busy their people get. */
+.stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background-color: var(--bg); background-image: radial-gradient(var(--line-2) 1px, transparent 1px); background-size: 18px 18px; }
+.stage svg { width: 100%; height: 100%; display: block; }
+.lane rect { fill: var(--lane); } .lane.alt rect { fill: var(--lane-2); }
+.lane text { fill: var(--fg-2); font: 600 13px var(--font); }
+.edge { fill: none; stroke: var(--line-2); stroke-width: 1.6; }
+.edge.hot { stroke: var(--warn); stroke-width: 2.2; stroke-dasharray: 5 4; }
+.pcard rect.body { fill: var(--panel); stroke: var(--line-2); stroke-width: 1.2; }
+.pcard text { fill: var(--fg); font: 600 13px var(--font); } .pcard text.s { fill: var(--fg-2); font: 400 11.5px var(--font); }
+.pcard .pill { font: 700 11px var(--font); }
+.mapctl { position: absolute; right: 14px; bottom: 14px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); box-shadow: var(--shadow); }
+.mapctl button { width: 32px; height: 32px; border: 0; border-bottom: 1px solid var(--line); background: var(--panel); cursor: pointer; font-size: 14px; }
+.mapctl span { font-size: 10px; text-align: center; padding: 3px 0; color: var(--fg-2); }
+.play { display: inline-flex; align-items: center; gap: 8px; }
+.play input { width: 160px; accent-color: var(--accent); }
+
+/* Levers. */
+.lgroup { border-top: 1px solid var(--line); padding: 10px 0; }
+.lgroup:first-child { border-top: 0; }
+.lgroup > summary { list-style: none; cursor: pointer; font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; }
+.lgroup > summary::after { content: "▾"; color: var(--fg-3); } .lgroup[open] > summary::after { content: "▴"; }
+.lv { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; font-size: 12.5px; margin-top: 10px; }
+.lv b { font-variant-numeric: tabular-nums; }
+.lv input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+.lv select { grid-column: 1 / -1; }
+.chg { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 500; white-space: nowrap; }
+
+/* Results. */
+.verdict { font-size: 15px; line-height: 22px; font-weight: 500; }
+.verdict b.bad { color: var(--crit); } .verdict b.ok { color: var(--good); }
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.kpi { padding: 8px 12px; border-left: 1px solid var(--line); min-width: 0; }
+.kpi:first-child { border-left: 0; }
+.kpi .l { font-size: 11px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 24px; }
+.kpi .d { font-size: 11px; color: var(--fg-2); }
+.kpi.bad { box-shadow: inset 3px 0 0 var(--crit); } .kpi.ok { box-shadow: inset 3px 0 0 var(--good); }
+.chart { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 10px 12px; min-width: 0; }
+.chart h3 { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.chart svg { width: 100%; height: auto; display: block; }
+.heat { display: grid; gap: 3px; font-size: 11.5px; align-items: center; }
+.heat .c { height: 22px; border-radius: 4px; display: grid; place-items: center; font-weight: 600; font-variant-numeric: tabular-nums; font-size: 11px; }
+
+/* Variant A: map stage, left drawer, results strip along the top of the map, pull-up sheet. The map keeps the space they leave. */
+.A .canvasA { position: absolute; top: 96px; right: 0; bottom: 44px; left: 0; transition: left .2s; }
+.A.open .canvasA { left: 320px; }
+.A .float { flex-direction: row !important; align-items: stretch; }
+.A .float .verdictbox { flex: 1 1 26rem; max-width: none !important; padding: 8px 12px !important; }
+.A .float .verdict { font-size: 13.5px; line-height: 19px; }
+.A .float .kpis { flex: 1 1 34rem; max-width: none !important; }
+.A .float { position: absolute; left: 16px; right: 16px; top: 12px; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.A .float > * { pointer-events: auto; }
+.A .float .verdictbox { align-self: flex-start; max-width: 760px; background: color-mix(in oklab, var(--panel) 92%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; box-shadow: var(--shadow); }
+.A .float .kpis { max-width: 760px; box-shadow: var(--shadow); }
+.A .drawer { position: absolute; top: 0; bottom: 0; left: 0; width: 320px; background: var(--panel); border-right: 1px solid var(--line); box-shadow: var(--shadow); transform: translateX(0); transition: transform .2s; overflow: auto; padding: 4px 16px 16px; z-index: 3; }
+.A.closed .drawer { transform: translateX(-100%); }
+.A .drawer-h { display: flex; align-items: center; gap: 8px; padding: 10px 0; position: sticky; top: 0; background: var(--panel); }
+.A.open .float { left: 336px; }
+.A .sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -6px 20px rgba(0,0,0,.08); z-index: 2; transition: transform .2s; }
+.A .sheet-h { height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 16px; cursor: pointer; }
+.A .sheet-h .grip { width: 36px; height: 4px; border-radius: 2px; background: var(--line-2); }
+.A .sheet-b { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; padding: 0 16px 16px; }
+.A.sheet-closed .sheet { transform: translateY(calc(100% - 44px)); }
+.A.open .sheet { left: 320px; }
+
+/* Variant B: map on top, dock of lever cards below. */
+.B .dock { flex: none; border-top: 1px solid var(--line); background: var(--panel); display: grid; grid-template-columns: minmax(0,1fr) 360px; min-height: 0; }
+.B .cards { display: flex; gap: 10px; overflow-x: auto; padding: 12px 16px; }
+.B .lcard { flex: none; width: 230px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--bg); }
+.B .lcard h3 { font-size: 13px; font-weight: 600; }
+.B .lcard.changed { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.B .result { border-left: 1px solid var(--line); padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+.B .result .kpis { grid-template-columns: repeat(2, minmax(0,1fr)); }
+.B .result .kpi:nth-child(3) { border-left: 0; } .B .result .kpi:nth-child(n+3) { border-top: 1px solid var(--line); }
+.B .chips { position: absolute; top: 12px; left: 14px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Variant C: map + right control rail with tabs. */
+.C .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0,1fr) 380px; }
+.C .rail { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.C .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); padding: 0 8px; }
+.C .tabs button { height: 40px; padding: 0 12px; border: 0; background: none; font-size: 13px; font-weight: 500; color: var(--fg-2); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.C .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.C .pane { overflow: auto; padding: 4px 16px 16px; flex: 1; }
+.C .overlay { position: absolute; top: 14px; left: 14px; right: 60px; display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-start; pointer-events: none; }
+.C .overlay .kpis { width: min(640px, 100%); box-shadow: var(--shadow); pointer-events: auto; }
+.C .railfoot { border-top: 1px solid var(--line); padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+
+/* Switcher (not part of the design). */
+.sw { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 50; display: flex; align-items: center; gap: 6px; background: var(--switch-bg); color: var(--switch-fg); border-radius: 999px; padding: 5px; box-shadow: 0 8px 30px rgba(0,0,0,.3); font-size: 12px; }
+.sw button { background: transparent; border: 0; color: inherit; height: 30px; min-width: 30px; padding: 0 10px; border-radius: 999px; cursor: pointer; font-weight: 600; }
+.sw button:hover { background: rgba(127,127,127,.25); }
+.sw .lab { padding: 0 8px; white-space: nowrap; font-weight: 600; } .sw .lab small { font-weight: 400; opacity: .7; }
+.note { position: fixed; left: 12px; bottom: 18px; z-index: 40; background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 8px; padding: 5px 9px; font-size: 11px; font-weight: 600; }
+
+@media (max-width: 900px) {
+  body { overflow: auto; } .app { grid-template-columns: minmax(0,1fr); height: auto; } .side { display: none; }
+  .stage { min-height: 60vh; } .C .body, .B .dock { grid-template-columns: minmax(0,1fr); } .C .rail { border-left: 0; border-top: 1px solid var(--line); }
+  .A .drawer { width: 86vw; } .A.open .float, .A.open .sheet { left: 0; } .A .sheet-b { grid-template-columns: minmax(0,1fr); }
+  .kpis { grid-template-columns: repeat(2, minmax(0,1fr)); } .note { display: none; }
+  .bar { flex-wrap: wrap; height: auto; padding: 8px 16px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div id="app"></div>
+<div class="note">Prototype · example numbers</div>
+<div class="sw" role="toolbar" aria-label="Prototype switcher">
+  <button id="prev" aria-label="Previous layout">←</button>
+  <span class="lab" id="vlab"></span>
+  <button id="next" aria-label="Next layout">→</button>
+  <button id="theme" aria-label="Toggle theme">◐</button>
+</div>
+
+<script>
+// ---------- A tiny fake model: levers in, figures out (shapes like the real Sandbox, numbers made up) ----------
+const L = { leads: 0, win: 0, newOrganic: 2, newPerf: 1, churn: 0, price: 0, hire: "none", leaver: "none" };
+const ROLES = [["Strategist", 95], ["Account manager", 62], ["SEO specialist", 58], ["Content team", 66], ["PPC specialist", 70], ["Performance director", 94]];
+function run() {
+  const growth = L.newOrganic * 3.2 + L.newPerf * 2.6 + L.leads * 0.25 + L.win * 0.3 - L.churn * 0.6 - Math.max(0, L.price) * 0.12;
+  const hireRelief = L.hire === "strategist" ? 22 : L.hire === "perf" ? 18 : 0;
+  const leave = L.leaver === "laura" ? 14 : L.leaver === "wendlley" ? 16 : 0;
+  const roles = ROLES.map(([n, b], i) => {
+    let v = b + growth * (i === 0 || i === 5 ? 1.1 : 0.7);
+    if ((L.hire === "strategist" && i === 0) || (L.hire === "perf" && i === 5)) v -= hireRelief;
+    if ((L.leaver === "laura" && i === 1) || (L.leaver === "wendlley" && i === 4)) v += leave;
+    return [n, Math.max(8, Math.round(v))];
+  });
+  const months = ["Nov", "Dec", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct"];
+  const series = (base, slope, wobble) => months.map((_, i) => base + slope * i + Math.sin(i * 1.3) * wobble);
+  const clients = Math.round(158 + growth * 2.4);
+  const profit = Math.round(61 + growth * 1.3 + L.price * 0.9 - (L.hire !== "none" ? 7 : 0));
+  const worstRole = roles.reduce((a, b) => (b[1] > a[1] ? b : a));
+  const over = roles.filter(r => r[1] >= 85).length;
+  const worstMonth = over ? months[Math.min(11, Math.max(1, Math.round(6 - growth / 3)))] : null;
+  return {
+    roles, months, clients, profit, over, worstRole, worstMonth,
+    dler: (5.6 + growth * 0.04 + L.price * 0.03).toFixed(1),
+    clientsS: [series(158, 0.4, 0.4), series(158, (clients - 158) / 11, 0.6)],
+    profitS: [series(61, 0.5, 0.8), series(61, (profit - 61) / 11, 1.2)],
+    utilS: [series(worstRole[1] - 6, 0.5, 1), series(worstRole[1] - 8, 0.9, 3)],
+  };
+}
+const changes = () => [
+  L.leads && `Leads ${L.leads > 0 ? "+" : ""}${L.leads}%`, L.win && `Win rate ${L.win > 0 ? "+" : ""}${L.win}%`,
+  (L.newOrganic || L.newPerf) && `+${L.newOrganic} SEO, +${L.newPerf} PPC clients a month`, L.churn && `Churn ${L.churn > 0 ? "+" : ""}${L.churn}%`,
+  L.price && `Price ${L.price > 0 ? "+" : ""}${L.price}%`, L.hire !== "none" && (L.hire === "strategist" ? "Hire a strategist in Mar" : "Hire a performance director in Mar"),
+  L.leaver !== "none" && (L.leaver === "laura" ? "Laura leaves in Feb" : "Wendlley leaves in Feb"),
+].filter(Boolean);
+
+// ---------- The map: three lanes, twelve processes; each card coloured by its busiest role ----------
+const PROC = [
+  { lane: 0, x: 60, n: "Win new clients", r: 0, s: 4 }, { lane: 0, x: 330, n: "Proposals", r: 0, s: 3 },
+  { lane: 1, x: 60, n: "Onboarding", r: 1, s: 7 }, { lane: 1, x: 330, n: "Content, per 1,000 words", r: 3, s: 5 }, { lane: 1, x: 600, n: "Links, per link", r: 2, s: 3 },
+  { lane: 1, x: 870, n: "Monthly work", r: 2, s: 6 }, { lane: 1, x: 1140, n: "Client meetings", r: 1, s: 2 },
+  { lane: 2, x: 60, n: "Pacing and hygiene", r: 4, s: 4 }, { lane: 2, x: 330, n: "Builds", r: 4, s: 3 }, { lane: 2, x: 600, n: "Creative sets", r: 4, s: 4 },
+  { lane: 2, x: 870, n: "Quarterly review", r: 5, s: 3 }, { lane: 2, x: 1140, n: "Ad-hoc requests", r: 5, s: 2 },
+];
+const LINKS = [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [2, 7], [7, 8], [8, 9], [9, 10], [10, 11]];
+const LANES = ["Sales and whole business", "Organic (SEO)", "Performance"];
+const tone = (v) => v >= 100 ? ["var(--crit)", "var(--crit-soft)", "Over capacity"] : v >= 85 ? ["var(--crit)", "var(--crit-soft)", "Stretched"] : v >= 75 ? ["var(--warn)", "var(--warn-soft)", "Near the line"] : ["var(--good)", "var(--good-soft)", "Has room"];
+function companyMap(R) {
+  const W = 1560, LH = 190, H = LH * 3 + 40, CW = 230, CH = 108;
+  const pos = (p) => [p.x + 150, 20 + p.lane * LH + (LH - CH) / 2];
+  const lanes = LANES.map((l, i) => `<g class="lane ${i % 2 ? "alt" : ""}"><rect x="0" y="${20 + i * LH}" width="${W}" height="${LH - 6}" rx="10"/><text x="16" y="${20 + i * LH + 26}">${l}</text></g>`).join("");
+  const edges = LINKS.map(([a, b]) => { const [x1, y1] = pos(PROC[a]), [x2, y2] = pos(PROC[b]); const sx = x1 + CW, sy = y1 + CH / 2, ex = x2, ey = y2 + CH / 2, mx = (sx + ex) / 2; const hot = R.roles[PROC[b].r][1] >= 85; return `<path class="edge ${hot ? "hot" : ""}" d="M${sx} ${sy} C${mx} ${sy} ${mx} ${ey} ${ex} ${ey}"/>`; }).join("");
+  const cards = PROC.map((p) => { const [x, y] = pos(p); const v = R.roles[p.r][1]; const [c, soft, word] = tone(v); return `<g class="pcard">
+      <rect class="body" x="${x}" y="${y}" width="${CW}" height="${CH}" rx="12" style="stroke:${v >= 85 ? c : "var(--line-2)"};stroke-width:${v >= 85 ? 2 : 1.2}"/>
+      <rect x="${x + 12}" y="${y + 12}" width="${word.length * 6.6 + 18}" height="20" rx="10" style="fill:${soft}"/><circle cx="${x + 22}" cy="${y + 22}" r="3.5" style="fill:${c}"/>
+      <text class="pill" x="${x + 30}" y="${y + 26}" style="fill:${c}">${word}</text>
+      <text x="${x + 12}" y="${y + 54}">${p.n}</text>
+      <text class="s" x="${x + 12}" y="${y + 74}">${p.s} steps · ${R.roles[p.r][0]} ${v}% busy</text>
+      <rect x="${x + 12}" y="${y + 86}" width="${CW - 24}" height="6" rx="3" style="fill:var(--panel-2)"/><rect x="${x + 12}" y="${y + 86}" width="${Math.min(1, v / 110) * (CW - 24)}" height="6" rx="3" style="fill:${c}"/>
+    </g>`; }).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Company map, coloured by how busy each process's people get">${lanes}${edges}${cards}</svg>
+    <div class="mapctl" aria-label="Map controls"><button aria-label="Zoom in">+</button><button aria-label="Zoom out">−</button><button aria-label="Fit">⤢</button><button aria-label="Full screen">⛶</button><span>82%</span></div>`;
+}
+
+// ---------- Pieces every variant uses ----------
+const playBar = () => `<span class="play"><button class="btn">▶ Play</button><input type="range" min="0" max="52" value="0" aria-label="Week"><span class="muted num" style="font-size:12px">Week 1</span></span>`;
+const verdict = (R) => R.over
+  ? `Worst month is <b class="bad">${R.worstMonth}</b>: ${R.worstRole[0].toLowerCase()} reaches <b class="bad">${R.worstRole[1]}%</b>. By Oct you have <b>${R.clients}</b> clients and <b>A$${R.profit}k</b> profit a month.`
+  : `<b class="ok">Nobody goes over their threshold.</b> By Oct you have <b>${R.clients}</b> clients and <b>A$${R.profit}k</b> profit a month.`;
+const kpis = (R) => `<div class="kpis">
+  <div class="kpi ${R.over ? "bad" : "ok"}"><div class="l">Worst month</div><div class="v">${R.worstMonth ?? "None"}</div><div class="d">${R.over ? `${R.over} roles over` : "all under threshold"}</div></div>
+  <div class="kpi"><div class="l">Clients by Oct</div><div class="v">${R.clients}</div><div class="d">${R.clients - 158 >= 0 ? "+" : ""}${R.clients - 158} vs today</div></div>
+  <div class="kpi"><div class="l">Profit in Oct</div><div class="v">A$${R.profit}k</div><div class="d">${R.profit - 61 >= 0 ? "+" : ""}A$${R.profit - 61}k a month</div></div>
+  <div class="kpi"><div class="l">DLER</div><div class="v">${R.dler}</div><div class="d">goal 4.5</div></div></div>`;
+function line(title, a, b, fmt) {
+  const W = 360, H = 130, L0 = 40, Rr = 8, T = 8, B = 20, all = a.concat(b), lo = Math.min(...all), hi = Math.max(...all), pad = (hi - lo) * .2 || 1, y0 = lo - pad, y1 = hi + pad;
+  const X = (i) => L0 + i * (W - L0 - Rr) / 11, Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B), P = (s) => s.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)} ${Y(v).toFixed(1)}`).join(" ");
+  return `<div class="chart"><h3>${title}</h3><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${title}">
+    ${[y0 + pad, (y0 + y1) / 2, y1 - pad].map(t => `<line x1="${L0}" x2="${W - Rr}" y1="${Y(t)}" y2="${Y(t)}" style="stroke:var(--line)"/><text x="${L0 - 5}" y="${Y(t) + 4}" text-anchor="end" style="fill:var(--fg-3);font:10px var(--font)">${fmt(t)}</text>`).join("")}
+    ${["Nov", "Feb", "May", "Aug", "Oct"].map((m, k) => `<text x="${X([0, 3, 6, 9, 11][k])}" y="${H - 4}" text-anchor="middle" style="fill:var(--fg-3);font:10px var(--font)">${m}</text>`).join("")}
+    <path d="${P(a)}" style="fill:none;stroke:var(--line-2);stroke-width:2;stroke-dasharray:4 4"/><path d="${P(b)}" style="fill:none;stroke:var(--accent);stroke-width:2.4"/></svg></div>`;
+}
+const charts = (R) => [line("Clients", R.clientsS[0], R.clientsS[1], v => Math.round(v)), line("Profit a month", R.profitS[0], R.profitS[1], v => "A$" + Math.round(v) + "k"), line(`${R.worstRole[0]} busy`, R.utilS[0], R.utilS[1], v => Math.round(v) + "%")];
+const heat = (R) => `<div class="heat" style="grid-template-columns:minmax(7rem,9rem) repeat(6,1fr)">${R.roles.map(([n, v]) => { const cells = [0, 1, 2, 3, 4, 5].map(m => Math.round(v - 4 + m * 1.4)); return `<span>${n}</span>${cells.map(c => `<span class="c" style="${c >= 85 ? "background:var(--crit-soft);color:var(--crit)" : c >= 75 ? "background:var(--warn-soft)" : "background:var(--good-soft)"}">${c}%</span>`).join("")}`; }).join("")}</div>`;
+const slider = (k, label, min, max, step, unit) => `<label class="lv"><span>${label}</span><b>${L[k] > 0 && unit !== " a month" ? "+" : ""}${L[k]}${unit}</b><input type="range" data-k="${k}" min="${min}" max="${max}" step="${step}" value="${L[k]}" aria-label="${label}"></label>`;
+const choice = (k, label, opts) => `<label class="lv"><span>${label}</span><b></b><select class="select" data-k="${k}" aria-label="${label}">${opts.map(([v, t]) => `<option value="${v}" ${L[k] === v ? "selected" : ""}>${t}</option>`).join("")}</select></label>`;
+const GROUPS = {
+  Market: () => slider("leads", "Leads", -50, 50, 5, "%") + slider("win", "Win rate", -30, 30, 5, "%"),
+  "Win new clients": () => slider("newOrganic", "Organic (SEO) a month", 0, 8, 1, " a month") + slider("newPerf", "Performance a month", 0, 8, 1, " a month"),
+  "Lose clients": () => slider("churn", "Churn", -30, 50, 5, "%"),
+  Prices: () => slider("price", "Price change", -20, 30, 1, "%"),
+  People: () => choice("hire", "Hire", [["none", "Nobody"], ["strategist", "A strategist in Mar"], ["perf", "A performance director in Mar"]]) + choice("leaver", "Someone leaves", [["none", "Nobody"], ["laura", "Laura in Feb"], ["wendlley", "Wendlley in Feb"]]),
+};
+const leverGroups = (open = true) => Object.entries(GROUPS).map(([t, f]) => `<details class="lgroup" ${open ? "open" : ""}><summary>${t}</summary>${f()}</details>`).join("");
+const toolbar = (extra = "") => `<div class="bar"><h1>Sandbox</h1><select class="select" aria-label="Company map version"><option>Company map v12 (live)</option></select><span class="seg"><button>6m</button><button aria-pressed="true">12m</button><button>24m</button></span>${extra}<span class="spacer"></span>${playBar()}<button class="btn" data-reset>Reset</button><button class="btn">Export</button></div>`;
+const shell = (body, cls) => `<div class="app ${cls}"><aside class="side"><div class="brand"><span class="mark"></span>Transpera Flow</div>${["Overview", "Processes", "Issues", "Solutions", "Capacity", "Sandbox", "Settings"].map(n => `<div class="nav ${n === "Sandbox" ? "on" : ""}">${n}</div>`).join("")}</aside><div class="main">${body}</div></div>`;
+
+// ---------- Variant A: map stage ----------
+const ui = { drawer: true, sheet: false, tab: "levers" };
+const A = { name: "Map stage", render(R) {
+  const cls = `A ${ui.drawer ? "open" : "closed"} ${ui.sheet ? "" : "sheet-closed"}`;
+  return shell(toolbar(`<button class="btn" data-toggle="drawer">${ui.drawer ? "Hide" : "Show"} levers</button>`) + `<div class="stage"><div class="canvasA">${companyMap(R)}</div>
+    <aside class="drawer" aria-label="Levers"><div class="drawer-h"><span class="t-label" style="flex:1">Levers</span><span class="muted" style="font-size:12px">${changes().length} changes</span></div>${leverGroups()}</aside>
+    <div class="float"><div class="verdictbox"><p class="verdict">${verdict(R)}</p>${changes().length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${changes().map(c => `<span class="chg">${c}</span>`).join("")}</div>` : ""}</div>${kpis(R)}</div>
+    <section class="sheet" aria-label="Charts"><div class="sheet-h" data-toggle="sheet"><span class="grip"></span><b style="font-size:13px">Month by month</b><span class="muted" style="font-size:12px">clients, profit and who's busy</span><span class="spacer"></span><span class="muted" style="font-size:12px">${ui.sheet ? "Pull down ▾" : "Pull up ▴"}</span></div>
+      <div class="sheet-b">${charts(R).join("")}<div class="chart" style="grid-column:1/-1"><h3>Who's overloaded</h3>${heat(R)}</div></div></section>
+  </div>`, cls);
+} };
+
+// ---------- Variant B: map + lever dock ----------
+const B = { name: "Map + lever dock", render(R) {
+  const cards = Object.entries(GROUPS).map(([t, f]) => { const on = changes().some(c => (t === "Market" && /Leads|Win rate/.test(c)) || (t === "Win new clients" && /clients a month/.test(c)) || (t === "Lose clients" && /Churn/.test(c)) || (t === "Prices" && /Price/.test(c)) || (t === "People" && /Hire|leaves/.test(c))); return `<div class="lcard ${on ? "changed" : ""}"><h3>${t}</h3>${f()}</div>`; }).join("");
+  return shell(toolbar() + `<div class="stage">${companyMap(R)}<div class="chips">${changes().map(c => `<span class="chg">${c}</span>`).join("")}</div></div>
+    <div class="dock"><div class="cards" aria-label="Levers">${cards}</div><div class="result"><p class="verdict" style="font-size:14px">${verdict(R)}</p>${kpis(R)}<button class="btn" style="align-self:flex-start">Charts and who's busy ▸</button></div></div>`, "B");
+} };
+
+// ---------- Variant C: map + control rail ----------
+const C = { name: "Map + control rail", render(R) {
+  const pane = ui.tab === "levers" ? leverGroups() : `<div style="display:flex;flex-direction:column;gap:12px;padding-top:12px">${charts(R).join("")}<div class="chart"><h3>Who's overloaded</h3>${heat(R)}</div></div>`;
+  return shell(toolbar() + `<div class="body"><div class="stage">${companyMap(R)}<div class="overlay">${kpis(R)}</div></div>
+    <aside class="rail"><div class="tabs" role="tablist"><button role="tab" data-tab="levers" aria-selected="${ui.tab === "levers"}">Levers</button><button role="tab" data-tab="results" aria-selected="${ui.tab === "results"}">Month by month</button></div>
+      <div class="pane">${pane}</div><div class="railfoot"><p class="verdict" style="font-size:13.5px">${verdict(R)}</p>${changes().length ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${changes().map(c => `<span class="chg">${c}</span>`).join("")}</div>` : `<span class="muted" style="font-size:12px">Move a lever to see what changes.</span>`}</div></aside></div>`, "C");
+} };
+
+// ---------- Switching and live updates ----------
+const V = [A, B, C], KEYS = ["a", "b", "c"];
+let vi = Math.max(0, KEYS.indexOf(location.hash.slice(1)));
+function render() {
+  const keep = document.activeElement?.dataset?.k;
+  document.getElementById("app").innerHTML = V[vi].render(run());
+  document.getElementById("vlab").innerHTML = `${KEYS[vi].toUpperCase()} <small>${V[vi].name}</small>`;
+  if (keep) document.querySelector(`[data-k="${keep}"]`)?.focus();
+}
+const go = (d) => { vi = (vi + d + 3) % 3; history.replaceState(null, "", "#" + KEYS[vi]); render(); };
+document.getElementById("prev").onclick = () => go(-1);
+document.getElementById("next").onclick = () => go(1);
+document.getElementById("theme").onclick = () => { const r = document.documentElement; const dark = r.dataset.theme ? r.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches; r.dataset.theme = dark ? "light" : "dark"; };
+document.addEventListener("keydown", (e) => { if (e.target.closest("input,select,textarea")) return; if (e.key === "ArrowLeft") go(-1); if (e.key === "ArrowRight") go(1); });
+document.addEventListener("input", (e) => { const k = e.target.dataset?.k; if (!k) return; L[k] = e.target.type === "range" ? Number(e.target.value) : e.target.value; render(); });
+document.addEventListener("change", (e) => { const k = e.target.dataset?.k; if (k && e.target.tagName === "SELECT") { L[k] = e.target.value; render(); } });
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-toggle]"); if (t) { ui[t.dataset.toggle] = !ui[t.dataset.toggle]; render(); return; }
+  const tab = e.target.closest("[data-tab]"); if (tab) { ui.tab = tab.dataset.tab; render(); return; }
+  if (e.target.closest("[data-reset]")) { Object.assign(L, { leads: 0, win: 0, newOrganic: 0, newPerf: 0, churn: 0, price: 0, hire: "none", leaver: "none" }); render(); }
+  const seg = e.target.closest(".seg button"); if (seg) seg.parentElement.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b === seg)));
+});
+addEventListener("hashchange", () => { vi = Math.max(0, KEYS.indexOf(location.hash.slice(1))); render(); });
+render();
+</script>
