@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { AgencyWorkspaceTable } from "@/components/agency-workspace-table";
 import { AppHeader } from "@/components/app-header";
@@ -24,6 +24,9 @@ export default async function HomePage() {
   // Memberships are made at sign-in from the "Who can sign in" list (and for a new workspace by the database), so there is nothing
   // to resolve here.
   const [workspaces, admin] = await Promise.all([listWorkspaces(), isAgencyAdmin()]);
+  // One deployment is one client (docs/adr/0024-*): with exactly one workspace there is no list to choose from, so go
+  // straight to it. Zero (the Owner makes the first) and two or more (a demo or QA deployment) keep this page.
+  if (workspaces.length === 1) redirect(`/w/${encodeURIComponent(workspaces[0]!.slug)}`);
   // The Owner with no workspaces creates the first one here.
   if (workspaces.length === 0 && !admin) {
     const user = await getSessionUser();
