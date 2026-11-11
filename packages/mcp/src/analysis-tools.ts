@@ -48,7 +48,7 @@ export const DEFAULT_ROBUSTNESS_SECONDS = 20;
 export const MAX_ROBUSTNESS_SECONDS = 45;
 export const SHADOW_PRICE_BUDGET_MS = 15_000;
 
-const workspaceArg = z.string().optional().describe("Workspace id, slug or name. Defaults to the active workspace (set_active_workspace).");
+const workspaceArg = z.string().optional().describe("Workspace id, slug or name. Defaults to the active workspace (set_active_workspace), else the only workspace you can access.");
 const processArg = z.string().optional().describe("Process id or name. Defaults to the workspace's only process.");
 const scenarioRefs = z
   .union([z.string().min(1), z.array(z.string().min(1)).min(1).max(10)])

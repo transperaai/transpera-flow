@@ -29,7 +29,7 @@ export const TOOL_NAMES = [
 const workspaceArg = z
   .string()
   .optional()
-  .describe("Workspace id, slug or name. Defaults to the active workspace (set_active_workspace).");
+  .describe("Workspace id, slug or name. Defaults to the active workspace (set_active_workspace), else the only workspace you can access.");
 const processArg = z.string().optional().describe("Process id or name. Defaults to the workspace's only process.");
 const revisionArg = z.enum(["live", "draft"]).optional().describe("Which revision to use (default live).");
 
