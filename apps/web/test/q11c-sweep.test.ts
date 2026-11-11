@@ -204,7 +204,7 @@ describe("Solution page", () => {
     const actions = page.locator("[data-testid=solution-header] [data-page-actions]");
     expect(await actions.locator("[data-open-in-editor]").innerText()).toContain("Open in editor");
     expect(await page.locator("[data-try-in-sandbox]").count()).toBe(0);
-    expect(await page.locator("[data-testid=solution-header] [data-edited]").innerText()).toMatch(/^Edited on \d{1,2} [A-Z][a-z]{2}/);
+    expect(await page.locator("[data-solution-rail] [data-edited]").innerText()).toMatch(/^\d{1,2} [A-Z][a-z]{2}/);
     expect(await page.locator("[data-built]").count()).toBe(0);
     expect(await page.locator("[data-adopt]").count()).toBe(0);
     await page.close();

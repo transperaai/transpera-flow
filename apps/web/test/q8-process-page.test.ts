@@ -116,12 +116,12 @@ describe("the process page on the detail template", () => {
     await page.keyboard.press("Escape");
     // The open menu hides the rest of the page from the accessibility tree; wait until it has gone.
     await page.locator("[data-slot=dropdown-menu-content]").waitFor({ state: "detached" });
-    // Header: the title, the pills, the key numbers, History, Edit (with the Editor's marker), Export.
+    // Header: the title, the pills, History, Edit (with the Editor's marker), Export. The numbers live in the strip below, once.
     const header = page.locator("[data-testid=about-process]");
     expect(await header.locator("h1").innerText()).toBe(processName);
     expect(await header.locator("[data-process-tag]").count()).toBe(2);
     expect(await header.innerText()).toMatch(/Live\s+Version 3/);
-    expect(await header.locator("[data-process-numbers]").innerText()).toMatch(/^\d+ steps? · \d+ roles? · [\d,.]+ h a month$/);
+    expect(await header.locator("[data-process-numbers]").count()).toBe(0);
     for (const name of ["History", "Edit", "Export"]) expect(await header.getByRole(name === "Export" ? "button" : "link", { name }).count()).toBe(1);
     expect(await header.locator("a[data-edit-entry] [data-edit-marker]").count()).toBe(1);
     // The pencil opens the Type and Department selects.
@@ -145,15 +145,15 @@ describe("the process page on the detail template", () => {
     const canvas = (await map.locator("[data-process-map]").boundingBox())!;
     expect(canvas.height).toBeGreaterThanOrEqual(595);
     expect(canvas.height).toBeLessThanOrEqual(605);
-    // At 1440 px the rail sits beside the main column, 20rem wide, its top level with the map card's.
+    // The details strip sits under the header, above the map card and as wide as it; it repeats nothing the header shows.
     const rail = page.locator("[data-process-rail]");
     const [railBox, mapBox] = [(await rail.boundingBox())!, (await map.boundingBox())!];
-    expect(railBox.width).toBe(320);
-    expect(railBox.x).toBeGreaterThan(mapBox.x + mapBox.width);
-    expect(Math.abs(railBox.y - mapBox.y)).toBeLessThan(2);
+    expect(Math.abs(railBox.width - mapBox.width)).toBeLessThan(2);
+    expect(railBox.y + railBox.height).toBeLessThanOrEqual(mapBox.y);
     const railText = await rail.innerText();
-    for (const term of ["Status", "Rating", "Category", "Department", "Steps", "Roles", "Hours a month", "Open issues", "Last published"]) expect(railText).toContain(term);
-    expect(await rail.locator("[data-rail-status]").innerText()).toBe("Live · Version 3");
+    for (const term of ["Steps", "Roles", "Hours a month", "Open issues", "Last published"]) expect(railText).toContain(term.toUpperCase());
+    for (const term of ["Status", "Rating", "Category", "Department"]) expect(railText).not.toContain(term.toUpperCase());
+    expect(await rail.locator("[data-process-hours]").innerText()).toMatch(/h|Simulating|Not simulated/);
     // Cost a month shows only where the run puts a cost on the hours (and pay isn't hidden); then it is a sum of money.
     for (const cost of await rail.locator("[data-process-cost]").allInnerTexts()) expect(cost).toMatch(/\d/);
     expect(railText).toContain("2 Nov");
@@ -206,10 +206,11 @@ describe("the process page on the detail template", () => {
     await page.close();
   }, 300_000);
 
-  it("stacks the rail under the main column below xl", async () => {
+  it("keeps the details strip above the map, as wide as it, at narrower widths too", async () => {
     const { page } = await mount({ editor: false, issues: true, width: 1100 });
     const [railBox, mapBox] = [(await page.locator("[data-process-rail]").boundingBox())!, (await page.locator("#map").boundingBox())!];
-    expect(railBox.y).toBeGreaterThan(mapBox.y + mapBox.height);
+    expect(railBox.y + railBox.height).toBeLessThanOrEqual(mapBox.y);
+    expect(Math.abs(railBox.width - mapBox.width)).toBeLessThan(2);
     await page.close();
   }, 300_000);
 

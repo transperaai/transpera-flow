@@ -17,9 +17,9 @@ import { AcknowledgeDialog } from "@/components/acknowledge-dialog";
 import { Help, HelpLabel } from "@/components/help";
 import { ISSUE_PAGE_HELP } from "@/lib/issues/help";
 import { ActionsHelp, DetailBreadcrumb, DetailLayout, EditMarker, MetaRail, RailItem } from "@/components/issues/detail-layout";
-import { IssueStatusMenu, IssueStatusPill } from "@/components/issues/status-pill";
+import { IssueStatusMenu } from "@/components/issues/status-pill";
 import { ResolveDialog } from "@/components/issues/resolve-dialog";
-import { EditableText, EmptyState, HEADER_PILL, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
+import { EditableText, EmptyState, HEADER_PILL, PageHeader, SectionCard } from "@/components/page-kit";
 import { RatingPill } from "@/components/overview/rating-pill";
 import { VerdictWord } from "@/components/solutions/solution-cards";
 import { SolutionStatusMenu } from "@/components/solutions/status-menu";
@@ -214,14 +214,6 @@ export function IssuePage(props: IssuePageProps) {
                 <IssueStatusMenu status={issue.status} onChange={(s) => void changeStatus(s)} disabled={!canEdit || state.busy} />
               </>
             }
-            meta={
-              <MetaLine>
-                <Link href={`${base}/p/${processIdOf}`} className="hover:underline" data-issue-process>
-                  {processLabel}
-                </Link>
-                <span>Last change {shortDate(lastChange)}</span>
-              </MetaLine>
-            }
             actionsLabel="Issue actions"
             actions={
               canEdit ? (
@@ -270,12 +262,6 @@ export function IssuePage(props: IssuePageProps) {
         }
         rail={
           <MetaRail label="Issue details" data-issue-rail="">
-            <RailItem term="Rating">
-              <RatingPill rating={ratingOfStored(issue.severity)} />
-            </RailItem>
-            <RailItem term="Status">
-              <IssueStatusPill status={issue.status} />
-            </RailItem>
             <RailItem term={owners.length > 1 ? "Owners" : "Owner"}>
               <OwnersEditor
                 ownerIds={owners}
@@ -287,7 +273,9 @@ export function IssuePage(props: IssuePageProps) {
               />
             </RailItem>
             <RailItem term="Process">
-              <TagPill tag={processLabel} className={HEADER_PILL} />
+              <Link href={`${base}/p/${processIdOf}`} className="hover:underline" data-issue-process>
+                <TagPill tag={processLabel} className={HEADER_PILL} />
+              </Link>
             </RailItem>
             <RailItem term="Created">{shortDate(issue.created_at)}</RailItem>
             <RailItem term="Last change">{shortDate(lastChange)}</RailItem>

@@ -215,13 +215,13 @@ describe("About this process", () => {
   });
   const header = (props: Partial<Parameters<typeof ProcessHeader>[0]> = {}) =>
     renderToStaticMarkup(createElement(ProcessHeader, { name: "Lead to live", about, actions: createElement("span", null, "actions"), ...props }));
-  it("is the page title with the Live pill and version, the category and department as pills, and the key numbers, with no (i)", () => {
+  it("is the page title with the Live pill and version, the category and department as pills, with no (i): the key numbers are in the details strip, not repeated here", () => {
     const html = header({ department: { value: null, options: [], workedOut: "Sales", current: "Performance", chosen: false } });
     expect(html).toContain("<h1");
     expect(html).toContain("Lead to live");
     expect(html).toContain("Sales");
     expect(html).toContain("Performance");
-    expect(html).toContain("6 steps · 3 roles");
+    expect(html).not.toContain("6 steps · 3 roles");
     expect(html).toMatch(/>Live<\/span>.*Version 4/);
     expect(header({ about: { ...about, version: null } })).toMatch(/>Draft<\/span>.*not published yet/);
     expect(html).not.toContain("About this process");

@@ -30,9 +30,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DetailLayout, EditMarker, MetaRail, RailItem } from "@/components/issues/detail-layout";
 import { SectionCard } from "@/components/page-kit";
-import { RatingPill } from "@/components/overview/rating-pill";
 import { Help } from "@/components/help";
-import { PROCESS_CATEGORY_LABELS } from "@transpera-flow/db";
 import { shortDate } from "@/lib/issues/pages";
 import { formatWholeCurrency } from "@/lib/format";
 import { aboutProcess } from "@/lib/process-page/about";
@@ -263,13 +261,6 @@ export function ProcessPage({
   const currency = bundle.workspace.settings.currency || "GBP";
   const monthCost = model && supporting ? costAMonth(model, result, supporting.hours) : null;
   const hoursAMonth = supporting?.hours && supporting.hours.total > 0 ? supporting.hours.total : null;
-  const numbers =
-    hoursAMonth !== null ? (
-      <>
-        {" · "}
-        <span data-process-hours>{hoursText(hoursAMonth)} a month</span>
-      </>
-    ) : null;
 
   const exportMenu = (
     <ExportMenu
@@ -307,7 +298,6 @@ export function ProcessPage({
             name={bundle.process.name}
             about={about}
             rating={processRating}
-            numbers={numbers}
             department={department}
             departmentEditor={department && mode === "live" ? <ProcessDepartmentField processId={bundle.process.id} data={department} canEdit /> : undefined}
             editCategory={editCategory}
@@ -353,15 +343,9 @@ export function ProcessPage({
         }
         rail={
           <MetaRail label="Process details" data-process-rail="">
-            <RailItem term="Status" data-rail-status="">
-              {old ? `Version ${viewingVersion}, read only` : unpublished ? "Draft, not published yet" : `Live · Version ${liveVersion}`}
-            </RailItem>
-            <RailItem term="Rating">{processRating ? <RatingPill rating={processRating} /> : "Nothing to fix"}</RailItem>
-            <RailItem term="Category">{PROCESS_CATEGORY_LABELS[about.category]}</RailItem>
-            {department && <RailItem term="Department">{department.current}</RailItem>}
             <RailItem term="Steps">{about.steps}</RailItem>
             <RailItem term="Roles">{about.roles}</RailItem>
-            <RailItem term="Hours a month" data-rail-hours="">
+            <RailItem term="Hours a month" data-rail-hours="" data-process-hours="">
               {hoursAMonth !== null ? hoursText(hoursAMonth) : model ? "Simulating…" : "Not simulated"}
             </RailItem>
             {monthCost !== null && (

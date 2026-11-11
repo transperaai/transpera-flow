@@ -13,7 +13,7 @@ import { PROCESS_CATEGORIES, PROCESS_CATEGORY_HELP, PROCESS_CATEGORY_LABELS, isP
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { HEADER_PILL, MetaLine, PageHeader } from "@/components/page-kit";
+import { HEADER_PILL, PageHeader } from "@/components/page-kit";
 import { TagPill } from "@/components/tag-pill";
 import { RatingPill } from "@/components/overview/rating-pill";
 import type { ProcessAdminResult } from "@/lib/processes/admin";
@@ -33,14 +33,11 @@ export function ProcessHeader({
   inside,
   actions,
   rating = null,
-  numbers,
 }: {
   /** The page's h1. */
   name: string;
   /** The worst rating on the process's steps, as a pill; null when nothing is rated. */
   rating?: Rating | null;
-  /** More key numbers after the steps and roles: the hours a month, from the run. */
-  numbers?: ReactNode;
   about: About;
   department?: DepartmentFieldData;
   /** The Department select (a server action behind it), for the Owner and Agency admins; absent for everyone else. */
@@ -106,7 +103,6 @@ export function ProcessHeader({
       )}
     </>
   );
-  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   return (
     <PageHeader
       label="Process"
@@ -127,14 +123,6 @@ export function ProcessHeader({
           {rating && <RatingPill rating={rating} />}
           {pills}
         </>
-      }
-      meta={
-        <MetaLine>
-          <span className="tabular-nums" data-process-numbers>
-            {plural(about.steps, "step", "steps")} · {plural(about.roles, "role", "roles")}
-            {numbers}
-          </span>
-        </MetaLine>
       }
       below={inside}
       actionsLabel="Process actions"
