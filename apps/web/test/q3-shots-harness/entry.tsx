@@ -3,6 +3,7 @@
 
 import { createRoot } from "react-dom/client";
 import type { ProcessBundle } from "@transpera-flow/db";
+import { DetailBreadcrumb } from "@/components/issues/detail-layout";
 import { ProcessPage } from "@/components/process-page";
 import { ProcessesPage } from "@/components/processes/processes-page";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -40,7 +41,9 @@ window.mountQ3Shots = (what) => {
   } else {
     root.render(
       <SidebarProvider>
-        <ProcessPage bundle={bundle} liveVersion={1} mode="readonly" historyHref="#" tierSetup={tierSetup} />
+        <div className="p-4">
+          <ProcessPage bundle={bundle} liveVersion={1} mode="readonly" historyHref="#" tierSetup={tierSetup} breadcrumb={<DetailBreadcrumb items={[{ label: "Processes", href: "#" }, { label: bundle.process.name }]} />} />
+        </div>
       </SidebarProvider>,
     );
   }

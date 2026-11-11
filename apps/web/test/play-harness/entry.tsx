@@ -115,8 +115,8 @@ function Harness({ setup, ctx }: { setup: ReturnType<typeof capacitySetupFromMod
   const todayPlan = useMemo(() => prepareOnModel(defaultPlay(), ctx, horizon), [ctx, horizon]);
   const prepare = useMemo(() => (play: PlayState) => prepareOnModel(play, ctx, horizon), [ctx, horizon]);
   return (
-    // The page's frame: from lg up the workbench fills the viewport and its panes scroll on their own.
-    <div className="flex min-w-0 flex-col lg:h-svh">
+    // The page's frame: one page that scrolls as a whole (no viewport-height frame).
+    <div className="flex min-w-0 flex-col">
       <PlayView
         setup={setup}
         processes={processes}
@@ -127,7 +127,7 @@ function Harness({ setup, ctx }: { setup: ReturnType<typeof capacitySetupFromMod
         prepare={prepare}
         // A stand-in for the company map's canvas (a bare page has no workspace bundle): a card per process, the page's click and badge hooks.
         map={(_runs, api) => (
-          <div data-company-map className="flex flex-wrap gap-6 rounded-lg border p-6">
+          <div data-company-map className="flex h-[65svh] min-h-[28rem] flex-wrap content-start gap-6 overflow-hidden rounded-xl border p-6">
             {processes.map((p) => (
               <div key={p.id} className="relative">
                 <button

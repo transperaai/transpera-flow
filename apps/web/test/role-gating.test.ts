@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -106,11 +106,12 @@ describe("the Editor and the Settings", () => {
   });
 
   it("Set up (Tiers & clients, People & roles): everyone reads, the loader says who may change, and the tables show text, not inputs, without it", () => {
-    for (const route of ["settings/clients", "settings/people"]) {
-      const page = read(PAGE(route));
-      expect(page, route).toContain("loadCapacitySetup(");
-      expect(page, route).toContain("notFound()");
-    }
+    // Both are sections of the one Settings page, which loads the setup for everyone and 404s without it.
+    const page = read(PAGE("settings"));
+    expect(page).toContain("loadCapacitySetup(");
+    expect(page).toContain("if (!setup) notFound();");
+    expect(page).toContain("<TiersAndClients setup={setup} data={data} roster={roster} />");
+    expect(page).toContain("<PeopleAndRoles setup={setup} data={data} />");
     const loader = read("../../../packages/db/src/capacity-setup.ts");
     expect(loader).toContain('rpc(db, "can_edit_workspace", { ws: workspaceId })');
     expect(loader).toContain('rpc(db, "can_see_people", { ws: workspaceId })');
@@ -129,13 +130,20 @@ describe("the Editor and the Settings", () => {
     expect(read(PAGE("people"))).not.toMatch(/-actions"|\/actions"/);
   });
 
-  it("Access is for owners and agency admins: the page 404s without can_manage_workspace and the link is hidden", () => {
+  it("Access is for owners and agency admins: the section is left out without can_manage_workspace and the link is hidden", () => {
     const access = read("lib/access-data.ts");
     expect(access).toContain('rpc(db, "can_manage_workspace", { ws }),');
     expect(access).toContain("if (!canManage) return null;");
-    expect(read(PAGE("settings/access"))).toContain("if (!settings) notFound();");
-    // The link is in the Settings sub-nav, for managers only: every Settings page passes it whether this person manages the workspace.
-    expect(read("components/settings/settings-nav.tsx")).toContain('...(canManage ? [{ label: "Access", href: `/w/${slug}/settings/access` }] : [])');
-    expect(read(PAGE("settings"))).toContain("canManage={data.canManage}");
+    // The Settings page loads Access only for a manager, and renders the section only when the loader answered (it is null otherwise).
+    const page = read(PAGE("settings"));
+    expect(page).toContain("data.canManage ? Promise.all([loadAccessSettings(slug),");
+    expect(page).toContain("{accessSettings && <AccessSection ");
+    // The old address has no page of its own: it redirects to the section, which a non-manager doesn't get.
+    expect(existsSync(join(__dirname, "..", "src", PAGE("settings/access")))).toBe(false);
+    // The link is in the Settings sub-nav, for managers only: the page passes whether this person manages the workspace.
+    const nav = read("components/settings/settings-nav.tsx");
+    expect(nav).toContain('{ label: "Access", section: "access", managersOnly: true }');
+    expect(nav).toContain('filter((s) => canManage || !("managersOnly" in s))');
+    expect(page).toContain("canManage={data.canManage}");
   });
 });

@@ -201,12 +201,12 @@ export function DepartmentAlerts({ failure }: { failure: DepartmentFigures["fail
 
 export function StartChecklist({ setup, base }: { setup: CapacitySetup; base: string }) {
   const items = [
-    { label: "Add roles", href: `${base}/settings/people#roles-heading`, done: setup.roles.length > 0 },
-    { label: "Add people", href: `${base}/settings/people#people-heading`, done: setup.people.length > 0 },
-    { label: "Add tiers and services", href: `${base}/settings/clients`, done: setup.services.some((s) => s.active && s.tier_id) },
+    { label: "Add roles", href: `${base}/settings#roles-heading`, done: setup.roles.length > 0 },
+    { label: "Add people", href: `${base}/settings#people-heading`, done: setup.people.length > 0 },
+    { label: "Add tiers and services", href: `${base}/settings#tiers-clients`, done: setup.services.some((s) => s.active && s.tier_id) },
     {
       label: "Enter how many clients are in each tier",
-      href: `${base}/settings/clients#clients-heading`,
+      href: `${base}/settings#clients-heading`,
       done: setup.tiers.some((t) => setup.services.some((s) => s.tier_id === t.id)) && setup.clients.length + setup.portfolio.length > 0,
     },
   ];
@@ -262,7 +262,7 @@ function SalariesMissing({ base }: { base: string }) {
   return (
     <span data-salaries-missing>
       Salaries not entered.{" "}
-      <Link href={`${base}/settings/people`} className="whitespace-nowrap font-medium text-accent hover:underline">
+      <Link href={`${base}/settings#people-roles`} className="whitespace-nowrap font-medium text-accent hover:underline">
         Enter them →
       </Link>
     </span>

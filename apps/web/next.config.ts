@@ -43,9 +43,14 @@ const nextConfig: NextConfig = {
     { source: "/w/:slug/library", destination: "/w/:slug/blocks", permanent: false },
     // The Forecast became the Sandbox (one scenario model); the query string (?plan=, ?compare=, ?horizon=) carries over.
     { source: "/w/:slug/forecast", destination: "/w/:slug/sandbox", permanent: false },
-    // Set up's two pages moved under Settings, and Purposes became a section of the Settings page.
-    { source: "/w/:slug/setup/:page(clients|people)", destination: "/w/:slug/settings/:page", permanent: false },
-    { source: "/w/:slug/settings/purposes", destination: "/w/:slug/settings#purposes-heading", permanent: false },
+    // Settings is one scrolling page: Set up's two pages, Settings' old sub-pages and Purposes are sections of it, each with an anchor.
+    // A redirect's Location keeps its #fragment and the browser scrolls to it; the query string (Access's ?error=, ?notice=) carries over.
+    { source: "/w/:slug/setup/clients", destination: "/w/:slug/settings#tiers-clients", permanent: false },
+    { source: "/w/:slug/setup/people", destination: "/w/:slug/settings#people-roles", permanent: false },
+    { source: "/w/:slug/settings/clients", destination: "/w/:slug/settings#tiers-clients", permanent: false },
+    { source: "/w/:slug/settings/people", destination: "/w/:slug/settings#people-roles", permanent: false },
+    { source: "/w/:slug/settings/access", destination: "/w/:slug/settings#access", permanent: false },
+    { source: "/w/:slug/settings/purposes", destination: "/w/:slug/settings#purposes", permanent: false },
   ],
 };
 

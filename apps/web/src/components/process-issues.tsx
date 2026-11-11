@@ -28,6 +28,8 @@ export interface ProcessIssues {
   facts: DetectedIssue[] | null;
   /** The process page's Issues section: confirmed issues linked to this process or its steps, with "+ New issue". */
   issuesList: ReactNode;
+  /** How many confirmed issues on this process are still open (Open or Testing solutions), for the page's rail. */
+  openIssues: number;
   /** Switch the rail to its Issues tab (the sidebar's Issues item, on the demo). */
   showIssues: () => void;
   /** A step's worst open-issue rating, which a closed group takes the worst of. */
@@ -157,6 +159,7 @@ export function useProcessIssues({
   }, [here]);
   const highlight = lit;
   const openCount = here.filter((e) => entryView(e).open).length;
+  const openIssues = here.filter((e) => e.kind === "tracked" && entryView(e).open).length;
 
   // Steps of this process and of those inside it, named for the register; the page's sections keep to them.
   const stepIds = useMemo(() => processStepIds(bundle), [bundle]);
@@ -267,6 +270,7 @@ export function useProcessIssues({
     rail,
     facts: shownFacts,
     issuesList: section("issues"),
+    openIssues,
     showIssues: () => setTab("issues"),
     onScenariosChange: setScenarios,
     scenarios,

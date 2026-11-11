@@ -19,6 +19,7 @@ export function SectionCard({
   contentClassName,
   section,
   level = 2,
+  ...rest
 }: {
   id: string;
   title: ReactNode;
@@ -37,9 +38,9 @@ export function SectionCard({
   section?: string;
   /** The title's heading level: 2 by default; 3 for a card inside a page section that has its own heading. */
   level?: 2 | 3;
-}) {
+} & Record<`data-${string}`, string | undefined>) {
   return (
-    <Card id={id} data-section={section} className={cn("scroll-mt-16 gap-3", className)} aria-labelledby={`${id}-heading`}>
+    <Card id={id} data-section={section} className={cn("scroll-mt-16 gap-3", className)} aria-labelledby={`${id}-heading`} {...rest}>
       <CardHeader>
         <CardTitle id={`${id}-heading`} role="heading" aria-level={level} className="font-display text-sm font-semibold">
           {title}

@@ -45,7 +45,7 @@ export function WorkspaceDetails({
 }) {
   const options = CURRENCIES.some((c) => c.value === currency) ? CURRENCIES : [{ value: currency, label: currency }, ...CURRENCIES];
   return (
-    <SettingsSection id="workspace" title="Workspace" description="The company's name, the money amounts are shown in, and its fixed costs.">
+    <SettingsSection id="workspace" band title="Workspace" description="The company's name, the money amounts are shown in, and its fixed costs.">
       <FieldRows>
         <TextField
           label="Name"

@@ -1,9 +1,8 @@
 "use client";
 
-// The free-play Sandbox's results, the workbench's main pane (D54, after capacity build P7; QA round 2 picks A1 and C1; the UI cleanup's layout A). In
-// order: the verdict in a sentence and a flat strip of its figures (worst month, clients, profit, DLER, each against today's path), the company map
-// (the page's, folded away on request), then clients, MRR and DLER by department side by side in an auto-fit grid over the horizon picked in the
-// toolbar (12 to 60 months), each with how far this scene is ahead of today's path at the horizon, then who's overloaded and when (a team-by-month
+// The free-play Sandbox's results, under the company map and the levers (D54, after capacity build P7; QA round 2 picks A1 and C1). In
+// order: the verdict in a sentence and a flat strip of its figures (worst month, clients, profit, DLER, each against today's path), then clients, MRR
+// and DLER by department side by side in an auto-fit grid over the horizon picked in the toolbar (12 to 60 months), each with how far this scene is ahead of today's path at the horizon, then who's overloaded and when (a team-by-month
 // heatmap of the first year with a This scene / Today switch and its worst month named and outlined) and where the time goes (Today and This scene as
 // stacked bars by purpose, with what moved). On today's path there is no change and no dashed copy. Goal seek and "What matters most" stay hidden (D33).
 
@@ -36,7 +35,6 @@ export function PlayResults({
   moved,
   purposes = DEFAULT_PURPOSES,
   horizon = 12,
-  map,
 }: {
   runs: PlayRuns;
   setup: CapacitySetup;
@@ -44,8 +42,6 @@ export function PlayResults({
   moved: boolean;
   purposes?: readonly PurposeCategory[];
   horizon?: PlayHorizon;
-  /** The company map section, drawn after the verdict's figures (and while the first run is still working). */
-  map?: ReactNode;
 }) {
   const { today, changed } = runs;
   const [view, setView] = useState<HeatView>("scene");
@@ -61,7 +57,6 @@ export function PlayResults({
         <div role="alert" data-run-error className="rounded-md border border-crit bg-crit-soft p-4 text-sm">
           The simulation could not run: {runs.error}
         </div>
-        {map}
       </div>
     );
   }
@@ -72,7 +67,6 @@ export function PlayResults({
           <p className="text-sm text-muted-foreground">Working out today&apos;s path over the next {horizon} months…</p>
           <Skeleton className="h-[4.5rem] w-full rounded-xl" />
         </div>
-        {map}
         <div className={CHART_GRID} aria-hidden>
           {[0, 1, 2].map((i) => (
             <SectionCard key={i} id={`play-skeleton-${i}`} title={<Skeleton className="h-5 w-32" />} contentClassName="gap-2">
@@ -215,8 +209,6 @@ export function PlayResults({
           )}
         </KpiStrip>
       </section>
-
-      {map}
 
       <div className={CHART_GRID} data-play-charts>
         <ChartCard title="Clients by department" help={PLAY_HELP.clients}>

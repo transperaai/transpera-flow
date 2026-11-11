@@ -17,8 +17,8 @@ import { isId } from "@/lib/sources/validate";
 import { loadLiveProcess, loadPublishState, loadWorkspaceIssues, loadWorkspaceSandboxScenarios, loadWorkspaceSolutions, loadWorkspaceSources } from "@/lib/data";
 
 /**
- * The Sandbox (capacity build P7, D38): free play, as a workbench. A toolbar, the levers on the left and the results on the right: a verdict, the
- * company map (click a process to load another version of it) and the charts against today's path. Nothing is saved; the levers reset when you leave. Everyone who
+ * The Sandbox (capacity build P7, D38): free play, as one scrolling page. A toolbar, the company map (click a process to load another
+ * version of it), the levers laid out in a band under it, then the results against today's path: a verdict, its figures and the charts. Nothing is saved; the levers reset when you leave. Everyone who
  * can read the workspace plays; Stored scenarios stay in the database, and
  * the old scenario page is behind SANDBOX_SCENARIOS_SHOWN.
  */
@@ -62,10 +62,9 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
     const chosen = typeof companyParam === "string" ? (companyParam === "draft" ? companyRevisions.find((r) => r.status === "draft") : companyRevisions.find((r) => r.id === companyParam)) : undefined;
     const company = chosen && !chosen.live ? ((await loadCompanyRevision(ws, chosen.id)) ?? liveCompany) : liveCompany;
     const companyRevisionId = chosen && company !== liveCompany ? chosen.id : (companyRevisions.find((r) => r.live)?.id ?? null);
-    // A workbench (docs/plans/ui-cleanup.md): from `lg` up it fills the viewport under the shell's bar and its panes scroll on their own; on a
-    // phone it is one column and the page scrolls.
+    // One page that scrolls as a whole, on a phone too: no viewport-height frame and no panes of its own.
     return (
-      <div className="flex min-w-0 flex-col lg:h-svh">
+      <div className="flex min-w-0 flex-col">
         <ShellHeader title="Sandbox" />
         <PlayPage live={live} parts={parts} company={company} setup={setup} solutions={solutions.solutions} solutionLinks={solutions.links} issues={issues} canEdit={canEdit} base={`/w/${slug}`} laneInput={laneInput} companyRevisions={companyRevisions} companyRevisionId={companyRevisionId} initialSolutionId={typeof solutionParam === "string" && isId(solutionParam) ? solutionParam : null} />
       </div>
@@ -89,7 +88,7 @@ export default async function WorkspaceSandboxPage(props: PageProps<"/w/[slug]/s
           mode={canEdit ? "live" : "readonly"}
           issuesHref={`${base}/issues`}
           peopleHref={`${base}/settings`}
-          purposesHref={`${base}/settings#purposes-heading`}
+          purposesHref={`${base}/settings#purposes`}
           scenarios={scenarios}
           solutions={solutions}
         />

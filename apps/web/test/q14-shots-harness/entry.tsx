@@ -7,6 +7,7 @@ import { capacityModel } from "@transpera-flow/engine";
 import { PeopleAndRoles, PeopleHeaderActions } from "@/components/setup/people-roles";
 import { peopleMeta } from "@/lib/setup/people-meta";
 import { SettingsPage } from "@/components/settings/settings-page";
+import { SettingsBand } from "@/components/settings/settings-band";
 import { PhoneNotice } from "@/components/shell/phone-read-only";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import type { WorkspaceSettingsData } from "@/lib/data";
@@ -40,9 +41,12 @@ window.mountQ14 = ({ open, role }) => {
   createRoot(document.getElementById("root")!).render(
     <SidebarProvider>
       <main className="min-w-0 flex-1">
-        <SettingsPage title="People & roles" eyebrow="Settings" description={peopleMeta(setup)} actions={<PeopleHeaderActions setup={setup} data={data} />}>
+        {/* People & roles is a section of the one Settings page: its band, as page.tsx renders it. */}
+        <SettingsPage title="Workspace settings" eyebrow="Settings">
           <PhoneNotice />
-          <PeopleAndRoles setup={setup} data={data} />
+          <SettingsBand id="people-roles" title="People & roles" description={`${peopleMeta(setup).join(" · ")}: people and roles open into a panel; then how the shared teams work.`} action={<PeopleHeaderActions setup={setup} data={data} />}>
+            <PeopleAndRoles setup={setup} data={data} />
+          </SettingsBand>
         </SettingsPage>
       </main>
     </SidebarProvider>,

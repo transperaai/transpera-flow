@@ -17,7 +17,22 @@ export type MapExportInput = Omit<MapImageInput, "palette" | "date">;
  * Export menu for a map. `input` is read when an item is chosen (so it draws the map as it is then); `bundleHref`, when
  * given, adds the workspace JSON bundle (fetched from that route; its error message, if any, shows in the menu).
  */
-export function ExportMenu({ input, name, bundleHref, label = "Export", note }: { input: () => MapExportInput; name: string; bundleHref?: string; label?: string; note?: string }) {
+export function ExportMenu({
+  input,
+  name,
+  bundleHref,
+  label = "Export",
+  note,
+  size = "sm",
+}: {
+  input: () => MapExportInput;
+  name: string;
+  bundleHref?: string;
+  label?: string;
+  note?: string;
+  /** The button's size, to match the buttons beside it (a detail page's header uses the default size). */
+  size?: "sm" | "default";
+}) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
@@ -67,7 +82,7 @@ export function ExportMenu({ input, name, bundleHref, label = "Export", note }: 
         }}
       >
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="outline" size="sm" data-export-menu disabled={busy}>
+          <Button type="button" variant="outline" size={size} data-export-menu disabled={busy}>
             <Download aria-hidden />
             {busy ? "Exporting…" : label}
           </Button>

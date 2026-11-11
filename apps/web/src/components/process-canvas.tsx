@@ -50,7 +50,6 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
-import { createPortal } from "react-dom";
 import { Clock, Flag, Play, Split, Undo2 } from "lucide-react";
 import { RATING_LABELS, type Rating, type SimulationResult } from "@transpera-flow/engine";
 import {
@@ -109,7 +108,6 @@ import { ProblemMark } from "./editor/problem-mark";
 import type { NodeProblems } from "@/lib/editor/problems";
 import { GO_BACK_LINK_PREFIX, branchRows, edgeOfGoBackNode, goBackNodes, isGoBackNodeId, type BranchRow } from "@/lib/editor/branch-view";
 import { addBranch, goBackProblem, setBranchShare, setBranchTarget, type BranchTarget } from "@/lib/editor/branches";
-import { Help } from "./help";
 import { FirstRunStatus } from "./map/map-placeholder";
 import { EmptyState } from "./shell/empty-state";
 import { NO_EXTRAS, StepDetail, sourcesOf, type StepExtras } from "./map/step-detail";
@@ -1414,7 +1412,7 @@ interface CanvasProps {
   playbackAbove?: boolean;
   /**
    * The start of a read-only map's one toolbar row (the Overview: "Company map", its (?), the horizon toggle and the Sandbox link),
-   * before Expand all, the lanes toggle, Key and playback. When given, `card.title` and its help are not drawn: the host's title is.
+   * before Expand all, the lanes toggle, Key and playback.
    */
   toolbarStart?: ReactNode;
   /**
@@ -1462,31 +1460,8 @@ interface CanvasProps {
   refitOn?: string;
   /** What to do about a read-only map with no steps (the process page offers the Editor); shown under the sentence. */
   emptyAction?: ReactNode;
-  /**
-   * Where a read-only map's step detail goes instead of floating over the map's corner: it is drawn into this element, docked, with no
-   * float or shadow of its own (the process page's inspector, Step tab). Null while that element isn't mounted yet: nothing is drawn.
-   * Omitted: over the map, as before.
-   */
-  stepDetailIn?: HTMLElement | null;
-  /** The step whose detail is open changed: its id, or null when the detail closed (a read-only map). */
-  onStepDetailChange?: (stepId: string | null) => void;
   /** The wheel zooms the map. Default: on an editable map only (a read-only map usually sits in a page that scrolls). */
   wheelZoom?: boolean;
-  /**
-   * The map as the body of a card that is not its own (Q8, the process page): no border or rounding of its own, and the toolbar row
-   * above it starts with the card's title (unless `toolbarStart` is given), with `action` after the Key button and before playback.
-   * `compact`: for a map that runs edge to edge (the process page's workbench): the title as a small panel label, and `below` capped
-   * in height so it never squeezes the map away.
-   */
-  card?: {
-    title: string;
-    action?: ReactNode;
-    /** The (i) beside the title. */
-    help?: { label: string; description: string; example: string };
-    /** Under the header, above the map: the process page's "Missing for simulation" alert. */
-    below?: ReactNode;
-    compact?: boolean;
-  };
 }
 
 export function ProcessCanvas(props: CanvasProps) {
@@ -1548,10 +1523,7 @@ function Canvas({
   computing = false,
   refitOn,
   emptyAction,
-  stepDetailIn,
-  onStepDetailChange,
   wheelZoom,
-  card,
   toolbarStart,
 }: CanvasProps) {
   const editable = editor !== null;
@@ -2409,18 +2381,6 @@ function Canvas({
     setDetailId(null);
     if (id) focusStep(id);
   };
-  // Tell the page which step's detail is open (it shows its Step tab), only when that changes.
-  const detailChanged = useRef(onStepDetailChange);
-  useEffect(() => {
-    detailChanged.current = onStepDetailChange;
-  }, [onStepDetailChange]);
-  const shownDetailId = detailStep?.id ?? null;
-  useEffect(() => {
-    detailChanged.current?.(shownDetailId);
-  }, [shownDetailId]);
-  // On the full screen the page's inspector is out of sight: the step's detail floats over the map instead.
-  const docked = stepDetailIn !== undefined && !fullscreen;
-  const compact = !!card?.compact;
 
   // What React Flow is handed keeps its identity across renders (issue #249): a new handler on each render made it wake every
   // handle and edge on each drag move. Each calls the latest closure.
@@ -2504,42 +2464,31 @@ function Canvas({
           tabIndex={-1}
           onDoubleClick={onDoubleClick}
           onKeyDownCapture={onKeyDownCapture}
-          className={`relative isolate flex min-w-0 flex-col ${card ? "" : "rounded-lg border"} ${card && !fullscreen ? "" : "bg-card"} ${heightMode === "fill" ? "min-h-[24rem] flex-1" : "h-fit"}`}
+          className={`relative isolate flex min-w-0 flex-col rounded-lg border bg-card ${heightMode === "fill" ? "min-h-[24rem] flex-1" : "h-fit"}`}
           data-fullscreen={fullscreen ? "" : undefined}
           role="region"
           aria-label={`${bundle.process.name} process map`}
         >
-          {/* Above the map in the page, so Tab reaches these first. A read-only map has one slim toolbar row: the host's start (or the
-              card's title), Expand all and the lanes toggle, Key (the colours), the card's action, then playback taking the room left.
+          {/* Above the map in the page, so Tab reaches these first. A read-only map has one slim toolbar row: the host's start,
+              Expand all and the lanes toggle, Key (the colours), then playback taking the room left.
               It wraps to a second row only when the panel is too narrow. The Editor keeps its bar of lane controls and legend. */}
           {editable
             ? (legend || allGroups.length > 0 || (showLanes && !hasGroups) || (departmentLanes && !departmentLanes.always)) && (
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-2">
                   {laneControls}
                   {legend && <MapLegend badge={!!openIssues} />}
-                  {card?.action}
                   {overflowNote("ml-auto")}
                 </div>
               )
-            : (toolbarStart || card || legend || laneControls || showPlayback) && (
+            : (toolbarStart || legend || laneControls || showPlayback) && (
                 <div className="flex min-h-11 flex-none flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-line px-3 py-1.5 text-xs" data-map-toolbar>
-                  {toolbarStart ? (
+                  {toolbarStart && (
                     <div className="flex min-w-0 flex-none flex-wrap items-center gap-x-3 gap-y-1.5" data-map-toolbar-start>
                       {toolbarStart}
                     </div>
-                  ) : (
-                    card && (
-                      <div className="flex flex-none items-center">
-                        <h2 id="map-heading" className={compact ? "text-xs font-semibold tracking-wider text-muted-foreground uppercase" : "font-display text-sm leading-snug font-bold"}>
-                          {card.title}
-                        </h2>
-                        {card.help && <Help {...card.help} />}
-                      </div>
-                    )
                   )}
                   {laneControls}
                   {legend && <MapKey badge={!!openIssues} note={showPlayback && playback.index ? `Playback shows run 1 of ${result?.reps ?? 1}; the figures average all ${result?.reps ?? 1} runs.` : undefined} />}
-                  {card?.action}
                   {showPlayback ? (
                     <div className="flex max-w-full flex-auto" data-playback-strip>
                       <PlaybackBar
@@ -2556,8 +2505,7 @@ function Canvas({
                   )}
                 </div>
               )}
-          {card?.below && <div className={compact ? "flex max-h-48 shrink-0 flex-col gap-2 overflow-y-auto border-b border-line px-3 py-2" : "flex flex-col gap-2 px-4 pb-3"}>{card.below}</div>}
-          <div className={`relative min-h-0 ${heightMode === "fill" ? "flex-1" : ""} ${card ? "bg-muted/30" : ""}`} style={heightMode === "auto" ? { height: autoHeight ?? 360 } : undefined}>
+          <div className={`relative min-h-0 ${heightMode === "fill" ? "flex-1" : ""}`} style={heightMode === "auto" ? { height: autoHeight ?? 360 } : undefined}>
           {/* Before the map in the page, so Tab reaches the toolbar first. */}
           {editable && editorState && (
             <div className="absolute top-2.5 left-2.5 z-10 max-w-[calc(100%-1.25rem)]">
@@ -2657,25 +2605,18 @@ function Canvas({
             )}
           </ReactFlow>
           </div>
-          {detailStep &&
-            (() => {
-              const detail = (
-                <StepDetail
-                  step={detailStep}
-                  who={(detailStep.person_id ? namedForViewer(viewerOf(bundle), bundle.people).find((x) => x.id === detailStep.person_id)?.name : null) ?? bundle.roles.find((x) => x.id === detailStep.role_id)?.name ?? null}
-                  rating={ratingOfRank(rating?.(detailStep.id)?.rank ?? -1)}
-                  reworkTo={reworkToOf(bundle.steps, detailStep)}
-                  extras={stepExtras?.(detailStep.id) ?? NO_EXTRAS}
-                  sources={sourcesOf(detailStep, sourceTitles)}
-                  baseValues={stepBaseValues?.(detailStep)}
-                  onClose={closeDetail}
-                  docked={docked}
-                />
-              );
-              // Docked in the page's inspector; nothing while that isn't mounted yet.
-              if (docked) return stepDetailIn ? createPortal(detail, stepDetailIn) : null;
-              return detail;
-            })()}
+          {detailStep && (
+            <StepDetail
+              step={detailStep}
+              who={(detailStep.person_id ? namedForViewer(viewerOf(bundle), bundle.people).find((x) => x.id === detailStep.person_id)?.name : null) ?? bundle.roles.find((x) => x.id === detailStep.role_id)?.name ?? null}
+              rating={ratingOfRank(rating?.(detailStep.id)?.rank ?? -1)}
+              reworkTo={reworkToOf(bundle.steps, detailStep)}
+              extras={stepExtras?.(detailStep.id) ?? NO_EXTRAS}
+              sources={sourcesOf(detailStep, sourceTitles)}
+              baseValues={stepBaseValues?.(detailStep)}
+              onClose={closeDetail}
+            />
+          )}
           {menu && editor && commands && (
             <NodeMenu
               key={menu.id}

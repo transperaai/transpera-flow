@@ -524,7 +524,7 @@ function PersonPanel({
               <ul className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
                 {named.map((c) => (
                   <li key={c.id}>
-                    <Link href={`/w/${data.workspace.slug}/settings/clients`} className="text-accent hover:underline">
+                    <Link href={`/w/${data.workspace.slug}/settings#tiers-clients`} className="text-accent hover:underline">
                       {c.name}
                     </Link>
                   </li>

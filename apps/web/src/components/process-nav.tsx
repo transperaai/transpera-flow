@@ -5,6 +5,7 @@ import { Fragment, useState } from "react";
 import { Check, ChevronRight, ChevronsUpDown, Network, Plus } from "lucide-react";
 import { companyMap, flattenCompanyMap, type ProcessListing } from "@transpera-flow/db";
 import type { CreateProcessResult } from "@/app/w/[slug]/process-actions";
+import { DetailBreadcrumb } from "@/components/issues/detail-layout";
 import { NewProcessDialog } from "@/components/new-process-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,9 +19,9 @@ import { EDIT_ONLY } from "@/lib/phone";
  * indented by how deep it sits with "All processes" at the foot. Editors can start a
  * new servicing process from it.
  *
- * `part` splits it for the process page's workbench, which puts the breadcrumbs in its top bar and the switcher in its toolbar (one
- * title, not two): `crumbs` draws the breadcrumbs ending with the process's name as plain text, `title` the switcher alone. Default
- * `all`: both, as the History page draws them.
+ * `part`: `all` (the default) draws the breadcrumbs and the switcher as the title, as the History page does. `crumbs` is the process
+ * page's breadcrumb (the Issue page's `DetailBreadcrumb`): Processes, the processes it sits inside, then the switcher as the last crumb,
+ * never a heading (the page header's h1 is the process name).
  */
 export function ProcessNav({
   processes,
@@ -42,7 +43,7 @@ export function ProcessNav({
   processesHref?: string;
   /** The company map, the same place as the Processes page's Company map button. */
   companyMapHref?: string;
-  part?: "all" | "crumbs" | "title";
+  part?: "all" | "crumbs";
   /**
    * The name (or the switcher) is the page's h1. Default true. False on a page with an h1 of its own (History): the same text in a
    * plain element, so the page has one h1.
@@ -56,8 +57,9 @@ export function ProcessNav({
   const name = here?.name ?? "Process";
   const byId = new Map(processes.map((p) => [p.id, { id: p.id, name: p.name, parentId: p.parentId ?? null }]));
   const trail = here ? trailOf({ id: here.id, parentId: here.parentId ?? null }, byId) : [];
+  const menu = { name, ordered, current, hrefs, processesHref, companyMapHref, onNew: create ? () => setAdding(true) : undefined };
   const crumbs = (
-    <nav aria-label="Breadcrumb" className={`flex min-w-0 items-center gap-x-1 text-xs text-muted-foreground ${part === "crumbs" ? "shrink overflow-hidden whitespace-nowrap" : "flex-wrap"}`}>
+    <nav aria-label="Breadcrumb" className="flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
       {processesHref && (
         <Link href={processesHref} className="hover:text-accent hover:underline">
           Processes
@@ -75,18 +77,22 @@ export function ProcessNav({
     </nav>
   );
   const Title = heading ? "h1" : "div";
+  const switcher = processes.length > 1 || !!create;
   if (part === "crumbs") {
     return (
-      <div className="flex min-w-0 items-center gap-x-1 overflow-hidden text-xs">
-        {crumbs}
-        <span aria-current="page" className="min-w-0 truncate font-medium text-foreground">
-          {name}
-        </span>
-      </div>
+      <>
+        <DetailBreadcrumb
+          items={[
+            ...(processesHref ? [{ label: "Processes", href: processesHref }] : []),
+            ...trail.map((t) => ({ label: t.name, href: hrefs[t.id] ?? "#" })),
+            { label: switcher ? <SwitchMenu {...menu} className="-my-1 h-7 gap-1 px-1.5 text-sm font-medium text-foreground" /> : name },
+          ]}
+        />
+        {create && <NewProcessDialog open={adding} onOpenChange={setAdding} create={create} />}
+      </>
     );
   }
-  if (processes.length <= 1 && !create) {
-    if (part === "title") return <Title className="min-w-0 truncate font-display text-base font-semibold">{name}</Title>;
+  if (!switcher) {
     return (
       <div className="flex min-w-0 flex-wrap items-center gap-x-1">
         {crumbs}
@@ -95,65 +101,87 @@ export function ProcessNav({
     );
   }
   const title = (
-        <Title className="min-w-0 text-base">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className={`max-w-full gap-1.5 px-2 font-display text-base ${part === "title" ? "-ml-2 h-8 font-semibold" : "font-bold"}`} aria-label={`Process: ${name}. Switch process`}>
-                <span className="truncate">{name}</span>
-                <ChevronsUpDown className="text-muted-foreground" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="max-h-[70vh] min-w-72 max-w-[calc(100vw-2rem)]">
-              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Switch to another process</DropdownMenuLabel>
-              {companyMapHref && (
-                <DropdownMenuItem asChild>
-                  <Link href={companyMapHref} className="font-medium text-accent">
-                    <Network /> Company map
-                  </Link>
-                </DropdownMenuItem>
-              )}
-              {ordered.map(({ process: p, depth }) => (
-                <DropdownMenuItem key={p.id} asChild>
-                  <Link href={hrefs[p.id]!} aria-current={p.id === current ? "page" : undefined} style={{ paddingLeft: 8 + (depth - 1) * 16 }}>
-                    <span className="min-w-0 flex-1 truncate">{p.name}</span>
-                    {p.kind === "servicing" && <Badge variant="secondary">servicing</Badge>}
-                    {!p.live && (
-                      <Badge variant="outline" className="border-warn bg-warn-soft text-fg">
-                        not published
-                      </Badge>
-                    )}
-                    {p.id === current && <Check className="text-accent" aria-hidden />}
-                  </Link>
-                </DropdownMenuItem>
-              ))}
-              {(create || processesHref) && <DropdownMenuSeparator />}
-              {create && (
-                <DropdownMenuItem className={EDIT_ONLY} data-edit-entry onSelect={() => setAdding(true)}>
-                  <Plus /> New process…
-                </DropdownMenuItem>
-              )}
-              {processesHref && (
-                <DropdownMenuItem asChild>
-                  <Link href={processesHref} className="font-medium text-accent">
-                    All processes →
-                  </Link>
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </Title>
+    <Title className="min-w-0 text-base">
+      <SwitchMenu {...menu} className="max-w-full gap-1.5 px-2 font-display text-base font-bold" />
+    </Title>
   );
   return (
     <>
-      {part === "title" ? (
-        title
-      ) : (
-        <div className="flex min-w-0 flex-wrap items-center gap-x-1">
-          {crumbs}
-          {title}
-        </div>
-      )}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-1">
+        {crumbs}
+        {title}
+      </div>
       {create && <NewProcessDialog open={adding} onOpenChange={setAdding} create={create} />}
     </>
+  );
+}
+
+/** The switcher: the process's name as a button that opens every process of the workspace, the company map and "All processes". */
+function SwitchMenu({
+  name,
+  ordered,
+  current,
+  hrefs,
+  processesHref,
+  companyMapHref,
+  onNew,
+  className,
+}: {
+  name: string;
+  ordered: { process: ProcessListing; depth: number }[];
+  current: string;
+  hrefs: Record<string, string>;
+  processesHref?: string;
+  companyMapHref?: string;
+  /** Start a new process (editors only). */
+  onNew?: () => void;
+  className: string;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" className={className} aria-label={`Process: ${name}. Switch process`}>
+          <span className="truncate">{name}</span>
+          <ChevronsUpDown className="text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-[70vh] min-w-72 max-w-[calc(100vw-2rem)]">
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Switch to another process</DropdownMenuLabel>
+        {companyMapHref && (
+          <DropdownMenuItem asChild>
+            <Link href={companyMapHref} className="font-medium text-accent">
+              <Network /> Company map
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {ordered.map(({ process: p, depth }) => (
+          <DropdownMenuItem key={p.id} asChild>
+            <Link href={hrefs[p.id]!} aria-current={p.id === current ? "page" : undefined} style={{ paddingLeft: 8 + (depth - 1) * 16 }}>
+              <span className="min-w-0 flex-1 truncate">{p.name}</span>
+              {p.kind === "servicing" && <Badge variant="secondary">servicing</Badge>}
+              {!p.live && (
+                <Badge variant="outline" className="border-warn bg-warn-soft text-fg">
+                  not published
+                </Badge>
+              )}
+              {p.id === current && <Check className="text-accent" aria-hidden />}
+            </Link>
+          </DropdownMenuItem>
+        ))}
+        {(onNew || processesHref) && <DropdownMenuSeparator />}
+        {onNew && (
+          <DropdownMenuItem className={EDIT_ONLY} data-edit-entry onSelect={onNew}>
+            <Plus /> New process…
+          </DropdownMenuItem>
+        )}
+        {processesHref && (
+          <DropdownMenuItem asChild>
+            <Link href={processesHref} className="font-medium text-accent">
+              All processes →
+            </Link>
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

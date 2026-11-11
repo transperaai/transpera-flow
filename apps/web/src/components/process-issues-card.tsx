@@ -5,7 +5,7 @@
 // so a row names no step. Solved issues follow as their solution: the solution that resolved the issue is the row, with "Solved <issue>"
 // under it and the person's verdict, or, resolved with no solution, the issue and how it was resolved. Won't fix is folded at the end.
 // "Other improvements" (solutions for no issue) sit in the same section. The register still owns saving and the New issue dialog.
-// It is the Issues tab of the process page's inspector, so it is a plain section with a heading, not a card of its own.
+// It is a section card in the process page's main column, like the Issue page's sections; `#issues` links here.
 
 import { CircleAlert, CircleCheck } from "lucide-react";
 import Link from "next/link";
@@ -13,7 +13,7 @@ import type { ReactNode } from "react";
 import { RATING_LABELS } from "@transpera-flow/engine";
 import type { IssueRow } from "@transpera-flow/db";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/page-kit";
+import { EmptyState, SectionCard } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
 import { IssueStatusPill } from "@/components/issues/status-pill";
 import { IssueTrackView } from "@/components/issue-track";
@@ -50,24 +50,23 @@ export function IssuesCard(p: IssuesCardProps) {
   const counts = issueCounts(tracked.map((e) => e.issue.status));
   const groups = issueGroups(tracked, (e) => e.issue.status);
   return (
-    <section id="issues" aria-labelledby="issues-heading" className="flex min-w-0 scroll-mt-16 flex-col gap-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 id="issues-heading" className="text-base font-semibold">
-            Issues and solutions
-          </h2>
-          <p className="text-sm text-muted-foreground" data-issue-counts="">
-            {p.loading && tracked.length === 0 ? "Checking the latest run…" : issueCountsText(counts)}
-          </p>
-        </div>
-        {p.canEdit && tracked.length > 0 && (
-          <div className={`shrink-0 ${EDIT_ONLY}`} data-edit-entry="">
-            <Button type="button" size="sm" onClick={p.openNew}>
-              Log an issue
-            </Button>
-          </div>
-        )}
-      </div>
+    <SectionCard
+      id="issues"
+      section="issues"
+      title="Issues and solutions"
+      description={p.loading && tracked.length === 0 ? "Checking the latest run…" : issueCountsText(counts)}
+      descriptionProps={{ "data-issue-counts": "" }}
+      actionIsEdit
+      actionClassName={EDIT_ONLY}
+      action={
+        p.canEdit && tracked.length > 0 ? (
+          <Button type="button" size="sm" onClick={p.openNew}>
+            Log an issue
+          </Button>
+        ) : undefined
+      }
+      contentClassName="gap-4"
+    >
       {p.error}
       {tracked.length === 0 ? (
         p.loading ? (
@@ -146,7 +145,7 @@ export function IssuesCard(p: IssuesCardProps) {
         <p className="-mt-1.5 text-xs text-fg-3">Solutions that are not for a particular issue.</p>
         {p.other}
       </div>
-    </section>
+    </SectionCard>
   );
 }
 

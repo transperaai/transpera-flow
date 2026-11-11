@@ -1,16 +1,15 @@
 import { Users } from "lucide-react";
-import { notFound } from "next/navigation";
 import { EmptyState, SectionCard } from "@/components/page-kit";
 import { Help } from "@/components/help";
-import { SettingsPage } from "@/components/settings/settings-page";
+import { SettingsBand } from "@/components/settings/settings-band";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { selectablePeople } from "@/lib/access";
-import { currentUserId, loadAccessSettings } from "@/lib/access-data";
-import { loadDeploymentAccess } from "@/lib/deployment-access";
+import type { AccessSettings } from "@/lib/access-data";
+import type { DeploymentAccessView } from "@/lib/deployment-access";
 import { MEMBERSHIP_ROLE_LABEL } from "@/lib/deployment-rules";
 import { setMemberPerson } from "./actions";
 import { WhoCanSignIn } from "./who-can-sign-in";
@@ -39,18 +38,27 @@ function PersonSelect({ people, value }: { people: { id: string; name: string }[
 const formatDate = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "Never";
 
-export default async function AccessPage(props: PageProps<"/w/[slug]/settings/access">) {
-  const { slug } = await props.params;
-  const search = await props.searchParams;
-  const error = typeof search.error === "string" ? search.error : null;
-  const notice = typeof search.notice === "string" ? search.notice : null;
-  const param = (key: string) => (typeof search[key] === "string" ? (search[key] as string) : undefined);
+/** What the Access section shows after an action sent the person back (`?error=` or `?notice=`, and the add form's draft). */
+export interface AccessParams {
+  error: string | null;
+  notice: string | null;
+  draft?: { kind?: string; value?: string; role?: string };
+}
 
-  const settings = await loadAccessSettings(slug);
-  if (!settings) notFound();
+/** Reads the Access section's query parameters off the Settings page's search params. */
+export function accessParams(search: Record<string, string | string[] | undefined>): AccessParams {
+  const param = (key: string) => (typeof search[key] === "string" ? (search[key] as string) : undefined);
+  const error = param("error") ?? null;
+  return { error, notice: param("notice") ?? null, draft: error ? { kind: param("kind"), value: param("value"), role: param("role") } : undefined };
+}
+
+/**
+ * Settings, Access: the last section of the Settings page, for whoever manages the workspace (the page renders it only when
+ * `loadAccessSettings` answers, which it does only with can_manage_workspace). Who can sign in, and the people in this workspace.
+ */
+export function AccessSection({ slug, settings, userId, signInView, params }: { slug: string; settings: AccessSettings; userId: string | null; signInView: DeploymentAccessView | null; params: AccessParams }) {
+  const { error, notice, draft } = params;
   const { members, people } = settings;
-  const userId = await currentUserId();
-  const signInView = await loadDeploymentAccess();
   const personName = new Map(people.map((p) => [p.id, p.name]));
 
   // Who is linked to which person, so each picker offers only people nobody else is linked to.
@@ -62,13 +70,8 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
   }
 
   return (
-    <SettingsPage
-      title="Access"
-      slug={slug}
-      canManage
-      description="People get in by signing in with Google. Nobody is emailed. Changes apply on their next page load."
-    >
-      <PhoneReadOnly>
+    <SettingsBand id="access" title="Access" description="People get in by signing in with Google. Nobody is emailed. Changes apply on their next page load.">
+      <PhoneReadOnly notice={false}>
         {error && (
           <Alert variant="destructive" role="alert">
             <AlertDescription>{error}</AlertDescription>
@@ -80,11 +83,12 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
           </Alert>
         )}
 
-        {signInView && <WhoCanSignIn slug={slug} view={signInView} myEmail={members.find((m) => m.userId === userId)?.email ?? null} draft={error ? { kind: param("kind"), value: param("value"), role: param("role") } : undefined} />}
+        {signInView && <WhoCanSignIn slug={slug} view={signInView} myEmail={members.find((m) => m.userId === userId)?.email ?? null} draft={draft} />}
 
         <div role="region" aria-labelledby="members-heading">
           <SectionCard
           id="members"
+          level={3}
           title="People in this workspace"
           description="Everyone who can sign in is added to every workspace, as an Agency admin or a Viewer, the next time they sign in. Change who can sign in, and as what, in the list above."
         >
@@ -142,6 +146,6 @@ export default async function AccessPage(props: PageProps<"/w/[slug]/settings/ac
         </SectionCard>
         </div>
       </PhoneReadOnly>
-    </SettingsPage>
+    </SettingsBand>
   );
 }

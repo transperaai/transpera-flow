@@ -3,8 +3,6 @@ import { MapSkeleton } from "@/components/map/map-placeholder";
 import { Page, pageBodyClass, type PageVariant } from "@/components/shell/page";
 import { ShellHeader } from "@/components/shell/shell-header";
 import { Card } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
-import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // What a workspace page shows while its server loaders run (issue #44): the page's own frame with grey shapes where its
@@ -210,10 +208,10 @@ export function FormSkeleton() {
   );
 }
 
-/** Settings: the sub-nav on the left, then a column of section cards whose rows are a label beside a narrow control. */
+/** Settings, one scrolling page: the sub-nav on the left, then section bands (a heading and a line over a rule) each over a card of rows. */
 export function SettingsSkeleton() {
   return (
-    <Loading name="settings" label="Loading the settings" className="grid min-w-0 gap-6 lg:grid-cols-[14rem_minmax(0,1fr)]">
+    <Loading name="settings" label="Loading the settings" className="grid min-w-0 gap-6 lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-8">
       <div className="flex flex-col gap-2 max-lg:hidden" aria-hidden>
         {Array.from({ length: 8 }, (_, i) => (
           <Skeleton key={i} className="h-4 w-32" />
@@ -221,18 +219,20 @@ export function SettingsSkeleton() {
       </div>
       <div className="flex max-w-240 min-w-0 flex-col gap-6">
         {Array.from({ length: 3 }, (_, i) => (
-          <Card key={i} className="gap-4 px-4 py-4" aria-hidden>
+          <div key={i} data-skeleton-band className="flex flex-col gap-4 border-line-2 [&:not(:first-child)]:mt-8 [&:not(:first-child)]:border-t [&:not(:first-child)]:pt-8" aria-hidden>
             <div className="flex flex-col gap-1.5">
-              <Skeleton className="h-5 w-40" />
-              <Skeleton className="h-3 w-3/4" />
+              <Skeleton className="h-5 w-36" />
+              <Skeleton className="h-3 w-2/3" />
             </div>
-            {Array.from({ length: 3 }, (_, j) => (
-              <div key={j} className="grid gap-3 border-t border-line pt-4 sm:grid-cols-[13rem_minmax(0,1fr)]">
-                <Skeleton className="h-4 w-28" />
-                <Skeleton className="h-9 w-28" />
-              </div>
-            ))}
-          </Card>
+            <Card className="gap-4 px-4 py-4">
+              {Array.from({ length: 3 }, (_, j) => (
+                <div key={j} className="grid gap-3 border-line pt-4 first:pt-0 sm:grid-cols-[13rem_minmax(0,1fr)] [&:not(:first-child)]:border-t">
+                  <Skeleton className="h-4 w-28" />
+                  <Skeleton className="h-9 w-28" />
+                </div>
+              ))}
+            </Card>
+          </div>
         ))}
       </div>
     </Loading>
@@ -264,53 +264,25 @@ export function OverviewSkeleton() {
   );
 }
 
-/** The process page: the top bar, the toolbar row, then the map filling the height beside the 380px inspector (stacked on a phone). */
+/** The process page, on the Issue page's template: breadcrumb, header with pills, then the map card and two section cards beside the 20rem rail from `xl`. */
 export function ProcessPageSkeleton() {
   return (
-    <div className="flex min-h-svh flex-1 flex-col md:h-svh">
-      <ProcessTopBar />
-      <Loading name="process-page" label="Loading the process" className="flex min-h-0 flex-1 flex-col">
-        <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-2.5 sm:px-6" aria-hidden>
-          <Skeleton className="h-7 w-48" />
-          <Skeleton className="h-6 w-20 rounded-full" />
-          <Skeleton className="h-6 w-24 rounded-full" />
-          <Skeleton className="h-6 w-20 rounded-full" />
-          <Skeleton className="h-4 w-56" />
-          <div className="ml-auto flex items-center gap-2">
-            <Skeleton className="h-8 w-20" />
-            <Skeleton className="h-8 w-20" />
-            <Skeleton className="h-8 w-20" />
-          </div>
-        </div>
-        <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(0,1fr)_380px]">
-          <div className="flex h-[60svh] min-w-0 flex-col md:h-auto">
-            <MapSkeleton nested height="fill" />
-          </div>
-          <aside className="flex flex-col gap-3 border-line bg-panel p-4 max-md:border-t md:border-l" aria-hidden>
-            <div className="flex gap-4 border-b border-line pb-2">
-              {Array.from({ length: 4 }, (_, i) => (
-                <Skeleton key={i} className="h-4 w-14" />
-              ))}
+    <Page title="Process" hideHeader>
+      <Loading name="process-page" label="Loading the process" className="flex min-w-0 flex-col gap-4">
+        <Skeleton className="h-4 w-40" aria-hidden />
+        <HeaderShape pills buttons={3} />
+        <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="flex min-w-0 flex-col gap-6">
+            <div className="flex h-[60svh] min-h-[28rem] min-w-0 flex-col">
+              <MapSkeleton nested height="fill" />
             </div>
-            <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-4/5" />
-            <Skeleton className="h-3 w-full" />
-          </aside>
+            <PanelShape lines={4} />
+            <PanelShape lines={3} />
+          </div>
+          <RailShape rows={10} />
         </div>
       </Loading>
-    </div>
-  );
-}
-
-/** The top bar of a page outside `Page` (the process page): the sidebar toggle and a line for the process picker. */
-function ProcessTopBar() {
-  return (
-    <div className="sticky top-0 z-20 flex items-center gap-x-2 border-b bg-background/95 px-4 py-2 backdrop-blur">
-      <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="data-[orientation=vertical]:h-4" />
-      <Skeleton className="h-6 w-48" aria-hidden />
-    </div>
+    </Page>
   );
 }
 

@@ -677,7 +677,13 @@ describe("history", () => {
 });
 
 describe("access settings", () => {
-  const url = (u: string) => new URLSearchParams(u.split("?")[1]);
+  // The actions send the person back to the Access section of the one Settings page: /settings?<message>#access.
+  const url = (u: string) => {
+    const at = new URL(u, "http://x.test");
+    expect(at.pathname, u).toBe(`/w/${SLUG}/settings`);
+    expect(at.hash, u).toBe("#access");
+    return at.searchParams;
+  };
 
   it("links a signed-in person to a person record, once per person", async () => {
     signInAs({ tdb }, owner);

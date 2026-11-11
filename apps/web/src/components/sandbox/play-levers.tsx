@@ -1,12 +1,13 @@
 "use client";
 
-// The free-play Sandbox's levers, in the workbench's left pane (capacity build P7, brief "The short version"; the prototype's `.levers`). Every change is a new `PlayState`:
-// the page re-runs, debounced, and nothing is saved. Market, Win new clients, Lose clients, Prices (with "Clients react", D36) and People, each group
-// foldable; Reset is in the toolbar. The levers are business conditions only: an automation or augmentation is part of a process version, picked on the company map (D53).
+// The free-play Sandbox's levers, one full-width band under the company map (capacity build P7, brief "The short version"; the prototype's `.levers`).
+// Every change is a new `PlayState`: the page re-runs, debounced, and nothing is saved. Market, Win new clients, Lose clients, Prices (with "Clients
+// react", D36) and People sit side by side as columns (all five on one row from about 1440px, wrapping on smaller screens), divided by hairlines; every
+// group shows. The band's header counts the changes and resets them. The levers are business conditions only: an automation or augmentation is part
+// of a process version, picked on the company map (D53).
 
 import { MARKET_PRESETS, type MarketPresetKey } from "@transpera-flow/engine";
-import { PRICE_REACTION, type CapacitySetup, type PlayMarket, type PlayState, type PriceReaction } from "@transpera-flow/db";
-import { ChevronDown } from "lucide-react";
+import { PRICE_REACTION, defaultPlay, type CapacitySetup, type PlayMarket, type PlayState, type PriceReaction } from "@transpera-flow/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -14,22 +15,37 @@ import { formatNumber } from "@/lib/format";
 import type { PlayMonths } from "./play-types";
 
 const FIELD = "flex min-w-0 flex-col gap-1 text-xs text-muted-foreground";
+/** A named leaver, hire or lost client, on two lines to fit a column: who (or which role), then the month and Remove. */
+const ROW = "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 border-t border-line pt-2 first:border-t-0 first:pt-0";
 
 /**
- * A group of levers: a heading that folds the group away (open to begin with), then its fields. A plain section with a hairline above it, not a card
- * (the levers pane is the one surface).
+ * A group of levers: a column of the band, its heading then its fields stacked. Hairlines on its left and top divide it from its neighbours; the
+ * grid is pulled a pixel up and left under the band's clipped edge, so the first column of each row and the first row show none, however it wraps.
  */
 function Group({ title, children, id }: { title: string; children: React.ReactNode; id: string }) {
   return (
-    <details open className="group/lever border-t border-line first:border-t-0" data-lever-details={id}>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 py-3 text-sm font-semibold outline-none select-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-        {title}
-        <ChevronDown aria-hidden className="size-4 text-muted-foreground transition-transform group-open/lever:rotate-180" />
-      </summary>
-      <fieldset aria-label={title} className="flex min-w-0 flex-col gap-2 border-0 p-0 pb-4" data-lever-group={id}>
+    <section aria-label={title} className="flex min-w-0 flex-col gap-3 border-t border-l border-line px-4 pt-3 pb-4" data-lever-details={id}>
+      <h3 className="text-sm font-semibold">{title}</h3>
+      <fieldset aria-label={title} className="flex min-w-0 flex-col gap-2 border-0 p-0" data-lever-group={id}>
         {children}
       </fieldset>
-    </details>
+    </section>
+  );
+}
+
+/** How many levers are off their default (the map's versions are counted on the map, not here). Pure. */
+export function leverChanges(p: PlayState): number {
+  const d = defaultPlay();
+  return (
+    (p.market !== d.market ? 1 : 0) +
+    (p.leads ? 1 : 0) +
+    (p.win ? 1 : 0) +
+    (p.churn ? 1 : 0) +
+    Object.values(p.add).filter((n) => n > 0).length +
+    (p.price ? 1 : 0) +
+    p.leavers.length +
+    p.hires.length +
+    p.lose.length
   );
 }
 
@@ -70,6 +86,7 @@ export function PlayLevers({
   setup,
   months,
   expectedWinsPerMonth,
+  note,
 }: {
   play: PlayState;
   setPlay: (next: PlayState) => void;
@@ -77,6 +94,8 @@ export function PlayLevers({
   months: PlayMonths;
   /** What the lead flow brings a month, in clients, for the note under "Win new clients". */
   expectedWinsPerMonth: number | null;
+  /** Under the columns: where the baselines are set. */
+  note?: React.ReactNode;
 }) {
   const set = (p: Partial<PlayState>) => setPlay({ ...play, ...p });
   const people = setup.people.filter((p) => p.active);
@@ -85,14 +104,22 @@ export function PlayLevers({
   const tiers = setup.tiers;
   const listEdit = <T,>(key: "leavers" | "hires" | "lose", i: number, patch: Partial<T>) => set({ [key]: (play[key] as unknown as T[]).map((x, j) => (j === i ? { ...x, ...patch } : x)) } as Partial<PlayState>);
   const listDel = (key: "leavers" | "hires" | "lose", i: number) => set({ [key]: (play[key] as unknown[]).filter((_, j) => j !== i) } as Partial<PlayState>);
+  const changes = leverChanges(play);
 
   return (
-    <aside aria-label="Levers" className="flex min-w-0 flex-col" data-play-levers>
-      <div className="flex items-baseline justify-between gap-2 pb-1">
-        <h2 className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">Levers</h2>
-        <span className="text-xs text-muted-foreground">Move one and the results follow.</span>
+    <aside aria-label="Levers" className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-panel" data-play-levers data-lever-changes={changes}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line px-4 py-2" data-levers-header>
+        <h2 className="text-sm font-semibold">Levers</h2>
+        <span className="text-xs text-muted-foreground tabular-nums" data-levers-count>
+          {changes ? `${changes} change${changes === 1 ? "" : "s"}` : "No changes"}
+        </span>
+        <span className="hidden text-xs text-muted-foreground sm:inline">Move one and the results below follow.</span>
+        <span className="flex-1" />
+        <Button type="button" variant="ghost" size="sm" disabled={!changes} onClick={() => setPlay({ ...defaultPlay(), versions: play.versions })} data-levers-reset>
+          Reset
+        </Button>
       </div>
-      <div className="flex flex-col">
+      <div className="-mt-px -ml-px grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))]" data-lever-columns>
         <Group title="Market" id="market">
           <div className="grid grid-cols-2 gap-2">
             <label className={FIELD}>
@@ -163,8 +190,8 @@ export function PlayLevers({
         <Group title="Lose clients" id="lose">
           <Slider id="churn" label="Churn" value={play.churn} min={-50} max={100} step={5} unit="%" onChange={(v) => set({ churn: v })} />
           {play.lose.map((x, i) => (
-            <div key={i} className="grid grid-cols-[1fr_auto_7rem_auto] items-center gap-2" data-lose-row>
-              <NativeSelect value={x.id} onChange={(e) => listEdit<{ id: string }>("lose", i, { id: e.target.value })} aria-label="Client who leaves">
+            <div key={i} className={ROW} data-lose-row>
+              <NativeSelect className="col-span-full" value={x.id} onChange={(e) => listEdit<{ id: string }>("lose", i, { id: e.target.value })} aria-label="Client who leaves">
                 {clients.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
@@ -224,8 +251,8 @@ export function PlayLevers({
 
         <Group title="People" id="people">
           {play.leavers.map((x, i) => (
-            <div key={`l${i}`} className="grid grid-cols-[1fr_auto_7rem_auto] items-center gap-2" data-leaver-row>
-              <NativeSelect value={x.person} onChange={(e) => listEdit<{ person: string }>("leavers", i, { person: e.target.value })} aria-label="Person who leaves">
+            <div key={`l${i}`} className={ROW} data-leaver-row>
+              <NativeSelect className="col-span-full" value={x.person} onChange={(e) => listEdit<{ person: string }>("leavers", i, { person: e.target.value })} aria-label="Person who leaves">
                 {people.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -246,9 +273,9 @@ export function PlayLevers({
             </div>
           ))}
           {play.hires.map((x, i) => (
-            <div key={`h${i}`} className="grid grid-cols-[auto_1fr_auto_7rem_auto] items-center gap-2" data-hire-row>
+            <div key={`h${i}`} className={ROW} data-hire-row>
               <span className="text-xs">Hire</span>
-              <NativeSelect value={x.role} onChange={(e) => listEdit<{ role: string }>("hires", i, { role: e.target.value })} aria-label="Role to hire">
+              <NativeSelect className="col-span-2" value={x.role} onChange={(e) => listEdit<{ role: string }>("hires", i, { role: e.target.value })} aria-label="Role to hire">
                 {roles.map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name}
@@ -283,6 +310,7 @@ export function PlayLevers({
           <p className="text-xs text-muted-foreground">New hires take about {setup.rampDefault.length} months to reach full speed (the ramp in Settings, under People & roles).</p>
         </Group>
       </div>
+      {note && <div className="border-t border-line px-4 py-2">{note}</div>}
     </aside>
   );
 }

@@ -203,7 +203,8 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
     ) : null;
   const renderMap = (runs: PlayRuns, api: PlayMapApi) =>
     map.bundle.steps.length ? (
-      <div className="overflow-hidden rounded-xl border border-line" data-company-map>
+      // The star of the page: full width, about two thirds of the window tall, the canvas filling it (zoom, fit, full screen and playback on the map).
+      <div className="flex h-[65svh] min-h-[28rem] min-w-0 flex-col overflow-hidden rounded-xl border border-line" data-company-map>
         <ProcessCanvas
           // Opening a card changes the map's size: frame it again, with playback going on.
           refitOn={[...expanded].sort().join("|")}
@@ -218,7 +219,7 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
           cardTags={cardTags}
           cardBadges={api.badges}
           handoffs
-          height="auto"
+          height="fill"
           stepDetail={false}
           onStepClick={(stepId) => {
             const process = map.processOfStep.get(stepId);

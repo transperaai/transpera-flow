@@ -152,7 +152,7 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     description: "What one client pays each month.",
     example: "SEO clients pay A$3,600 a month.",
     control: "settings",
-    settingsPath: "/settings/clients",
+    settingsPath: "/settings#tiers-clients",
     settingsLabel: "Settings → Tiers & clients",
   },
   {
@@ -170,7 +170,7 @@ export const LEVER_KINDS: readonly LeverKind[] = [
     description: "How much each cause of leaving matters (Settings → Churn drivers).",
     example: "Late work matters a bit more than normal.",
     control: "settings",
-    settingsPath: "/settings#churn-drivers-heading",
+    settingsPath: "/settings#churn-drivers",
     settingsLabel: "Settings → Churn drivers",
   },
   // Finances

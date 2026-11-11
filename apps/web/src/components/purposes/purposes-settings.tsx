@@ -17,7 +17,8 @@ import {
   type PurposeCategory,
 } from "@transpera-flow/db";
 import { Help } from "@/components/help";
-import { SectionCard } from "@/components/page-kit";
+import { SettingsBand } from "@/components/settings/settings-band";
+import { Card, CardContent } from "@/components/ui/card";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { ConfirmDialog } from "@/components/sandbox/scenario-bar";
 import { Button } from "@/components/ui/button";
@@ -140,11 +141,11 @@ export function PurposesSettings({
   };
 
   return (
-    <SectionCard
+    // A top-level section of the Settings page: the heading band (with Save at its right), then the list in a card.
+    <SettingsBand
       id="purposes"
       title="Purposes"
       description="What the work of each step achieves. A step's purpose is set in the editor; Automatic uses the process: sales pipelines are Winning work up to and including the step that decides the sale, and everything after it, and client work, move the client's job forward. The order here is the order in the Sandbox's charts and tables."
-      actionClassName="flex flex-wrap items-center justify-end gap-2"
       action={
         <>
           <span role="status" aria-live="polite" className="text-xs text-muted-foreground" data-save-status>
@@ -159,6 +160,8 @@ export function PurposesSettings({
         </>
       }
     >
+      <Card className="gap-3">
+      <CardContent className="flex flex-col gap-3">
       <PhoneReadOnly notice={false}>
         {mode === "readonly" && (
           <p role="note" className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
@@ -273,6 +276,8 @@ export function PurposesSettings({
         {children}
       </PhoneReadOnly>
       {confirm ? <ConfirmDialog title={confirm.title} description={confirm.description} confirm={confirm.confirm} cancel="Cancel" destructive onConfirm={confirm.onConfirm} onCancel={() => setConfirm(null)} /> : null}
-    </SectionCard>
+      </CardContent>
+      </Card>
+    </SettingsBand>
   );
 }

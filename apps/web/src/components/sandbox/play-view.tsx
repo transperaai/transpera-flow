@@ -1,9 +1,9 @@
 "use client";
 
-// The free-play Sandbox (capacity build P7, docs/plans/capacity/p7-sandbox-brief.md; decisions D28 to D38; Q16), as a workbench: a toolbar (version,
-// horizon, Reset, Export), the levers on the left, the results on the right (the verdict and its figures, the company map, where a click on a process
-// loads another version of it, then the charts). Nothing is saved: the levers are this component's state and reset
-// when you leave the page. Every lever change re-runs in the worker (debounced), against today's path, and the result charts follow.
+// The free-play Sandbox (capacity build P7, docs/plans/capacity/p7-sandbox-brief.md; decisions D28 to D38; Q16), as one scrolling page: a toolbar
+// (version, horizon, Reset, Export), then the company map full width (a click on a process loads another version of it), then the levers laid out
+// horizontally in one band, then the results (the verdict and its figures, the charts, who's overloaded, where the time goes). Nothing is saved: the
+// levers are this component's state and reset when you leave the page. Every lever change re-runs in the worker (debounced), against today's path, and the result charts follow.
 
 import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -18,6 +18,7 @@ import { PlayMapCard, type PlayMapApi } from "./play-map";
 import { PlayResults } from "./play-results";
 import { Segmented } from "./segmented";
 import { PLAY_HORIZONS, type PlayHorizon, type PlayMonths, type PlayProcess } from "./play-types";
+import { pageBodyClass } from "@/components/shell/page";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -80,13 +81,11 @@ export function PlayView(props: PlayViewProps) {
   const expectedWins = runs.today ? runs.today.run.result.kpi.won.mean / horizon : null;
   const busy = runs.status === "running";
 
-  const map = <PlayMapCard play={play} setPlay={setPlay} processes={processes} months={leverMonths} header={props.mapHeader} canvas={props.map ? (api) => props.map!(runs, api) : undefined} />;
-
-  // A workbench (docs/plans/ui-cleanup.md, WorkbenchPage): a one-row toolbar, then the levers pane and the results pane, each scrolling on its own from
-  // `lg` up (the page around it gives it the viewport's height). On a phone the panes stack and the page scrolls.
+  // One page that scrolls as a whole: a one-row toolbar, then the company map (the star, full width), the levers band and the results, top to bottom,
+  // in the page's gutter. A phone gets the same order.
   return (
     <div
-      className="flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-hidden"
+      className="flex min-w-0 flex-col"
       data-sandbox-play
       data-moved={moved ? "true" : "false"}
       data-run-ms={runs.changed ? Math.round(runs.changed.ms) : undefined}
@@ -122,23 +121,30 @@ export function PlayView(props: PlayViewProps) {
         </div>
       )}
 
-      <div className="grid min-h-0 min-w-0 flex-1 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <div className="min-h-0 min-w-0 border-b border-line bg-panel px-4 pt-3 pb-6 sm:px-6 lg:overflow-y-auto lg:border-r lg:border-b-0 lg:px-4" data-play-levers-column>
-          <PlayLevers play={play} setPlay={setPlay} setup={setup} months={leverMonths} expectedWinsPerMonth={expectedWins} />
-          {props.base && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Baselines, tiers, salaries and utilisation thresholds are set in{" "}
-              <Link href={`${props.base}/settings/people`} className="font-medium text-accent hover:underline">
-                Settings
-              </Link>
-              . Every baseline there is a lever here.
-            </p>
-          )}
+      <div className={pageBodyClass()}>
+        <PlayMapCard play={play} setPlay={setPlay} processes={processes} months={leverMonths} header={props.mapHeader} canvas={props.map ? (api) => props.map!(runs, api) : undefined} />
+        <div className="min-w-0" data-play-levers-column>
+          <PlayLevers
+            play={play}
+            setPlay={setPlay}
+            setup={setup}
+            months={leverMonths}
+            expectedWinsPerMonth={expectedWins}
+            note={
+              props.base && (
+                <p className="text-xs text-muted-foreground">
+                  Baselines, tiers, salaries and utilisation thresholds are set in{" "}
+                  <Link href={`${props.base}/settings#people-roles`} className="font-medium text-accent hover:underline">
+                    Settings
+                  </Link>
+                  . Every baseline there is a lever here.
+                </p>
+              )
+            }
+          />
         </div>
-        <div className="min-h-0 min-w-0 lg:overflow-y-auto" data-play-main>
-          <div className="flex min-w-0 flex-col gap-6 px-4 pt-5 pb-12 sm:px-6 lg:px-8">
-            <PlayResults runs={runs} setup={setup} months={months} moved={moved} purposes={props.purposes} horizon={horizon} map={map} />
-          </div>
+        <div className="mt-1 min-w-0">
+          <PlayResults runs={runs} setup={setup} months={months} moved={moved} purposes={props.purposes} horizon={horizon} />
         </div>
       </div>
     </div>
@@ -147,4 +153,4 @@ export function PlayView(props: PlayViewProps) {
 
 /** What the Sandbox is, behind the (i) in the toolbar. */
 const NOTE =
-  "Load another map for a process (an automation is part of a version of it) and pull the levers on the left, then watch the months ahead change on the right. Nothing here is saved and nothing touches live data: the levers reset when you leave.";
+  "Load another map for a process (an automation is part of a version of it) and pull the levers under the map, then watch the months ahead change below. Nothing here is saved and nothing touches live data: the levers reset when you leave.";
