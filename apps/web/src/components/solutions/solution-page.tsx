@@ -9,9 +9,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { SOLUTION_STATUS_LABELS, type IssueRow, type ProcessBundle, type SolutionRow, type SolutionStatus } from "@transpera-flow/db";
+import { type IssueRow, type ProcessBundle, type SolutionRow, type SolutionStatus } from "@transpera-flow/db";
 import { DetailBreadcrumb, DetailLayout, EditMarker, MetaRail, RailItem } from "@/components/issues/detail-layout";
-import { EditableText, HEADER_PILL, MetaLine, PageHeader, SectionCard, StatusPill } from "@/components/page-kit";
+import { EditableText, HEADER_PILL, MetaLine, PageHeader, SectionCard } from "@/components/page-kit";
 import { DeleteSolution } from "@/components/solutions/delete-solution";
 import { LinkIssueButton } from "@/components/solutions/new-solution";
 import { SolutionMaps } from "@/components/solutions/solution-maps";
@@ -28,7 +28,6 @@ import { compareMaps } from "@/lib/solutions/compare";
 import { SOLUTION_PAGE_HELP } from "@/lib/solutions/help";
 import { solutionEditorHref } from "@/lib/solutions/links";
 import { NO_ISSUE_WORDS } from "@/lib/solutions/list";
-import { SOLUTION_STATUS_TONE } from "@/lib/solutions/status";
 import { EDIT_ONLY } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 
@@ -113,8 +112,6 @@ export function SolutionPage(props: SolutionPageProps) {
           }
           meta={
             <MetaLine>
-              <span>{processName}</span>
-              <span data-edited>Edited on {editedDate(solution)}</span>
               <span>Solutions never change the live map.</span>
             </MetaLine>
           }
@@ -148,9 +145,6 @@ export function SolutionPage(props: SolutionPageProps) {
       }
       rail={
         <MetaRail label="Solution details" data-solution-rail="">
-          <RailItem term="Status">
-            <StatusPill value={solution.status} label={SOLUTION_STATUS_LABELS[solution.status]} tone={SOLUTION_STATUS_TONE[solution.status]} />
-          </RailItem>
           <RailItem term="Process">
             <TagPill tag={processName} className={HEADER_PILL} />
           </RailItem>
@@ -162,7 +156,7 @@ export function SolutionPage(props: SolutionPageProps) {
               </span>
             }
           >
-            <span className="flex flex-col items-start gap-1.5" data-solution-issues>
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1" data-solution-issues>
               {linked.length > 0 ? (
                 linked.map((i) => (
                   <Link key={i.id} href={issueHref(base, i)} className="hover:underline" data-solves={i.id}>
@@ -179,7 +173,9 @@ export function SolutionPage(props: SolutionPageProps) {
             </span>
           </RailItem>
           {compareBase && <RailItem term="Copied from">Version {compareBase.revision.number}</RailItem>}
-          <RailItem term="Edited">{editedDate(solution)}</RailItem>
+          <RailItem term="Edited" data-edited="">
+            {editedDate(solution)}
+          </RailItem>
         </MetaRail>
       }
     >

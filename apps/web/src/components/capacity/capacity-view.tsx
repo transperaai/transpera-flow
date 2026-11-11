@@ -58,11 +58,11 @@ const f1 = (v: number) => formatNumber(v, 1);
 
 /** Where an engine problem or a missing item is fixed. */
 function fixHref(base: string, where: string): string {
-  if (where.startsWith("people") || where.startsWith("roles")) return `${base}/settings/people`;
+  if (where.startsWith("people") || where.startsWith("roles")) return `${base}/settings#people-roles`;
   if (where.startsWith("steps") || where.startsWith("changes")) return `${base}/processes`;
-  return `${base}/settings/clients`;
+  return `${base}/settings#tiers-clients`;
 }
-const missingHref = (base: string, m: MissingItem): string => (m.kind === "tier_deliverable" || m.kind === "tier_total_over" || m.kind === "tier_total_unassigned" ? `${base}/settings/clients` : `${base}/settings/people`);
+const missingHref = (base: string, m: MissingItem): string => (m.kind === "tier_deliverable" || m.kind === "tier_total_over" || m.kind === "tier_total_unassigned" ? `${base}/settings#tiers-clients` : `${base}/settings#people-roles`);
 
 export const CAPACITY_DESCRIPTION = 'Are we at capacity, who has room, and how many more clients fit. "Today" is the current book of clients with nobody arriving or leaving.';
 
@@ -104,7 +104,7 @@ export function CapacityView(props: CapacityViewProps) {
         <CapacityHeader base={base} />
         <Section title="No tiers and services are set up yet." data-no-tiers description="Capacity is worked out from each department's tiers, the clients in them and the people who look after them.">
           <div>
-            <Link href={`${base}/settings/clients`} className={buttonVariants({ variant: "outline", size: "sm" })}>
+            <Link href={`${base}/settings#tiers-clients`} className={buttonVariants({ variant: "outline", size: "sm" })}>
               Set up tiers and clients in Settings →
             </Link>
           </div>
@@ -260,7 +260,7 @@ function TodaySections(props: CapacityViewProps & { model: EngineModel; result: 
   // One colour per purpose across the page: the bottleneck's bars and the time-to-serve bars share them.
   const riskParts = useMemo(() => new Map(risk.people.map((r) => [r.person.id, namedPurposeParts(r.byPurpose, purposes)] as const)), [risk, purposes]);
   const tierParts = useMemo(() => new Map(t.departments.flatMap((d) => d.tiers.map((tier) => [tier.serviceId, namedPurposeParts(tier.byPurpose, purposes)] as const))), [t, purposes]);
-  const colours = useMemo(() => purposeColours([...tierParts.values(), ...riskParts.values()]), [tierParts, riskParts]);
+  const colours = useMemo(() => purposeColours([...tierParts.values(), ...riskParts.values()], purposes), [tierParts, riskParts, purposes]);
   const cf = (deptId: string) => busy.people.filter((p) => p.kind === "client_facing" && p.departmentId === deptId);
   return (
     // The dashboard's panels (docs/plans/ui-cleanup.md, DashboardPage): two across from xl, three from 2xl; time to serve, with its table, runs the full width.
@@ -325,7 +325,7 @@ function Room({ name, ceiling, people }: { name: string; ceiling: DepartmentCeil
       }
     >
       <p className="flex flex-wrap items-baseline gap-x-2 leading-none" data-room-clients>
-        <span className="font-mono text-4xl font-semibold tracking-tight tabular-nums">{f0(ceiling.clients)}</span>
+        <span className="text-2xl font-semibold tracking-tight tabular-nums">{f0(ceiling.clients)}</span>
         <span className="text-base font-medium">clients today</span>
       </p>
       <div className="flex max-w-[40rem] flex-col gap-1.5">
@@ -616,8 +616,9 @@ export function TimeToServe({ setup, model, purposes, colours: shared, className
   // Each tier's bar, named by the workspace's purposes, and one colour per purpose across the whole section.
   const parts = useMemo(() => new Map(t.departments.flatMap((d) => d.tiers.map((tier) => [tier.serviceId, namedPurposeParts(tier.byPurpose, purposes)] as const))), [t, purposes]);
   // The page passes its colours so a purpose matches the bottleneck's bars; on its own it picks them from these bars.
-  const colours = useMemo(() => shared ?? purposeColours([...parts.values()]), [shared, parts]);
+  const colours = useMemo(() => shared ?? purposeColours([...parts.values()], purposes), [shared, parts, purposes]);
   return (
+    <>
     <Section title="Avg time to serve one client, by tier, per month" className={className} data-time-to-serve
       aside={
         <PanelHow
@@ -626,54 +627,65 @@ export function TimeToServe({ setup, model, purposes, colours: shared, className
         />
       }
     >
-      {t.departments.map((d) => (
-        <div key={d.id} className="flex flex-col gap-2">
-          <h3 className="text-sm font-semibold">{d.name}</h3>
-          {/* The tiers side by side, divided by hairlines: plain sections, not cards inside the card. */}
-          <div className="grid gap-x-6 gap-y-4 md:grid-cols-[repeat(auto-fit,minmax(16rem,1fr))]">
-            {d.tiers.map((tier) => (
-              <div key={tier.serviceId} className="flex min-w-0 flex-col gap-1 border-t border-line pt-3" data-tier-card={`${d.name} ${tier.tierKey}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <h4 className="text-sm font-semibold">{tier.tierName} client</h4>
-                  <span className="text-xs text-muted-foreground" data-tier-fee>
-                    Avg {money(tier.fee)} a month
-                  </span>
+      {/* One framed block per department, its name in a header band, so Organic and Performance can't run into each other. */}
+      <div className="flex flex-col gap-4">
+        {t.departments.map((d) => (
+          <section key={d.id} className="overflow-hidden rounded-lg border border-line" aria-labelledby={`tts-${d.id}`} data-tts-department={d.name}>
+            <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-line bg-panel-2 px-4 py-2">
+              <h3 id={`tts-${d.id}`} className="text-sm font-semibold">
+                {d.name}
+              </h3>
+              <span className="text-xs text-muted-foreground">
+                {d.tiers.length} {d.tiers.length === 1 ? "tier" : "tiers"}
+                {d.tiers.length > 0 && ` · ${money(Math.min(...d.tiers.map((x) => x.fee)))}–${money(Math.max(...d.tiers.map((x) => x.fee)))} a month`}
+              </span>
+            </header>
+            {/* The tiers side by side, divided by hairlines: plain sections inside the department's frame. */}
+            <div className="grid divide-line max-md:divide-y md:grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] md:divide-x">
+              {d.tiers.map((tier) => (
+                <div key={tier.serviceId} className="flex min-w-0 flex-col gap-1 px-4 py-3" data-tier-card={`${d.name} ${tier.tierKey}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold">{tier.tierName} client</h4>
+                    <span className="text-xs text-muted-foreground" data-tier-fee>
+                      Avg {money(tier.fee)} a month
+                    </span>
+                  </div>
+                  <p className="text-base">
+                    <b className="tabular-nums">{f0(tier.hours)} hours</b> a month
+                  </p>
+                  <p className="mb-1 text-xs text-muted-foreground">{tier.feePerHour === null ? "No hours planned yet" : `Earns ${money(tier.feePerHour)} per hour of work`}</p>
+                  {tier.byPurpose.length > 0 && <StackBar parts={(parts.get(tier.serviceId) ?? []).map((p) => ({ ...p, color: colours.get(p.name) }))} />}
                 </div>
-                <p className="text-base">
-                  <b className="tabular-nums">{f0(tier.hours)} hours</b> a month
-                </p>
-                <p className="mb-1 text-xs text-muted-foreground">{tier.feePerHour === null ? "No hours planned yet" : `Earns ${money(tier.feePerHour)} per hour of work`}</p>
-                {tier.byPurpose.length > 0 && <StackBar parts={(parts.get(tier.serviceId) ?? []).map((p) => ({ ...p, color: colours.get(p.name) }))} />}
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-      {t.named.length > 0 && (
-        <>
-          <h3 className="text-sm font-semibold">Named clients</h3>
-          <Table className="min-w-[30rem] max-w-4xl" data-named-clients>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Client</TableHead>
-                <TableHead>Looked after by</TableHead>
-                <TableHead className="text-right">Hours a month</TableHead>
-                <TableHead className="text-right">Earns per hour</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {t.named.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell>{c.name}</TableCell>
-                  <TableCell>{nameOf(c.manager)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{f1(c.hours)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{c.feePerHour === null ? "—" : money(c.feePerHour)}</TableCell>
-                </TableRow>
               ))}
-            </TableBody>
-          </Table>
-        </>
-      )}
+            </div>
+          </section>
+        ))}
+      </div>
     </Section>
+    {t.named.length > 0 && (
+      <Section title="Named clients: time and earnings" className={className} data-named-clients-section>
+        <Table className="min-w-[30rem]" data-named-clients>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Client</TableHead>
+              <TableHead>Looked after by</TableHead>
+              <TableHead className="text-right">Hours a month</TableHead>
+              <TableHead className="text-right">Earns per hour</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {t.named.map((c) => (
+              <TableRow key={c.id}>
+                <TableCell>{c.name}</TableCell>
+                <TableCell>{nameOf(c.manager)}</TableCell>
+                <TableCell className="text-right tabular-nums">{f1(c.hours)}</TableCell>
+                <TableCell className="text-right tabular-nums">{c.feePerHour === null ? "—" : money(c.feePerHour)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Section>
+    )}
+    </>
   );
 }

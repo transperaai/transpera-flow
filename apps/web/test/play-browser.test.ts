@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { bundleHarness } from "./build-harness";
 
 // The free-play Sandbox in a real browser, with its simulations in a real Web Worker (./play-harness/entry.tsx), on the engine fixture `capacityModel()` and
-// the Set up data that agrees with it (made-up data): the three parts (company map on top, levers left, results right), the result charts (heatmap, over-line bars, three line charts against
+// the Set up data that agrees with it (made-up data): the three parts stacked (company map, then the levers band, then the results), the result charts (heatmap, over-line bars, three line charts against
 // today's path dashed, time bars), a lever that moves the charts, no automation section among the levers (D53), a map version picked from a process's popover (badge, chip, reset to
 // today), a price rise with "Clients react", Reset levers, the levers resetting when the
 // page is left (unmounted and opened again), no save, scenario or compare UI, no automation levers (D53), pay
@@ -76,27 +76,46 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
       const { page, errors } = await mount({}, width);
       await ready(page);
 
-      // A workbench: the toolbar, the levers pane and the results pane (the verdict and its figures, then the company map, then the charts). From 1440px
-      // the levers sit beside the results and each pane scrolls on its own; on a phone they stack.
+      // One scrolling page: the toolbar, then the company map full width, then the levers laid out horizontally in one band, then the results (the
+      // verdict and its figures, then the charts). No pane scrolls on its own; on a phone the same order, stacked.
       expect(await page.locator("[data-play-toolbar]").count()).toBe(1);
       expect(await page.locator("[data-play-map]").count()).toBe(1);
       expect(await page.locator("[data-play-levers]").count()).toBe(1);
       expect(await page.locator("[data-play-results]").count()).toBe(1);
+      expect(await page.locator("[data-play-map] details, [data-play-map] summary").count()).toBe(0);
       const layout = await page.evaluate(() => {
         const box = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+        const map = box("[data-company-map]");
         const levers = box("[data-play-levers-column]");
-        const main = box("[data-play-main]");
+        const results = box("[data-play-results]");
+        const groups = [...document.querySelectorAll("[data-lever-details]")].map((e) => e.getBoundingClientRect());
         return {
-          beside: levers.right <= main.left + 1,
-          kpisBeforeMap: box("[data-play-kpis]").top < box("[data-play-map]").top,
-          mapBeforeCharts: box("[data-play-map]").top < box("[data-play-charts]").top,
-          ownScroll: ["[data-play-levers-column]", "[data-play-main]"].map((s) => getComputedStyle(document.querySelector(s)!).overflowY),
+          toolbarBeforeMap: box("[data-play-toolbar]").bottom <= box("[data-play-map]").top,
+          mapBeforeLevers: map.bottom <= levers.top,
+          leversBeforeResults: levers.bottom <= results.top,
+          kpisBeforeCharts: box("[data-play-kpis]").bottom <= box("[data-play-charts]").top,
+          fullWidth: [map.width, levers.width, results.width].map((w) => Math.round(w)),
+          mapHeight: map.height,
+          groupRows: new Set(groups.map((g) => Math.round(g.top))).size,
+          groupsOpen: groups.length,
+          scrollers: [...document.querySelectorAll("[data-sandbox-play] *")].filter((e) => ["auto", "scroll"].includes(getComputedStyle(e).overflowY) && !e.closest("[data-company-map], [data-play-heatmap]")).length,
+          pageScrolls: document.documentElement.scrollHeight > window.innerHeight,
         };
       });
-      expect(layout.kpisBeforeMap).toBe(true);
-      expect(layout.mapBeforeCharts).toBe(true);
-      expect(layout.beside).toBe(width >= 1024);
-      if (width >= 1024) expect(layout.ownScroll).toEqual(["auto", "auto"]);
+      expect(layout.toolbarBeforeMap).toBe(true);
+      expect(layout.mapBeforeLevers).toBe(true);
+      expect(layout.leversBeforeResults).toBe(true);
+      expect(layout.kpisBeforeCharts).toBe(true);
+      // The map, the levers band and the results share the page's width; the map is the star (about two thirds of the window, at least 28rem).
+      expect(Math.max(...layout.fullWidth) - Math.min(...layout.fullWidth)).toBeLessThanOrEqual(1);
+      expect(layout.mapHeight).toBeGreaterThanOrEqual(448);
+      // Every group of levers shows; all five on one row from 1440px, wrapped on a phone (one column each).
+      expect(layout.groupsOpen).toBe(5);
+      expect(layout.groupRows).toBe(width >= 1440 ? 1 : 5);
+      expect(layout.scrollers).toBe(0);
+      expect(layout.pageScrolls).toBe(true);
+      expect(await text(page, "[data-levers-count]")).toBe("No changes");
+      expect(await page.locator("[data-levers-reset]").isDisabled()).toBe(true);
       // The verdict's figures: worst month, clients, profit and DLER, in one flat strip.
       expect(await page.locator("[data-play-kpis] [data-play-kpi]").evaluateAll((els) => els.map((e) => e.getAttribute("data-play-kpi")))).toEqual(["worst", "clients", "profit", "dler"]);
       expect(await text(page, "[data-play-summary]")).toMatch(/^(Worst month is [A-Z][a-z]{2} \d{4}|Nobody goes over).+ By [A-Z][a-z]{2} \d{4}: \d+ clients and .+ profit a month\. Move a lever/);
@@ -112,7 +131,7 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
 
       // The map is a card per process, with one line above it; the per-process cards, step pickers and "No solutions" lines are gone.
       expect(await page.locator("[data-company-map] [data-id]").count()).toBeGreaterThanOrEqual(6);
-      expect(await text(page, "[data-version-summary]")).toBe("All processes on today's map. Click a process to load another version.");
+      expect(await text(page, "[data-version-summary]")).toBe("Every process on today's version.");
       for (const gone of [/No solutions for this process/, /No blocks yet/, /Company processes/]) expect(await page.locator("body").innerText(), String(gone)).not.toMatch(gone);
       expect(await page.locator("[data-block], [data-step-row], [data-version]").count()).toBe(0);
 
@@ -170,6 +189,9 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     await page.locator('[data-lever="addMonths"]').selectOption("6");
     await settled(page);
     expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("true");
+    // The levers band counts what moved (two departments' wins; how long for is a setting of them, not a change of its own).
+    expect(await text(page, "[data-levers-count]")).toBe("2 changes");
+    expect(await page.locator("[data-levers-reset]").isDisabled()).toBe(false);
     const after = await clientsHeader(page);
     const gained = Number(/\(\+(\d+)\)$/.exec(after)?.[1]);
     // 3 a month for 6 months is 18, less the few the example's churn takes in the months after.
@@ -201,6 +223,30 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("false");
     expect(await clientsHeader(page)).toBe(before);
     expect(await page.locator("[data-heat-switch]").count()).toBe(0);
+    expect(errors).toEqual([]);
+    await page.close();
+  });
+
+  it("the levers band's Reset puts the levers back and keeps the map's versions", async () => {
+    const { page, errors } = await mount();
+    await ready(page);
+    const card = page.locator("[data-company-map] [data-id]").first();
+    const id = (await card.getAttribute("data-id"))!;
+    await card.click();
+    await page.locator(`[data-version-popover="${id}"] [data-version-option="sol-${id}"]`).click();
+    await page.keyboard.press("Escape");
+    await page.locator('[data-lever="add:org"]').fill("2");
+    await page.locator('[data-lever="churn"] input').fill("20");
+    await settled(page);
+    expect(await text(page, "[data-levers-count]")).toBe("2 changes");
+    await page.locator("[data-levers-reset]").click();
+    await settled(page);
+    expect(await page.locator('[data-lever="add:org"]').inputValue()).toBe("0");
+    expect(await page.locator('[data-lever="churn"] [data-lever-value]').innerText()).toBe("0%");
+    expect(await text(page, "[data-levers-count]")).toBe("No changes");
+    // The map's version is a choice on the map, not a lever: it stays, and the run is still off today's path.
+    expect(await page.locator(`[data-version-chip="${id}"]`).count()).toBe(1);
+    expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("true");
     expect(errors).toEqual([]);
     await page.close();
   });
@@ -262,7 +308,7 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     }
     expect(await text(page, "[data-version-summary]")).toMatch(/^2 processes on new versions/);
     await page.locator("[data-versions-reset]").click();
-    expect(await text(page, "[data-version-summary]")).toBe("All processes on today's map. Click a process to load another version.");
+    expect(await text(page, "[data-version-summary]")).toBe("Every process on today's version.");
     await settled(page);
     expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("false");
     expect(errors).toEqual([]);

@@ -1,16 +1,16 @@
 "use client";
 
-// The process page (issue #103, A38), as a workbench (docs/plans/ui-cleanup.md, layout A): a top bar with the breadcrumbs, one slim
-// toolbar (the process name, its Live or Draft pill and version, its rating, the key numbers, History, Edit and Export), then the map
-// edge to edge with an inspector on the right. The inspector's tabs: Step (the clicked step's detail), Facts (What the process shows:
-// the headline, the facts from the run, B17, and the supporting data), Issues (Issues and solutions, each issue with its status track)
-// and Sources (the process's notes and its linked sources). On a phone the inspector sits under the map. Editing happens in the
-// Editor (A39), which Edit opens; History (A40) lists the earlier versions this page can show.
+// The process page (issue #103, A38), on the detail-page template the Issue and Solution pages share (components/issues/detail-layout.tsx):
+// the breadcrumb (Processes, then the process switcher), a flat header (the process name, its Live or Draft pill and version, its rating,
+// category and department, the key numbers, History, Edit and Export), then from `xl` a main column beside a sticky metadata rail. The
+// main column: the process map (its own toolbar, zoom, playback and step detail), What the process shows (the headline, the facts from
+// the run, B17, and the supporting data), Issues and solutions (each issue with its status track) and Sources (the process's notes and
+// its linked sources). Under `xl` the rail stacks under the main column. Links into the page (#issues, #sources, #run, ...) scroll to
+// their section. Editing happens in the Editor (A39), which Edit opens; History (A40) lists the earlier versions this page can show.
 
 import { isReadOnly } from "@/lib/mode";
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { PanelRightClose, PanelRightOpen, Pencil } from "lucide-react";
 import { usePathname, useSearchParams } from "next/navigation";
 import type { IssueRow, ProcessBundle, ProcessCategory, ScenarioRow, SourceRow } from "@transpera-flow/db";
 import type { EngineModel, SimulationResult } from "@transpera-flow/engine";
@@ -28,9 +28,10 @@ import { capacityBlockers, findGaps, gapInputFromBundle } from "@transpera-flow/
 import { MissingForSimulation } from "@/components/simulation-gaps";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DetailLayout, EditMarker, MetaRail, RailItem } from "@/components/issues/detail-layout";
+import { SectionCard } from "@/components/page-kit";
+import { Help } from "@/components/help";
+import { shortDate } from "@/lib/issues/pages";
 import { formatWholeCurrency } from "@/lib/format";
 import { aboutProcess } from "@/lib/process-page/about";
 import { processHeadline, processHours, type ProcessHours } from "@/lib/process-page/hours";
@@ -79,8 +80,8 @@ export function ProcessPage({
   historyHref,
   solutions,
   inside = [],
-  processPicker,
-  processCrumbs,
+  breadcrumb,
+  lastPublished = null,
   notice,
   tierSetup,
   department,
@@ -123,10 +124,11 @@ export function ProcessPage({
   solutions?: { data: SolutionsData; base: string; viewerId?: string | null; memberNames?: Readonly<Record<string, string>> };
   /** Processes inside this one. */
   inside?: ChildProcess[];
-  /** The process switcher: the page's one title, in the toolbar. */
-  processPicker?: ReactNode;
-  /** The breadcrumbs (Processes, then the processes it sits inside), in the top bar. */
-  processCrumbs?: ReactNode;
+  /** The breadcrumb above the header: Processes, the processes it sits inside, then the process switcher (ProcessNav `part="crumbs"`). */
+  breadcrumb: ReactNode;
+  /** When the live version was published, for the rail; null when it never was. */
+  lastPublished?: string | null;
+  /** Above the breadcrumb: the archived banner. */
   notice?: ReactNode;
 }) {
   const searchParams = useSearchParams();
@@ -215,14 +217,20 @@ export function ProcessPage({
   const stepParam = searchParams.get("step");
   const linkedStep = useMemo(() => (stepParam && bundle.steps.some((s) => s.id === stepParam) ? stepParam : null), [stepParam, bundle.steps]);
   useEffect(() => {
-    if (linkedStep) document.getElementById("map")?.scrollIntoView({ block: "nearest" });
+    if (linkedStep) document.getElementById("map")?.scrollIntoView({ block: "start" });
   }, [linkedStep]);
+  // A link into the page (`#issues` from an issue or a solution, `#issue-<id>`, `#sources`, `#run`, ...) scrolls to its section once it
+  // has drawn: some (an issue's row) arrive after the first paint, which the browser's own jump to the anchor misses.
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (id) requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ block: "start" }));
+  }, []);
   // The map is read only here: the step's base values show in its detail with every control off, and nothing they would save is ever sent.
   const readOnlyEditor = useMemo(() => ({ run: () => undefined }) as unknown as ProcessEditor, []);
   const stampNow = useCallback(() => ({ at: new Date().toISOString() }), []);
   const showGapStep = (id: string) => {
     setGapStep(id);
-    document.getElementById("map")?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    document.getElementById("map")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
   // The steps of this process and of the processes inside it, which the wait chart is about (the model may hold more).
   const stepIds = useMemo(() => processStepIds(bundle), [bundle]);
@@ -245,34 +253,6 @@ export function ProcessPage({
     [model, result, stepIds, tierSetup],
   );
 
-  // The inspector: which tab shows, and whether it is folded away (from md up; on a phone it always sits under the map).
-  const [tab, setTab] = useState<InspectorTab>(linkedStep ? "step" : "facts");
-  const [inspectorOpen, setInspectorOpen] = useState(true);
-  // Where the map draws the clicked step's detail: the Step tab's body.
-  const [stepSlot, setStepSlot] = useState<HTMLDivElement | null>(null);
-  const [detailStepId, setDetailStepId] = useState<string | null>(linkedStep);
-  const onStepDetailChange = useCallback((id: string | null) => {
-    setDetailStepId(id);
-    if (id) {
-      setTab("step");
-      setInspectorOpen(true);
-    }
-  }, []);
-  // Links into the page (`#issues` from an issue or a solution, `#sources`, `#run`, ...) open the tab that holds them, then scroll to it.
-  useEffect(() => {
-    const fromHash = () => {
-      const id = window.location.hash.slice(1);
-      const next = tabOfAnchor(id);
-      if (!next) return;
-      setTab(next);
-      setInspectorOpen(true);
-      requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ block: "start" }));
-    };
-    fromHash();
-    window.addEventListener("hashchange", fromHash);
-    return () => window.removeEventListener("hashchange", fromHash);
-  }, []);
-
   // The process's rating: the worst on its steps (the map's colours), none when nothing is rated.
   const processRating = (() => {
     const worst = Math.max(-1, ...processSteps(bundle).map((st) => issuesUi.rating(st.id)?.rank ?? -1));
@@ -280,22 +260,11 @@ export function ProcessPage({
   })();
   const currency = bundle.workspace.settings.currency || "GBP";
   const monthCost = model && supporting ? costAMonth(model, result, supporting.hours) : null;
-  const numbers =
-    supporting?.hours && supporting.hours.total > 0 ? (
-      <>
-        {" · "}
-        <span data-process-hours>{hoursText(supporting.hours.total)} a month</span>
-        {monthCost !== null && (
-          <>
-            {" · "}
-            <span data-process-cost>{formatWholeCurrency(monthCost, currency)} a month</span>
-          </>
-        )}
-      </>
-    ) : null;
+  const hoursAMonth = supporting?.hours && supporting.hours.total > 0 ? supporting.hours.total : null;
 
   const exportMenu = (
     <ExportMenu
+      size="default"
       name={bundle.process.name}
       note="Groups are drawn open."
       input={() => {
@@ -316,202 +285,168 @@ export function ProcessPage({
     />
   );
 
+  const editLink = editHref ? withHorizon(editHref, pickedMonths) : null;
   return (
-    <div className="flex min-h-svh flex-1 flex-col md:h-svh md:overflow-hidden" data-process-workbench>
-      <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur">
-        <SidebarTrigger className="-ml-1" />
-        <Separator orientation="vertical" className="data-[orientation=vertical]:h-4" />
-        {/* Slots arrive from a Server Component; a keyed Fragment keeps React from asking them for keys. */}
-        <Fragment key="crumbs">{processCrumbs ?? <span className="text-sm font-medium text-muted-foreground">Process</span>}</Fragment>
-      </header>
-
-      {notice && (
-        <div className="shrink-0 border-b px-4 py-2">
-          <Fragment key="notice">{notice}</Fragment>
-        </div>
-      )}
-
-      <ProcessHeader
-        name={bundle.process.name}
-        title={processPicker ? <Fragment key="picker">{processPicker}</Fragment> : undefined}
-        about={about}
-        rating={processRating}
-        numbers={numbers}
-        department={department}
-        departmentEditor={department && mode === "live" ? <ProcessDepartmentField processId={bundle.process.id} data={department} canEdit /> : undefined}
-        editCategory={editCategory}
-        status={
-          old ? (
-            <>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-warn bg-warn-soft px-2.5 py-0.5 text-xs font-medium text-fg">Viewing version {viewingVersion} · read only</span>
-              <Button asChild variant="outline" size="xs">
-                <Link href={backToLive}>Back to live</Link>
-              </Button>
-            </>
-          ) : undefined
-        }
-        inside={
-          inside.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-fg-2">Inside:</span>
-              {inside.map((c) => (
-                <Link key={c.id} href={c.href} className="rounded-full border border-border px-2.5 py-0.5 text-xs hover:bg-panel-2">
-                  {c.name}
-                </Link>
-              ))}
-            </div>
-          ) : undefined
-        }
-        actions={
-          <>
-            <Button asChild variant="outline" size="sm">
-              <Link href={historyHref}>History</Link>
-            </Button>
-            {editHref && (
-              // Opens the Editor: an ordinary button with the Editor's purple as a small marker, not a purple button.
-              <Button asChild variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry>
-                <Link href={withHorizon(editHref, pickedMonths)}>
-                  <Pencil aria-hidden className="text-edit" /> Edit
-                </Link>
-              </Button>
-            )}
-            {exportMenu}
-            {!inspectorOpen && (
-              <Button type="button" variant="ghost" size="icon-sm" aria-label="Show the panel" aria-controls="inspector" aria-expanded={false} onClick={() => setInspectorOpen(true)} className="max-md:hidden">
-                <PanelRightOpen />
-              </Button>
-            )}
-          </>
-        }
-      />
-
-      <div className={`flex flex-col md:grid md:min-h-0 md:flex-1 md:grid-rows-[minmax(0,1fr)] ${inspectorOpen ? "md:grid-cols-[minmax(0,1fr)_380px]" : "md:grid-cols-[minmax(0,1fr)]"}`}>
-        <div id="map" className="flex h-[60svh] min-h-0 min-w-0 scroll-mt-12 flex-col md:h-auto" aria-labelledby="map-heading">
-          <ProcessCanvas
-            card={{
-              title: "Process map",
-              compact: true,
-              help: {
-                label: "Map colours",
-                description: "A step is coloured by the worst rating among its confirmed open issues. Red badges count confirmed issues. Facts from the run show under Facts until someone logs an issue.",
-                example: "A step with one Bad issue is orange with a badge of 1; a step with only an unconfirmed insight stays plain.",
-              },
-              below:
-                gaps.length > 0 || error ? (
-                  <>
-                    <MissingForSimulation gaps={gaps} onSelectStep={showGapStep} settingsHref={settingsHref} />
-                    {error && (
-                      <Alert className="border-crit bg-crit-soft">
-                        <AlertDescription className="text-fg">This process can&apos;t be simulated yet: {error}.</AlertDescription>
-                      </Alert>
-                    )}
-                  </>
-                ) : undefined,
-            }}
-            height="fill"
-            wheelZoom
-            bundle={bundle}
-            result={result}
-            savedLabel="Saved"
-            defaultLanes
-            branchNodes
-            rating={issuesUi.rating}
-            stepExtras={issuesUi.stepExtras}
-            highlight={issuesUi.highlight ?? (gapStep ? [gapStep] : linkedStep ? [linkedStep] : null)}
-            initialStepId={linkedStep}
-            stepDetailIn={stepSlot}
-            onStepDetailChange={onStepDetailChange}
-            stepBaseValues={(step) => <StepBaseValues bundle={bundle} step={step} editor={readOnlyEditor} stamp={stampNow} tierSetup={tierSetup} readOnly settingsHref={settingsHref} />}
-            sourceTitles={sourceTitles}
-            // Only while there is a model to run: one that can't be built never starts a run.
-            computing={model !== null && sim.status === "running" && sim.run === null}
-            emptyAction={
-              editHref ? (
-                <Button asChild variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry>
-                  <Link href={withHorizon(editHref, pickedMonths)}>Open in Editor</Link>
-                </Button>
+    <div className="flex min-w-0 flex-col gap-4">
+      {/* Slots arrive from a Server Component; a keyed Fragment keeps React from asking them for keys. */}
+      {notice && <Fragment key="notice">{notice}</Fragment>}
+      <DetailLayout
+        data-process-page={bundle.process.id}
+        breadcrumb={<Fragment key="crumbs">{breadcrumb}</Fragment>}
+        header={
+          <ProcessHeader
+            name={bundle.process.name}
+            about={about}
+            rating={processRating}
+            department={department}
+            departmentEditor={department && mode === "live" ? <ProcessDepartmentField processId={bundle.process.id} data={department} canEdit /> : undefined}
+            editCategory={editCategory}
+            status={
+              old ? (
+                <>
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-warn bg-warn-soft px-2.5 py-0.5 text-xs font-medium text-fg">Viewing version {viewingVersion} · read only</span>
+                  <Button asChild variant="outline" size="xs">
+                    <Link href={backToLive}>Back to live</Link>
+                  </Button>
+                </>
               ) : undefined
             }
+            inside={
+              inside.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs text-fg-2">Inside:</span>
+                  {inside.map((c) => (
+                    <Link key={c.id} href={c.href} className="rounded-full border border-border px-2.5 py-0.5 text-xs hover:bg-panel-2">
+                      {c.name}
+                    </Link>
+                  ))}
+                </div>
+              ) : undefined
+            }
+            actions={
+              <>
+                <Button asChild variant="outline">
+                  <Link href={historyHref}>History</Link>
+                </Button>
+                {editLink && (
+                  // Opens the Editor: an ordinary button with the Editor's purple as a small marker, not a purple button.
+                  <Button asChild variant="outline" className={EDIT_ONLY} data-edit-entry>
+                    <Link href={editLink}>
+                      <EditMarker /> Edit
+                    </Link>
+                  </Button>
+                )}
+                {exportMenu}
+              </>
+            }
           />
+        }
+        rail={
+          <MetaRail label="Process details" data-process-rail="">
+            <RailItem term="Steps">{about.steps}</RailItem>
+            <RailItem term="Roles">{about.roles}</RailItem>
+            <RailItem term="Hours a month" data-rail-hours="" data-process-hours="">
+              {hoursAMonth !== null ? hoursText(hoursAMonth) : model ? "Simulating…" : "Not simulated"}
+            </RailItem>
+            {monthCost !== null && (
+              <RailItem term="Cost a month" data-process-cost="">
+                {formatWholeCurrency(monthCost, currency)}
+              </RailItem>
+            )}
+            <RailItem term="Open issues">
+              <a href="#issues" className="hover:underline" data-rail-issues>
+                {issuesUi.openIssues ? `${issuesUi.openIssues} open` : "None open"}
+              </a>
+            </RailItem>
+            <RailItem term="Last published">{lastPublished ? shortDate(lastPublished) : "Never"}</RailItem>
+          </MetaRail>
+        }
+      >
+        <SectionCard
+          id="map"
+          section="map"
+          title={
+            <span className="flex items-center">
+              Process map
+              <Help
+                label="Map colours"
+                description="A step is coloured by the worst rating among its confirmed open issues. Red badges count confirmed issues. Facts from the run show under What the process shows until someone logs an issue."
+                example="A step with one Bad issue is orange with a badge of 1; a step with only an unconfirmed insight stays plain."
+              />
+            </span>
+          }
+        >
+          {(gaps.length > 0 || error) && (
+            <div className="flex flex-col gap-2">
+              <MissingForSimulation gaps={gaps} onSelectStep={showGapStep} settingsHref={settingsHref} />
+              {error && (
+                <Alert className="border-crit bg-crit-soft">
+                  <AlertDescription className="text-fg">This process can&apos;t be simulated yet: {error}.</AlertDescription>
+                </Alert>
+              )}
+            </div>
+          )}
+          <div className="flex h-[60svh] min-h-[28rem] min-w-0 flex-col">
+            <ProcessCanvas
+              height="fill"
+              wheelZoom
+              bundle={bundle}
+              result={result}
+              savedLabel="Saved"
+              defaultLanes
+              branchNodes
+              rating={issuesUi.rating}
+              stepExtras={issuesUi.stepExtras}
+              highlight={issuesUi.highlight ?? (gapStep ? [gapStep] : linkedStep ? [linkedStep] : null)}
+              initialStepId={linkedStep}
+              stepBaseValues={(step) => <StepBaseValues bundle={bundle} step={step} editor={readOnlyEditor} stamp={stampNow} tierSetup={tierSetup} readOnly settingsHref={settingsHref} />}
+              sourceTitles={sourceTitles}
+              // Only while there is a model to run: one that can't be built never starts a run.
+              computing={model !== null && sim.status === "running" && sim.run === null}
+              emptyAction={
+                editLink ? (
+                  <Button asChild variant="outline" size="sm" className={EDIT_ONLY} data-edit-entry>
+                    <Link href={editLink}>Open in Editor</Link>
+                  </Button>
+                ) : undefined
+              }
+            />
+          </div>
+        </SectionCard>
+
+        <div id="run" className="flex min-w-0 scroll-mt-16 flex-col gap-6">
+          <SectionCard
+            id="facts"
+            section="facts"
+            data-panel="facts"
+            title="What the process shows"
+            description="What the simulation measured. Evidence, not issues: log an issue under Issues and solutions when one matters."
+          >
+            {model && supporting ? (
+              <>
+                <SupportingHeadline headline={supporting.headline} result={result} />
+                <FactsList facts={issuesUi.facts} names={factNames} onLight={issuesUi.light} />
+              </>
+            ) : (
+              <p className="text-sm text-fg-2">Nothing to show until the process can be simulated.</p>
+            )}
+          </SectionCard>
+          {model && supporting && (
+            <div id="supporting-data" className="flex min-w-0 scroll-mt-16 flex-col gap-6">
+              <HoursByRole hours={supporting.hours} result={result} viewer={bundle.viewer} />
+              <HeaviestSteps hours={supporting.hours} result={result} />
+              <TimeSplit rows={supporting.timeSplit} result={result} />
+              <KeyPersonPanel rows={supporting.keyPeople} hours={supporting.hours} result={result} />
+            </div>
+          )}
         </div>
 
-        <aside id="inspector" aria-label="Process details" className={`flex min-h-0 min-w-0 flex-col border-t bg-background md:border-t-0 md:border-l ${inspectorOpen ? "" : "md:hidden"}`}>
-          <Tabs value={tab} onValueChange={(v) => setTab(v as InspectorTab)} className="flex min-h-0 flex-1 flex-col gap-0">
-            <div className="flex shrink-0 items-center gap-2 border-b px-2">
-              <TabsList variant="line" className="h-10 flex-1 justify-start">
-                <TabsTrigger value="step" className="flex-none px-2 text-xs">
-                  Step
-                </TabsTrigger>
-                <TabsTrigger value="facts" className="flex-none px-2 text-xs">
-                  Facts
-                </TabsTrigger>
-                <TabsTrigger value="issues" className="flex-none px-2 text-xs">
-                  Issues
-                </TabsTrigger>
-                <TabsTrigger value="sources" className="flex-none px-2 text-xs">
-                  Sources
-                </TabsTrigger>
-              </TabsList>
-              <Button type="button" variant="ghost" size="icon-sm" aria-label="Hide the panel" aria-controls="inspector" aria-expanded onClick={() => setInspectorOpen(false)} className="max-md:hidden">
-                <PanelRightClose />
-              </Button>
-            </div>
-            <div className="min-h-0 flex-1 md:overflow-y-auto">
-              {/* Every tab stays mounted (hidden when not shown), so a #issues link, the run's panels and the step's detail are always there. */}
-              <TabsContent value="step" forceMount className="p-4 data-[state=inactive]:hidden">
-                <div ref={setStepSlot} />
-                {!detailStepId && <p className="py-6 text-center text-sm text-muted-foreground">Select a step on the map to see who does it, its time and its issues.</p>}
-              </TabsContent>
-              <TabsContent value="facts" forceMount className="p-4 data-[state=inactive]:hidden">
-                <section id="run" aria-labelledby="run-heading" className="@container flex min-w-0 scroll-mt-16 flex-col gap-4">
-                  <h2 id="run-heading" className="text-base font-semibold">
-                    What the process shows
-                  </h2>
-                  {model && supporting ? (
-                    <>
-                      <SupportingHeadline headline={supporting.headline} result={result} />
-                      <section id="facts" aria-labelledby="facts-heading" data-panel="facts" className="flex min-w-0 scroll-mt-16 flex-col border-t border-line pt-4">
-                        <h3 id="facts-heading" className="text-sm font-semibold">
-                          Facts
-                        </h3>
-                        <p className="mb-3 text-xs text-fg-3">What the simulation measured. Evidence, not issues: log an issue under Issues when one matters.</p>
-                        <FactsList facts={issuesUi.facts} names={factNames} onLight={issuesUi.light} />
-                      </section>
-                      <HoursByRole hours={supporting.hours} result={result} viewer={bundle.viewer} />
-                      <div id="supporting-data" className="flex scroll-mt-16 flex-col gap-4">
-                        <HeaviestSteps hours={supporting.hours} result={result} />
-                        <TimeSplit rows={supporting.timeSplit} result={result} />
-                        <KeyPersonPanel rows={supporting.keyPeople} hours={supporting.hours} result={result} />
-                      </div>
-                    </>
-                  ) : (
-                    <p className="text-sm text-fg-2">Nothing to show until the process can be simulated.</p>
-                  )}
-                </section>
-              </TabsContent>
-              <TabsContent value="issues" forceMount className="p-4 data-[state=inactive]:hidden">
-                {issuesUi.issuesList}
-              </TabsContent>
-              <TabsContent value="sources" forceMount className="p-4 data-[state=inactive]:hidden">
-                <ProcessSources processId={bundle.process.id} name={bundle.process.name} notes={notes} canEditNotes={!isReadOnly(mode) && !old && !!notes?.save} />
-              </TabsContent>
-            </div>
-          </Tabs>
-        </aside>
-      </div>
+        {issuesUi.issuesList}
+
+        <ProcessSources processId={bundle.process.id} name={bundle.process.name} notes={notes} canEditNotes={!isReadOnly(mode) && !old && !!notes?.save} />
+      </DetailLayout>
     </div>
   );
-}
-
-/** The inspector's tabs. */
-type InspectorTab = "step" | "facts" | "issues" | "sources";
-
-/** The tab that holds an anchor other pages link to (`#issues`, `#solutions`, `#issue-<id>`, `#sources`, `#run`, ...); null for any other. */
-function tabOfAnchor(id: string): InspectorTab | null {
-  if (id === "issues" || id === "solutions" || id.startsWith("issue-")) return "issues";
-  if (id === "sources") return "sources";
-  if (id === "run" || id === "facts" || id === "supporting-data") return "facts";
-  return null;
 }
 
 /** Whole hours, one decimal under 10, as the headline writes them. */
@@ -535,8 +470,8 @@ function costAMonth(model: EngineModel, result: SimulationResult | null, hours: 
 }
 
 /**
- * The sources that are evidence for the whole process, with "+ Link", and the process's notes above them: the inspector's Sources tab
- * (a #sources address opens it). Where the page loads neither, it says there is nothing here.
+ * The sources that are evidence for the whole process, with "+ Link", and the process's notes above them: the last section of the page
+ * (a #sources address scrolls to it). Where the page loads neither, it says there is nothing here.
  */
 function ProcessSources({
   processId,
@@ -553,13 +488,7 @@ function ProcessSources({
   // The saved text, kept here once a save succeeds so the field shows it without a reload.
   const [savedNotes, setSavedNotes] = useState<string | null | undefined>(undefined);
   return (
-    <section id="sources" aria-labelledby="sources-heading" className="flex min-w-0 scroll-mt-16 flex-col gap-4">
-      <div className="flex flex-col gap-0.5">
-        <h2 id="sources-heading" className="text-base font-semibold">
-          Sources
-        </h2>
-        <p className="text-sm text-muted-foreground">Notes, and the interviews and data that are evidence for this process as a whole.</p>
-      </div>
+    <SectionCard id="sources" section="sources" title="Sources" description="Notes, and the interviews and data that are evidence for this process as a whole." contentClassName="gap-4">
       {!linking && !notes && <p className="text-sm text-fg-2">No sources for this process here.</p>}
       <div id="sources-body" className="flex flex-col gap-4">
         {notes && (
@@ -582,6 +511,6 @@ function ProcessSources({
         )}
         {linking && <LinkedSources target={{ kind: "process", processId }} label={`Process: ${name}`} empty="No source linked to this process yet." hideTitle className="flex flex-col gap-2" />}
       </div>
-    </section>
+    </SectionCard>
   );
 }

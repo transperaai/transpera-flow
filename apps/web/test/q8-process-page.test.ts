@@ -12,10 +12,12 @@ import { departmentField } from "@/lib/process-page/department";
 import { tierSetupFrom } from "@/lib/tier-setup";
 import { bundleHarness } from "./build-harness";
 
-// Q8, the process page as a workbench, in a real browser on the example agency's "Performance: Pacing and hygiene, per channel" process:
-// the toolbar (title, pills, the key numbers, pencil popover, History, Edit, Export), the map edge to edge (Key popover, playback docked
-// under it), and the inspector's tabs: Step, Facts (What the process shows) and Issues (rows, and the empty state). Nothing sideways at 400 px.
-// With Q8_SHOTS=<dir> it also saves the screenshots (with and without issues; 1440 px light and dark, 400 px light).
+// Q8, the process page on the Issue and Solution pages' detail template, in a real browser on the example agency's "Performance: Pacing
+// and hygiene, per channel" process: the breadcrumb ending with the process switcher, the flat header (title, pills, the key numbers,
+// pencil popover, History, Edit, Export), the map card (Key popover, playback in its toolbar, the step detail on the map), the sections
+// under it (What the process shows, Issues and solutions: rows, and the empty state, Sources) and the metadata rail beside them from xl.
+// Nothing sideways at 400 px. With Q8_SHOTS=<dir> it also saves full-page screenshots (with and without issues; 1440 px light and dark,
+// 400 px light).
 
 const META = { "import.meta.url": JSON.stringify("http://harness.test/src/lib/x/") };
 const shots = process.env.Q8_SHOTS;
@@ -49,7 +51,8 @@ beforeAll(async () => {
   await tdb.client.query("commit");
   const db = tdb.dbAs({ sub: owner.id, role: "authenticated", app_metadata: { agency_admin: true } });
   const pick = (await tdb.client.query("select id from processes where workspace_id = $1 and name = $2", [ws, EXAMPLE_MARKER_PROCESS])).rows[0].id as string;
-  const bundle = (await loadProcessBySlug(db, "example", { draft: false, processId: pick }))!.live as ProcessBundle;
+  const found = (await loadProcessBySlug(db, "example", { draft: false, processId: pick }))!;
+  const bundle = found.live as ProcessBundle;
   processName = bundle.process.name;
   const [departments, services, links] = await Promise.all([
     db.selectFrom("departments").select(["id", "name", "sort"]).where("workspace_id", "=", ws).orderBy("sort").execute(),
@@ -59,6 +62,7 @@ beforeAll(async () => {
   const [solutions, solutionLinks] = await Promise.all([loadSolutions(db, ws, pick), loadSolutionIssues(db, ws)]);
   data = {
     bundle,
+    processes: found.processes,
     tierSetup: tierSetupFrom(await loadCapacitySetup(db, ws)),
     issues: await loadIssuesForReader(db, ws),
     solutions: { solutions, links: solutionLinks.filter((l) => solutions.some((s) => s.id === l.solution_id)) },
@@ -98,49 +102,80 @@ async function mount(o: { editor: boolean; issues: boolean; width?: number; sche
   return { page, errors };
 }
 
-describe("the process page as a workbench", () => {
-  it("an editor sees the toolbar, the map, the What the process shows tab and the issues rows", async () => {
+describe("the process page on the detail template", () => {
+  it("an editor sees the breadcrumb, the header, the map card, the sections and the rail", async () => {
     const { page, errors } = await mount({ editor: true, issues: true });
-    // Header: the title, the pills, History, Edit, Export.
+    // One h1, the process name in the header; the breadcrumb ends with the switcher, which opens every process.
+    expect(await page.locator("h1").count()).toBe(1);
+    const crumbs = page.locator("nav[aria-label=Breadcrumb]");
+    expect(await crumbs.getByRole("link", { name: "Processes" }).getAttribute("href")).toBe("/w/example/processes");
+    await crumbs.getByRole("button", { name: `Process: ${processName}. Switch process` }).click();
+    const menu = page.locator("[data-slot=dropdown-menu-content][data-state=open]");
+    expect(await menu.getByRole("menuitem").count()).toBeGreaterThan(2);
+    expect(await menu.locator(`a[aria-current=page]`).innerText()).toContain(processName);
+    await page.keyboard.press("Escape");
+    // The open menu hides the rest of the page from the accessibility tree; wait until it has gone.
+    await page.locator("[data-slot=dropdown-menu-content]").waitFor({ state: "detached" });
+    // Header: the title, the pills, History, Edit (with the Editor's marker), Export. The numbers live in the strip below, once.
     const header = page.locator("[data-testid=about-process]");
     expect(await header.locator("h1").innerText()).toBe(processName);
     expect(await header.locator("[data-process-tag]").count()).toBe(2);
     expect(await header.innerText()).toMatch(/Live\s+Version 3/);
-    expect(await header.locator("[data-process-numbers]").innerText()).toMatch(/^\d+ steps? · \d+ roles? · [\d,.]+ h a month/);
+    expect(await header.locator("[data-process-numbers]").count()).toBe(0);
     for (const name of ["History", "Edit", "Export"]) expect(await header.getByRole(name === "Export" ? "button" : "link", { name }).count()).toBe(1);
+    expect(await header.locator("a[data-edit-entry] [data-edit-marker]").count()).toBe(1);
     // The pencil opens the Type and Department selects.
     await header.getByRole("button", { name: "Edit type and department" }).click();
     const pop = page.locator("[data-slot=popover-content][data-state=open]");
     expect(await pop.locator("select[data-process-category] option").count()).toBe(5);
     expect(await pop.innerText()).toContain("Department");
     await page.keyboard.press("Escape");
-    // The map: its label, Swimlanes, Fit, the Key popover, and the playback bar docked under it. It fills the page under the toolbar.
+    // No workbench: no tabs, no inspector.
+    expect(await page.getByRole("tab").count()).toBe(0);
+    expect(await page.locator("#inspector").count()).toBe(0);
+    // The map card: its heading, then the map's one toolbar row with Swimlanes, the Key popover and playback inline; Fit on the map itself.
     const map = page.locator("#map");
     expect(await map.getByRole("heading", { name: "Process map" }).count()).toBe(1);
-    for (const name of ["Swimlanes", "Fit", "Key"]) expect(await map.getByRole("button", { name }).count()).toBe(1);
-    expect(await map.locator("[data-playback-strip] [role=group][aria-label=Playback]").count()).toBe(1);
+    for (const name of ["Swimlanes", "Key", "Fit the map to view"]) expect(await map.getByRole("button", { name, exact: true }).count()).toBe(1);
+    expect(await map.locator("[data-map-toolbar] [data-playback-strip] [role=group][aria-label=Playback]").count()).toBe(1);
     await map.getByRole("button", { name: "Key" }).click();
     expect(await page.locator("[data-slot=popover-content][data-state=open]").innerText()).toContain("Operational risk");
     await page.keyboard.press("Escape");
-    const box = await map.boundingBox();
-    expect(box!.height).toBeGreaterThan(600);
-    // The inspector opens on Facts, What the process shows: the headline, then the panels. No card stack under the map.
-    expect(await page.getByRole("tab", { name: "Facts" }).getAttribute("aria-selected")).toBe("true");
+    // The map is about 60% of the viewport tall (1000 px here), never under 28rem.
+    const canvas = (await map.locator("[data-process-map]").boundingBox())!;
+    expect(canvas.height).toBeGreaterThanOrEqual(595);
+    expect(canvas.height).toBeLessThanOrEqual(605);
+    // The details strip sits under the header, above the map card and as wide as it; it repeats nothing the header shows.
+    const rail = page.locator("[data-process-rail]");
+    const [railBox, mapBox] = [(await rail.boundingBox())!, (await map.boundingBox())!];
+    expect(Math.abs(railBox.width - mapBox.width)).toBeLessThan(2);
+    expect(railBox.y + railBox.height).toBeLessThanOrEqual(mapBox.y);
+    const railText = await rail.innerText();
+    for (const term of ["Steps", "Roles", "Hours a month", "Open issues", "Last published"]) expect(railText).toContain(term.toUpperCase());
+    for (const term of ["Status", "Rating", "Category", "Department"]) expect(railText).not.toContain(term.toUpperCase());
+    expect(await rail.locator("[data-process-hours]").innerText()).toMatch(/h|Simulating|Not simulated/);
+    // Cost a month shows only where the run puts a cost on the hours (and pay isn't hidden); then it is a sum of money.
+    for (const cost of await rail.locator("[data-process-cost]").allInnerTexts()) expect(cost).toMatch(/\d/);
+    expect(railText).toContain("2 Nov");
+    expect(await rail.locator("a[data-rail-issues]").getAttribute("href")).toBe("#issues");
+    // The sections in order under the map: What the process shows, Issues and solutions, Sources.
+    const order = await page.evaluate(() => ["map", "run", "issues", "sources"].map((id) => document.getElementById(id)!.getBoundingClientRect().top));
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    // What the process shows: the headline, then the panels, each a section card.
     const run = page.locator("#run");
-    for (const panel of ["facts", "hours-by-role", "heaviest-steps", "time-split", "key-person"]) expect(await run.locator(`[data-panel=${panel}]`).count()).toBe(1);
+    for (const panel of ["facts", "hours-by-role", "heaviest-steps", "time-split", "key-person"]) expect(await run.locator(`[data-panel=${panel}][data-slot=card]`).count()).toBe(1);
     // Heaviest steps as one strip, the time split as three totals, key-person risk grouped by person under its worst case.
     await run.locator("[data-hours-strip]").waitFor();
     expect(await run.locator("[data-time-total]").count()).toBe(3);
     expect(await run.locator("[data-panel=heaviest-steps] [data-lead]").innerText()).toMatch(/of the [\d,.]+ h a month\.$/);
-    // A click on a step shows its detail in the Step tab, not over the map.
+    // A click on a step shows its detail on the map, as the Issue page's map does.
     const task = await page.evaluate(() => window.q8Data.bundle.steps.find((st) => st.kind === "task" && !st.parent_step_id && !st.child_process_id)!.id);
     await map.locator(`.react-flow__node[data-id="${task}"]`).click();
-    await page.locator("#inspector [data-step-detail]").waitFor();
-    expect(await page.getByRole("tab", { name: "Step" }).getAttribute("aria-selected")).toBe("true");
-    expect(await map.locator("[data-step-detail]").count()).toBe(0);
-    // Issues: counts, a Log an issue button, and rows that open the issue page.
-    await page.getByRole("tab", { name: "Issues" }).click();
+    await map.locator(`[data-step-detail="${task}"][role=dialog]`).waitFor();
+    expect(await page.locator("[data-step-detail]").count()).toBe(1);
+    // Issues: counts, a Log an issue button, and rows that open the issue page; a section card, open on the page.
     const issues = page.locator("#issues");
+    expect(await issues.getAttribute("data-slot")).toBe("card");
     expect(await issues.locator("[data-issue-counts]").innerText()).toMatch(/\d+ open · \d+ in progress · \d+ resolved/);
     expect(await issues.getByRole("button", { name: "Log an issue" }).count()).toBe(1);
     const rows = issues.locator("li[data-issue]");
@@ -157,7 +192,25 @@ describe("the process page as a workbench", () => {
       expect(await bySolution.nth(i).locator("a[href^='/w/example/solutions/']").count()).toBe(1);
       expect(await bySolution.nth(i).locator("[data-solved-issue]").innerText()).toMatch(/^Solved /);
     }
+    // The rail's open issues are the current ones.
+    const current = await issues.locator("[data-issue-group=current] > ul > li").count();
+    expect(await rail.locator("a[data-rail-issues]").innerText()).toBe(current ? `${current} open` : "None open");
+    // A link into the page scrolls to its section.
+    await page.evaluate(() => (location.hash = "sources"));
+    // (Sources is last, so the page scrolls as far as it goes: the card is in view, and the map has gone above.)
+    await page.waitForFunction(() => {
+      const r = document.getElementById("sources")!.getBoundingClientRect();
+      return window.scrollY > 0 && r.top >= 0 && r.bottom <= window.innerHeight + 1;
+    });
     expect(errors).toEqual([]);
+    await page.close();
+  }, 300_000);
+
+  it("keeps the details strip above the map, as wide as it, at narrower widths too", async () => {
+    const { page } = await mount({ editor: false, issues: true, width: 1100 });
+    const [railBox, mapBox] = [(await page.locator("[data-process-rail]").boundingBox())!, (await page.locator("#map").boundingBox())!];
+    expect(railBox.y + railBox.height).toBeLessThanOrEqual(mapBox.y);
+    expect(Math.abs(railBox.width - mapBox.width)).toBeLessThan(2);
     await page.close();
   }, 300_000);
 
@@ -174,7 +227,6 @@ describe("the process page as a workbench", () => {
 
   it("with no issues the card says what goes there, with an icon and the button", async () => {
     const { page } = await mount({ editor: true, issues: false });
-    await page.getByRole("tab", { name: "Issues" }).click();
     const empty = page.locator("#issues [data-issues-empty]");
     expect(await empty.innerText()).toContain("Log the problems you find on this map, then link solutions to them.");
     expect(await empty.locator("svg").count()).toBe(1);
@@ -198,10 +250,9 @@ describe("the process page as a workbench", () => {
         [400, "light"],
       ] as const) {
         const { page } = await mount({ editor: true, issues, width, scheme });
-        // The workbench fills the viewport from md up; a phone's stacked page is taken whole.
-        if (width < 768) await page.setViewportSize({ width, height: await page.evaluate(() => document.documentElement.scrollHeight) });
         await page.waitForTimeout(500);
-        await page.screenshot({ path: `${shots}/process-page-${issues ? "with" : "no"}-issues-${scheme}-${width}.png` });
+        // The page scrolls, like the Issue page: taken whole.
+        await page.screenshot({ path: `${shots}/process-page-${issues ? "with" : "no"}-issues-${scheme}-${width}.png`, fullPage: true });
         await page.close();
       }
     }

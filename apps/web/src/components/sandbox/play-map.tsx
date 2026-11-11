@@ -2,11 +2,11 @@
 
 // "Company map" in the free-play Sandbox (Q16): the company's map is the Sandbox's way to load a different version of a process. Click a process card and a
 // popover lists "Today" and each map made for that process (a solution, with its status), and the month it starts. The choice is `play.versions` (P7's E6;
-// `?solution=` fills it too). Above the map: which processes are on a new version, each a removable chip, and "Reset to today".
+// `?solution=` fills it too). Above the map: which processes are on a new version, each a removable chip, and "Reset to today". The map is the first
+// thing under the Sandbox's toolbar, full width and always shown (not foldable).
 
 import { useEffect, useState, type ReactNode } from "react";
 import type { PlayState } from "@transpera-flow/db";
-import { ChevronDown } from "lucide-react";
 import { EmptyState, StatusPill } from "@/components/page-kit";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -112,15 +112,12 @@ export function PlayMapCard({
 
   return (
     <div data-play-map>
-      <details open className="group/map flex flex-col" data-play-map-section>
-        <summary className="flex cursor-pointer list-none flex-wrap items-baseline gap-x-3 gap-y-0.5 rounded-md outline-none select-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-          <h2 className="inline-flex items-center gap-1.5 text-base font-semibold">
-            <ChevronDown aria-hidden className="size-4 text-muted-foreground -rotate-90 transition-transform group-open/map:rotate-0" />
-            Company map
-          </h2>
-          <span className="text-xs text-muted-foreground">This run playing on every process. Click a process to load another version of it.</span>
-        </summary>
-        <div className="mt-3 flex min-w-0 flex-col gap-3">
+      <section aria-label="Company map" className="flex min-w-0 flex-col gap-3" data-play-map-section>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <h2 className="text-base font-semibold">Company map</h2>
+          <span className="text-xs text-muted-foreground">Click a process to try another version.</span>
+        </div>
+        <div className="flex min-w-0 flex-col gap-3">
           {header}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm" data-version-summary data-versions={on.length}>
             {on.length ? (
@@ -146,13 +143,13 @@ export function PlayMapCard({
                 </Button>
               </>
             ) : (
-              <span className="text-muted-foreground">All processes on today&apos;s map. Click a process to load another version.</span>
+              <span className="text-xs text-muted-foreground">Every process on today&apos;s version.</span>
             )}
           </div>
 
           {canvas ? canvas({ badges, onProcess }) : <EmptyState>No process has been published yet.</EmptyState>}
         </div>
-      </details>
+      </section>
 
       {open && pick && (
         <Popover open onOpenChange={(o) => !o && setOpen(null)}>

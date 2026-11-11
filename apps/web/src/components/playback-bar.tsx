@@ -10,10 +10,16 @@
 import { Square } from "lucide-react";
 import { useEffect, useRef, useSyncExternalStore, type KeyboardEvent } from "react";
 import { SPEEDS, formatSimTime, type PlaybackClock } from "@/lib/playback/clock";
+import { Button } from "@/components/ui/button";
 
 interface BarProps {
   /** Along the foot of a card (Q8): no border, fill or shadow of its own. */
   docked?: boolean;
+  /**
+   * In the one toolbar row above a read-only map: no box of its own, small buttons, short speed names, a scrubber that takes the
+   * room left, and "Run 1 of 30" on the time's tooltip (and for a screen reader) rather than as text of its own.
+   */
+  inline?: boolean;
   clock: PlaybackClock;
   /** Measured horizon in hours; null while there is no run to play. */
   H: number | null;
@@ -28,7 +34,10 @@ const TEXT_INTERVAL_MS = 100;
 const button =
   "rounded-token border border-line bg-panel px-2 py-1 text-fg hover:bg-panel-2 disabled:cursor-not-allowed disabled:text-fg-3 disabled:hover:bg-panel";
 
-export function PlaybackBar({ docked = false, clock, H, hoursPerWeek, reps, describe }: BarProps) {
+/** Short names for the speeds in the toolbar row; the option's text (and what a screen reader hears) stays the full one. */
+const SHORT_SPEED: Record<(typeof SPEEDS)[number]["unit"], string> = { hour: "1 hour/s", day: "1 day/s", week: "1 week/s", month: "1 month/s" };
+
+export function PlaybackBar({ docked = false, inline = false, clock, H, hoursPerWeek, reps, describe }: BarProps) {
   const state = useSyncExternalStore(clock.subscribe, clock.getState, clock.getState);
   const slider = useRef<HTMLInputElement>(null);
   const time = useRef<HTMLSpanElement>(null);
@@ -99,6 +108,79 @@ export function PlaybackBar({ docked = false, clock, H, hoursPerWeek, reps, desc
   };
 
   const playLabel = state.playing ? "Pause" : state.atEnd ? "Replay" : "Play";
+  const runText = ready ? `Run 1 of ${reps ?? 1}` : "Simulating…";
+  const runTitle = `Playback shows one simulated run of ${Math.round((H ?? 0) / hoursPerWeek)} weeks; the figures above average all ${reps ?? 1}.`;
+  if (inline)
+    return (
+      <div role="group" aria-label="Playback" onKeyDown={onKeyDown} className="flex flex-1 items-center gap-x-1.5 gap-y-1 text-xs max-sm:flex-wrap">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => clock.toggle()}
+          disabled={!ready}
+          aria-label={playLabel}
+          aria-keyshortcuts="Space"
+          title={`${playLabel} (Space)`}
+          className={`w-[4.75rem] justify-start font-semibold ${state.playing ? "border-accent bg-accent-soft" : ""}`}
+        >
+          <span aria-hidden>{state.playing ? "❚❚" : "▶"}</span> {playLabel}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => clock.stop()}
+          disabled={!ready || !state.active}
+          aria-label="Stop"
+          data-playback-stop
+          title="Stop playback and go back to the map"
+          className="font-semibold"
+        >
+          <Square aria-hidden className="size-3 fill-current" /> Stop
+        </Button>
+        <label className="sr-only" htmlFor="playback-speed">
+          Playback speed
+        </label>
+        <select
+          id="playback-speed"
+          value={state.speed}
+          onChange={(e) => clock.setSpeed(Number(e.target.value))}
+          disabled={!ready}
+          title="Simulated working time per second"
+          className="h-7 shrink-0 rounded-token border border-line bg-panel px-1 text-xs"
+        >
+          {SPEEDS.map((s, i) => (
+            <option key={s.label} value={i} label={SHORT_SPEED[s.unit]}>
+              {s.label}
+            </option>
+          ))}
+        </select>
+        <input
+          ref={slider}
+          type="range"
+          min={0}
+          max={H ?? 0}
+          step="any"
+          defaultValue={0}
+          disabled={!ready}
+          aria-label="Simulated time"
+          aria-keyshortcuts="Space ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight PageUp PageDown Home End"
+          title="Arrows: an hour (Shift: a day) · Page Up/Down: a week · Space: play/pause"
+          onInput={(e) => {
+            clock.pause();
+            clock.seek(Number(e.currentTarget.value));
+          }}
+          className="h-6 min-w-32 flex-1 accent-accent"
+        />
+        {/* The time is read aloud by the scrubber; the run is said on its tooltip, and to a screen reader below. */}
+        <span ref={time} className={`shrink-0 font-mono whitespace-nowrap text-fg tabular-nums ${ready ? "" : "hidden"}`} title={`${runText}. ${runTitle}`} aria-hidden data-playback-time />
+        <span className={ready ? "sr-only" : "shrink-0 whitespace-nowrap text-fg-3"} title={runTitle} data-playback-run>
+          {runText}
+        </span>
+        <p ref={status} role="status" className="sr-only" />
+      </div>
+    );
   return (
     <div
       role="group"
@@ -165,9 +247,9 @@ export function PlaybackBar({ docked = false, clock, H, hoursPerWeek, reps, desc
       <span ref={time} className="min-w-44 font-mono text-fg tabular-nums" aria-hidden />
       <span
         className="text-fg-3"
-        title={`Playback shows one simulated run of ${Math.round((H ?? 0) / hoursPerWeek)} weeks; the figures above average all ${reps ?? 1}.`}
+        title={runTitle}
       >
-        {ready ? `Run 1 of ${reps ?? 1}` : "Simulating…"}
+        {runText}
       </span>
       <p ref={status} role="status" className="sr-only" />
     </div>

@@ -9,7 +9,7 @@ export function MetaLine({ children, className }: { children: ReactNode; classNa
   const parts = Children.toArray(children).filter((c) => c !== "");
   if (!parts.length) return null;
   return (
-    <div data-meta-line className={cn("flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-fg-2", className)}>
+    <div data-meta-line className={cn("flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-fg-2", className)}>
       {parts.map((p, i) => (
         <Fragment key={i}>
           {i > 0 && <span aria-hidden>·</span>}

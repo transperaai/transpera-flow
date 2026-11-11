@@ -2,32 +2,26 @@
 
 // The process page's Supporting data (issue #174; capacity-shaped in Q3), each panel reading the latest run: the headline (what this
 // process takes, in hours a month), the hours by role (a donut) and by person, the heaviest steps (one strip of the hours by step), the
-// time split (the totals, then where the waiting is) and key-person risk (grouped by the person each step hangs on). No (i)s: the
-// headings and a line under each say what it is, with "How this works" folded under the picture.
+// time split (the totals, then where the waiting is) and key-person risk (grouped by the person each step hangs on), each a section card in
+// the process page's main column. No (i)s: the headings and a line under each say what it is, with "How this works" folded under the picture.
 
 import type { CSSProperties, ReactNode } from "react";
 import type { Viewer } from "@transpera-flow/db";
 import type { SimulationResult } from "@transpera-flow/engine";
+import { SectionCard } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatHours, formatPercent } from "@/lib/format";
 import { headlineText, hoursStrip, pieSlices, stripHeadline, type PieSlice, type ProcessHeadline, type ProcessHours, type StripSegment } from "@/lib/process-page/hours";
-import { PURPOSE_PALETTE } from "@/lib/capacity/purposes";
+import { OTHER_COLOUR, categoricalColour } from "@/lib/chart-colours";
 import { keyPersonGroups, timeSplitSummary, type KeyPersonGroups, type KeyPersonRow, type TimeSplitRow } from "@/lib/process-page/supporting";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
-// A plain section with a rule above it, not a card: the panels sit in the process page's inspector (its Facts tab), one surface already.
-const card = "flex min-w-0 flex-col border-t border-line pt-4";
-
-/** A titled panel with a one-line description, the same on every part of the "What the process shows" content (Q8). */
+/** A titled panel with a one-line description, the same on every part of the "What the process shows" content (Q8): a section card. */
 export function Panel({ id, title, note, children }: { id: string; title: string; note: string; children: ReactNode }) {
   return (
-    <section aria-labelledby={`${id}-heading`} className={card} data-panel={id}>
-      <h3 id={`${id}-heading`} className="text-sm font-semibold">
-        {title}
-      </h3>
-      <p className="mb-3 text-xs text-fg-3">{note}</p>
+    <SectionCard id={id} section={id} data-panel={id} title={title} description={note} className="@container min-w-0" contentClassName="block">
       {children}
-    </section>
+    </SectionCard>
   );
 }
 
@@ -57,8 +51,8 @@ export function SupportingHeadline({ headline, result }: { headline: ProcessHead
 }
 
 /** The colour of the n-th named slice (the app's categorical palette, the same tokens in both themes); "Others" is the neutral grey. */
-const sliceColour = (s: PieSlice, i: number) => (s.role === null ? OTHERS_COLOUR : PURPOSE_PALETTE[i % PURPOSE_PALETTE.length]!);
-const OTHERS_COLOUR = "var(--purpose-unset)";
+const sliceColour = (s: PieSlice, i: number) => (s.role === null ? OTHERS_COLOUR : categoricalColour(i));
+const OTHERS_COLOUR = OTHER_COLOUR;
 
 /** What a slice says on hover and to a screen reader: "Executor: 300 h a month, 86%", with the folded roles for "Others". */
 function sliceText(s: PieSlice): string {
@@ -192,7 +186,7 @@ const Lead = ({ children, ...rest }: { children: ReactNode; "data-lead"?: string
 // ---------------------------------------------------------------------------
 
 /** The named steps take the first colours of the categorical palette; "N other steps" is the neutral grey. */
-const stripColour = (s: StripSegment, i: number) => (s.members.length ? OTHERS_COLOUR : PURPOSE_PALETTE[i % PURPOSE_PALETTE.length]!);
+const stripColour = (s: StripSegment, i: number) => (s.members.length ? OTHERS_COLOUR : categoricalColour(i));
 
 /** What a segment says on hover: "Review: 38 h a month, 24% of the process", with the grouped steps for "N other steps". */
 function segmentText(s: StripSegment): string {

@@ -198,6 +198,12 @@ export async function loadWorkspaceLiveRevisionIds(workspaceId: string): Promise
   return loadLiveRevisionIds(await getDb(), workspaceId);
 }
 
+/** When a revision was published (the process page's "Last published"); null for a draft or a revision RLS hides. */
+export async function loadRevisionPublishedAt(revisionId: string): Promise<string | null> {
+  const row = await (await getDb()).selectFrom("process_revisions").select(["published_at"]).where("id", "=", revisionId).executeTakeFirst();
+  return row?.published_at ?? null;
+}
+
 /**
  * The workspace's tracked issues, newest first (RLS: everyone in the workspace can read them). A member or viewer gets an
  * opaque `detected_key` where it is a hash of AI text (B1 2b).

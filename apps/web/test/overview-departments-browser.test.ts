@@ -184,7 +184,8 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
     expect(await page.locator("[data-no-tiers]").innerText()).toContain("No tiers and services are set up yet.");
     const links = await page.locator("[data-setup-checklist] a").evaluateAll((as) => as.map((a) => a.getAttribute("href")));
     expect(links.length).toBeGreaterThanOrEqual(3);
-    for (const l of links) expect(l).toMatch(/^\/w\/example\/settings\/(people|clients)/);
+    // Each goes straight to its section of the one Settings page (no detour through a redirect).
+    for (const l of links) expect(l).toMatch(/^\/w\/example\/settings#(tiers-clients|people-roles|roles-heading|people-heading|clients-heading)$/);
     expect(await page.locator("[data-department]").count()).toBe(0);
     expect(await page.evaluate(() => window.workerPosts.length)).toBe(0);
     expect(errors).toEqual([]);
@@ -201,7 +202,7 @@ describe("Overview department cards", { timeout: 180_000 }, () => {
       expect(await card(page, name).locator("[data-kpi]").filter({ hasText: "DLER" }).first().getAttribute("data-tone")).toBe("none");
     }
     expect(await page.locator("[data-whole-business] [data-salaries-missing]").count()).toBe(1);
-    expect(await page.locator("[data-salaries-missing] a").first().getAttribute("href")).toBe("/w/example/settings/people");
+    expect(await page.locator("[data-salaries-missing] a").first().getAttribute("href")).toBe("/w/example/settings#people-roles");
     expect(await kpi(page, ORGANIC, "MRR ÷")).toMatch(/\d/);
     expect(errors).toEqual([]);
     await page.close();

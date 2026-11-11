@@ -38,15 +38,22 @@ export const NO_PADDING: Padding = { top: 0, right: 0, bottom: 0, left: 0 };
 
 /**
  * Where to put the map so `bounds` (in map units) is framed in `panel`: fitted (see `fitZoom`) and centred across when it
- * fits, or, when it is wider than the panel at 70%, pinned to the left so the rest is a scroll (drag) away. It always starts at the top.
+ * fits, or, when it is wider than the panel at 70%, pinned to the left so the rest is a scroll (drag) away. It starts at the top,
+ * unless `middle`: then a map that fits down the panel is centred down it too (the map on the full screen).
  */
-export function fitViewport(bounds: { x: number; y: number; width: number; height: number }, panel: Box, pad: Padding = NO_PADDING, minZoom: number = MIN_FIT_ZOOM): { x: number; y: number; zoom: number } {
+export function fitViewport(
+  bounds: { x: number; y: number; width: number; height: number },
+  panel: Box,
+  pad: Padding = NO_PADDING,
+  minZoom: number = MIN_FIT_ZOOM,
+  middle = false,
+): { x: number; y: number; zoom: number } {
   const room: Box = { width: panel.width - pad.left - pad.right, height: panel.height - pad.top - pad.bottom };
   const zoom = fitZoom(bounds, room, minZoom);
   // Across, a map that fits is centred; down, it hangs from the top, so a tall panel doesn't strand it in the middle.
   return {
     x: bounds.width * zoom <= room.width ? pad.left + (room.width - bounds.width * zoom) / 2 - bounds.x * zoom : pad.left - bounds.x * zoom,
-    y: pad.top - bounds.y * zoom,
+    y: middle && bounds.height * zoom <= room.height ? pad.top + (room.height - bounds.height * zoom) / 2 - bounds.y * zoom : pad.top - bounds.y * zoom,
     zoom,
   };
 }

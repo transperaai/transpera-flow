@@ -123,7 +123,7 @@ export function ForecastMoney({ view, currency, overheadsHref = null, span, cost
             Profit per month
             <Help {...PLAN_HELP.profit} />
           </h3>
-          <CompareChart title="Profit per month" months={[...view.months]} series={[{ name: "Profit", values: view.profit }]} format={fmt} />
+          <CompareChart title="Profit per month" months={[...view.months]} series={[{ name: "Profit", values: view.profit }]} format={fmt} firstIsBaseline={false} />
         </Card>
       ) : null}
 

@@ -26,13 +26,12 @@ describe("the process page", () => {
   it("has no stat cards, projection (horizon) picker or levers", () => {
     for (const gone of ["HeadlineCards", "HorizonPicker", "LeverPanel", 'id="projection"']) expect(page).not.toContain(gone);
   });
-  it("puts Sources last, as the inspector's last tab, which a #sources address opens", () => {
+  it("puts Sources last, the page's last section, which a #sources address scrolls to", () => {
     expect(page.lastIndexOf("<ProcessSources")).toBeGreaterThan(page.lastIndexOf("issuesUi.issuesList"));
     const sources = page.slice(page.indexOf("function ProcessSources"));
     expect(sources).not.toContain("<summary");
-    expect(sources).toContain('id="sources"');
-    expect(page).toContain('if (id === "sources") return "sources";');
-    expect(page).toContain('window.addEventListener("hashchange", fromHash)');
+    expect(sources).toContain('<SectionCard id="sources"');
+    expect(page).toContain('document.getElementById(id)?.scrollIntoView({ block: "start" })');
   });
 });
 

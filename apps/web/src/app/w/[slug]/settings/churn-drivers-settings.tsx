@@ -216,6 +216,7 @@ export function ChurnDriversSettings({
   return (
     <SettingsSection
       id="churn-drivers"
+      band
       title="Churn drivers"
       description="Base churn per service is multiplied by these drivers. Weights are your estimates; the simulation measures the drivers marked Measured. Contribution shows how much of the churn in the latest run each driver explains."
     >

@@ -7,7 +7,9 @@
 import { useMemo, useState } from "react";
 import { SectionCard } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
+import type { DepartmentTimePart, PurposeCategory } from "@transpera-flow/db";
 import { purposeColours } from "@/lib/capacity/purposes";
+import { categoricalColour, HAND_HOLDING, OTHER_COLOUR, PURPOSE_COLOURS, stableOrder } from "@/lib/chart-colours";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DepartmentFigure } from "./department-cards";
@@ -22,12 +24,49 @@ const WHERE_HOW = {
   tells: "What each department's hours are spent on, and how the departments compare.",
 };
 
-export function WhereTimeGoes({ rows, failed, className }: { rows: readonly DepartmentFigure[]; failed: boolean; className?: string }) {
+const OTHER = "Other";
+
+/**
+ * The colour of each process. With seven or fewer, every process has a slot, by name. With more, the seven with the most hours across the
+ * whole run (every department, so no one bar decides) keep a hue and the rest fold into "Other"; the kept ones still take their slots by
+ * name, so a process's colour never depends on how it ranks in a bar. Hand-holding keeps its own slot, as it does by purpose.
+ */
+export function processColours(parts: readonly { name: string; hours: number }[]): Map<string, string> {
+  const hours = new Map<string, number>();
+  for (const p of parts) if (p.name !== HAND_HOLDING && p.name !== OTHER) hours.set(p.name, (hours.get(p.name) ?? 0) + p.hours);
+  const kept = new Set([...hours.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 7).map(([n]) => n));
+  const named = stableOrder(kept);
+  const colours = new Map<string, string>(named.map((n, i) => [n, categoricalColour(i)] as const));
+  for (const n of hours.keys()) if (!kept.has(n)) colours.set(n, OTHER_COLOUR);
+  if (parts.some((p) => p.name === HAND_HOLDING)) colours.set(HAND_HOLDING, PURPOSE_COLOURS[HAND_HOLDING]!);
+  return colours;
+}
+
+/** Fold the parts drawn in the "Other" neutral into one "Other" part, so no two segments share a colour. */
+function fold(parts: readonly DepartmentTimePart[], colours: ReadonlyMap<string, string>): DepartmentTimePart[] {
+  const kept = parts.filter((p) => (colours.get(p.name) ?? OTHER_COLOUR) !== OTHER_COLOUR);
+  const rest = parts.filter((p) => !kept.includes(p));
+  if (!rest.length) return [...kept];
+  const other = { name: OTHER, hours: rest.reduce((a, p) => a + p.hours, 0), share: rest.reduce((a, p) => a + p.share, 0) };
+  return [...kept, other].sort((a, b) => b.hours - a.hours);
+}
+
+export function WhereTimeGoes({ rows, categories, failed, className }: { rows: readonly DepartmentFigure[]; /** The workspace's purposes, for their colours. */ categories?: readonly PurposeCategory[]; failed: boolean; className?: string }) {
   const [by, setBy] = useState<By>("process");
   const ready = rows.length > 0 && rows.every((r) => r.run);
-  const bars = useMemo(() => (ready ? rows.map((r) => ({ id: r.id, name: r.name, ...r.run!.time[by] })) : []), [ready, rows, by]);
-  const colours = useMemo(() => purposeColours(bars.map((b) => b.parts.map((p) => ({ key: p.name, name: p.name, value: p.hours })))), [bars]);
-  const answer = bars
+  const raw = useMemo(() => (ready ? rows.map((r) => ({ id: r.id, name: r.name, ...r.run!.time[by] })) : []), [ready, rows, by]);
+  const { bars, colours } = useMemo(() => {
+    const all = raw.flatMap((b) => b.parts);
+    const picked =
+      by === "process" ? processColours(all) : purposeColours(raw.map((b) => b.parts.map((p) => ({ key: p.name, name: p.name, value: p.hours }))), categories);
+    const folded = raw.map((b) => ({ ...b, parts: fold(b.parts, picked) }));
+    // The legend: the coloured names in their fixed order, then "Other" once.
+    const used = new Set(folded.flatMap((b) => b.parts.map((p) => p.name)));
+    const legend = new Map([...picked].filter(([n, c]) => c !== OTHER_COLOUR && used.has(n)));
+    if (used.has(OTHER)) legend.set(OTHER, OTHER_COLOUR);
+    return { bars: folded, colours: legend };
+  }, [raw, by, categories]);
+  const answer = raw
     .filter((b) => b.parts.length)
     .map((b) => `${b.name} spends most on ${b.parts[0]!.name} (${formatPercent(b.parts[0]!.share)})`)
     .join("; ");

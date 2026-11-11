@@ -13,13 +13,13 @@ import { Help } from "@/components/help";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/native-select";
+import { DIVERGING } from "@/lib/chart-colours";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import { SANDBOX_HELP } from "@/lib/forecast/help";
 import { sharedSimPool } from "@/lib/forecast/sim-pool";
 import { Cancel, poolRunner, runTornado, type RunContext } from "@/lib/sandbox/analysis-run";
 import { TORNADO_MEASURES, TORNADO_MEASURE_INFO, tornadoValue, type TornadoMeasureId } from "@/lib/sandbox/measures";
 import { tornadoVariants, type TornadoBar, type TornadoVariant } from "@/lib/sandbox/tornado";
-import { SERIES_STYLES } from "./compare-chart";
 
 const SECTION_TITLE = "font-heading text-lg leading-snug font-semibold tracking-tight";
 
@@ -242,12 +242,13 @@ export function TornadoBars({ bars, fmtDelta, measure }: { bars: TornadoBar[]; f
   const ROW = 28;
   const H = bars.length * ROW + 24;
   const x = (d: number) => (d / max) * half;
-  const low = SERIES_STYLES[0].color;
-  const high = SERIES_STYLES[1].color;
+  // The lever moved down or up: two sides of the scenario's value, so the diverging pair (lib/chart-colours.ts).
+  const low = DIVERGING.neg;
+  const high = DIVERGING.pos;
   return (
     <figure className="m-0">
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Bars: how far each lever moves ${measure}, moved down and up`} className="h-auto w-full" data-tornado-chart>
-        <line x1={mid} x2={mid} y1={4} y2={H - 16} stroke="var(--border)" strokeWidth={1} />
+        <line x1={mid} x2={mid} y1={4} y2={H - 16} stroke="var(--line-2)" strokeWidth={1} />
         {bars.map((b, i) => {
           const y = 8 + i * ROW;
           const opacity = b.negligible ? 0.35 : 1;

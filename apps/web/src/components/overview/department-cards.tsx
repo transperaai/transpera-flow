@@ -201,12 +201,12 @@ export function DepartmentAlerts({ failure }: { failure: DepartmentFigures["fail
 
 export function StartChecklist({ setup, base }: { setup: CapacitySetup; base: string }) {
   const items = [
-    { label: "Add roles", href: `${base}/settings/people#roles-heading`, done: setup.roles.length > 0 },
-    { label: "Add people", href: `${base}/settings/people#people-heading`, done: setup.people.length > 0 },
-    { label: "Add tiers and services", href: `${base}/settings/clients`, done: setup.services.some((s) => s.active && s.tier_id) },
+    { label: "Add roles", href: `${base}/settings#roles-heading`, done: setup.roles.length > 0 },
+    { label: "Add people", href: `${base}/settings#people-heading`, done: setup.people.length > 0 },
+    { label: "Add tiers and services", href: `${base}/settings#tiers-clients`, done: setup.services.some((s) => s.active && s.tier_id) },
     {
       label: "Enter how many clients are in each tier",
-      href: `${base}/settings/clients#clients-heading`,
+      href: `${base}/settings#clients-heading`,
       done: setup.tiers.some((t) => setup.services.some((s) => s.tier_id === t.id)) && setup.clients.length + setup.portfolio.length > 0,
     },
   ];
@@ -262,7 +262,7 @@ function SalariesMissing({ base }: { base: string }) {
   return (
     <span data-salaries-missing>
       Salaries not entered.{" "}
-      <Link href={`${base}/settings/people`} className="whitespace-nowrap font-medium text-accent hover:underline">
+      <Link href={`${base}/settings#people-roles`} className="whitespace-nowrap font-medium text-accent hover:underline">
         Enter them →
       </Link>
     </span>
@@ -279,7 +279,7 @@ export function WholeBusinessHero({ setup, base, extra }: { setup: CapacitySetup
   const money = (v: number) => formatWholeCurrency(v, setup.currency);
   const status = dlerStatus(w.dler);
   return (
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(13rem,100%),1fr))] gap-4" data-whole-business>
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]" data-whole-business>
       <HeroKpi label="Clients" value={f0(w.unique)} sub={`${w.byDepartment.map((d) => `${f0(d.clients)} ${d.name}`).join(" + ")} − ${f0(w.both)} taking both`} />
       <HeroKpi label={`MRR ÷ ${w.employees} people`} value={w.revenuePerEmployee === null ? "—" : money(w.revenuePerEmployee)} sub={`a month, from ${money(mrr)} MRR`} />
       <HeroKpi
@@ -318,7 +318,7 @@ function Tile({ label, value, sub, tone = null, className }: { label: string; va
   return (
     <div className={cn("flex min-w-0 flex-col gap-0.5 border-l-2 py-0.5 pl-3", tone ? TILE_EDGE[tone] : "border-l-line", className)} data-kpi data-tone={tone ?? "none"}>
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="font-mono text-xl font-semibold tabular-nums">{value}</div>
+      <div className="text-lg font-semibold tabular-nums">{value}</div>
       {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
     </div>
   );

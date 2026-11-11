@@ -39,6 +39,7 @@ export function WhoCanSignIn({ slug, view, myEmail, draft }: { slug: string; vie
     <div role="region" aria-labelledby="sign-in-heading">
       <SectionCard
         id="sign-in"
+        level={3}
         title={
           <span className="flex items-center">
             Who can sign in

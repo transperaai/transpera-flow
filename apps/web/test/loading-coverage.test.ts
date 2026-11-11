@@ -11,9 +11,6 @@ const ROOT = join(WEB, "src/app/w/[slug]");
 
 /** Folders that show their parent's `loading.tsx` (the nearest one wins), and why. */
 const INHERITS: Record<string, string> = {
-  "settings/access": "inherit settings/loading.tsx",
-  "settings/clients": "inherit settings/loading.tsx",
-  "settings/people": "inherit settings/loading.tsx",
   people: "only redirects to capacity; inherit w/[slug]/loading.tsx",
 };
 
@@ -88,4 +85,39 @@ describe("the skeletons load nothing either", () => {
       expect(src).not.toMatch(/\bawait\b|\basync\b/);
     });
   }
+});
+
+describe("the Settings skeleton is the one scrolling page", () => {
+  // Settings has no sub-pages: settings/loading.tsx draws the sub-nav column, then a few section bands (a heading over a rule) with a card each.
+  const src = readFileSync(join(WEB, "src/components/shell/skeletons.tsx"), "utf8");
+  const fn = src.slice(src.indexOf("export function SettingsSkeleton"), src.indexOf("export function", src.indexOf("export function SettingsSkeleton") + 1));
+  it("has the sub-nav and the bands", () => {
+    expect(fn).toContain("lg:grid-cols-[14rem_minmax(0,1fr)]");
+    expect(fn).toContain("data-skeleton-band");
+    expect(fn).toMatch(/border-t\]?:?.*pt-8|pt-8.*border-t/);
+  });
+  it("is the loading state of settings/ and nothing below it has its own page", () => {
+    expect(readFileSync(join(ROOT, "settings/loading.tsx"), "utf8")).toContain("<SettingsSkeleton />");
+    expect(folders.filter((f) => f.startsWith("settings/"))).toEqual([]);
+  });
+});
+
+describe("the Sandbox skeleton is the one scrolling page", () => {
+  // The Sandbox is one page that scrolls: the toolbar, the company map's big block, the levers band with its five columns, then the verdict line, the
+  // strip of its figures and the charts' grid. No viewport-height frame and no panes of its own.
+  const src = readFileSync(join(WEB, "src/components/sandbox/sandbox-skeleton.tsx"), "utf8");
+  it("has the map, the levers band and the results, in that order, with no workbench frame", () => {
+    expect(src).not.toMatch(/h-svh|overflow-hidden flex-1|lg:overflow|lg:grid-cols-\[20rem/);
+    expect(src).toContain("pageBodyClass()");
+    expect(src).toContain("h-[82svh] min-h-[34rem]");
+    expect(src).toMatch(/Array\.from\(\{ length: 5 \}/);
+    const at = (s: string) => src.indexOf(s);
+    expect(at("data-skeleton-map")).toBeGreaterThan(-1);
+    expect(at("data-skeleton-map")).toBeLessThan(at("data-skeleton-levers"));
+    expect(at("data-skeleton-levers")).toBeLessThan(at("h-[4.5rem]"));
+    expect(at("h-[4.5rem]")).toBeLessThan(at("minmax(min(20rem,100%),1fr)"));
+  });
+  it("is the loading state of sandbox/", () => {
+    expect(readFileSync(join(ROOT, "sandbox/loading.tsx"), "utf8")).toContain("<SandboxSkeleton />");
+  });
 });

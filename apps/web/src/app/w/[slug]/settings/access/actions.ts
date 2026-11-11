@@ -15,7 +15,7 @@ type DbError = { code?: string; message: string };
 
 const text = (form: FormData, key: string) => String(form.get(key) ?? "");
 
-const back = (slug: string, params: Record<string, string>): never => redirect(`/w/${encodeURIComponent(slug)}/settings/access?${new URLSearchParams(params)}`);
+const back = (slug: string, params: Record<string, string>): never => redirect(`/w/${encodeURIComponent(slug)}/settings?${new URLSearchParams(params)}#access`);
 
 /** Updates and deletes that RLS filters out match no rows instead of failing; report those too. */
 async function outcome(run: () => Promise<unknown[]>): Promise<DbError | null> {

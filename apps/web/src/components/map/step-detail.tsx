@@ -58,7 +58,6 @@ export function StepDetail({
   sources,
   baseValues,
   onClose,
-  docked = false,
 }: {
   step: StepRow;
   who: string | null;
@@ -70,8 +69,6 @@ export function StepDetail({
   /** The step's base values for capacity, read only (P9): shown under the numbers when given. */
   baseValues?: ReactNode;
   onClose: () => void;
-  /** In a page's own panel (the process page's inspector) rather than floating over the map's corner: no float, border or shadow. */
-  docked?: boolean;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   // Where the page loads source links, the Sources block is the links (cited sources are linked automatically) with "+ Link".
@@ -80,8 +77,8 @@ export function StepDetail({
   useEffect(() => heading.current?.focus(), [step.id]);
   return (
     <aside
-      role={docked ? "region" : "dialog"}
-      aria-modal={docked ? undefined : "false"}
+      role="dialog"
+      aria-modal="false"
       aria-label={`${step.name}, detail`}
       data-step-detail={step.id}
       onKeyDown={(e) => {
@@ -90,14 +87,10 @@ export function StepDetail({
           onClose();
         }
       }}
-      className={
-        docked
-          ? "flex min-w-0 flex-col"
-          : "nodrag nopan absolute top-2.5 right-2.5 z-20 max-h-[calc(100%-1.25rem)] w-[min(18rem,calc(100%-1.25rem))] overflow-y-auto rounded-token border border-line bg-panel p-3 shadow-md"
-      }
+      className="nodrag nopan absolute top-2.5 right-2.5 z-20 max-h-[calc(100%-1.25rem)] w-[min(18rem,calc(100%-1.25rem))] overflow-y-auto rounded-token border border-line bg-panel p-3 shadow-md"
     >
       <div className="flex items-start justify-between gap-2">
-        <h3 ref={heading} tabIndex={-1} className={`${docked ? "text-base" : "text-sm"} leading-tight font-semibold outline-none`}>
+        <h3 ref={heading} tabIndex={-1} className="text-sm leading-tight font-semibold outline-none">
           {step.name}
         </h3>
         <button type="button" onClick={onClose} aria-label="Close step detail" className="rounded-sm p-0.5 text-fg-2 hover:bg-panel-2 hover:text-fg">

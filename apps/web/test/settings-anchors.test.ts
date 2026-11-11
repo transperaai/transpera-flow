@@ -1,10 +1,10 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Links into a section of Settings (`/settings#roles-heading`) land on the section's heading, whose id is `<section id>-heading`
-// (SettingsSection). A link to `#workspace` or `#simulation` (the section id without "-heading") pointed at nothing, so the page
-// opened at the top instead of the section: the Sandbox's "Set them in Settings, under Workspace".
+// Links into Settings land on something that exists. Settings is one scrolling page of eight sections, each a heading band
+// (SettingsBand, or a SettingsSection with `band`) whose id is the anchor (`/settings#people-roles`); every card inside has a heading
+// `<card id>-heading` (`/settings#roles-heading`). A link to an id that isn't there opened the page at the top instead of the section.
 
 const SRC = new URL("../src/", import.meta.url).pathname;
 const SETTINGS = join(SRC, "app/w/[slug]/settings");
@@ -17,43 +17,64 @@ function files(dir: string): string[] {
 }
 
 describe("links into Settings", () => {
-  // Its sections, and the Purposes section it draws from components (a SectionCard).
-  const sources = [...files(SETTINGS), join(SRC, "components/purposes/purposes-settings.tsx")];
-  const sections = new Set(sources.flatMap((f) => [...readFileSync(f, "utf8").matchAll(/<(?:SettingsSection|SectionCard)\s+(?:\n\s*)?id="([^"]+)"/g)].map((m) => `${m[1]}-heading`)));
+  // Its sections: the Settings folder, the Purposes band, the Tiers & clients and People & roles parts (components/setup).
+  const sources = [...files(SETTINGS), join(SRC, "components/purposes/purposes-settings.tsx"), ...files(join(SRC, "components/setup"))];
+  const text = sources.map((f) => readFileSync(f, "utf8")).join("\n");
+  const cards = [...text.matchAll(/<(?:SettingsSection|SectionCard|SettingsBand)\s+(?:\n\s*)?id=(?:"([^"]+)"|\{`([^`$]+)`)/g)].map((m) => m[1] ?? m[2]!);
+  const bands = new Set([
+    ...[...text.matchAll(/<SettingsBand\s+(?:\n\s*)?id="([^"]+)"/g)].map((m) => m[1]!),
+    ...[...text.matchAll(/<SettingsSection\s+(?:\n\s*)?id="([^"]+)"\s+band\b/g)].map((m) => m[1]!),
+  ]);
+  const targets = new Set([...bands, ...cards.map((id) => `${id}-heading`)]);
 
-  it("finds the sections", () => {
-    expect(sections).toContain("workspace-heading");
-    expect(sections).toContain("simulation-heading");
-    expect(sections).toContain("purposes-heading");
+  it("finds the eight bands and the cards' headings", () => {
+    expect([...bands].sort()).toEqual(["access", "churn-drivers", "demand", "people-roles", "purposes", "simulation", "tiers-clients", "workspace"]);
+    for (const h of ["workspace-heading", "simulation-heading", "purposes-heading", "people-heading", "roles-heading", "clients-heading"]) expect(targets).toContain(h);
   });
 
-  it("point at a section heading that exists", () => {
+  it("the sub-nav lists every band, in the page's order", async () => {
+    const { settingsNavEntries } = await import("@/components/settings/settings-nav");
+    const ids = settingsNavEntries("s", true).map((e) => e.href.split("#")[1]);
+    expect(ids).toEqual(["workspace", "simulation", "purposes", "churn-drivers", "demand", "tiers-clients", "people-roles", "access"]);
+    expect(settingsNavEntries("s", false).map((e) => e.label)).not.toContain("Access");
+    for (const e of settingsNavEntries("s", true)) expect(e.href).toMatch(/^\/w\/s\/settings#[a-z-]+$/);
+    // The page renders the bands in that order.
+    const page = readFileSync(join(SETTINGS, "page.tsx"), "utf8");
+    const order = ["<WorkspaceDetails", "<SimulationSettings", "<PurposesSettings", "<ChurnDriversSettings", "<DemandSettings", 'id="tiers-clients"', 'id="people-roles"', "<AccessSection"].map((m) => page.indexOf(m));
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it("point at a band or a heading that exists", () => {
     const links = files(SRC).flatMap((f) => [...readFileSync(f, "utf8").matchAll(/(?:\/settings|[pP]eopleHref\})#([a-z0-9-]+)/g)].map((m) => ({ file: f.slice(SRC.length), anchor: m[1]! })));
-    expect(links.length).toBeGreaterThanOrEqual(4);
-    for (const l of links) expect(sections.has(l.anchor), `${l.file}: #${l.anchor}`).toBe(true);
+    expect(links.length).toBeGreaterThanOrEqual(10);
+    for (const l of links) expect(targets.has(l.anchor), `${l.file}: #${l.anchor}`).toBe(true);
+  });
+
+  it("no link goes to the old Tiers & clients, People & roles or Access pages (they only redirect now)", () => {
+    const old = files(SRC).flatMap((f) => [...readFileSync(f, "utf8").matchAll(/\/settings\/(clients|people|access)\b(?!-)/g)].map((m) => `${f.slice(SRC.length)}: ${m[0]}`));
+    expect(old).toEqual([]);
   });
 });
 
-// The same for Settings' Tiers & clients and People & roles pages (capacity build P1): Tiers & clients and People & roles, whose sections come from components/setup and
-// the Settings parts they reuse. A link to `/settings/people#roles-heading` must land on a heading of that page.
-describe("links into Tiers & clients and People & roles", () => {
-  const PAGES: Record<string, string[]> = {
-    clients: ["components/setup/tiers-clients.tsx", "app/w/[slug]/settings/services-settings.tsx", "app/w/[slug]/settings/client-groups-settings.tsx"],
-    people: ["components/setup/people-roles.tsx"],
-  };
-  const sectionsOf = (page: string) =>
-    new Set(PAGES[page]!.flatMap((f) => [...readFileSync(join(SRC, f), "utf8").matchAll(/<SettingsSection\s+(?:\n\s*)?id=(?:"([^"]+)"|\{`([^`$]+)`)/g)].map((m) => `${m[1] ?? m[2]}-heading`)));
-
-  it("finds the sections", () => {
-    expect(sectionsOf("people")).toContain("people-heading");
-    expect(sectionsOf("people")).toContain("roles-heading");
-    expect(sectionsOf("clients")).toContain("clients-heading");
+// The old pages' addresses (bookmarks, Set up's even older ones) redirect to their sections. A redirect's Location keeps the
+// #fragment, so the browser lands on the band; the query string (Access's ?error= after a refused form) carries over.
+describe("the old Settings pages redirect to their sections", () => {
+  it("next.config.ts sends each to its anchor", async () => {
+    const config = (await import("../next.config")).default as { redirects: () => Promise<{ source: string; destination: string }[]> };
+    const to = new Map((await config.redirects()).map((r) => [r.source, r.destination]));
+    expect(to.get("/w/:slug/settings/clients")).toBe("/w/:slug/settings#tiers-clients");
+    expect(to.get("/w/:slug/settings/people")).toBe("/w/:slug/settings#people-roles");
+    expect(to.get("/w/:slug/settings/access")).toBe("/w/:slug/settings#access");
+    expect(to.get("/w/:slug/setup/clients")).toBe("/w/:slug/settings#tiers-clients");
+    expect(to.get("/w/:slug/setup/people")).toBe("/w/:slug/settings#people-roles");
+    expect(to.get("/w/:slug/settings/purposes")).toBe("/w/:slug/settings#purposes");
+    // Their pages are gone, so nothing renders at the old address.
+    for (const page of ["clients", "people", "access"]) expect(existsSync(join(SETTINGS, page, "page.tsx")), page).toBe(false);
   });
 
-  it("point at a section heading that exists", () => {
-    const links = files(SRC).flatMap((f) => [...readFileSync(f, "utf8").matchAll(/\/settings\/(clients|people)#([a-z0-9-]+)/g)].map((m) => ({ file: f.slice(SRC.length), page: m[1]!, anchor: m[2]! })));
-    expect(links.length).toBeGreaterThan(3);
-    for (const l of links) expect(sectionsOf(l.page).has(l.anchor), `${l.file}: ${l.page}#${l.anchor}`).toBe(true);
+  it("Access's actions send the person back to the section, with the message in the query", () => {
+    expect(readFileSync(join(SETTINGS, "access/actions.ts"), "utf8")).toContain("redirect(`/w/${encodeURIComponent(slug)}/settings?${new URLSearchParams(params)}#access`)");
   });
 });
 

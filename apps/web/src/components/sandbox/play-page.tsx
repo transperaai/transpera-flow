@@ -163,14 +163,20 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
     const qs = next.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
+  // What the run can't honour, folded to one line: open it for the list.
   const noteList = mapNotes.length ? (
-    <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground" data-company-run-notes>
-      {mapNotes.map((n, i) => (
-        <li key={`${n.kind}:${i}`} data-company-run-note={n.kind}>
-          {n.message}
-        </li>
-      ))}
-    </ul>
+    <details className="text-xs text-muted-foreground" data-company-run-notes>
+      <summary className="w-fit cursor-pointer hover:text-foreground">
+        {mapNotes.length} {mapNotes.length === 1 ? "note" : "notes"} on this run
+      </summary>
+      <ul className="mt-1 flex flex-col gap-0.5 pl-4">
+        {mapNotes.map((n, i) => (
+          <li key={`${n.kind}:${i}`} data-company-run-note={n.kind}>
+            {n.message}
+          </li>
+        ))}
+      </ul>
+    </details>
   ) : null;
   // In the toolbar: which version of the company map runs (sized to its content). What that means is behind its (i) and in the map section's line.
   const companySelect =
@@ -187,23 +193,12 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
         <Help {...SANDBOX_HELP.companyMap} />
       </label>
     ) : null;
-  // In the map section: whether the map on screen is the live one, and what it can't honour.
-  const mapHeader =
-    companyRevisions.length > 1 || noteList ? (
-      <div className="flex min-w-0 flex-col gap-1">
-        {companyRevisions.length > 1 && (
-          <p className="max-w-prose text-xs text-muted-foreground" data-company-version-note>
-            {mapKey === null
-              ? "The processes on the company map are what is simulated, and its hand-off lines say where won clients carry on."
-              : "This version's processes and hand-off lines are run against today's path (the live company map)."}
-          </p>
-        )}
-        {noteList}
-      </div>
-    ) : null;
+  // In the map section: only what the run can't honour (what the version picker means is behind its (i)).
+  const mapHeader = noteList;
   const renderMap = (runs: PlayRuns, api: PlayMapApi) =>
     map.bundle.steps.length ? (
-      <div className="overflow-hidden rounded-xl border border-line" data-company-map>
+      // The star of the page: full width, most of the window tall, the canvas filling it (zoom, fit, full screen and playback on the map).
+      <div className="flex h-[82svh] min-h-[34rem] min-w-0 flex-col overflow-hidden rounded-xl border border-line" data-company-map>
         <ProcessCanvas
           // Opening a card changes the map's size: frame it again, with playback going on.
           refitOn={[...expanded].sort().join("|")}
@@ -213,13 +208,12 @@ export function PlayPage({ live, parts, company, setup, solutions, solutionLinks
           expanded={expanded}
           onExpandedChange={setExpanded}
           playbackRollUp
-          playbackAbove
           showLanes={false}
           departmentLanes={departmentLanes}
           cardTags={cardTags}
           cardBadges={api.badges}
           handoffs
-          height="auto"
+          height="fill"
           stepDetail={false}
           onStepClick={(stepId) => {
             const process = map.processOfStep.get(stepId);

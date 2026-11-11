@@ -40,9 +40,6 @@ export interface NavCounts {
 
 const matches = (rest: string, path: string) => rest === path || rest.startsWith(`${path}/`);
 
-/** The pages under Settings that its item stands for. */
-const SETTINGS_SUB_PAGES = ["/settings/clients", "/settings/people", "/settings/access"];
-
 /**
  * The shared shape: `base` is where the workspace's pages live (`/w/<slug>`), `rest` the path under it.
  * The workspace root is the Overview, the landing page (issue #100); a process's map (`/p/<id>`) belongs to Processes.
@@ -58,8 +55,8 @@ function groups(base: string, rest: string, counts: NavCounts, extra: { settings
     // Who gets too busy, and when (issue #35).
     item({ key: "sandbox", label: "Sandbox", path: "/sandbox", icon: "sandbox" }),
   ];
-  // Settings holds its sub pages (Tiers & clients, People & roles, Access).
-  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" || SETTINGS_SUB_PAGES.some((p) => matches(rest, p)) }));
+  // Settings is one page of sections (Tiers & clients, People & roles and Access among them); its old sub-page addresses redirect into it.
+  if (extra.settings) company.push(item({ key: "settings", label: "Settings", path: "/settings", icon: "settings", active: rest === "/settings" }));
   return [
     {
       key: "main",

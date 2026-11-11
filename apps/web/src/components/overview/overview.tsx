@@ -379,7 +379,7 @@ export function Overview({
       ? [
           {
             key: "where-time-goes",
-            node: <WhereTimeGoes rows={departmentFigures.rows} failed={!!departmentFigures.failure} className="min-w-0 flex-1" />,
+            node: <WhereTimeGoes rows={departmentFigures.rows} categories={purposeCategories} failed={!!departmentFigures.failure} className="min-w-0 flex-1" />,
           },
         ]
       : []),
@@ -431,6 +431,29 @@ export function Overview({
     },
   ];
 
+  const mapToolbar = (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1" data-map-controls title={horizonResult ? `Playing ${span} of work, with planned hires and leave.` : error ? "Nothing to play until the company can be simulated." : `Simulating ${span}…`}>
+      <div className="flex items-center gap-1">
+        <h2 id="company-map-heading" className="text-sm font-semibold">
+          Company map
+        </h2>
+        <PanelHow
+          works="Every process in the business, in a lane for its department. Press play to watch the work move over the horizon picked, with planned hires and leave; expand a process in place, or click it to open its page."
+          tells="How work moves between the processes, and where it piles up."
+        />
+      </div>
+      <HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} options={OVERVIEW_HORIZONS} />
+      {forecastHref && (
+        <Link href={forecastHref} data-sandbox-link className={buttonVariants({ variant: "link", size: "sm" })}>
+          Simulate further in the Sandbox
+        </Link>
+      )}
+      {/* What is playing: read out to a screen reader and shown on hover, not a second line in the bar. */}
+      <span className="sr-only" data-horizon-note>
+        {horizonResult ? `Playing ${span} of work, with planned hires and leave.` : error ? "Nothing to play until the company can be simulated." : `Simulating ${span}…`}
+      </span>
+    </div>
+  );
   return (
     <div>
       <ShellHeader title="Overview" />
@@ -518,12 +541,12 @@ export function Overview({
                         overThreshold !== null ? (
                           <span data-over-threshold>
                             {overThreshold}
-                            <span className="text-xl text-muted-foreground"> of {departmentFigures.people!.length}</span>
+                            <span className="text-sm font-medium text-muted-foreground"> of {departmentFigures.people!.length}</span>
                           </span>
                         ) : departmentFigures.failure ? (
                           "—"
                         ) : (
-                          <Skeleton className="h-9 w-16" aria-busy="true" aria-label="Who is over their utilisation threshold is being worked out" />
+                          <Skeleton className="h-7 w-16" aria-busy="true" aria-label="Who is over their utilisation threshold is being worked out" />
                         )
                       }
                       sub="people, in a simulation of today's clients"
@@ -553,35 +576,14 @@ export function Overview({
             <StartChecklist setup={capacity.setup} base={capacity.base} />
           ))}
 
-        {/* The company map and, beside it, what needs attention. */}
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+        {/* The company map, the full width of the page; what needs attention sits under it. */}
           <section
             id="company-map"
             data-section="company-map"
             data-company-map
             aria-labelledby="company-map-heading"
-            className="flex h-[60svh] min-h-[32rem] min-w-0 scroll-mt-16 flex-col overflow-hidden rounded-xl border border-line bg-card xl:col-span-8 [&_[data-process-map]]:rounded-none [&_[data-process-map]]:border-0"
+            className="flex h-[78svh] min-h-[32rem] min-w-0 scroll-mt-16 flex-col overflow-hidden rounded-xl border border-line bg-card [&_[data-process-map]]:rounded-none [&_[data-process-map]]:border-0"
           >
-            <div className="flex flex-none flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-2.5" data-map-controls>
-              <div className="flex items-center gap-1">
-                <h2 id="company-map-heading" className="text-base font-semibold">
-                  Company map
-                </h2>
-                <PanelHow
-                  works="Every process in the business, in a lane for its department. Press play to watch the work move over the horizon picked, with planned hires and leave; expand a process in place, or click it to open its page."
-                  tells="How work moves between the processes, and where it piles up."
-                />
-              </div>
-              <HorizonPicker weeks={weeks} onChange={pickHorizon} help={false} options={OVERVIEW_HORIZONS} />
-              {forecastHref && (
-                <Link href={forecastHref} data-sandbox-link className={buttonVariants({ variant: "link", size: "sm" })}>
-                  Simulate further in the Sandbox
-                </Link>
-              )}
-              <p className="ml-auto text-xs text-muted-foreground" data-horizon-note>
-                {horizonResult ? `Playing ${span} of work, with planned hires and leave.` : error ? "Nothing to play until the company can be simulated." : `Simulating ${span}…`}
-              </p>
-            </div>
             {viewingMapVersion !== null && (
               <div data-viewing-map-version className="flex flex-none flex-wrap items-center gap-2 border-b border-line px-4 py-2">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-warn bg-warn-soft px-2.5 py-0.5 text-xs font-medium">Viewing version {viewingMapVersion} of the company map · read only</span>
@@ -601,7 +603,7 @@ export function Overview({
                   expanded={expanded}
                   onExpandedChange={setExpanded}
                   playbackRollUp
-                  playbackAbove
+                  toolbarStart={mapToolbar}
                   showLanes={false}
                   departmentLanes={departmentLanes}
                   cardTags={cardTags}
@@ -619,8 +621,9 @@ export function Overview({
             </div>
           </section>
 
-          <div className="flex min-w-0 flex-col gap-6 xl:col-span-4" data-rail>
-            <div data-chart="issues" className="min-w-0">
+        {/* Under the map, cards sized by what they hold: open issues beside the busiest people, team load the full width, where the time goes beside what it achieves, then the time split the full width. */}
+        <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-2" data-cards data-rail>
+            <div data-chart="issues" className={cn("flex min-w-0 flex-col [&>*]:flex-1", !peopleReady && "lg:col-span-2")}>
               <SectionCard
                 id="open-issues"
                 section="issues"
@@ -642,16 +645,12 @@ export function Overview({
               </SectionCard>
             </div>
             {peopleReady && (
-              <div data-chart="busiest" className="min-w-0">
+              <div data-chart="busiest" className="flex min-w-0 flex-col [&>*]:flex-1">
                 <BusiestPeople people={departmentFigures.people} failed={!!departmentFigures.failure} capacityHref={`${capacity!.base}/capacity`} />
               </div>
             )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2" data-charts>
-          {charts.map((c, i) => (
-            <div key={c.key} data-chart={c.key} className={cn("flex min-w-0 flex-col", charts.length % 2 === 1 && i === charts.length - 1 && "xl:col-span-2")}>
+          {charts.map((c) => (
+            <div key={c.key} data-chart={c.key} className={cn("@container flex min-w-0 flex-col", spanFor(c.key, peopleReady))}>
               {c.node}
             </div>
           ))}
@@ -661,4 +660,15 @@ export function Overview({
       </div>
     </div>
   );
+}
+
+/**
+ * How wide each card under the map is, from what it holds (two columns from `lg`): the month-by-month team load and the per-process time split
+ * are wide tables, so they take the full width; open issues and the busiest people, and where the time goes and what it achieves, sit in pairs.
+ * A pair whose partner isn't shown (no capacity set up) takes the full width, so no row ends in a hole.
+ */
+function spanFor(key: string, peopleReady: boolean): string | false {
+  if (key === "team-load" || key === "time-split") return "lg:col-span-2";
+  if (key === "time-achieves" && !peopleReady) return "lg:col-span-2";
+  return false;
 }

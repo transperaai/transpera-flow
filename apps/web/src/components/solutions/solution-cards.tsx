@@ -69,25 +69,28 @@ export function SolutionCards({
       </EmptyState>
     );
   }
+  // Two a row only where the cards themselves have the room (a container query): one a row in the process page's 380px side panel.
   return (
-    <ul className="grid gap-3 md:grid-cols-2" aria-label="Solutions" data-testid="solution-cards">
-      {data.solutions.map((s) => (
-        <li key={s.id} className="min-w-0">
-          <SolutionCard
-            solution={s}
-            links={linksOf(data, s.id)}
-            issueById={issueById}
-            processName={processName.get(s.process_id) ?? "a process"}
-            base={base}
-            demo={demo}
-            canEdit={canEdit}
-            viewerId={viewerId}
-            memberNames={memberNames}
-            from={from}
-          />
-        </li>
-      ))}
-    </ul>
+    <div className="@container">
+      <ul className="grid gap-3 @2xl:grid-cols-2" aria-label="Solutions" data-testid="solution-cards">
+        {data.solutions.map((s) => (
+          <li key={s.id} className="min-w-0">
+            <SolutionCard
+              solution={s}
+              links={linksOf(data, s.id)}
+              issueById={issueById}
+              processName={processName.get(s.process_id) ?? "a process"}
+              base={base}
+              demo={demo}
+              canEdit={canEdit}
+              viewerId={viewerId}
+              memberNames={memberNames}
+              from={from}
+            />
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -174,8 +177,9 @@ function SolutionCard({
           <Help {...SOLUTIONS_LIST_HELP.open} />
         </span>
         {canEdit && (
-          <span className={`flex items-center ${EDIT_ONLY}`} data-edit-entry>
-            <Button asChild variant="outline">
+          <span className={`flex min-w-0 items-center gap-1 ${EDIT_ONLY}`} data-edit-entry>
+            {/* A long process name wraps inside the button rather than running off the card. */}
+            <Button asChild variant="outline" className="h-auto min-h-9 min-w-0 py-1.5 text-left whitespace-normal">
               <Link href={solutionEditorHref(base, s.process_id, { from })}>✎ New solution on {processName}</Link>
             </Button>
             <Help {...newOnProcessHelp(processName)} />

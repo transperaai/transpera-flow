@@ -55,10 +55,11 @@ describe("workspaceNav: the active item", () => {
     expect(active(nav("/w/s/processes"))).toEqual(["processes"]);
   });
   it("is Overview on its own page", () => expect(active(nav("/w/s/overview"))).toEqual(["overview"]));
-  it("is Settings on /settings and its Tiers & clients and People & roles pages", () => {
-    for (const path of ["/w/s/settings", "/w/s/settings/clients", "/w/s/settings/people"]) expect(active(nav(path)), path).toEqual(["settings"]);
+  // Settings is one scrolling page: Tiers & clients, People & roles and Access are its sections (#tiers-clients, …), and their old
+  // addresses redirect to it (next.config.ts), so the pathname the sidebar sees is /settings.
+  it("is Settings on /settings, whose sections include Tiers & clients, People & roles and Access", () => {
+    expect(active(nav("/w/s/settings"))).toEqual(["settings"]);
   });
-  it("is Settings on /settings/access", () => expect(active(nav("/w/s/settings/access"))).toEqual(["settings"]));
   it("is the matching item on each of the other pages", () => {
     for (const [path, key] of [
       ["/w/s/issues", "issues"],

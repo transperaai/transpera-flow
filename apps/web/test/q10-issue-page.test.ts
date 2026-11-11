@@ -111,13 +111,15 @@ describe("the Issue page as cards", () => {
     expect(await page.locator("nav[aria-label=Breadcrumb]").innerText()).toMatch(/^Issues\s*\/\s*#6$/);
     expect(await header.locator("h1").innerText()).toMatch(/^#6\s+Only Karl can vet link domains$/);
     expect(await header.locator("[data-status-menu]").count()).toBe(1);
-    expect(await header.locator("[data-meta-line]").innerText()).toMatch(/^.+\s*·\s*Last change \d+ \w+/);
+    // The process and the dates sit in the details strip, not repeated in a meta line.
+    expect(await header.locator("[data-meta-line]").count()).toBe(0);
     for (const name of ["Edit", "Resolve"]) expect(await header.getByRole("button", { name, exact: true }).count()).toBe(1);
     // One (i) for the buttons, not one hand-wrapped beside each.
     expect(await header.locator("[data-page-actions] [data-slot=help]").count()).toBe(1);
-    // The rail: rating, status, owners, its process only (no step pill, QA round 2), dates, sources and solutions.
+    // The strip: owners, its process only (no step pill, QA round 2), dates, sources and solutions. Rating and status are the header's pills.
     const rail = page.getByRole("complementary", { name: "Issue details" });
-    expect(await rail.locator("dt").allInnerTexts()).toEqual(["Rating", "Status", "Owner", "Process", "Created", "Last change", "Sources", "Solutions"]);
+    expect(await rail.locator("dt").allTextContents()).toEqual(["Owner", "Process", "Created", "Last change", "Sources", "Solutions"]);
+    expect(await rail.locator("a[data-issue-process]").count()).toBe(1);
     expect(await rail.locator("[data-process-tag]").count()).toBe(1);
     expect(await rail.locator("[data-owners]").count()).toBe(1);
     expect(errors).toEqual([]);

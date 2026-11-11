@@ -1,6 +1,6 @@
 // The detail-page template the Issue and Solution pages share (docs/plans/ui-cleanup.md, "DetailPage"): the breadcrumb above the header,
-// the header (the kit's PageHeader: title, pills, meta line, actions), then from `xl` a main column beside a sticky metadata rail of about
-// 20rem. On narrower screens the rail stacks under the main column.
+// the header (the kit's PageHeader: title, pills, meta line, actions), then the metadata strip, then
+// the main column across the full width.
 //
 // Candidate for components/page-kit once the History and Block detail pages use it too.
 
@@ -56,34 +56,30 @@ export function DetailLayout({
       {breadcrumb}
       {header}
       {notices}
-      {(children || rail) && (
-        <div className={cn("grid min-w-0 items-start gap-6", rail && "xl:grid-cols-[minmax(0,1fr)_20rem]")}>
-          <div className="flex min-w-0 flex-col gap-6">{children}</div>
-          {rail}
-        </div>
-      )}
+      {rail}
+      {children && <div className="flex min-w-0 flex-col gap-6">{children}</div>}
     </div>
   );
 }
 
-/** The metadata rail: one surface with a list of terms and values, sticky beside the main column from `xl`. */
+/** The metadata strip: one slim surface of terms and values in a row, under the header. */
 export function MetaRail({ label, children, ...rest }: { label: string; children: ReactNode } & Record<`data-${string}`, string | undefined>) {
   return (
-    <aside aria-label={label} className="min-w-0 rounded-xl bg-card p-4 text-sm ring-1 ring-foreground/10 xl:sticky xl:top-16" {...rest}>
-      <dl className="grid grid-cols-[minmax(6rem,auto)_minmax(0,1fr)] items-start gap-x-4 gap-y-3">{children}</dl>
+    <aside aria-label={label} className="min-w-0 rounded-xl bg-card px-4 py-2.5 text-sm ring-1 ring-foreground/10" {...rest}>
+      <dl className="flex flex-wrap items-start gap-x-7 gap-y-2">{children}</dl>
     </aside>
   );
 }
 
-/** One line of the rail: what it is, then its value. */
+/** One item of the strip: what it is (small, above), then its value. */
 export function RailItem({ term, children, ...rest }: { term: ReactNode; children: ReactNode } & Record<`data-${string}`, string | undefined>) {
   return (
-    <>
-      <dt className="text-fg-2">{term}</dt>
+    <div className="flex min-w-0 max-w-[24rem] flex-col gap-0.5">
+      <dt className="text-2xs font-medium tracking-wide text-fg-2 uppercase">{term}</dt>
       <dd className="min-w-0 font-medium break-words" {...rest}>
         {children}
       </dd>
-    </>
+    </div>
   );
 }
 

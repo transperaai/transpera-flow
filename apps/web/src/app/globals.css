@@ -4,6 +4,7 @@
 @import "../styles/tokens.css";
 @import "@xyflow/react/dist/base.css";
 @import "../styles/react-flow.css";
+@import "../styles/map-controls.css";
 
 /* shadcn's `dark:` classes follow the same scheme as tokens.css: the OS, unless data-theme says otherwise. */
 @custom-variant dark {
@@ -90,11 +91,27 @@
   --font-sans: var(--font-inter), system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, Menlo, monospace;
   --font-heading: var(--font-inter), system-ui, sans-serif;
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
+  /* The chart palette (tokens.css; pick through lib/chart-colours.ts). */
+  --color-cat-1: var(--cat-1);
+  --color-cat-2: var(--cat-2);
+  --color-cat-3: var(--cat-3);
+  --color-cat-4: var(--cat-4);
+  --color-cat-5: var(--cat-5);
+  --color-cat-6: var(--cat-6);
+  --color-cat-7: var(--cat-7);
+  --color-cat-8: var(--cat-8);
+  --color-seq-1: var(--seq-1);
+  --color-seq-2: var(--seq-2);
+  --color-seq-3: var(--seq-3);
+  --color-seq-4: var(--seq-4);
+  --color-seq-5: var(--seq-5);
+  --color-div-neg: var(--div-neg);
+  --color-div-mid: var(--div-mid);
+  --color-div-pos: var(--div-pos);
+  --color-series-baseline: var(--series-baseline);
+  --color-series-other: var(--series-other);
+  --color-series-idle: var(--series-idle);
+  --color-on-series: var(--on-series);
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);

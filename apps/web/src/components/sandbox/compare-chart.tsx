@@ -10,17 +10,21 @@ import type { Stat } from "@transpera-flow/engine";
 import { FloatingTip } from "@/components/ui/floating-tip";
 import { labelIndexes, niceTicks } from "@/lib/overview/axis";
 import type { TimelineMonth } from "@/lib/forecast/timeline";
+import { BASELINE_COLOUR, BASELINE_DASH, CATEGORICAL } from "@/lib/chart-colours";
 import { useElementWidth } from "@/lib/use-element-width";
 
 const HEIGHT = 190;
 
 
-/** How each column is drawn, in order: "No changes" first, in the accent, then the chart palette (chart-2, -5 and -1, the ones furthest from the accent, each with its own dash; never `--edit`, which means the Editor). The legend uses the same. */
+/**
+ * How each column is drawn, in order (lib/chart-colours.ts): "No changes" is today's path, the baseline neutral, dashed; the scenarios take
+ * the categorical slots 1, 2 and 3, solid. The legend uses the same.
+ */
 export const SERIES_STYLES = [
-  { color: "var(--accent)", dash: undefined, swatch: "bg-accent" },
-  { color: "var(--chart-2)", dash: "6 3", swatch: "bg-chart-2" },
-  { color: "var(--chart-5)", dash: "2 3", swatch: "bg-chart-5" },
-  { color: "var(--chart-1)", dash: "8 3 2 3", swatch: "bg-chart-1" },
+  { color: BASELINE_COLOUR, dash: BASELINE_DASH as string | undefined, swatch: "h-0! rounded-none! border-t-2 border-dashed border-series-baseline" },
+  { color: CATEGORICAL[0], dash: undefined, swatch: "bg-cat-1" },
+  { color: CATEGORICAL[1], dash: undefined, swatch: "bg-cat-2" },
+  { color: CATEGORICAL[2], dash: undefined, swatch: "bg-cat-3" },
 ] as const;
 
 export interface CompareSeries {
@@ -41,11 +45,14 @@ export interface CompareChartProps {
   reference?: { value: number; label: string };
   /** Smallest top of the scale (a busy share never draws flatter than the line). */
   minTop?: number;
+  /** Column 0 is "No changes" (today's path, the dashed baseline). False: the columns are plain series, slot 1 first (a forecast's one line). */
+  firstIsBaseline?: boolean;
   /** Draw at this width instead of measuring the container (the print summary is hidden on screen, so has nothing to measure); it still shrinks to fit. */
   fixedWidth?: number;
 }
 
-export function CompareChart({ title, months, series, format, formatDiff = (v) => format(v), reference, minTop = 0, fixedWidth }: CompareChartProps) {
+export function CompareChart({ title, months, series, format, formatDiff = (v) => format(v), reference, minTop = 0, fixedWidth, firstIsBaseline = true }: CompareChartProps) {
+  const style = (k: number) => SERIES_STYLES[firstIsBaseline ? k : k + 1] ?? SERIES_STYLES[SERIES_STYLES.length - 1];
   const [ref, measured] = useElementWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
   const [tipAt, setTipAt] = useState<{ x: number; y: number } | null>(null);
@@ -141,15 +148,15 @@ export function CompareChart({ title, months, series, format, formatDiff = (v) =
           </g>
         ) : null}
         {[...series].map((s, k) => ({ s, k })).reverse().map(({ s, k }) => (
-          <path key={`band-${k}`} d={band(s.values)} fill={SERIES_STYLES[k]!.color} fillOpacity={k === 0 ? 0.18 : 0.1} data-band={k} />
+          <path key={`band-${k}`} d={band(s.values)} fill={style(k).color} fillOpacity={0.12} data-band={k} />
         ))}
         {[...series].map((s, k) => ({ s, k })).reverse().map(({ s, k }) => (
-          <path key={`line-${k}`} d={line(s.values)} fill="none" stroke={SERIES_STYLES[k]!.color} strokeWidth={2.25} strokeDasharray={SERIES_STYLES[k]!.dash} strokeLinejoin="round" strokeLinecap="round" data-line={k} />
+          <path key={`line-${k}`} d={line(s.values)} fill="none" stroke={style(k).color} strokeWidth={2.25} strokeDasharray={style(k).dash} strokeLinejoin="round" strokeLinecap="round" data-line={k} />
         ))}
         {hover !== null ? (
           <g pointerEvents="none">
             <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={HEIGHT - m.b} stroke="var(--fg-3)" strokeDasharray="3 3" />
-            {series.map((s, k) => (s.values[hover] ? <circle key={k} cx={x(hover)} cy={y(s.values[hover]!.mean)} r={4} fill={SERIES_STYLES[k]!.color} stroke="var(--panel)" strokeWidth={2} /> : null))}
+            {series.map((s, k) => (s.values[hover] ? <circle key={k} cx={x(hover)} cy={y(s.values[hover]!.mean)} r={4} fill={style(k).color} stroke="var(--panel)" strokeWidth={2} /> : null))}
           </g>
         ) : null}
       </svg>

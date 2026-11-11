@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { riskOf } from "@transpera-flow/db";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { SectionCard } from "@/components/page-kit";
+import { categoricalColour } from "@/lib/chart-colours";
 import { cn } from "@/lib/utils";
 
 /** The bar runs to 130% so a line at 85% and a person at 110% both show. */
@@ -91,15 +92,14 @@ export function Dumbbell({ before, after, line }: { before: number; after: numbe
         <i className={cn("absolute top-0.5 -ml-[5px] size-2.5 rounded-full", TONE_BG[tone])} style={{ left: at(after) }} />
       </div>
       <span className="w-24 text-right text-xs tabular-nums">
-        {formatPercent(before)} → <b className={TONE_TEXT[tone]}>{formatPercent(after)}</b>
+        {formatPercent(before)} → <b className="font-semibold text-fg">{formatPercent(after)}</b>
       </span>
     </div>
   );
 }
 
-const SERIES = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5", "bg-chart-1/60", "bg-chart-2/60", "bg-chart-3/60"];
-
-/** One bar split into parts with a legend; `unit` follows each figure. A part's `color` (a CSS colour) overrides the series colour by position. */
+/** One bar split into parts with a legend; `unit` follows each figure. A part's `color` (a CSS colour, from lib/chart-colours.ts) overrides
+ * the categorical slot by position (`categoricalColour`: past eight, "Other"). A 2px surface gap between parts. */
 export function StackBar({ parts, unit = "h", legend = true, label }: { parts: { key: string; name: string; value: number; color?: string }[]; unit?: string; legend?: boolean; label?: string }) {
   const total = parts.reduce((s, p) => s + p.value, 0) || 1;
   return (
@@ -108,8 +108,8 @@ export function StackBar({ parts, unit = "h", legend = true, label }: { parts: {
         {parts.map((p, i) => (
           <i
             key={p.key}
-            className={cn("block h-full", !p.color && SERIES[i % SERIES.length], p.color && i > 0 && "border-l-2 border-panel")}
-            style={{ width: `${(p.value * 100) / total}%`, background: p.color }}
+            className={cn("block h-full", i > 0 && "border-l-2 border-panel")}
+            style={{ width: `${(p.value * 100) / total}%`, background: p.color ?? categoricalColour(i) }}
             title={`${p.name} ${formatNumber(p.value)} ${unit}`}
             data-part={p.name}
           />
@@ -119,7 +119,7 @@ export function StackBar({ parts, unit = "h", legend = true, label }: { parts: {
         <ul className="mt-1.5 flex flex-wrap gap-x-3.5 gap-y-1 text-xs text-muted-foreground">
           {parts.map((p, i) => (
             <li key={p.key} className="flex items-center gap-1.5">
-              <i className={cn("size-2.5 shrink-0 rounded-sm", !p.color && SERIES[i % SERIES.length])} style={p.color ? { background: p.color } : undefined} />
+              <i className="size-2.5 shrink-0 rounded-sm" style={{ background: p.color ?? categoricalColour(i) }} />
               {p.name} <b className="tabular-nums text-fg">{formatNumber(p.value)}</b>
             </li>
           ))}
@@ -181,7 +181,7 @@ export function Kpi({ label, value, sub }: { label: string; value: ReactNode; su
   return (
     <div className="min-w-0 rounded-md border border-line bg-panel px-3.5 py-3" data-kpi>
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-0.5 font-mono text-2xl font-medium tabular-nums">{value}</div>
+      <div className="mt-0.5 text-xl font-semibold tabular-nums">{value}</div>
       {sub && <div className="mt-0.5 text-xs text-muted-foreground">{sub}</div>}
     </div>
   );
@@ -198,13 +198,13 @@ const STATUS_DOT: Record<KpiStatus["tone"], string> = { good: "bg-good", warn: "
 export function HeroKpi({ label, value, sub, status }: { label: string; value: ReactNode; sub?: ReactNode; status?: KpiStatus }) {
   return (
     <div
-      className={cn("flex min-w-0 flex-col gap-1 rounded-xl border border-line bg-panel px-4 py-3", status && STATUS_EDGE[status.tone])}
+      className={cn("flex h-full min-w-0 flex-col gap-1 rounded-xl border border-line bg-panel px-3.5 py-3", status && STATUS_EDGE[status.tone])}
       data-kpi
       data-kpi-status={status?.tone}
     >
-      <div className="text-sm font-medium text-fg-2">{label}</div>
-      <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
-        <span className="font-mono text-4xl leading-none font-semibold tracking-tight text-fg tabular-nums">{value}</span>
+      <div className="truncate text-xs font-medium text-fg-2">{label}</div>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-2xl leading-tight font-semibold tracking-tight text-fg tabular-nums">{value}</span>
         {status && (
           <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium text-fg", STATUS_BADGE[status.tone])} data-kpi-badge>
             <i aria-hidden className={cn("size-2 rounded-full", STATUS_DOT[status.tone])} />

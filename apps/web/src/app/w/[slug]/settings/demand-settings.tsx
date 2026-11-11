@@ -46,7 +46,7 @@ export function DemandSettings({ data }: { data: WorkspaceSettingsData }) {
   const { leadSources, canEdit } = data;
   const summary = demandSummary(leadSources, data.services, data.workspace.settings.leads_per_week);
   return (
-    <SettingsSection id="demand" title="Demand" description={<>Where leads come from and how demand moves through the year. The app uses these to work out how many new leads to expect.</>}>
+    <SettingsSection id="demand" band title="Demand" description={<>Where leads come from and how demand moves through the year. The app uses these to work out how many new leads to expect.</>}>
 
       <p className="max-w-prose rounded-lg bg-panel-2 p-3 text-sm" aria-live="polite">
         <strong className="tabular-nums">{formatNumber(summary.perWeek, 2)}</strong> qualified leads a week

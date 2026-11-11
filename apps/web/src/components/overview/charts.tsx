@@ -2,11 +2,12 @@
 
 // The monthly recurring revenue chart (issue #100, A35; the Solution page's since B15 took revenue off the Overview), drawn
 // by hand in SVG and CSS from the theme's tokens: no chart library is in the app. Each says what it shows in words for a screen reader, and carries the same numbers
-// in a table only a screen reader sees. Colours come from the tokens (`--accent`, `--chart-*`, the rating colours),
+// in a table only a screen reader sees. Colours come from lib/chart-colours.ts (slot 1 for the line; with a comparison, today in the dashed baseline neutral),
 // so both themes work, and no meaning rests on colour alone: values are written next to the marks.
 
 import { useEffect, useRef, useState } from "react";
 import { FloatingTip } from "@/components/ui/floating-tip";
+import { BASELINE_COLOUR, BASELINE_DASH, CATEGORICAL } from "@/lib/chart-colours";
 import { formatCurrency } from "@/lib/format";
 import { labelIndexes, monthLabel, niceTicks } from "@/lib/overview/axis";
 import type { MrrPoint } from "@/lib/overview/projection";
@@ -39,7 +40,7 @@ export function MrrChart({
   points: MrrPoint[];
   horizonMonths: number;
   currency: string;
-  /** A second line drawn over the first (the Solution page's "with this solution", same months), in the edit colour. */
+  /** A second line drawn over the first (the Solution page's "with this solution", same months), in slot 1; the first line is then today's path, dashed in the baseline neutral. */
   compare?: MrrPoint[];
   compareName?: string;
 }) {
@@ -67,6 +68,8 @@ export function MrrChart({
   const last = points[points.length - 1]!;
   const line2 = compare?.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.mean).toFixed(1)}`).join(" ");
   const last2 = compare?.[compare.length - 1];
+  // Alone, the line is slot 1. Beside a comparison (with the solution), it is today's path: the baseline neutral, dashed, and the comparison slot 1.
+  const main = line2 ? BASELINE_COLOUR : CATEGORICAL[0];
   const labelled = new Set(labelIndexes(points.length, Math.max(2, Math.floor((width - m.l - m.r) / 72) + 1)));
   const shown = hover !== null ? points[hover] : null;
   const pointerMove = (clientX: number, left: number) => {
@@ -104,17 +107,17 @@ export function MrrChart({
             </text>
           ) : null,
         )}
-        <path d={band} fill="var(--accent)" fillOpacity={0.16} />
-        <path d={line} fill="none" stroke="var(--accent)" strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" />
-        {points.length <= 8 && points.map((p, i) => <circle key={p.month} cx={x(i)} cy={y(p.mean)} r={3} fill="var(--panel)" stroke="var(--accent)" strokeWidth={2} />)}
-        <circle cx={x(points.length - 1)} cy={y(last.mean)} r={4.5} fill="var(--accent)" />
+        <path d={band} fill={main} fillOpacity={0.12} />
+        <path d={line} fill="none" stroke={main} strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" strokeDasharray={line2 ? BASELINE_DASH : undefined} />
+        {points.length <= 8 && points.map((p, i) => <circle key={p.month} cx={x(i)} cy={y(p.mean)} r={3} fill="var(--panel)" stroke={main} strokeWidth={2} />)}
+        <circle cx={x(points.length - 1)} cy={y(last.mean)} r={4.5} fill={main} stroke="var(--panel)" strokeWidth={2} />
         <text x={x(points.length - 1) + 9} y={y(last.mean) + (last2 && last2.mean > last.mean ? 12 : 4)} className="fill-fg text-[12px] font-semibold tabular-nums">
           {money(last.mean)}
         </text>
         {line2 && last2 && (
           <g data-compare-line>
-            <path d={line2} fill="none" stroke="var(--edit)" strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" strokeDasharray="6 3" />
-            <circle cx={x(compare!.length - 1)} cy={y(last2.mean)} r={4.5} fill="var(--edit)" />
+            <path d={line2} fill="none" stroke={CATEGORICAL[0]} strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" />
+            <circle cx={x(compare!.length - 1)} cy={y(last2.mean)} r={4.5} fill={CATEGORICAL[0]} stroke="var(--panel)" strokeWidth={2} />
             <text x={x(compare!.length - 1) + 9} y={y(last2.mean) + (last2.mean > last.mean ? -2 : 12)} className="fill-fg text-[12px] font-semibold tabular-nums">
               {money(last2.mean)}
             </text>
@@ -123,7 +126,7 @@ export function MrrChart({
         {hover !== null && (
           <g pointerEvents="none">
             <line x1={x(hover)} x2={x(hover)} y1={m.t} y2={MRR_HEIGHT - m.b} stroke="var(--fg-3)" strokeDasharray="3 3" />
-            <circle cx={x(hover)} cy={y(points[hover]!.mean)} r={5} fill="var(--accent)" stroke="var(--panel)" strokeWidth={2} />
+            <circle cx={x(hover)} cy={y(points[hover]!.mean)} r={5} fill={main} stroke="var(--panel)" strokeWidth={2} />
           </g>
         )}
       </svg>

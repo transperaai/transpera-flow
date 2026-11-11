@@ -27,7 +27,7 @@ let css: string;
 
 beforeAll(async () => {
   if (!dir) return;
-  [script, css] = await Promise.all([bundleHarness(new URL("./q11b-shots-harness/entry.tsx", import.meta.url), META), appCss()]);
+  [script, css] = await Promise.all([bundleHarness(new URL("./q11b-shots-harness/entry.tsx", import.meta.url), META, { navigation: "navigation-url.ts" }), appCss()]);
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 }, 300_000);
 

@@ -12,7 +12,7 @@ import type { Comparison } from "@/lib/solutions/compare";
 // The map is heavy: load it once the page has drawn.
 const ProcessCanvas = dynamic(() => import("@/components/process-canvas").then((m) => m.ProcessCanvas), {
   ssr: false,
-  loading: () => <MapSkeleton height={256} />,
+  loading: () => <MapSkeleton height={416} />,
 });
 
 export function SolutionMaps({ comparison, notes }: { comparison: Comparison; notes: string[] }) {
@@ -40,7 +40,7 @@ export function SolutionMaps({ comparison, notes }: { comparison: Comparison; no
         ).map(([id, title, bundle, diff]) => (
           <div key={id} className="flex min-w-0 flex-col gap-1" data-map-side={id}>
             <h3 className="text-sm font-semibold">{title}</h3>
-            <div className="min-w-0 overflow-hidden rounded-token border bg-card">
+            <div className="flex h-[55svh] min-h-[26rem] min-w-0 flex-col overflow-hidden rounded-token border bg-card">
               <ProcessCanvas
                 bundle={bundle}
                 diff={diff}
@@ -51,7 +51,7 @@ export function SolutionMaps({ comparison, notes }: { comparison: Comparison; no
                 legend={false}
                 diffLegend={false}
                 focus={comparison.changed}
-                height="auto"
+                height="fill"
                 stepDetail={false}
                 branchNodes
               />

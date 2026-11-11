@@ -19,6 +19,7 @@ export function SectionCard({
   contentClassName,
   section,
   level = 2,
+  ...rest
 }: {
   id: string;
   title: ReactNode;
@@ -37,17 +38,17 @@ export function SectionCard({
   section?: string;
   /** The title's heading level: 2 by default; 3 for a card inside a page section that has its own heading. */
   level?: 2 | 3;
-}) {
+} & Record<`data-${string}`, string | undefined>) {
   return (
-    <Card id={id} data-section={section} className={cn("scroll-mt-16", className)} aria-labelledby={`${id}-heading`}>
+    <Card id={id} data-section={section} className={cn("scroll-mt-16 gap-3", className)} aria-labelledby={`${id}-heading`} {...rest}>
       <CardHeader>
-        <CardTitle id={`${id}-heading`} role="heading" aria-level={level} className="font-display text-base font-semibold">
+        <CardTitle id={`${id}-heading`} role="heading" aria-level={level} className="font-display text-sm font-semibold">
           {title}
         </CardTitle>
-        {description && <CardDescription {...descriptionProps}>{description}</CardDescription>}
+        {description && <CardDescription className="text-xs" {...descriptionProps}>{description}</CardDescription>}
         {action && <CardAction className={actionClassName} data-edit-entry={actionIsEdit ? "" : undefined}>{action}</CardAction>}
       </CardHeader>
-      <CardContent className={cn("flex flex-col gap-4", contentClassName)}>{children}</CardContent>
+      <CardContent className={cn("flex flex-col gap-3", contentClassName)}>{children}</CardContent>
     </Card>
   );
 }

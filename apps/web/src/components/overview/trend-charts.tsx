@@ -90,13 +90,13 @@ export function OpenIssuesSummary({
     <div className="flex flex-col gap-3" data-open-issues>
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
         <p>
-          <span className="font-mono text-4xl leading-none font-semibold tabular-nums" data-open-total>
+          <span className="text-2xl leading-none font-semibold tabular-nums" data-open-total>
             {total}
           </span>{" "}
           <span className="text-sm text-muted-foreground">open</span>
         </p>
         <p data-risks>
-          <span className={cn("font-mono text-2xl leading-none font-semibold tabular-nums", risks > 0 ? "text-rate-risk" : "text-fg")}>{risks}</span>{" "}
+          <span className={cn("text-xl leading-none font-semibold tabular-nums", risks > 0 ? "text-rate-risk" : "text-fg")}>{risks}</span>{" "}
           <span className="text-sm">{risks === 1 ? "operational risk" : "operational risks"}</span>
         </p>
       </div>
@@ -160,8 +160,8 @@ export function OpenIssuesSummary({
 // ---------------------------------------------------------------------------------------------------------------------
 
 export const TIME_SPLIT_LEGEND = [
-  { key: "handsOn", label: "Hands-on", swatch: swatch("var(--accent)") },
-  { key: "person", label: "Waiting for one of our people", swatch: swatch("color-mix(in oklab, var(--fg-3) 70%, transparent)") },
+  { key: "handsOn", label: "Hands-on", swatch: swatch("var(--cat-1)") },
+  { key: "person", label: "Waiting for one of our people", swatch: swatch("var(--series-other)") },
   { key: "others", label: "Waiting on the client or others", swatch: swatch(HATCH, "border border-fg-3") },
 ];
 
@@ -189,12 +189,12 @@ export function TimeSplitChart({
         <b className="font-semibold">Slowest: {rows[0]!.name}</b>, worked on {formatPercent(rows[0]!.share)} of the time work is in it.
       </p>
       <Legend items={TIME_SPLIT_LEGEND} />
-      <ul className="flex flex-col gap-2" data-time-split>
+      <ul className="grid grid-cols-1 gap-x-10 gap-y-2 @3xl:grid-cols-2" data-time-split>
         {rows.map((r) => {
           const total = totalOf(r);
           const parts = [
-            { key: "handsOn", v: r.handsOn, style: { background: "var(--accent)" } },
-            { key: "person", v: r.waitingForPerson, style: { background: "color-mix(in oklab, var(--fg-3) 70%, transparent)" } },
+            { key: "handsOn", v: r.handsOn, style: { background: "var(--cat-1)" } },
+            { key: "person", v: r.waitingForPerson, style: { background: "var(--series-other)" } },
             { key: "others", v: r.waitingOnOthers, style: { backgroundImage: HATCH, boxShadow: "inset 0 0 0 1px var(--fg-3)" } },
           ];
           const body = (
@@ -211,7 +211,7 @@ export function TimeSplitChart({
           return (
             <li
               key={r.id}
-              className="grid grid-cols-[minmax(5rem,9rem)_minmax(0,1fr)_4.5rem] items-center gap-2 text-sm"
+              className="grid grid-cols-[minmax(6rem,14rem)_minmax(0,1fr)_5.5rem] items-center gap-3 text-sm"
               data-process={r.id}
               onPointerMove={(e) => showTip(e, body)}
               onPointerLeave={hideTip}
@@ -222,7 +222,7 @@ export function TimeSplitChart({
               <span aria-hidden className="flex h-3.5 gap-0.5">
                 {parts.map((p) => (p.v > 0 ? <span key={p.key} className="block h-full min-w-px first:rounded-l-[4px] last:rounded-r-[4px]" style={{ flexGrow: p.v / total, flexBasis: 0, ...p.style }} /> : null))}
               </span>
-              <span className="text-right text-xs tabular-nums">
+              <span className="text-right text-xs whitespace-nowrap tabular-nums">
                 <b className="font-semibold">{formatPercent(r.share)}</b> working
               </span>
             </li>

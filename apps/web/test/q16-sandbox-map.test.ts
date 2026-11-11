@@ -110,22 +110,30 @@ function withSolution() {
 const card = (page: Page, processId: string) => page.locator(`[data-company-map] .react-flow__node-group[data-id="${processId}"]`);
 
 describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
-  it("shows the company map in the results pane, with lanes and tags, beside the levers", async () => {
+  it("shows the company map first, full width, with lanes and tags, then the levers, then the results", async () => {
     const { page, errors } = await mount();
     expect(await page.locator("[data-play-map] [data-lane]").count()).toBeGreaterThan(1);
     expect(await page.locator("[data-play-map] [data-process-tag]").count()).toBeGreaterThan(1);
     expect(await page.locator("[data-play-map] h2").first().innerText()).toContain("Company map");
-    expect(await page.locator("[data-version-summary]").innerText()).toBe("All processes on today's map. Click a process to load another version.");
+    expect(await page.locator("[data-version-summary]").innerText()).toBe("Every process on today's version.");
     expect(await page.locator("[data-play-processes], [data-step-row], [data-block], [data-version]").count()).toBe(0);
     const body = await page.locator("body").innerText();
     expect(body).not.toMatch(/No solutions for this process|No blocks yet/);
-    const order = await page.evaluate(() => {
-      const top = (s: string) => document.querySelector(s)!.getBoundingClientRect().top;
-      return [top("[data-play-map]"), top("[data-play-levers-column]"), top("[data-play-results]")];
+    const layout = await page.evaluate(() => {
+      const box = (s: string) => document.querySelector(s)!.getBoundingClientRect();
+      const map = box("[data-company-map]");
+      return {
+        stacked: map.bottom <= box("[data-play-levers-column]").top && box("[data-play-levers-column]").bottom <= box("[data-play-results]").top,
+        widths: [map.width, box("[data-play-levers-column]").width, box("[data-play-results]").width].map(Math.round),
+        mapHeight: map.height,
+        canvasHeight: document.querySelector("[data-company-map] [data-process-map]")!.getBoundingClientRect().height,
+      };
     });
-    // Layout A's workbench: the levers pane and the results pane start side by side; the map sits in the results pane, under the verdict.
-    expect(Math.abs(order[1]! - order[2]!)).toBeLessThan(40);
-    expect(order[0]).toBeGreaterThan(order[2]!);
+    // One scrolling page: the map on top, full width and about two thirds of the window tall (the canvas filling it), then the levers band, then the results.
+    expect(layout.stacked).toBe(true);
+    expect(Math.max(...layout.widths) - Math.min(...layout.widths)).toBeLessThanOrEqual(1);
+    expect(layout.mapHeight).toBeGreaterThanOrEqual(600);
+    expect(layout.canvasHeight).toBeGreaterThan(layout.mapHeight - 20);
     expect(errors).toEqual([]);
     await page.close();
   });
@@ -212,7 +220,7 @@ describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
       await page.keyboard.press("Escape");
       await settled(page);
       await page.waitForSelector("[data-play-heatmap]", { timeout: 120_000 });
-      await page.evaluate(() => (window.scrollTo(0, 0), document.querySelector("[data-play-levers-column]")?.scrollTo(0, 0), document.fonts.ready));
+      await page.evaluate(() => (window.scrollTo(0, 0), document.fonts.ready));
       expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(0);
       await page.waitForTimeout(500);
       await page.screenshot({ path: `${shots}/sandbox-swapped-${scheme}-${width}.png`, fullPage: true });

@@ -22,12 +22,14 @@ const LAYOUT_CSS = `
   .self-start { align-self: flex-start } .h-fit { height: fit-content }
   .w-48 { width: 12rem } .w-60 { width: 15rem } .h-full { height: 100% } .w-full { width: 100% }
   .border-b { border-bottom: 1px solid #ddd } .px-3 { padding: 0 .75rem } .py-2 { padding: .5rem 0 }
+  .bottom-2\\.5 { bottom: .625rem } .left-2\\.5 { left: .625rem } .right-2\\.5 { right: .625rem }
 `;
 
 beforeAll(async () => {
   script = await bundleHarness(new URL("./map-harness/entry.tsx", import.meta.url));
   css = readFileSync(createRequire(import.meta.url).resolve("@xyflow/react/dist/style.css"), "utf8");
   css += readFileSync(fileURLToPath(new URL("../src/styles/react-flow.css", import.meta.url)), "utf8");
+  css += readFileSync(fileURLToPath(new URL("../src/styles/map-controls.css", import.meta.url)), "utf8");
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 }, 120_000);
 
@@ -97,6 +99,118 @@ describe("framing the map", () => {
     await page.evaluate(() => window.mapApi.addStep());
     await page.waitForTimeout(600);
     expect(await view(page)).toBe(moved);
+    await page.close();
+  }, 60_000);
+});
+
+/** The viewport's x, y and zoom, from its transform. */
+const viewOf = async (page: Page) => {
+  const [, x, y, zoom] = /translate\(([-\d.]+)px, ([-\d.]+)px\) scale\(([\d.]+)\)/.exec(await view(page))!.map(Number);
+  return { x: x!, y: y!, zoom: zoom! };
+};
+
+describe("the buttons on the map", () => {
+  it("offers zoom in, zoom out, fit and full screen on a read-only map, labelled, in its corner, and no lock toggle", async () => {
+    const page = await mount({ playback: true });
+    const controls = page.locator(".react-flow__controls[aria-label='Map view']");
+    expect(await controls.count()).toBe(1);
+    for (const name of ["Zoom in", "Zoom out", "Fit the map to view", "Full screen"]) expect(await page.getByRole("button", { name, exact: true }).count(), name).toBe(1);
+    expect(await page.locator(".react-flow__controls-interactive").count()).toBe(0);
+    // The old -, Fit and + in the bar above the map are gone: one set of buttons, on the map.
+    expect(await page.getByRole("button", { name: "Fit", exact: true }).count()).toBe(0);
+    expect(await page.locator("[role=group][aria-label=Zoom]").count()).toBe(0);
+    // Bottom right of the map. A read-only map's playback is in the toolbar row above the map, never over it.
+    const box = (await controls.boundingBox())!;
+    const area = (await page.locator(".react-flow").boundingBox())!;
+    const bar = (await page.locator("[role=group][aria-label=Playback]").first().boundingBox())!;
+    expect(area.x + area.width - (box.x + box.width)).toBeLessThan(20);
+    expect(area.y + area.height - (box.y + box.height)).toBeLessThan(20);
+    expect(bar.y + bar.height).toBeLessThanOrEqual(area.y);
+    expect(await page.locator("[data-map-toolbar] [role=group][aria-label=Playback]").count()).toBe(1);
+    // The zoom under them.
+    expect(await page.locator("[data-map-zoom-level]").textContent()).toMatch(/^\d+%$/);
+    await page.close();
+  }, 60_000);
+
+  it("leaves full screen off an editable map, which has panels beside it, and hides them all when asked", async () => {
+    const page = await mount({ editable: true });
+    expect(await page.getByRole("button", { name: "Zoom in", exact: true }).count()).toBe(1);
+    expect(await page.getByRole("button", { name: "Full screen", exact: true }).count()).toBe(0);
+    await page.close();
+    const hidden = await mount({ zoomControls: false });
+    expect(await hidden.locator(".react-flow__controls").count()).toBe(0);
+    await hidden.close();
+  }, 60_000);
+
+  it("zooms in and out by a step, and the zoom under the buttons follows", async () => {
+    const page = await mount();
+    const before = await viewOf(page);
+    await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+    await page.waitForTimeout(400);
+    const zoomed = await viewOf(page);
+    expect(zoomed.zoom).toBeCloseTo(Math.round((before.zoom + 0.15) * 100) / 100, 2);
+    expect(await page.locator("[data-map-zoom-level]").textContent()).toBe(`${Math.round(zoomed.zoom * 100)}%`);
+    // From the keyboard too.
+    await page.getByRole("button", { name: "Zoom out", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(400);
+    expect((await viewOf(page)).zoom).toBeCloseTo(before.zoom, 2);
+    await page.close();
+  }, 60_000);
+
+  it("keeps a fitted map clear of the buttons", async () => {
+    const page = await mount();
+    await page.getByRole("button", { name: "Fit the map to view", exact: true }).click();
+    await page.waitForTimeout(600);
+    await settled(page);
+    const left = (await page.locator(".react-flow__controls").boundingBox())!.x;
+    const right = Math.max(...(await cards(page)).map((c) => c.r));
+    expect(right).toBeLessThanOrEqual(left);
+    await page.close();
+  }, 60_000);
+
+  it("re-renders no tile or line while it zooms or fits (issue #249: the canvas followed every zoom frame)", async () => {
+    for (const options of [{}, { editable: true }, { company: true, editable: true }] as Partial<HarnessOptions>[]) {
+      const page = await mount(options);
+      await settled(page);
+      await page.waitForTimeout(300);
+      const counted = () => page.evaluate(() => ({ ...(window as unknown as { __mapRenderCounts: Record<string, number> }).__mapRenderCounts }));
+      // Counting on: every tile and line render from here adds one to its kind.
+      await page.evaluate(() => ((window as unknown as { __mapRenderCounts: object }).__mapRenderCounts = {}));
+      for (const name of ["Zoom in", "Zoom out", "Zoom in", "Fit the map to view"]) {
+        await page.getByRole("button", { name, exact: true }).click();
+        await page.waitForTimeout(400);
+      }
+      expect(await counted(), JSON.stringify(options)).toEqual({});
+      if (options.editable && !options.company) {
+        // The counter does count: an edit re-renders the tiles.
+        await page.evaluate(() => window.mapApi.addStep());
+        await page.waitForTimeout(400);
+        expect((await counted()).tile ?? 0).toBeGreaterThan(0);
+      }
+      await page.close();
+    }
+  }, 120_000);
+
+  it("shows a read-only map on the full screen, framed afresh and centred, and back", async () => {
+    const page = await mount();
+    await settled(page);
+    expect(await page.evaluate(() => document.fullscreenEnabled)).toBe(true);
+    await page.getByRole("button", { name: "Full screen", exact: true }).click();
+    await page.waitForSelector("[data-process-map][data-fullscreen]");
+    await page.waitForTimeout(700);
+    await settled(page);
+    const area = (await page.locator(".react-flow").boundingBox())!;
+    expect(Math.round(area.width)).toBe(1400);
+    const all = await cards(page);
+    const top = Math.min(...all.map((c) => c.t)) - area.y;
+    const bottom = area.y + area.height - Math.max(...all.map((c) => c.b));
+    // Centred down the screen.
+    expect(Math.abs(top - bottom)).toBeLessThanOrEqual(3);
+    expect(await page.getByRole("button", { name: "Exit full screen", exact: true }).getAttribute("aria-pressed")).toBe("true");
+    await page.getByRole("button", { name: "Exit full screen", exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector("[data-process-map][data-fullscreen]"));
+    expect(await page.getByRole("button", { name: "Full screen", exact: true }).count()).toBe(1);
     await page.close();
   }, 60_000);
 });
@@ -178,8 +292,8 @@ describe("Fit (Q1 item 11)", () => {
     await page.waitForFunction(() => window.mapApi.getOpen().length === 2);
     await settled(page);
     // Move the view away by hand, then Fit.
-    await page.getByRole("button", { name: /^Zoom in|^\+$/ }).first().click().catch(() => undefined);
-    await page.getByRole("button", { name: "Fit", exact: true }).click();
+    await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+    await page.getByRole("button", { name: "Fit the map to view", exact: true }).click();
     await page.waitForTimeout(700);
     await settled(page);
     expect(await page.locator(".react-flow__node").count()).toBeGreaterThan(5);
@@ -196,7 +310,7 @@ describe("Fit (Q1 item 11)", () => {
       await page.waitForTimeout(150);
     }
     await settled(page);
-    await page.getByRole("button", { name: "Fit", exact: true }).click();
+    await page.getByRole("button", { name: "Fit the map to view", exact: true }).click();
     await page.waitForTimeout(700);
     await settled(page);
     expect(await outsidePanel(page)).toEqual([]);

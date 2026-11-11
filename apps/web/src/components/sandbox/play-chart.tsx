@@ -8,17 +8,18 @@
 import { useState, type ReactNode } from "react";
 import { FloatingTip } from "@/components/ui/floating-tip";
 import { labelIndexes, niceTicks } from "@/lib/overview/axis";
+import { BASELINE_COLOUR, BASELINE_DASH, CATEGORICAL } from "@/lib/chart-colours";
 import { useElementWidth } from "@/lib/use-element-width";
 
-/** The series colours of every Sandbox chart, in order: the chart palette, the shades furthest apart first. A single line (MRR) is the accent. */
-export const PLAY_SERIES_COLORS = ["var(--chart-2)", "var(--chart-5)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)"] as const;
+/** The series colours of every Sandbox chart, in order: the categorical slots (lib/chart-colours.ts). A single line (MRR) is slot 1. */
+export const PLAY_SERIES_COLORS = CATEGORICAL;
 
 export interface PlayChartSeries {
   name: string;
   values: (number | null)[];
-  /** A CSS colour or token: "var(--chart-1)". */
+  /** A CSS colour or token: "var(--cat-1)". */
   color: string;
-  /** Today's path: thin and dashed. */
+  /** Today's path: thin, dashed and in the baseline neutral, whatever `color` says. */
   dashed?: boolean;
   /** Leave out of the legend (a dashed line shares its name with the line it is the path of). */
   hideFromLegend?: boolean;
@@ -115,8 +116,8 @@ export function PlayChart({ title, months, series, format, goal, min, todayLabel
         ))}
         {goal && (
           <g>
-            <line x1={M.l} x2={W - M.r} y1={y(goal.value)} y2={y(goal.value)} stroke="var(--crit)" strokeDasharray="4 4" />
-            <text x={W - M.r} y={y(goal.value) - 4} textAnchor="end" style={{ fill: "var(--crit)" }}>
+            <line x1={M.l} x2={W - M.r} y1={y(goal.value)} y2={y(goal.value)} stroke="var(--fg-2)" strokeWidth={1} data-goal-line />
+            <text x={W - M.r} y={y(goal.value) - 4} textAnchor="end" className="fill-fg-2">
               {goal.label}
             </text>
           </g>
@@ -129,8 +130,8 @@ export function PlayChart({ title, months, series, format, goal, min, todayLabel
         {tip && <line x1={x(tip.i)} x2={x(tip.i)} y1={M.t} y2={H - M.b} stroke="var(--fg-3)" strokeWidth={1} data-crosshair />}
         {series.map((s, i) => (
           <g key={i}>
-            <path d={path(s.values)} fill="none" stroke={s.color} strokeWidth={s.dashed ? 1.5 : 2.5} {...(s.dashed ? { strokeDasharray: "5 4", opacity: 0.7 } : {})} data-line={s.dashed ? "today" : "changed"} data-series={s.name} />
-            {!s.dashed && s.values[n - 1] != null && <circle cx={x(n - 1)} cy={y(s.values[n - 1]!)} r={3.5} fill={s.color} />}
+            <path d={path(s.values)} fill="none" stroke={s.dashed ? BASELINE_COLOUR : s.color} strokeWidth={s.dashed ? 1.75 : 2.5} {...(s.dashed ? { strokeDasharray: BASELINE_DASH } : {})} data-line={s.dashed ? "today" : "changed"} data-series={s.name} />
+            {!s.dashed && s.values[n - 1] != null && <circle cx={x(n - 1)} cy={y(s.values[n - 1]!)} r={4} fill={s.color} stroke="var(--panel)" strokeWidth={2} />}
           </g>
         ))}
       </svg>
@@ -169,7 +170,7 @@ export function PlayChart({ title, months, series, format, goal, min, todayLabel
         ))}
         {hasToday && (
           <span className="inline-flex items-center gap-1.5" data-legend-today>
-            <i aria-hidden className="inline-block h-0 w-4 border-t-2 border-dashed border-fg-3" />
+            <i aria-hidden className="inline-block h-0 w-4 border-t-2 border-dashed border-series-baseline" />
             {todayLabel}
           </span>
         )}

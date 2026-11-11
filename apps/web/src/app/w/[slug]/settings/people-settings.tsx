@@ -43,7 +43,7 @@ export function SimulationSettings({ data }: { data: WorkspaceSettingsData }) {
   const overtime = workspace.settings.overtime_cap ?? null;
   const ownersOnly = canManage ? undefined : "Only Agency admins can change this.";
   return (
-    <SettingsSection id="simulation" title="Simulation" description="Limits on how the simulation treats people's time.">
+    <SettingsSection id="simulation" band title="Simulation" description="Limits on how the simulation treats people's time.">
       <FieldRows>
         <ToggleField
           label="Per-person times"

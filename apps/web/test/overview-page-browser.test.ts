@@ -95,7 +95,7 @@ describe("the Overview's layout: a dashboard (docs/plans/ui-cleanup.md)", () => 
   };
 
   for (const width of [1300, 1600, 400]) {
-    it(`the headline tiles, then the company map beside open issues and the busiest people, then the charts and the departments (${width}px)`, async () => {
+    it(`the headline tiles in one row, the company map the full width, then the cards sized by what they hold and the departments (${width}px)`, async () => {
       const { page, errors } = await mount({ width, capacity: true, styled: true });
       await ready(page);
       // No jump links and no section rules any more: the panels follow one another in a fixed order.
@@ -112,19 +112,35 @@ describe("the Overview's layout: a dashboard (docs/plans/ui-cleanup.md)", () => 
       expect(await page.locator("[data-company-map] [data-slot=card]").count()).toBe(0);
       const box = (sel: string) => page.locator(sel).first().evaluate((e) => e.getBoundingClientRect().toJSON() as DOMRect);
       const map = await box("[data-company-map]");
-      const rail = await box("[data-rail]");
+      const main = await box("[data-kpi-row]");
+      const cards = await page.locator("[data-cards] > [data-chart]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON() as DOMRect));
+      // Open issues and the busiest people first, then team load and the time charts.
+      expect(cards.length).toBe(6);
+      expect(cards.every((c) => c.top > map.bottom - 1)).toBe(true);
+      // The map runs the full width of the page (the QA ask: no two-thirds map with a rail beside it).
+      expect(Math.abs(map.width - main.width)).toBeLessThanOrEqual(1);
       if (width >= 1280) {
-        // About two thirds of the width, with the rail beside it.
-        expect(rail.left).toBeGreaterThan(map.right - 1);
-        expect(Math.abs(rail.top - map.top)).toBeLessThanOrEqual(1);
-        expect(map.width / (map.width + rail.width)).toBeGreaterThan(0.6);
-        // The charts two to a row, the odd one out (there are four here) never leaving a hole.
-        const charts = await page.locator("[data-charts] > [data-chart]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
-        expect(charts.length).toBe(4);
-        expect(charts[0]).toBe(charts[1]);
-        expect(charts[2]).toBe(charts[3]);
+        // The map's controls in one slim row above it: Key and playback inline, no strip of their own, no bordered box round playback.
+        const bar = await box("[data-company-map] [data-map-toolbar]");
+        expect(bar.height).toBeLessThanOrEqual(48);
+        const playbackBox = await box("[data-company-map] [data-map-toolbar] [role=group][aria-label=Playback]");
+        expect(playbackBox.height).toBeLessThanOrEqual(36);
+        expect(await page.locator("[data-company-map] [data-map-toolbar] [data-map-key]").count()).toBe(1);
+        expect(await page.locator("[data-company-map] [data-playback-strip]").evaluateAll((els) => els.every((e) => !!e.closest("[data-map-toolbar]")))).toBe(true);
+        expect(await page.locator("[data-company-map] [role=group][aria-label=Playback]").evaluate((e) => getComputedStyle(e).borderTopWidth)).toBe("0px");
+        // The five headline tiles on one line.
+        const tiles = await page.locator("[data-kpi-row] [data-whole-business] > [data-kpi]").evaluateAll((els) => els.map((e) => e.getBoundingClientRect().top));
+        expect(new Set(tiles).size).toBe(1);
+        // Open issues beside the busiest people (the same height), team load the full width, where the time goes beside what it
+        // achieves, then the time split the full width: no tall narrow towers.
+        expect(cards[0]!.top).toBe(cards[1]!.top);
+        expect(cards[0]!.height).toBe(cards[1]!.height);
+        expect(cards[2]!.top).toBeGreaterThan(cards[0]!.bottom - 1);
+        expect(Math.abs(cards[2]!.width - map.width)).toBeLessThanOrEqual(1);
+        expect(cards[3]!.top).toBe(cards[4]!.top);
+        expect(Math.abs(cards[5]!.width - map.width)).toBeLessThanOrEqual(1);
       } else {
-        expect(rail.top).toBeGreaterThan(map.bottom - 1);
+        for (let i = 1; i < cards.length; i++) expect(cards[i]!.top).toBeGreaterThan(cards[i - 1]!.bottom - 1);
       }
       // "How this works" is a small (?) in each panel's header, not a line under every chart.
       expect(await page.locator("details[data-how]").count()).toBe(0);

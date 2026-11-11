@@ -161,7 +161,7 @@ describe("Capacity with nothing published", () => {
     const people = (await import("@/app/w/[slug]/capacity/page")).default as Page;
     const editor = await html(people);
     expect(editor).toContain("Add people in Settings");
-    expect(editor).toContain(`href="/w/${FRESH_SLUG}/settings/people"`);
+    expect(editor).toContain(`href="/w/${FRESH_SLUG}/settings#people-roles"`);
     state.canEdit = false;
     const reader = await html(people);
     expect(reader).not.toContain("Add people in Settings");
