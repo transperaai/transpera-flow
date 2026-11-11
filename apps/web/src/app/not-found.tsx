@@ -18,10 +18,11 @@ export default function NotFound() {
         Transpera Flow
       </p>
       <h1 className="font-heading text-2xl font-semibold tracking-tight">Page not found</h1>
-      <p className="max-w-prose text-fg-2">There&apos;s nothing at this address, or you don&apos;t have access to it. Check the link, or start again from your workspaces.</p>
+      <p className="max-w-prose text-fg-2">There&apos;s nothing at this address, or you don&apos;t have access to it. Check the link, or start again from the home page.</p>
       <div>
+        {/* "/" is the workspace list, or with one workspace that workspace itself (docs/adr/0024-*). */}
         <Link href="/" className={buttonVariants({ variant: "outline" })}>
-          Back to your workspaces
+          Go to the home page
         </Link>
       </div>
     </main>

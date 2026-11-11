@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -71,6 +73,18 @@ describe("the home page", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("is where every way back out of a page leads, so with one workspace they land in it, and none promises a list", () => {
+    const read = (f: string) => readFileSync(fileURLToPath(new URL(`../src/${f}`, import.meta.url)), "utf8");
+    for (const f of ["components/app-header.tsx", "app/not-found.tsx"]) {
+      const src = read(f);
+      expect(src, f).toContain('<Link href="/"');
+      expect(src, f).not.toMatch(/your workspaces|All workspaces/);
+    }
+    // The agency table (Owner, two or more) is only on this page, and "All workspaces" only in the many-workspace switcher.
+    const all = ["components/shell/app-sidebar.tsx", "app/w/[slug]/layout.tsx"].map(read).join("\n");
+    expect(all).not.toContain("AgencyWorkspaceTable");
   });
 
   it("keeps the list with two or more workspaces", async () => {
