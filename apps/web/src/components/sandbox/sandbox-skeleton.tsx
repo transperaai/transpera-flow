@@ -23,7 +23,7 @@ export function SandboxSkeleton() {
         <div className={pageBodyClass()} aria-hidden>
           <div className="flex flex-col gap-3" data-skeleton-map>
             <Skeleton className="h-5 w-40" />
-            <Skeleton className="h-[65svh] min-h-[28rem] w-full rounded-xl" />
+            <Skeleton className="h-[82svh] min-h-[34rem] w-full rounded-xl" />
           </div>
           <div className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-line bg-panel" data-skeleton-levers>
             <div className="flex items-center gap-3 border-b border-line px-4 py-2">

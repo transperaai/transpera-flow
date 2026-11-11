@@ -131,7 +131,7 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
 
       // The map is a card per process, with one line above it; the per-process cards, step pickers and "No solutions" lines are gone.
       expect(await page.locator("[data-company-map] [data-id]").count()).toBeGreaterThanOrEqual(6);
-      expect(await text(page, "[data-version-summary]")).toBe("All processes on today's map. Click a process to load another version.");
+      expect(await text(page, "[data-version-summary]")).toBe("Click a process to try another version.");
       for (const gone of [/No solutions for this process/, /No blocks yet/, /Company processes/]) expect(await page.locator("body").innerText(), String(gone)).not.toMatch(gone);
       expect(await page.locator("[data-block], [data-step-row], [data-version]").count()).toBe(0);
 
@@ -308,7 +308,7 @@ describe("the free-play Sandbox", { timeout: 240_000 }, () => {
     }
     expect(await text(page, "[data-version-summary]")).toMatch(/^2 processes on new versions/);
     await page.locator("[data-versions-reset]").click();
-    expect(await text(page, "[data-version-summary]")).toBe("All processes on today's map. Click a process to load another version.");
+    expect(await text(page, "[data-version-summary]")).toBe("Click a process to try another version.");
     await settled(page);
     expect(await page.locator("[data-sandbox-play]").getAttribute("data-moved")).toBe("false");
     expect(errors).toEqual([]);

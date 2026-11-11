@@ -115,7 +115,7 @@ describe("the Sandbox as the company map", { timeout: 300_000 }, () => {
     expect(await page.locator("[data-play-map] [data-lane]").count()).toBeGreaterThan(1);
     expect(await page.locator("[data-play-map] [data-process-tag]").count()).toBeGreaterThan(1);
     expect(await page.locator("[data-play-map] h2").first().innerText()).toContain("Company map");
-    expect(await page.locator("[data-version-summary]").innerText()).toBe("All processes on today's map. Click a process to load another version.");
+    expect(await page.locator("[data-version-summary]").innerText()).toBe("Click a process to try another version.");
     expect(await page.locator("[data-play-processes], [data-step-row], [data-block], [data-version]").count()).toBe(0);
     const body = await page.locator("body").innerText();
     expect(body).not.toMatch(/No solutions for this process|No blocks yet/);

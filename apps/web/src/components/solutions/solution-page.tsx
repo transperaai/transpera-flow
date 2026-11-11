@@ -162,7 +162,7 @@ export function SolutionPage(props: SolutionPageProps) {
               </span>
             }
           >
-            <span className="flex flex-col items-start gap-1.5" data-solution-issues>
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1" data-solution-issues>
               {linked.length > 0 ? (
                 linked.map((i) => (
                   <Link key={i.id} href={issueHref(base, i)} className="hover:underline" data-solves={i.id}>
