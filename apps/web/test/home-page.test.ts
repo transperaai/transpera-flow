@@ -50,12 +50,27 @@ describe("the home page", () => {
 
   it("keeps the page with no workspaces: the Owner makes the first one there, anyone else is told to ask", async () => {
     state.admin = true;
+    vi.stubEnv("ALLOW_MULTIPLE_WORKSPACES", "");
     const owner = renderToStaticMarkup(await HomePage());
     expect(owner).toContain("data-no-workspaces");
     expect(owner).toContain("data-new-workspace");
     state.admin = false;
     expect(renderToStaticMarkup(await HomePage())).toContain("No workspace yet");
     expect(redirect).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+
+  it("offers the Owner New workspace with two or more only when ALLOW_MULTIPLE_WORKSPACES is on", async () => {
+    state.admin = true;
+    state.workspaces = [ws("acme"), ws("larkspur")];
+    try {
+      vi.stubEnv("ALLOW_MULTIPLE_WORKSPACES", "");
+      expect(renderToStaticMarkup(await HomePage())).not.toContain("data-new-workspace");
+      vi.stubEnv("ALLOW_MULTIPLE_WORKSPACES", "true");
+      expect(renderToStaticMarkup(await HomePage())).toContain("data-new-workspace");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("keeps the list with two or more workspaces", async () => {

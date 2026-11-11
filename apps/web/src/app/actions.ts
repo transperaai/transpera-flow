@@ -4,11 +4,14 @@ import { redirect } from "next/navigation";
 import { rpc } from "@transpera-flow/db/client";
 import { pgCode } from "@/app/action-db";
 import { getDb, getSessionUser } from "@/lib/auth/session";
+import { mayCreateWorkspace, ONE_WORKSPACE_MESSAGE } from "@/lib/workspace-limit";
 import { parseNewWorkspace } from "@/lib/workspaces";
 
 // Creating a workspace from the home page (issue #88; docs/adr/0012-*). Only
 // agency admins may: `create_workspace` checks that in the database, as the
-// signed-in user, and gives the creator an agency_admin membership.
+// signed-in user, and gives the creator an agency_admin membership. A
+// deployment holds one workspace unless ALLOW_MULTIPLE_WORKSPACES=true
+// (docs/adr/0024-one-workspace-per-deployment.md).
 
 export interface CreateWorkspaceState {
   error?: string;
@@ -20,6 +23,10 @@ export async function createWorkspace(_prev: CreateWorkspaceState, form: FormDat
   const user = await getSessionUser();
   if (!user) return { error: "Your session has ended. Sign in again." };
   const db = await getDb();
+  // One workspace per deployment (docs/adr/0024-*): the first is always allowed, a second only with ALLOW_MULTIPLE_WORKSPACES.
+  // Only the Owner can create one, and the Owner sees every workspace, so the count here is the deployment's.
+  const existing = await db.selectFrom("workspaces").select((eb) => eb.fn.countAll<string>().as("n")).executeTakeFirstOrThrow();
+  if (!mayCreateWorkspace(Number(existing.n))) return { error: ONE_WORKSPACE_MESSAGE };
 
   try {
     await rpc(db, "create_workspace", { ws_name: parsed.name, ws_slug: parsed.slug, ws_settings: parsed.settings });

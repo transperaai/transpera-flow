@@ -13,6 +13,7 @@ import { isAgencyAdmin } from "@/lib/access-data";
 import { listAgencyWorkspaces, listWorkspaces } from "@/lib/data";
 import { authEnv } from "@/lib/auth/env";
 import { getSessionUser } from "@/lib/auth/session";
+import { mayCreateWorkspace } from "@/lib/workspace-limit";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { NewWorkspaceButton } from "./new-workspace-form";
 
@@ -44,7 +45,8 @@ export default async function HomePage() {
           title="Workspaces"
           description="Each workspace is one company: its processes, people, issues and settings."
           actions={
-            admin ? (
+            // The first workspace, or another only where ALLOW_MULTIPLE_WORKSPACES is on (createWorkspace refuses it otherwise).
+            admin && mayCreateWorkspace(workspaces.length) ? (
               <PhoneReadOnly notice={false}>
                 <NewWorkspaceButton defaultOpen={workspaces.length === 0} />
               </PhoneReadOnly>
