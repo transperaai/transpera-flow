@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { allowMultipleWorkspaces, mayCreateWorkspace, ONE_WORKSPACE_MESSAGE } from "@/lib/workspace-limit";
 import { isSlug, parseNewWorkspace, slugify } from "@/lib/workspaces";
 import { createWorld, signInAs, signOut, type World } from "./action-harness";
 
@@ -81,6 +82,54 @@ describe("parseNewWorkspace", () => {
   });
 });
 
+describe("allowMultipleWorkspaces and mayCreateWorkspace", () => {
+  it("allow more than one workspace only when ALLOW_MULTIPLE_WORKSPACES is true", () => {
+    for (const v of ["true", "TRUE", " true "]) expect(allowMultipleWorkspaces({ ALLOW_MULTIPLE_WORKSPACES: v }), v).toBe(true);
+    for (const v of [undefined, "", "false", "1", "yes"]) expect(allowMultipleWorkspaces({ ALLOW_MULTIPLE_WORKSPACES: v }), String(v)).toBe(false);
+  });
+  it("always allow the first workspace, and another only with the flag", () => {
+    expect(mayCreateWorkspace(0, {})).toBe(true);
+    expect(mayCreateWorkspace(1, {})).toBe(false);
+    expect(mayCreateWorkspace(3, {})).toBe(false);
+    expect(mayCreateWorkspace(1, { ALLOW_MULTIPLE_WORKSPACES: "true" })).toBe(true);
+  });
+});
+
+describe("the createWorkspace action, one workspace per deployment", () => {
+  let world: World;
+  const count = async () => Number((await world.tdb.client.query("select count(*) from workspaces")).rows[0].count);
+  beforeAll(async () => {
+    world = await createWorld("acme");
+  });
+  afterAll(async () => {
+    vi.unstubAllEnvs();
+    await world?.tdb.close();
+  });
+  beforeEach(() => {
+    inject.error = null;
+    vi.stubEnv("ALLOW_MULTIPLE_WORKSPACES", "");
+    signInAs(world, "admin");
+    vi.mocked(redirect).mockClear();
+  });
+
+  it("refuses a second workspace without ALLOW_MULTIPLE_WORKSPACES, before reaching create_workspace", async () => {
+    const before = await count();
+    expect(before).toBeGreaterThan(0);
+    expect(await createWorkspace({}, form({ name: "Second Co" }))).toEqual({ error: ONE_WORKSPACE_MESSAGE });
+    expect(await count()).toBe(before);
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it("makes the first workspace (the bootstrap) without the flag", async () => {
+    // An empty deployment: the Owner signs in and makes the client's workspace.
+    await world.tdb.client.query("delete from workspaces");
+    await expect(createWorkspace({}, form({ name: "First Co" }))).rejects.toThrow("NEXT_REDIRECT");
+    expect(redirect).toHaveBeenCalledWith("/w/first-co");
+    expect(await count()).toBe(1);
+    expect(await createWorkspace({}, form({ name: "Second Co" }))).toEqual({ error: ONE_WORKSPACE_MESSAGE });
+  });
+});
+
 describe("the createWorkspace action", () => {
   let world: World;
   const count = async () => Number((await world.tdb.client.query("select count(*) from workspaces")).rows[0].count);
@@ -88,10 +137,13 @@ describe("the createWorkspace action", () => {
     world = await createWorld("acme");
   });
   afterAll(async () => {
+    vi.unstubAllEnvs();
     await world?.tdb.close();
   });
   beforeEach(() => {
     inject.error = null;
+    // These make more than one workspace, as a demo or QA deployment may.
+    vi.stubEnv("ALLOW_MULTIPLE_WORKSPACES", "true");
     signInAs(world, "admin");
     vi.mocked(redirect).mockClear();
   });

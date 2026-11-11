@@ -6,6 +6,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 export function AppHeader({ workspace, signedIn }: { workspace?: string; signedIn: boolean }) {
   return (
     <header className="flex h-12 items-center gap-2 border-b">
+      {/* "/" is the workspace list, or with one workspace that workspace itself (docs/adr/0024-*). */}
       <Link href="/" className="flex items-center gap-2.5 font-display text-base font-semibold tracking-tight">
         <TransperaMark />
         Transpera Flow

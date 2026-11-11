@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { AgencyWorkspaceTable } from "@/components/agency-workspace-table";
 import { AppHeader } from "@/components/app-header";
@@ -13,6 +13,7 @@ import { isAgencyAdmin } from "@/lib/access-data";
 import { listAgencyWorkspaces, listWorkspaces } from "@/lib/data";
 import { authEnv } from "@/lib/auth/env";
 import { getSessionUser } from "@/lib/auth/session";
+import { mayCreateWorkspace } from "@/lib/workspace-limit";
 import { PhoneReadOnly } from "@/components/shell/phone-read-only";
 import { NewWorkspaceButton } from "./new-workspace-form";
 
@@ -24,6 +25,9 @@ export default async function HomePage() {
   // Memberships are made at sign-in from the "Who can sign in" list (and for a new workspace by the database), so there is nothing
   // to resolve here.
   const [workspaces, admin] = await Promise.all([listWorkspaces(), isAgencyAdmin()]);
+  // One deployment is one client (docs/adr/0024-*): with exactly one workspace there is no list to choose from, so go
+  // straight to it. Zero (the Owner makes the first) and two or more (a demo or QA deployment) keep this page.
+  if (workspaces.length === 1) redirect(`/w/${encodeURIComponent(workspaces[0]!.slug)}`);
   // The Owner with no workspaces creates the first one here.
   if (workspaces.length === 0 && !admin) {
     const user = await getSessionUser();
@@ -41,7 +45,8 @@ export default async function HomePage() {
           title="Workspaces"
           description="Each workspace is one company: its processes, people, issues and settings."
           actions={
-            admin ? (
+            // The first workspace, or another only where ALLOW_MULTIPLE_WORKSPACES is on (createWorkspace refuses it otherwise).
+            admin && mayCreateWorkspace(workspaces.length) ? (
               <PhoneReadOnly notice={false}>
                 <NewWorkspaceButton defaultOpen={workspaces.length === 0} />
               </PhoneReadOnly>

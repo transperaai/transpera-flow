@@ -46,7 +46,7 @@ const paged = (total: number, page: { limit: number; offset: number }, shown: nu
   next_offset: page.offset + shown < total ? page.offset + shown : null,
 });
 
-const workspaceArg = z.string().optional().describe("Workspace id, slug or name. Defaults to the active workspace (set_active_workspace).");
+const workspaceArg = z.string().optional().describe("Workspace id, slug or name. Defaults to the active workspace (set_active_workspace), else the only workspace you can access.");
 const processArg = z.string().optional().describe("Process id or name. Defaults to the workspace's only process.");
 
 /**

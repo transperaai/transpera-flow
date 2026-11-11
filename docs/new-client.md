@@ -56,6 +56,7 @@ Settings → Environment Variables. "Sensitive" variables cannot be read back af
 | `BETTER_AUTH_URL` | This deployment's own URL. Production: the production URL. Preview: the stable preview alias | Production, Preview (different values) | No | Claude via API (Austin may in the dashboard) |
 | `AUTH_PROVIDERS` | `google` (default), or `google,microsoft` | Production, Preview | No | Claude via API |
 | `ACCESS_ADMIN_EMAILS` | Comma-separated addresses that always sign in as Owner (Austin) | Production, Preview | No | Claude via API |
+| `ALLOW_MULTIPLE_WORKSPACES` | Leave unset on a client deployment (one workspace). `true` only on a demo or QA deployment that needs several ([ADR 0024](adr/0024-one-workspace-per-deployment.md)) | Production, Preview | No | Claude via API, only when asked |
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID | Production, Preview | No | Austin, dashboard |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret | Production, Preview | Yes | Austin, dashboard (paste from Google) |
 | `MICROSOFT_CLIENT_ID` | Entra app (client) ID. Only with Microsoft | Production, Preview | No | Austin, dashboard |
@@ -98,6 +99,8 @@ Other preview URLs sign in through the alias (Better Auth's OAuth proxy), so the
 3. Create or upload a process, run a simulation, reload: it persists (database and app login work).
 4. Sign in with an address not on the list: it is refused.
 5. Open a preview deployment's URL and sign in: it should bounce through the alias and back.
+
+**One workspace per deployment.** The Owner's first sign-in on an empty deployment shows **New workspace**: create the client's workspace there. From then on everyone lands straight in it, the sidebar shows its name with no switcher, and a second workspace is refused. Only a demo or QA deployment sets `ALLOW_MULTIPLE_WORKSPACES=true` to allow more. Multi-tenancy is hidden, not removed: [ADR 0024](adr/0024-one-workspace-per-deployment.md).
 
 ## 10. Costs and limits
 
