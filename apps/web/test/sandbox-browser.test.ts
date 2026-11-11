@@ -519,7 +519,8 @@ describe("the Sandbox", { timeout: 180_000 }, () => {
         await page.locator("[data-sandbox-name-dialog] button[type=submit]").click();
         await page.waitForFunction(() => document.querySelector("[data-scenario-select]")?.textContent?.includes("Hire early (copy)"));
         expect(await changes(page).count()).toBe(1);
-        expect(await status(page)).toContain("Saved");
+        // The copy's forecast runs first ("Updating the forecast…"); the line says Saved once it has.
+        await page.waitForFunction(() => document.querySelector("[data-scenario-status-line]")?.textContent?.includes("Saved"));
         // A name already taken is refused in the dialog.
         await button(page, "Duplicate").click();
         await page.locator("[data-sandbox-name-dialog] input").fill("hire early");
