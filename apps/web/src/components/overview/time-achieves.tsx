@@ -33,9 +33,9 @@ function Sparkline({ values, label }: { values: readonly number[]; label: string
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="shrink-0" role="img" aria-label={label} data-client-sparkline>
       <title>{label}</title>
-      <polyline points={values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ")} fill="none" className="stroke-accent" strokeWidth={2} />
+      <polyline points={values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ")} fill="none" className="stroke-cat-1" strokeWidth={2} />
       {values.map((v, i) => (
-        <circle key={i} cx={x(i)} cy={y(v)} r={2.5} className="fill-accent" />
+        <circle key={i} cx={x(i)} cy={y(v)} r={2.5} className="fill-cat-1" />
       ))}
     </svg>
   );
@@ -90,7 +90,7 @@ export function TimeAchieves({
           <span
             key={r.id}
             className={r.kind === "idle" ? "block h-full min-w-[2px] shadow-[inset_0_0_0_1px_var(--line-2)]" : "block h-full min-w-[2px]"}
-            style={{ flexGrow: r.runShare, flexBasis: 0, background: purposeColor(r.id) }}
+            style={{ flexGrow: r.runShare, flexBasis: 0, background: purposeColor(r.id, categories.map((c) => c.key)) }}
             title={`${r.name}: ${formatPercent(r.runShare)}, ${formatNumber(r.runHours, 0)} h over the ${span} (${view.months.map((mo, i) => `${mo.short} ${formatPercent(r.share[i] ?? 0)}`).join(", ")})`}
             data-part={r.id}
           />

@@ -260,7 +260,7 @@ function TodaySections(props: CapacityViewProps & { model: EngineModel; result: 
   // One colour per purpose across the page: the bottleneck's bars and the time-to-serve bars share them.
   const riskParts = useMemo(() => new Map(risk.people.map((r) => [r.person.id, namedPurposeParts(r.byPurpose, purposes)] as const)), [risk, purposes]);
   const tierParts = useMemo(() => new Map(t.departments.flatMap((d) => d.tiers.map((tier) => [tier.serviceId, namedPurposeParts(tier.byPurpose, purposes)] as const))), [t, purposes]);
-  const colours = useMemo(() => purposeColours([...tierParts.values(), ...riskParts.values()]), [tierParts, riskParts]);
+  const colours = useMemo(() => purposeColours([...tierParts.values(), ...riskParts.values()], purposes), [tierParts, riskParts, purposes]);
   const cf = (deptId: string) => busy.people.filter((p) => p.kind === "client_facing" && p.departmentId === deptId);
   return (
     // The dashboard's panels (docs/plans/ui-cleanup.md, DashboardPage): two across from xl, three from 2xl; time to serve, with its table, runs the full width.
@@ -616,7 +616,7 @@ export function TimeToServe({ setup, model, purposes, colours: shared, className
   // Each tier's bar, named by the workspace's purposes, and one colour per purpose across the whole section.
   const parts = useMemo(() => new Map(t.departments.flatMap((d) => d.tiers.map((tier) => [tier.serviceId, namedPurposeParts(tier.byPurpose, purposes)] as const))), [t, purposes]);
   // The page passes its colours so a purpose matches the bottleneck's bars; on its own it picks them from these bars.
-  const colours = useMemo(() => shared ?? purposeColours([...parts.values()]), [shared, parts]);
+  const colours = useMemo(() => shared ?? purposeColours([...parts.values()], purposes), [shared, parts, purposes]);
   return (
     <>
     <Section title="Avg time to serve one client, by tier, per month" className={className} data-time-to-serve

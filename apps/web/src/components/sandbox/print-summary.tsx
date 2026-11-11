@@ -116,7 +116,7 @@ export function PrintSummary(p: PrintSummaryProps) {
         <ul className="mb-0.5 flex flex-wrap gap-x-4 text-[10px] text-fg-2">
           {names.map((name, c) => (
             <li key={name + c} className="flex items-center">
-              <i aria-hidden className="mr-1 inline-block h-0.5 w-4 rounded" style={{ background: SERIES_STYLES[Math.min(c, SERIES_STYLES.length - 1)]!.color }} />
+              <i aria-hidden className={`mr-1 inline-block h-0.5 w-4 rounded ${SERIES_STYLES[Math.min(c, SERIES_STYLES.length - 1)]!.swatch}`} />
               {name}
             </li>
           ))}

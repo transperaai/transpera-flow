@@ -12,7 +12,7 @@ import { SectionCard } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatHours, formatPercent } from "@/lib/format";
 import { headlineText, hoursStrip, pieSlices, stripHeadline, type PieSlice, type ProcessHeadline, type ProcessHours, type StripSegment } from "@/lib/process-page/hours";
-import { PURPOSE_PALETTE } from "@/lib/capacity/purposes";
+import { OTHER_COLOUR, categoricalColour } from "@/lib/chart-colours";
 import { keyPersonGroups, timeSplitSummary, type KeyPersonGroups, type KeyPersonRow, type TimeSplitRow } from "@/lib/process-page/supporting";
 import { ownRowsOnly, viewerOf } from "@/lib/viewer";
 
@@ -51,8 +51,8 @@ export function SupportingHeadline({ headline, result }: { headline: ProcessHead
 }
 
 /** The colour of the n-th named slice (the app's categorical palette, the same tokens in both themes); "Others" is the neutral grey. */
-const sliceColour = (s: PieSlice, i: number) => (s.role === null ? OTHERS_COLOUR : PURPOSE_PALETTE[i % PURPOSE_PALETTE.length]!);
-const OTHERS_COLOUR = "var(--purpose-unset)";
+const sliceColour = (s: PieSlice, i: number) => (s.role === null ? OTHERS_COLOUR : categoricalColour(i));
+const OTHERS_COLOUR = OTHER_COLOUR;
 
 /** What a slice says on hover and to a screen reader: "Executor: 300 h a month, 86%", with the folded roles for "Others". */
 function sliceText(s: PieSlice): string {
@@ -186,7 +186,7 @@ const Lead = ({ children, ...rest }: { children: ReactNode; "data-lead"?: string
 // ---------------------------------------------------------------------------
 
 /** The named steps take the first colours of the categorical palette; "N other steps" is the neutral grey. */
-const stripColour = (s: StripSegment, i: number) => (s.members.length ? OTHERS_COLOUR : PURPOSE_PALETTE[i % PURPOSE_PALETTE.length]!);
+const stripColour = (s: StripSegment, i: number) => (s.members.length ? OTHERS_COLOUR : categoricalColour(i));
 
 /** What a segment says on hover: "Review: 38 h a month, 24% of the process", with the grouped steps for "N other steps". */
 function segmentText(s: StripSegment): string {

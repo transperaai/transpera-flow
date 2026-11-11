@@ -446,7 +446,7 @@ function HowBusy({
                       <TableCell className="hidden min-w-40 sm:table-cell">
                         <span className="block h-2 overflow-hidden rounded-full bg-panel-2" role="img" aria-label={`${formatPercent(p.average)} busy on average, ${formatPercent(p.p90)} in a bad month`}>
                           <i
-                            className={`block h-full ${p.average >= BUSY_LIMIT ? "bg-crit" : p.average >= 0.75 ? "bg-warn" : "bg-accent"}`}
+                            className={`block h-full ${p.average >= BUSY_LIMIT ? "bg-crit" : p.average >= 0.75 ? "bg-warn" : "bg-good"}`}
                             style={{ width: pctWidth(p.average) }}
                           />
                         </span>

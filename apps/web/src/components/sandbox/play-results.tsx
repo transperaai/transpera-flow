@@ -11,13 +11,14 @@ import { DLER_GOAL, DEFAULT_PURPOSES, type CapacitySetup, type PurposeCategory }
 import { Help } from "@/components/help";
 import { EmptyState, SectionCard } from "@/components/page-kit";
 import { Skeleton } from "@/components/ui/skeleton";
+import { BASELINE_COLOUR, categoricalColour, departmentColours, OTHER_COLOUR } from "@/lib/chart-colours";
 import { formatCurrency, formatNumber } from "@/lib/format";
 import { PLAY_HELP } from "@/lib/sandbox/play-help";
 import { heatRows, purposeMoves, purposeSlices, signedCount, signedMoney, worstMonth, type WorstMonth } from "@/lib/sandbox/play-results-data";
 import type { PlayRuns } from "@/lib/sandbox/use-play-runs";
 import { KpiStrip, KpiTile } from "@/components/capacity/widgets";
 import { Heatmap, type HeatView } from "./play-busy";
-import { PLAY_SERIES_COLORS as COLORS, PlayChart, type PlayChartSeries } from "./play-chart";
+import { PlayChart, type PlayChartSeries } from "./play-chart";
 import { MovedLine, PurposeBar, PurposeLegend } from "./play-donuts";
 import { Segmented } from "./segmented";
 import type { PlayHorizon, PlayMonths } from "./play-types";
@@ -91,9 +92,11 @@ export function PlayResults({
   const monthNames = Array.from({ length: n }, (_, i) => months.short[i] ?? `Month ${i + 1}`);
   const by = `by ${months.long[last] ?? `month ${n}`}`;
   const deptName = new Map(setup.departments.map((d) => [d.id, d.name]));
+  // A department keeps its slot on every chart (by name, lib/chart-colours.ts), whichever departments a chart shows.
+  const deptColour = departmentColours(setup.departments);
   const pair = (now: { id: string; name: string; values: (number | null)[] }[], was: { id: string; values: (number | null)[] }[]): PlayChartSeries[] => [
-    ...now.map((d, i) => ({ name: deptName.get(d.id) ?? d.name, values: d.values, color: COLORS[i % 5]! })),
-    ...(moved ? now.map((d, i) => ({ name: deptName.get(d.id) ?? d.name, values: was.find((w) => w.id === d.id)?.values ?? [], color: COLORS[i % 5]!, dashed: true })) : []),
+    ...now.map((d) => ({ name: deptName.get(d.id) ?? d.name, values: d.values, color: deptColour.get(d.id) ?? OTHER_COLOUR })),
+    ...(moved ? now.map((d) => ({ name: deptName.get(d.id) ?? d.name, values: was.find((w) => w.id === d.id)?.values ?? [], color: BASELINE_COLOUR, dashed: true })) : []),
   ];
 
   // Who's overloaded, over the first year.
@@ -249,8 +252,8 @@ export function PlayResults({
             months={monthNames}
             format={money}
             series={[
-              { name: "MRR", values: c.retainers, color: "var(--accent)" },
-              ...(moved ? [{ name: "MRR", values: t.retainers, color: "var(--accent)", dashed: true }] : []),
+              { name: "MRR", values: c.retainers, color: categoricalColour(0) },
+              ...(moved ? [{ name: "MRR", values: t.retainers, color: BASELINE_COLOUR, dashed: true }] : []),
             ]}
           />
           {moved && (

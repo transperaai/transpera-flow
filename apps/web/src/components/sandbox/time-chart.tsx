@@ -8,36 +8,27 @@ import { useState, type ReactNode } from "react";
 import { FloatingTip } from "@/components/ui/floating-tip";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { niceTicks } from "@/lib/overview/axis";
-import { IDLE, NOT_SET, UNCOVERED, type TimeRow, type TimeView } from "@/lib/sandbox/time";
+import { UNCOVERED, type TimeRow, type TimeView } from "@/lib/sandbox/time";
+import { purposeColour } from "@/lib/chart-colours";
 import { useElementWidth } from "@/lib/use-element-width";
 
-/** A fixed colour per default category, so a rename or a reorder never recolours it; categories the workspace added take the spare ones by their key. */
-const FIXED: Record<string, string> = {
-  client_job: "var(--accent)",
-  client_upkeep: "var(--purpose-upkeep)",
-  winning: "var(--purpose-winning)",
-  required: "var(--purpose-required)",
-  coordination: "var(--purpose-coordination)",
-  fixing: "var(--rate-bad)",
-  removable: "var(--purpose-removable)",
-  [NOT_SET]: "var(--purpose-unset)",
-  [IDLE]: "var(--panel-2)",
-};
-const SPARE = [1, 2, 3, 4, 5, 6].map((n) => `var(--purpose-spare-${n})`);
 const HATCH = "repeating-linear-gradient(135deg, var(--fg-3) 0 1.5px, transparent 1.5px 4px)";
 
-export function purposeColor(key: string): string {
-  if (FIXED[key]) return FIXED[key]!;
-  let h = 0;
-  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return SPARE[h % SPARE.length]!;
+/**
+ * A category's colour (lib/chart-colours.ts): the defaults on fixed slots, so a rename or a reorder never recolours one; a category the
+ * workspace added takes a slot a removed default left (`keys`: the workspace's category keys), else "Other"; Not set is "Other", Idle the idle neutral.
+ */
+export function purposeColor(key: string, keys?: readonly string[]): string {
+  return purposeColour(key, keys);
 }
 
-const fillOf = (r: TimeRow) => (r.kind === "uncovered" ? "url(#time-hatch)" : purposeColor(r.id));
+const rowKeys = (rows: readonly { id: string; kind: TimeRow["kind"] }[]) => rows.filter((r) => r.kind === "category").map((r) => r.id);
+const fillOf = (r: TimeRow, keys: readonly string[]) => (r.kind === "uncovered" ? "url(#time-hatch)" : purposeColor(r.id, keys));
 const hours = (h: number) => `${formatNumber(h, h < 10 ? 1 : 0)} h`;
 
 
 export function TimeLegend({ rows, shares = false }: { rows: TimeRow[]; /** Say each row's share of the run after its name. */ shares?: boolean }) {
+  const keys = rowKeys(rows);
   return (
     <ul className="flex flex-wrap items-center gap-x-3 gap-y-1" data-legend data-time-legend>
       {rows.map((r) => (
@@ -45,7 +36,7 @@ export function TimeLegend({ rows, shares = false }: { rows: TimeRow[]; /** Say 
           <i
             aria-hidden
             className="inline-block h-2.5 w-3.5 rounded-sm border border-line"
-            style={r.kind === "uncovered" ? { backgroundImage: HATCH } : { background: fillOf(r) }}
+            style={r.kind === "uncovered" ? { backgroundImage: HATCH } : { background: fillOf(r, keys) }}
           />
           {r.name}
           {shares && r.kind !== "uncovered" ? <span className="tabular-nums text-fg-2" data-legend-share>{formatPercent(r.runShare)}</span> : null}
@@ -85,6 +76,7 @@ export function TimeChart({ view, label }: { view: TimeView; label: string }) {
   const n = view.months.length;
   const m = { l: 40, r: 8, t: 10, b: 28 };
   const bars = view.rows.filter((r) => r.kind !== "uncovered");
+  const keys = rowKeys(view.rows);
   const cap = view.rows.find((r) => r.kind === "uncovered");
   // The most any month reaches: 100%, or the work above it, or the hatched cap.
   const top = Math.max(
@@ -141,7 +133,7 @@ export function TimeChart({ view, label }: { view: TimeView; label: string }) {
             >
               <rect x={cx - slot / 2} y={m.t} width={slot} height={HEIGHT - m.t - m.b} fill="transparent" />
               {segs.map(({ r, y0, y1 }) =>
-                y1 > y0 ? <rect key={r.id} x={cx - bar / 2} y={y(y1)} width={bar} height={Math.max(0, y(y0) - y(y1))} fill={fillOf(r)} stroke="var(--panel)" strokeWidth={0.5} data-row={r.id} /> : null,
+                y1 > y0 ? <rect key={r.id} x={cx - bar / 2} y={y(y1)} width={bar} height={Math.max(0, y(y0) - y(y1))} fill={fillOf(r, keys)} stroke="var(--panel)" strokeWidth={0.5} data-row={r.id} /> : null,
               )}
               {upper > 0 && cap ? <rect x={cx - bar / 2} y={y(acc + upper)} width={bar} height={Math.max(0, y(acc) - y(acc + upper))} fill="url(#time-hatch)" stroke="var(--fg-3)" strokeWidth={0.5} data-row={UNCOVERED} /> : null}
               {view.over[i] ? <circle cx={cx} cy={m.t + 3} r={3} fill="var(--crit)" data-over-dot /> : null}
@@ -160,7 +152,7 @@ export function TimeChart({ view, label }: { view: TimeView; label: string }) {
           <li key={mo.index} className="grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-2 text-xs" data-month={mo.index}>
             <span className="text-muted-foreground">{mo.short}</span>
             <span aria-hidden className="flex h-3.5 overflow-hidden rounded-sm">
-              {bars.map((r) => (r.hours[i]!.mean > 0 ? <span key={r.id} className="block h-full min-w-px" style={{ flexGrow: r.hours[i]!.mean, flexBasis: 0, background: fillOf(r) }} /> : null))}
+              {bars.map((r) => (r.hours[i]!.mean > 0 ? <span key={r.id} className="block h-full min-w-px" style={{ flexGrow: r.hours[i]!.mean, flexBasis: 0, background: fillOf(r, keys) }} /> : null))}
             </span>
           </li>
         ))}
@@ -175,10 +167,11 @@ export function TimeChart({ view, label }: { view: TimeView; label: string }) {
 /** One whole-run 100% bar: a compare column's, or the Overview's summary. */
 export function TimeBar({ rows, label }: { rows: { id: string; name: string; share: number; kind: TimeRow["kind"] }[]; label: string }) {
   const bars = rows.filter((r) => r.kind !== "uncovered");
+  const keys = rowKeys(rows);
   const total = bars.reduce((a, r) => a + r.share, 0) || 1;
   return (
     <span role="img" aria-label={label} className="flex h-4 overflow-hidden rounded-sm border border-line" data-time-bar>
-      {bars.map((r) => (r.share > 0 ? <span key={r.id} title={`${r.name}: ${formatPercent(r.share)}`} className="block h-full min-w-px" style={{ flexGrow: r.share / total, flexBasis: 0, background: purposeColor(r.id) }} /> : null))}
+      {bars.map((r) => (r.share > 0 ? <span key={r.id} title={`${r.name}: ${formatPercent(r.share)}`} className="block h-full min-w-px" style={{ flexGrow: r.share / total, flexBasis: 0, background: purposeColor(r.id, keys) }} /> : null))}
     </span>
   );
 }

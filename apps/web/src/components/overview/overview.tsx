@@ -379,7 +379,7 @@ export function Overview({
       ? [
           {
             key: "where-time-goes",
-            node: <WhereTimeGoes rows={departmentFigures.rows} failed={!!departmentFigures.failure} className="min-w-0 flex-1" />,
+            node: <WhereTimeGoes rows={departmentFigures.rows} categories={purposeCategories} failed={!!departmentFigures.failure} className="min-w-0 flex-1" />,
           },
         ]
       : []),

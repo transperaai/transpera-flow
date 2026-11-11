@@ -31,16 +31,27 @@ describe("namedPurposeParts", () => {
 });
 
 describe("purposeColours", () => {
-  it("gives each purpose one colour across every bar, the largest overall first, and Not set the grey", () => {
-    const a = [{ key: "A", name: "A", value: 1 }, { key: "B", name: "B", value: 5 }, { key: PURPOSE_NOT_SET, name: PURPOSE_NOT_SET, value: 9 }];
-    const b = [{ key: "C", name: "C", value: 3 }, { key: "A", name: "A", value: 1 }];
-    const c = purposeColours([a, b]);
+  it("gives each purpose its fixed slot by key, whatever its size, in the workspace's order; Hand-holding its own; Not set the neutral", () => {
+    const a = [
+      { key: "Required", name: "Required", value: 9 },
+      { key: "Moves the client's job forward", name: "Moves the client's job forward", value: 1 },
+      { key: PURPOSE_NOT_SET, name: PURPOSE_NOT_SET, value: 20 },
+    ];
+    const b = [{ key: "Hand-holding", name: "Hand-holding", value: 3 }, { key: "Fixing", name: "Fixing", value: 2 }];
+    const c = purposeColours([a, b], DEFAULT_PURPOSES);
     expect([...c.entries()]).toEqual([
-      [PURPOSE_NOT_SET, "var(--purpose-unset)"],
-      ["B", PURPOSE_PALETTE[0]],
-      ["C", PURPOSE_PALETTE[1]],
-      ["A", PURPOSE_PALETTE[2]],
+      ["Moves the client's job forward", "var(--cat-1)"],
+      ["Required", "var(--cat-3)"],
+      ["Fixing", "var(--cat-6)"],
+      ["Hand-holding", "var(--cat-8)"],
+      [PURPOSE_NOT_SET, "var(--series-other)"],
     ]);
+  });
+
+  it("keeps a purpose's colour when another bar is filtered out or the sizes change", () => {
+    const one = purposeColours([[{ key: "Winning work", name: "Winning work", value: 1 }]], DEFAULT_PURPOSES);
+    const two = purposeColours([[{ key: "Coordination", name: "Coordination", value: 50 }, { key: "Winning work", name: "Winning work", value: 1 }]], DEFAULT_PURPOSES);
+    expect(one.get("Winning work")).toBe(two.get("Winning work"));
   });
 
   it("has no repeated colour in its palette", () => {

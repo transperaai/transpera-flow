@@ -489,7 +489,7 @@ function ChartAndNumbers({
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" data-compare-legend>
         {names.map((name, c) => (
           <span key={name + c} className="inline-flex items-center gap-1.5">
-            <i aria-hidden className="h-0.5 w-5 rounded" style={{ background: SERIES_STYLES[c]!.color }} />
+            <i aria-hidden className={`inline-block h-0.5 w-5 rounded ${SERIES_STYLES[c]!.swatch}`} />
             {name}
           </span>
         ))}

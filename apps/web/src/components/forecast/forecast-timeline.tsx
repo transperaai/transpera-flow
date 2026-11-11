@@ -65,8 +65,8 @@ export function TimelineLegend({
   hasPlan?: boolean;
 }) {
   const items: { key: string; swatch: ReactNode; label: ReactNode }[] = [
-    { key: "average", swatch: <i aria-hidden className="h-0.5 w-4 rounded bg-accent" />, label: "Average" },
-    { key: "range", swatch: <i aria-hidden className="h-2.5 w-4 rounded-sm bg-accent/20" />, label: "10–90% range" },
+    { key: "average", swatch: <i aria-hidden className="h-0.5 w-4 rounded bg-cat-1" />, label: "Average" },
+    { key: "range", swatch: <i aria-hidden className="h-2.5 w-4 rounded-sm bg-cat-1/15" />, label: "10–90% range" },
     { key: "line", swatch: <i aria-hidden className="w-4 border-t border-dashed border-fg-3" />, label: `${formatPercent(busyLine)} utilisation threshold` },
     { key: "busy", swatch: <i aria-hidden className="size-2.5 rounded-full border-2 border-panel bg-rate-bad ring-1 ring-rate-bad" />, label: "Too busy that month" },
     ...(hasMarkers
@@ -462,8 +462,8 @@ export function ForecastTimeline({
                   </g>
                 ) : null,
               )}
-              <path d={bandPath(row.series.map((s) => (s ? { lo: s.p10, hi: s.p90 } : null)), y)} fill="var(--accent)" fillOpacity={0.22} />
-              <path d={linePath(means, y)} fill="none" stroke="var(--accent)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+              <path d={bandPath(row.series.map((s) => (s ? { lo: s.p10, hi: s.p90 } : null)), y)} fill="var(--cat-1)" fillOpacity={0.14} />
+              <path d={linePath(means, y)} fill="none" stroke="var(--cat-1)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
               {row.series.map((s, i) => {
                 const tone = s ? toneOf(s.mean, cutoffs) : null;
                 return tone ? <circle key={i} cx={x(i)} cy={y(s!.mean)} r={3.5} fill={tone} stroke="var(--panel)" strokeWidth={2} /> : null;
@@ -496,8 +496,8 @@ export function ForecastTimeline({
             <g key={c.id || "all"} data-client-row={c.id}>
               {rowLabel(r, base - rowH, c.name, `${formatNumber(c.series[0]!.mean, 0)} → ${formatNumber(last.mean, 0)}`)}
               <line x1={m.l} x2={m.l + plotW} y1={base} y2={base} stroke="var(--line-2)" strokeWidth={1} />
-              <path d={bandPath(c.series.map((s) => ({ lo: s.p10, hi: s.p90 })), y)} fill="var(--accent)" fillOpacity={0.22} />
-              <path d={linePath(c.series.map((s) => s.mean), y)} fill="none" stroke="var(--accent)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+              <path d={bandPath(c.series.map((s) => ({ lo: s.p10, hi: s.p90 })), y)} fill="var(--cat-1)" fillOpacity={0.14} />
+              <path d={linePath(c.series.map((s) => s.mean), y)} fill="none" stroke="var(--cat-1)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
               <text x={m.l + plotW + 6} y={y(last.mean) + 4} className="fill-fg text-2xs font-semibold tabular-nums">
                 {formatNumber(last.mean, 0)}
               </text>

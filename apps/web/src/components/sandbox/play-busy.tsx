@@ -10,11 +10,13 @@ import { formatPercent } from "@/lib/format";
 import { busyTone, type BusyTone, type HeatRow } from "@/lib/sandbox/play-results-data";
 import { cn } from "@/lib/utils";
 
+/** The status tokens, as the Overview's team load draws the same cut-offs: a soft green, a soft amber ringed, solid red with its own text colour. */
 const TINT: Record<BusyTone, string> = {
-  ok: "color-mix(in srgb, var(--good) 30%, transparent)",
-  warn: "color-mix(in srgb, var(--warn) 50%, transparent)",
-  bad: "color-mix(in srgb, var(--crit) 68%, transparent)",
+  ok: "var(--good-soft)",
+  warn: "var(--warn-soft)",
+  bad: "var(--crit)",
 };
+const CELL: Record<BusyTone, string> = { ok: "text-fg", warn: "text-fg ring-1 ring-inset ring-warn", bad: "text-crit-fg" };
 const WORDS: Record<BusyTone, string> = { ok: "under the utilisation threshold", warn: "close to the utilisation threshold", bad: "over the utilisation threshold" };
 
 export type HeatView = "scene" | "today";
@@ -50,14 +52,14 @@ export function Heatmap({ rows, months, view, worst = null }: { rows: HeatRow[];
                   role="cell"
                   data-heat-cell={tone ?? "none"}
                   data-worst-month={m === worst ? "" : undefined}
-                  className={cn("flex h-8 items-center justify-center rounded-[3px] text-2xs tabular-nums", m === worst && "outline-2 -outline-offset-1 outline-fg")}
+                  className={cn("flex h-8 items-center justify-center rounded-[3px] text-2xs tabular-nums", tone ? CELL[tone] : "text-fg-3", m === worst && "outline-2 -outline-offset-1 outline-fg")}
                   style={{ background: tone ? TINT[tone] : "var(--panel-2)" }}
                   onPointerMove={(e) => setTip({ row: r, m, at: at(e) })}
                   onPointerDown={(e) => setTip({ row: r, m, at: at(e) })}
                   onPointerLeave={() => setTip(null)}
                 >
                   {v === null ? <span className="sr-only">no one there</span> : <span className="max-md:sr-only">{Math.round(v * 100)}</span>}
-                  {tone === "bad" && <i aria-hidden className="hidden size-1.5 rounded-full bg-crit max-md:block" />}
+                  {tone === "bad" && <i aria-hidden className="hidden size-1.5 rounded-full bg-crit-fg max-md:block" />}
                 </span>
               );
             })}
@@ -67,7 +69,7 @@ export function Heatmap({ rows, months, view, worst = null }: { rows: HeatRow[];
       <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" data-legend data-heat-legend>
         {(["ok", "warn", "bad"] as const).map((t) => (
           <li key={t} className="inline-flex items-center gap-1.5">
-            <i aria-hidden className="inline-block h-2.5 w-3.5 rounded-[3px]" style={{ background: TINT[t] }} />
+            <i aria-hidden className={cn("inline-block h-2.5 w-3.5 rounded-[3px]", t === "warn" && "ring-1 ring-inset ring-warn")} style={{ background: TINT[t] }} />
             {t === "ok" ? "Under the utilisation threshold" : t === "warn" ? "Within 10 points of it" : "At or over the utilisation threshold"}
           </li>
         ))}

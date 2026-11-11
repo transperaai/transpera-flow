@@ -213,7 +213,7 @@ export function PurposesSettings({
               <li key={c.key}>
                 <div className="flex flex-col gap-2 px-4 py-3" data-purpose={c.key}>
                   <div className="flex items-start gap-3">
-                    <i aria-hidden className="mt-2.5 size-3 shrink-0 rounded-sm border border-line" style={{ background: purposeColor(c.key) }} />
+                    <i aria-hidden className="mt-2.5 size-3 shrink-0 rounded-sm border border-line" style={{ background: purposeColor(c.key, list.map((x) => x.key)) }} />
                     <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-[minmax(10rem,18rem)_minmax(0,1fr)]">
                       <label className="flex flex-col gap-1 text-xs font-medium text-fg-2">
                         Name

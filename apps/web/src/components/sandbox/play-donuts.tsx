@@ -7,6 +7,7 @@
 import { useState } from "react";
 import { FloatingTip } from "@/components/ui/floating-tip";
 import { purposeColor } from "@/components/sandbox/time-chart";
+import { labelOn } from "@/lib/chart-colours";
 import { formatNumber, formatPercent } from "@/lib/format";
 import { signedHours, type PurposeMove, type PurposeSlice } from "@/lib/sandbox/play-results-data";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ export function PurposeBar({ title, slices, order, strong = false }: { title: st
   const [tip, setTip] = useState<{ s: PurposeSlice; at: { x: number; y: number } } | null>(null);
   const sorted = order.map((id) => slices.find((s) => s.id === id)).filter((s): s is PurposeSlice => !!s && s.hours > 0);
   const total = sorted.reduce((a, s) => a + s.hours, 0);
+  const keys = slices.map((s) => s.id);
   return (
     <figure className="m-0 grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-2" data-play-purpose-bar={title}>
       <figcaption className={cn("text-xs", strong ? "font-semibold" : "text-muted-foreground")}>{title}</figcaption>
@@ -27,12 +29,13 @@ export function PurposeBar({ title, slices, order, strong = false }: { title: st
       >
         {sorted.map((s) => {
           const share = s.hours / (total || 1);
+          const fill = purposeColor(s.id, keys);
           return (
             <span
               key={s.id}
               data-purpose-segment={s.id}
-              className="flex min-w-0 items-center justify-center overflow-hidden border-r border-panel text-2xs font-semibold text-accent-fg tabular-nums last:border-r-0"
-              style={{ width: `${share * 100}%`, background: purposeColor(s.id) }}
+              className="flex min-w-0 items-center justify-center overflow-hidden border-r-2 border-panel text-2xs font-semibold tabular-nums last:border-r-0"
+              style={{ width: `${share * 100}%`, background: fill, color: labelOn(fill) }}
               onPointerMove={(e) => setTip({ s, at: { x: e.clientX, y: e.clientY } })}
               onPointerDown={(e) => setTip({ s, at: { x: e.clientX, y: e.clientY } })}
             >
@@ -75,7 +78,7 @@ export function PurposeLegend({ slices }: { slices: PurposeSlice[] }) {
     <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground" data-legend data-time-legend>
       {slices.map((s) => (
         <li key={s.id} className="inline-flex items-center gap-1.5">
-          <i aria-hidden className="inline-block size-2.5 rounded-sm" style={{ background: purposeColor(s.id) }} />
+          <i aria-hidden className="inline-block size-2.5 rounded-sm" style={{ background: purposeColor(s.id, slices.map((x) => x.id)) }} />
           {s.name}
         </li>
       ))}

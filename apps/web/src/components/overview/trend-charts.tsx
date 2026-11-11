@@ -160,8 +160,8 @@ export function OpenIssuesSummary({
 // ---------------------------------------------------------------------------------------------------------------------
 
 export const TIME_SPLIT_LEGEND = [
-  { key: "handsOn", label: "Hands-on", swatch: swatch("var(--accent)") },
-  { key: "person", label: "Waiting for one of our people", swatch: swatch("color-mix(in oklab, var(--fg-3) 70%, transparent)") },
+  { key: "handsOn", label: "Hands-on", swatch: swatch("var(--cat-1)") },
+  { key: "person", label: "Waiting for one of our people", swatch: swatch("var(--series-other)") },
   { key: "others", label: "Waiting on the client or others", swatch: swatch(HATCH, "border border-fg-3") },
 ];
 
@@ -193,8 +193,8 @@ export function TimeSplitChart({
         {rows.map((r) => {
           const total = totalOf(r);
           const parts = [
-            { key: "handsOn", v: r.handsOn, style: { background: "var(--accent)" } },
-            { key: "person", v: r.waitingForPerson, style: { background: "color-mix(in oklab, var(--fg-3) 70%, transparent)" } },
+            { key: "handsOn", v: r.handsOn, style: { background: "var(--cat-1)" } },
+            { key: "person", v: r.waitingForPerson, style: { background: "var(--series-other)" } },
             { key: "others", v: r.waitingOnOthers, style: { backgroundImage: HATCH, boxShadow: "inset 0 0 0 1px var(--fg-3)" } },
           ];
           const body = (
