@@ -618,6 +618,7 @@ export function TimeToServe({ setup, model, purposes, colours: shared, className
   // The page passes its colours so a purpose matches the bottleneck's bars; on its own it picks them from these bars.
   const colours = useMemo(() => shared ?? purposeColours([...parts.values()]), [shared, parts]);
   return (
+    <>
     <Section title="Avg time to serve one client, by tier, per month" className={className} data-time-to-serve
       aside={
         <PanelHow
@@ -626,54 +627,65 @@ export function TimeToServe({ setup, model, purposes, colours: shared, className
         />
       }
     >
-      {t.departments.map((d) => (
-        <div key={d.id} className="flex flex-col gap-2">
-          <h3 className="text-sm font-semibold">{d.name}</h3>
-          {/* The tiers side by side, divided by hairlines: plain sections, not cards inside the card. */}
-          <div className="grid gap-x-6 gap-y-4 md:grid-cols-[repeat(auto-fit,minmax(16rem,1fr))]">
-            {d.tiers.map((tier) => (
-              <div key={tier.serviceId} className="flex min-w-0 flex-col gap-1 border-t border-line pt-3" data-tier-card={`${d.name} ${tier.tierKey}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <h4 className="text-sm font-semibold">{tier.tierName} client</h4>
-                  <span className="text-xs text-muted-foreground" data-tier-fee>
-                    Avg {money(tier.fee)} a month
-                  </span>
+      {/* One framed block per department, its name in a header band, so Organic and Performance can't run into each other. */}
+      <div className="flex flex-col gap-4">
+        {t.departments.map((d) => (
+          <section key={d.id} className="overflow-hidden rounded-lg border border-line" aria-labelledby={`tts-${d.id}`} data-tts-department={d.name}>
+            <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-line bg-panel-2 px-4 py-2">
+              <h3 id={`tts-${d.id}`} className="text-sm font-semibold">
+                {d.name}
+              </h3>
+              <span className="text-xs text-muted-foreground">
+                {d.tiers.length} {d.tiers.length === 1 ? "tier" : "tiers"}
+                {d.tiers.length > 0 && ` · ${money(Math.min(...d.tiers.map((x) => x.fee)))}–${money(Math.max(...d.tiers.map((x) => x.fee)))} a month`}
+              </span>
+            </header>
+            {/* The tiers side by side, divided by hairlines: plain sections inside the department's frame. */}
+            <div className="grid divide-line max-md:divide-y md:grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] md:divide-x">
+              {d.tiers.map((tier) => (
+                <div key={tier.serviceId} className="flex min-w-0 flex-col gap-1 px-4 py-3" data-tier-card={`${d.name} ${tier.tierKey}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold">{tier.tierName} client</h4>
+                    <span className="text-xs text-muted-foreground" data-tier-fee>
+                      Avg {money(tier.fee)} a month
+                    </span>
+                  </div>
+                  <p className="text-base">
+                    <b className="tabular-nums">{f0(tier.hours)} hours</b> a month
+                  </p>
+                  <p className="mb-1 text-xs text-muted-foreground">{tier.feePerHour === null ? "No hours planned yet" : `Earns ${money(tier.feePerHour)} per hour of work`}</p>
+                  {tier.byPurpose.length > 0 && <StackBar parts={(parts.get(tier.serviceId) ?? []).map((p) => ({ ...p, color: colours.get(p.name) }))} />}
                 </div>
-                <p className="text-base">
-                  <b className="tabular-nums">{f0(tier.hours)} hours</b> a month
-                </p>
-                <p className="mb-1 text-xs text-muted-foreground">{tier.feePerHour === null ? "No hours planned yet" : `Earns ${money(tier.feePerHour)} per hour of work`}</p>
-                {tier.byPurpose.length > 0 && <StackBar parts={(parts.get(tier.serviceId) ?? []).map((p) => ({ ...p, color: colours.get(p.name) }))} />}
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-      {t.named.length > 0 && (
-        <>
-          <h3 className="text-sm font-semibold">Named clients</h3>
-          <Table className="min-w-[30rem] max-w-4xl" data-named-clients>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Client</TableHead>
-                <TableHead>Looked after by</TableHead>
-                <TableHead className="text-right">Hours a month</TableHead>
-                <TableHead className="text-right">Earns per hour</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {t.named.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell>{c.name}</TableCell>
-                  <TableCell>{nameOf(c.manager)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{f1(c.hours)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{c.feePerHour === null ? "—" : money(c.feePerHour)}</TableCell>
-                </TableRow>
               ))}
-            </TableBody>
-          </Table>
-        </>
-      )}
+            </div>
+          </section>
+        ))}
+      </div>
     </Section>
+    {t.named.length > 0 && (
+      <Section title="Named clients: time and earnings" className={className} data-named-clients-section>
+        <Table className="min-w-[30rem]" data-named-clients>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Client</TableHead>
+              <TableHead>Looked after by</TableHead>
+              <TableHead className="text-right">Hours a month</TableHead>
+              <TableHead className="text-right">Earns per hour</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {t.named.map((c) => (
+              <TableRow key={c.id}>
+                <TableCell>{c.name}</TableCell>
+                <TableCell>{nameOf(c.manager)}</TableCell>
+                <TableCell className="text-right tabular-nums">{f1(c.hours)}</TableCell>
+                <TableCell className="text-right tabular-nums">{c.feePerHour === null ? "—" : money(c.feePerHour)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Section>
+    )}
+    </>
   );
 }
