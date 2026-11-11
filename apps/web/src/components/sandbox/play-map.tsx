@@ -113,7 +113,10 @@ export function PlayMapCard({
   return (
     <div data-play-map>
       <section aria-label="Company map" className="flex min-w-0 flex-col gap-3" data-play-map-section>
-        <h2 className="sr-only">Company map</h2>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <h2 className="text-base font-semibold">Company map</h2>
+          <span className="text-xs text-muted-foreground">Click a process to try another version.</span>
+        </div>
         <div className="flex min-w-0 flex-col gap-3">
           {header}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm" data-version-summary data-versions={on.length}>
@@ -140,7 +143,7 @@ export function PlayMapCard({
                 </Button>
               </>
             ) : (
-              <span className="text-muted-foreground">Click a process to try another version.</span>
+              <span className="text-xs text-muted-foreground">Every process on today&apos;s version.</span>
             )}
           </div>
 
