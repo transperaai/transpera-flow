@@ -109,7 +109,7 @@ describe("the Sandbox skeleton is the one scrolling page", () => {
   it("has the map, the levers band and the results, in that order, with no workbench frame", () => {
     expect(src).not.toMatch(/h-svh|overflow-hidden flex-1|lg:overflow|lg:grid-cols-\[20rem/);
     expect(src).toContain("pageBodyClass()");
-    expect(src).toContain("h-[65svh] min-h-[28rem]");
+    expect(src).toContain("h-[82svh] min-h-[34rem]");
     expect(src).toMatch(/Array\.from\(\{ length: 5 \}/);
     const at = (s: string) => src.indexOf(s);
     expect(at("data-skeleton-map")).toBeGreaterThan(-1);

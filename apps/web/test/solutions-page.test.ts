@@ -244,7 +244,7 @@ describe("(i) help on every control", () => {
 
   it("the Solution page has only the header, the notes and sources, and the two maps (Q12, D44; QA round 2)", () => {
     const page = read("components/solutions/solution-page.tsx");
-    for (const t of ["Open in editor", "Notes and sources", "Edited on", "Solutions never change the live map", "<SolutionMaps", "<EditableText", "<SolutionStatusMenu"]) expect(page).toContain(t);
+    for (const t of ["Open in editor", "Notes and sources", "data-edited", "Solutions never change the live map", "<SolutionMaps", "<EditableText", "<SolutionStatusMenu"]) expect(page).toContain(t);
     // No generated list of changes, no Built by and no Sandbox button: the notes say what it changes (QA round 2).
     for (const t of ["What it changes", "changeLines", "Built by", "Try it in the Sandbox"]) expect(page).not.toContain(t);
     expect(page).not.toContain("AdoptSolution");

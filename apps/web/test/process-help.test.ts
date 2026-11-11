@@ -27,7 +27,7 @@ describe("process page help", () => {
 
   it("only the non-obvious things on the process page keep an (i): the map colours", () => {
     const text = read("components/process-page.tsx");
-    expect(text).toContain('label: "Map colours"');
+    expect(text).toMatch(/label(: |=)"Map colours"/);
     expect((text.match(/<Help\b/g) ?? []).length).toBeLessThanOrEqual(2);
     for (const label of ["First principles", "Insights", "Issues", "Solutions", "Sources"]) expect(text).not.toContain(`label: "${label}"`);
   });
