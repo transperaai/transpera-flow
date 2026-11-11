@@ -404,8 +404,10 @@ export function EditorView({
   // Something in the folded inspector wants attention: things to fix, or a form's refusal.
   const inspectorAlert = !!problemsProp || !!blockForm?.error || !!solutionForm?.error;
 
+  // From lg the Editor is exactly the screen: the page itself never scrolls (only the panels and the map do), so a fast scroll in a
+  // panel can't carry past it into empty space.
   return (
-    <div data-editor={editorMode} className="flex min-h-svh flex-col bg-bg text-fg lg:h-svh">
+    <div data-editor={editorMode} className="flex min-h-svh flex-col bg-bg text-fg lg:h-svh lg:max-h-svh lg:overflow-hidden">
       <EditorBar
         mode={editorMode}
         subject={live.process.name}
@@ -433,10 +435,10 @@ export function EditorView({
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <aside aria-label="Palette"
           data-collapsed={paletteCollapsed ? "" : undefined}
-          className={cn("flex shrink-0 flex-col border-b border-line bg-panel lg:border-r lg:border-b-0", paletteCollapsed ? "lg:w-11" : "lg:w-60")}
+          className={cn("flex shrink-0 flex-col border-b border-line bg-panel lg:min-h-0 lg:border-r lg:border-b-0", paletteCollapsed ? "lg:w-11" : "lg:w-60")}
         >
           <PanelToggle side="left" collapsed={paletteCollapsed} onToggle={panels.togglePalette} label="palette" />
-          <div className={cn("flex min-h-0 flex-1 flex-col gap-4 p-3.5 lg:overflow-y-auto lg:pt-0", paletteCollapsed && "lg:hidden")}>
+          <div className={cn("flex min-h-0 flex-1 flex-col gap-4 p-3.5 lg:overflow-y-auto lg:overscroll-contain lg:pt-0", paletteCollapsed && "lg:hidden")}>
             <Palette bundle={working} editor={editor} selected={inspected} setSelection={setSelection} blocks={blockTools} company={company} viewRef={viewRef} library={libraryProps} />
             {solutionMode && <IssueArea issue={issue} steps={[...live.steps, ...working.steps]} present={new Set(working.steps.map((s) => s.id))} onSelect={select} />}
             {mode === "demo" && (
@@ -488,11 +490,11 @@ export function EditorView({
         <aside aria-label="Inspector"
           data-collapsed={inspectorCollapsed ? "" : undefined}
           style={{ "--inspector-w": `${inspectorWidth}px` } as CSSProperties}
-          className={cn("relative flex shrink-0 flex-col border-t border-line bg-panel lg:border-t-0 lg:border-l", inspectorCollapsed ? "lg:w-11" : "lg:w-(--inspector-w)")}
+          className={cn("relative flex shrink-0 flex-col border-t border-line bg-panel lg:min-h-0 lg:border-t-0 lg:border-l", inspectorCollapsed ? "lg:w-11" : "lg:w-(--inspector-w)")}
         >
           {!inspectorCollapsed && <PanelResizer width={inspectorWidth} onWidth={panels.setInspectorWidth} />}
           <PanelToggle side="right" collapsed={inspectorCollapsed} onToggle={panels.toggleInspector} label="inspector" alert={inspectorAlert} />
-          <div className={cn("flex min-h-0 flex-1 flex-col gap-4 p-3.5 lg:overflow-y-auto lg:pt-0", inspectorCollapsed && "lg:hidden")}>
+          <div className={cn("flex min-h-0 flex-1 flex-col gap-4 p-3.5 lg:overflow-y-auto lg:overscroll-contain lg:pt-0", inspectorCollapsed && "lg:hidden")}>
             {blockForm && <BlockFormFields form={blockForm} />}
             {solutionForm && <SolutionFormFields form={solutionForm} />}
             <EditorGuide mode={editorMode} company={company} issue={solutionMode ? issue : null} blockEditing={!!blockForm?.editing} problems={problemsProp} />
