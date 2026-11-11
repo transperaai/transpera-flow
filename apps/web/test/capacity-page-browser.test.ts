@@ -181,10 +181,13 @@ describe("Capacity page", { timeout: 180_000 }, () => {
     // Keyboard: open with ArrowDown, the checked person has focus; Space unticks them.
     await page.keyboard.press("ArrowDown");
     await page.waitForSelector("[data-leaver-options]");
+    // Focus moves to the checked person once the list has opened. Press Space only then: pressed before that (as happened on a
+    // loaded CI runner), Space goes to the closed trigger and shuts the list, which made the next check pass with nothing unticked.
+    await page.waitForFunction(() => document.activeElement?.matches("[data-leaver-options] input:checked") ?? false);
     await page.keyboard.press(" ");
+    await page.waitForSelector("[data-leaver-options]");
     expect(await page.locator("[data-leaver-options] input:checked").count()).toBe(0);
-    // The sentence follows the untick on the next render: wait for it rather than read it on the same frame (it raced under load).
-    await expect.poll(() => text(page, "[data-leaver-sentence]")).toBe("Choose one or more people to see who takes their work.");
+    expect(await text(page, "[data-leaver-sentence]")).toBe("Choose one or more people to see who takes their work.");
 
     // Two people: Zach and Laura (both Organic) leave together; neither is handed the other's clients.
     await page.locator('[data-leaver-option="Zach"] input').check();
