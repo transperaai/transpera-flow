@@ -60,7 +60,8 @@ describe("simulate (Northbeam)", () => {
   });
 });
 
-describe("the initialState option (sandbox phase 3: the Sandbox pins a scenario's warm-up)", () => {
+// Each case runs a golden model three times over; the capacity model takes a few seconds on a busy CI runner.
+describe("the initialState option (sandbox phase 3: the Sandbox pins a scenario's warm-up)", { timeout: 30_000 }, () => {
   for (const g of GOLDEN_MODELS) {
     it(`${g.name}: handing a run its own initial state gives exactly the run that works it out`, () => {
       const m = g.model();
