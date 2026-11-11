@@ -1,5 +1,5 @@
 // The detail-page template the Issue and Solution pages share (docs/plans/ui-cleanup.md, "DetailPage"): the breadcrumb above the header,
-// the header (the kit's PageHeader: title, pills, meta line, actions), then the metadata strip (sticky under the top bar from `md`), then
+// the header (the kit's PageHeader: title, pills, meta line, actions), then the metadata strip, then
 // the main column across the full width.
 //
 // Candidate for components/page-kit once the History and Block detail pages use it too.
@@ -62,10 +62,10 @@ export function DetailLayout({
   );
 }
 
-/** The metadata strip: one slim surface of terms and values in a row, under the header and sticky below the top bar from `md`. */
+/** The metadata strip: one slim surface of terms and values in a row, under the header. */
 export function MetaRail({ label, children, ...rest }: { label: string; children: ReactNode } & Record<`data-${string}`, string | undefined>) {
   return (
-    <aside aria-label={label} className="z-10 min-w-0 rounded-xl bg-card/95 px-4 py-2.5 text-sm ring-1 ring-foreground/10 backdrop-blur md:sticky md:top-14" {...rest}>
+    <aside aria-label={label} className="min-w-0 rounded-xl bg-card px-4 py-2.5 text-sm ring-1 ring-foreground/10" {...rest}>
       <dl className="flex flex-wrap items-start gap-x-7 gap-y-2">{children}</dl>
     </aside>
   );
